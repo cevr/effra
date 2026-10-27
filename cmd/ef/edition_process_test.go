@@ -369,7 +369,7 @@ func TestEditionAgreesAcrossCLIMCPLSP(t *testing.T) {
 		if isError || cli != mcpText || cli != lspResult {
 			t.Fatalf("%s: surfaces disagree\nCLI %s\nMCP %s (error %v)\nLSP %s", c.rel, cli, mcpText, isError, lspResult)
 		}
-		if want := string(edition.Resolve(filepath.Dir(path)).JSON()); cli != want {
+		if want := string(edition.ResolveDocument(path).JSON()); cli != want {
 			t.Fatalf("%s: surfaces report %s, the resolver %s", c.rel, cli, want)
 		}
 		if c.want != "" && !strings.Contains(cli, c.want) {

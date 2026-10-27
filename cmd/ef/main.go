@@ -467,9 +467,13 @@ func command(args []string) error {
 	if err != nil {
 		return err
 	}
-	// The edition is resolved in the directory loadSource compiles in, before
-	// any front-end reads the file. Only the legacy edition reaches it.
-	if resolution := resolveSource(source.Admitted()); resolution.Diagnostic != nil || resolution.Edition != edition.Legacy {
+	// The edition is resolved from the file loadSource reads (source.Path),
+	// before any front-end reads it. Only the legacy edition reaches it.
+	resolution, err := resolveSource(source.Path())
+	if err != nil {
+		return err
+	}
+	if resolution.Diagnostic != nil || resolution.Edition != edition.Legacy {
 		return foreignCommand(args[0], source, opts, session, resolution)
 	}
 	r, snapshot, err := loadSource(source, opts.target)

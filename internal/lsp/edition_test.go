@@ -115,7 +115,7 @@ func TestEditionRequest(t *testing.T) {
 		s.send(editionCall(target, id))
 		response := s.receive()
 		path, _ := documentPath(target)
-		want := edition.Resolve(filepath.Dir(path)).JSON()
+		want := edition.ResolveDocument(path).JSON()
 		if string(response["result"]) != string(want) {
 			t.Fatalf("effra/edition %d = %s (error %s), want %s", id, response["result"], response["error"], want)
 		}

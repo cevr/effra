@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 
 	"effra.local/prototype/internal/compiler"
@@ -54,10 +53,12 @@ func lookupFileCommand(name string) (fileCommand, bool) {
 	return fileCommands[index], true
 }
 
-// resolveSource resolves the edition of a source in the directory the
-// compiler resolves its imports in: the admitted path's directory.
-func resolveSource(admitted string) edition.Resolution {
-	return edition.Resolve(filepath.Dir(admitted))
+// resolveSource resolves the edition of the file a command reads: path is
+// the exact path the command opens, so the edition and the bytes come from
+// one file.
+func resolveSource(path string) (edition.Resolution, error) {
+	file, err := edition.ResolveFile(path)
+	return file.Resolution, err
 }
 
 // editionRefusal is the refusal of running command on a source of the
@@ -103,10 +104,12 @@ func editionCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := sourcefile.ReadRegularFile(source.Path(), 0); err != nil {
+	// The file is admitted, never read: the edition does not depend on its
+	// size or content.
+	resolution, err := resolveSource(source.Path())
+	if err != nil {
 		return err
 	}
-	resolution := resolveSource(source.Admitted())
 	if _, err := os.Stdout.Write(append(resolution.JSON(), '\n')); err != nil {
 		return err
 	}

@@ -59,6 +59,6 @@ Build `ef migrate` for the mechanical rules only. It reads a `legacy` file with 
 - **Elixir.** Deprecations come first as warnings across releases; `mix format --migrate` rewrites deprecated forms in place.
 - **MoonBit.** Breaking changes ship as deprecation warnings and are migrated with tooling; the `moon.mod.json` manifest has no edition field.
 
-Every compile-to-host language above ships a mechanical rewriter for a syntax break and leaves semantic choices to a person. None migrates a corpus by hand when a parser for the old syntax already exists, as `internal/compiler` does here.
+These tools are precedents for mechanical rewrites of a syntax break that leave semantic choices to a person; Rust and Go ship theirs today, and Gleam and ReScript shipped theirs for one transition. They show that the approach works, not that hand migration never happens.
 
 Decision: build ef migrate — the measured rule cost prices a 33-rule tool at 1.5 agent-minutes, and even at 10 times that it is below the 20.5 agent-minutes of migrating the mechanical share of 55 files by hand.

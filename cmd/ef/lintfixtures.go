@@ -60,13 +60,18 @@ func lintTestCommand(args []string) error {
 		return invalidInvocation(err)
 	}
 	// Every fixture's edition is resolved before any pack loads or runs; only
-	// legacy fixtures reach the legacy front-end.
+	// legacy fixtures reach the legacy front-end. The path is the one
+	// Session.Fixture reads: the fixture made absolute.
 	for _, fixture := range fixtures {
 		absolute, err := filepath.Abs(fixture)
 		if err != nil {
 			return err
 		}
-		if refusal := editionRefusal("lint test", resolveSource(absolute)); refusal != nil {
+		resolution, err := resolveSource(absolute)
+		if err != nil {
+			return invalidInvocation(fmt.Errorf("%s: %w", fixture, err))
+		}
+		if refusal := editionRefusal("lint test", resolution); refusal != nil {
 			return fmt.Errorf("%s: %s", fixture, refusal.String())
 		}
 	}

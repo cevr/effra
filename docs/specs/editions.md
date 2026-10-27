@@ -25,13 +25,13 @@ The manifest is strict. Each of these is the EF144 refusal: an id that is not in
 
 ## Resolution
 
-`edition.Resolve(dir)` in `internal/edition` decides the edition of a source file in `dir`. Every surface calls it with the directory it compiles the file in, before any front-end reads the file:
+`edition.ResolveFile(path)` in `internal/edition` admits a source file and decides its edition. It is the one path admission that every surface uses, before any front-end reads the file. It resolves `path` as the file system walks it, with every link resolved and each `..` applied to the directory a link reaches, never a lexically cleaned spelling. The file must be a regular file. ResolveFile returns that resolved path and the edition of its directory, and the surface reads the source bytes from that same path. So the edition always governs the bytes that are read, formatted or written, and the edition does not depend on the size or content of the file. Each surface passes the path it reads:
 
-- **CLI.** The admitted source path's directory, the directory `ef` resolves imports in.
-- **MCP.** The directory of `ROOT/file`, with `ROOT` the canonical workspace root.
-- **LSP.** The directory of the document URI's path.
+- **CLI.** The path the command opens. For `check`, `diagnostics`, `build`, `run` and the other loader commands, this is the admitted source path, which is made absolute as the go command makes its file arguments absolute. For `lint test` and `lint receipt`, it is the source made absolute. For `fmt FILE`, it is the spelling as given, because the formatter walks a link before a `..`.
+- **MCP.** `ROOT/file` with `ROOT` the canonical workspace root, after the workspace containment check. `project.edition` admits the file and does not read it. The 2 MiB source bound applies only to the tools that read the source.
+- **LSP.** The document URI's path (`edition.ResolveDocument`). A document with no file on disk, such as an unsaved buffer, resolves in its directory with links resolved.
 
-The rule:
+`edition.Resolve(dir)` decides the edition of the link-free directory `dir`. The rule:
 
 1. Walk from `dir` upward.
 2. At each directory, an `effra.json` decides. A valid manifest gives its edition with source `manifest`. Any other manifest is EF144. A refused manifest is never skipped in favour of an ancestor's.
@@ -46,7 +46,7 @@ Inputs without a path have no directory and resolve to the default `legacy`: `ef
 
 ## Canonical projection
 
-`ef edition FILE`, MCP `project.edition` and LSP `effra/edition` return the same bytes, produced once by `internal/edition`: compact JSON with the keys `edition`, `source`, `manifest`, and `diagnostic` on EF144 only. `manifest` is absolute and clean, without symlinks resolved.
+`ef edition FILE`, MCP `project.edition` and LSP `effra/edition` return the same bytes, produced once by `internal/edition`: compact JSON with the keys `edition`, `source`, `manifest`, and `diagnostic` on EF144 only. `manifest` is absolute and clean, in the link-resolved directory of the file.
 
 ```json
 {"edition":"legacy","source":"default","manifest":""}
@@ -96,7 +96,7 @@ How other compile-to-host languages select or evolve a language version per pack
 
 - **Rust editions.** `edition = "2021"` per crate in `Cargo.toml`. Crates of different editions link in one build. `cargo fix --edition` migrates. A missing key means 2015. `rustc --edition` exists for builds without Cargo.
 - **Go `go` directive.** `go 1.22` in `go.mod` sets the language version per module, so the 1.22 per-iteration loop variables apply only to modules that declare 1.22 or later. A `//go:build go1.N` line can lower one file's version. Effra keeps no per-file override (O13: never from content).
-- **Gleam.** The `gleam = ">= 1.x"` key in `gleam.toml` is a compiler-version constraint, not an edition. Gleam evolves one language with deprecation warnings and `gleam fix`.
+- **Gleam.** The `gleam = ">= 1.x"` key in `gleam.toml` is a compiler-version constraint, not an edition. Gleam evolves one language with deprecation warnings; before v1 it shipped `gleam fix` to rewrite breaking syntax changes, and the command is now a no-op.
 - **ReScript.** `rescript.json` (JSON, formerly `bsconfig.json`). ReScript 11's `"uncurried"` key was a project-wide language-mode switch with a migration path, which is the closest analogue to an edition.
 - **Elixir.** The `elixir: "~> 1.17"` key in `mix.exs` is a version requirement. There are no editions; deprecations run warning first, removal later.
 - **MoonBit.** The `moon.mod.json` JSON manifest has no edition field. Breaking changes ship as deprecation warnings and are migrated with tooling.

@@ -368,11 +368,12 @@ func (s *session) synchronize(req request) error {
 		uri = old.snapshot.URI
 	}
 	doc := document{snapshot: compiler.SourceSnapshot{URI: uri, Origin: "buffer", Text: text}, path: path, version: *p.TextDocument.Version}
-	// Every analysis resolves the edition afresh in the directory the
-	// compiler resolves imports in, so a manifest edit takes effect at the
-	// next change. Only the legacy edition reaches CompileAt.
+	// Every analysis resolves the edition afresh from the document's file, as
+	// the CLI and MCP resolve it (edition.ResolveDocument, through the shared
+	// edition.ResolveFile), so a manifest edit takes effect at the next
+	// change. Only the legacy edition reaches CompileAt.
 	var report compiler.DiagnosticReport
-	resolution := edition.Resolve(filepath.Dir(path))
+	resolution := edition.ResolveDocument(path)
 	switch {
 	case resolution.Diagnostic != nil:
 		doc.analysis = compiler.ForeignResult(text, s.target, []compiler.Diagnostic{{Code: resolution.Diagnostic.Code, Message: resolution.Diagnostic.Message}})
@@ -471,7 +472,7 @@ func (s *session) navigate(req request) error {
 	}
 	// Navigation answers from legacy facts only: a document whose analysis or
 	// current manifest is another edition has no answer yet (#196).
-	if current := edition.Resolve(filepath.Dir(path)); !doc.legacy || current.Diagnostic != nil || current.Edition != edition.Legacy {
+	if current := edition.ResolveDocument(path); !doc.legacy || current.Diagnostic != nil || current.Edition != edition.Legacy {
 		return s.result(req.ID, nil)
 	}
 	positions := compiler.NewSourcePositions(doc.snapshot.Text)
@@ -535,7 +536,7 @@ func (s *session) formatDocument(req request) error {
 	}
 	// Only a legacy document reaches the legacy formatter; the edition is
 	// resolved now, so a manifest edit since the last change counts.
-	if refusal := formattingRefusal(captured, edition.Resolve(filepath.Dir(path))); refusal != nil {
+	if refusal := formattingRefusal(captured, edition.ResolveDocument(path)); refusal != nil {
 		return s.send(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{"code": -32803, "message": boundedDetail(documentContext(captured) + refusal.String()), "data": refusal}})
 	}
 	result, err := compiler.FormatSourceBounded(captured.snapshot.Text, MaxFormattedBytes)
@@ -565,7 +566,9 @@ func formattingRefusal(doc document, current edition.Resolution) *edition.Diagno
 }
 
 // editionRequest answers effra/edition with the canonical edition JSON of
-// one file URI, open or not. The file is never read.
+// one file URI, open or not. The file is never read, so its size does not
+// matter; a file on disk resolves through edition.ResolveFile as on the CLI
+// and MCP.
 func (s *session) editionRequest(req request) error {
 	var p struct {
 		TextDocument struct {
@@ -579,7 +582,7 @@ func (s *session) editionRequest(req request) error {
 	if err != nil {
 		return s.failure(req.ID, -32602, err.Error())
 	}
-	return s.result(req.ID, json.RawMessage(edition.Resolve(filepath.Dir(path)).JSON()))
+	return s.result(req.ID, json.RawMessage(edition.ResolveDocument(path).JSON()))
 }
 
 // completeFormatting answers a formatting result computed for the captured

@@ -1,7 +1,7 @@
 // Package edition resolves the language edition that governs a source file
-// and declares the diagnostics of that resolution. The CLI, MCP and LSP call
-// Resolve with the directory they compile the file in, and route the file to
-// the front-end of the resolved edition. The edition comes only from an
+// and declares the diagnostics of that resolution. The CLI, MCP and LSP admit
+// a source file with ResolveFile, read it from the path that returns, and
+// route it to the front-end of the resolved edition. The edition comes only from an
 // edition manifest, never from the file's content.
 //
 // The package is a leaf: it imports neither the compiler nor a surface, so
@@ -94,7 +94,8 @@ type Resolution struct {
 // governs across a Go module boundary), or at the filesystem root. With no
 // manifest, the edition is Default with source "default". Resolve never
 // reads a source file and keeps no cache, so a manifest edit takes effect at
-// the next call.
+// the next call. The walk takes each directory's lexical parent, so a
+// surface passes a directory with its links resolved; ResolveFile does.
 func Resolve(dir string) Resolution {
 	absolute, err := filepath.Abs(dir)
 	if err != nil {
@@ -117,6 +118,62 @@ func Resolve(dir string) Resolution {
 		current = parent
 	}
 	return Resolution{Edition: Default, Source: SourceDefault}
+}
+
+// File is a source file admitted for edition lookup: the path the file
+// system opens for it and the edition of the directory that holds that
+// file.
+type File struct {
+	// Path is absolute, with every link resolved and each `..` applied to
+	// the resolved directory, as the file system walks the spelling. A
+	// surface reads the source from Path, so the bytes it reads and the
+	// edition it routes by come from one file.
+	Path       string
+	Resolution Resolution
+}
+
+// ResolveFile admits the source file at path and resolves its edition. The
+// spelling is resolved as the file system walks it (filepath.EvalSymlinks),
+// never cleaned lexically first, so `link/../main.ef` names the file a read
+// of that spelling reaches, and the edition comes from that file's
+// directory. The file must exist and be a regular file. ResolveFile never
+// reads the file, so the edition does not depend on its size or content.
+// Every surface admits a source through this one function: the CLI with the
+// path its loader reads, MCP with the workspace path it admits, and the LSP
+// with a document's file path.
+func ResolveFile(path string) (File, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return File{}, err
+	}
+	resolved, err = filepath.Abs(resolved)
+	if err != nil {
+		return File{}, err
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return File{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return File{}, fmt.Errorf("source must be a regular file")
+	}
+	return File{Path: resolved, Resolution: Resolve(filepath.Dir(resolved))}, nil
+}
+
+// ResolveDocument resolves the edition of an editor document at path. A
+// document that exists on disk resolves as ResolveFile resolves it. A
+// document with no file yet, such as an unsaved buffer, resolves in its
+// directory with links resolved, or in the directory as spelled when that
+// does not exist either.
+func ResolveDocument(path string) Resolution {
+	if file, err := ResolveFile(path); err == nil {
+		return file.Resolution
+	}
+	dir := filepath.Dir(path)
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
+	return Resolve(dir)
 }
 
 // readManifest admits one manifest: a regular file of at most

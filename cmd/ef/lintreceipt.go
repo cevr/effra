@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"effra.local/prototype/internal/lintpacks"
-	sourcefile "effra.local/prototype/internal/source"
 )
 
 const lintReceiptUsage = "usage: ef lint receipt FILE [--runs N] [--target go] [--lint-config FILE] [--rules MANIFEST]..."
@@ -59,15 +58,17 @@ func lintReceiptCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	if refusal := editionRefusal("lint receipt", resolveSource(absolute)); refusal != nil {
+	// The source is admitted like every other CLI source before any run, at
+	// the path Session.Receipt reads: the source made absolute.
+	resolution, err := resolveSource(absolute)
+	if err != nil {
+		return err
+	}
+	if refusal := editionRefusal("lint receipt", resolution); refusal != nil {
 		return editionError(refusal)
 	}
 	session, err := loadLint(selection)
 	if err != nil {
-		return err
-	}
-	// The source is admitted like every other CLI source before any run.
-	if _, err := sourcefile.ReadRegularFile(paths[0], 0); err != nil {
 		return err
 	}
 	receipt, err := session.Receipt(context.Background(), paths[0], target, runs)
