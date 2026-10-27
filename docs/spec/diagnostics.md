@@ -69,7 +69,7 @@ The checker does not restrict `main`'s capability row; the build refuses what th
 - A `catch` without `try` omits an error of the caught row (`reject/catch-not-total.sketch`, `catch-not-total`).
 - A type switch over a union names neither every variant nor `default` (`type-switch-not-total`).
 - A multi-subject type switch leaves a tuple of variants unhandled; `_` matches any variant. Totality is decided by a usefulness check over the case matrix, never by enumerating the product (`product-not-total`). The message names one missing tuple.
-- A multi-subject type switch whose proof needs more than the fixed solver budget: "too many cases to prove this switch total; split it or add default". The checker never accepts a switch it has not proved total ([rows: totality](rows.md#totality) 5). No missing-return diagnostic follows an S103 for the same switch (D3).
+- A multi-subject type switch whose proof needs more than the fixed solver budget: "too many cases to prove this switch total; split it or add default", or, when the reachability of its cases needs more, "too many cases to prove which cases of this switch are reachable; split it". The checker never accepts a switch it has not proved; the totality budget does not depend on the order of the subjects or the cases ([rows: totality](rows.md#totality) 5). A case of a union that lost a variant to a reported error adds no diagnostic of its own (D3). No missing-return diagnostic follows an S103 for the same switch (D3).
 
 ### S104: unknown name
 
@@ -106,7 +106,7 @@ The checker does not restrict `main`'s capability row; the build refuses what th
 | A receiver is not a struct type declared in the package | `receiver-not-local` |
 | A union variant is not a struct type declared in the package | `union-variant-interface` |
 | A struct contains itself by value, also through an instance of a generic struct (`type U struct{ F Wrap[U] }`), at any depth; one report per cycle | `recursive-struct`; checker domain tests (`TestFiniteChains`) |
-| An instantiation cycle: a generic type or function instantiates itself, through any path, with an argument that grows (`type T[A any] struct{ F *T[[]A] }`, `func f[T any]() { f[[]T]() }`), so its instances never end (Go's rule, `go/types` "instantiation cycle"); reported once, before rows are inferred | checker domain tests (`TestExpandingInstantiation`) |
+| An instantiation cycle: a generic type or function instantiates itself, through any path, with an argument that grows (`type T[A any] struct{ F *T[[]A] }`, `func f[T any]() { f[[]T]() }`), so its instances never end (Go's rule, `go/types` "instantiation cycle"), also through a method's receiver parameters and through any containing type, interface method signatures included; reported once, before rows are inferred | checker domain tests (`TestExpandingInstantiation`); the go/types differential test (`TestDifferentialGoTypes`, `FuzzDifferential`) |
 | An initialization cycle: a package `var`'s initializer refers to itself through vars, functions or methods (Go's initialization order, `go/types` initorder). The cycle's vars become invalid, so no capability or error diagnostic follows from them | checker domain tests (`TestRowGraphDomain`) |
 | A value of one type where another is expected: an assignment, an argument, a return, a field or an element | `var-mismatch`, `argument-mismatch`, `return-mismatch` |
 | A type does not implement an interface, or its method's rows are wider (interface assignability) | `interface-missing-method`, `interface-wider-row` |
