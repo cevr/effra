@@ -85,9 +85,10 @@ type checker struct {
 	// bodyEdges counts the edges of the body graph: linear in the source
 	// (round-3 M5), and bounded by a test.
 	bodyEdges int
-	// variantOps counts the variant-index entries built and the lookups
-	// that resolve type-switch cases: linear in the source (round-5 M2),
-	// and bounded by a test.
+	// variantOps counts the variant-index work that resolves type-switch
+	// cases: a constructor inserted, a node visited, a type argument
+	// compared, a wildcard candidate checked. Linear in the source
+	// (round-5 M2, round-7 M4), and bounded by tests.
 	variantOps int
 	// instancesMade counts the generic instances created: a default-only
 	// switch over generic unions creates none (round-6 M5), bounded by a

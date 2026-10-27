@@ -52,22 +52,40 @@ func (s *switchUnion) at(i int) Type {
 
 // lookup returns the index of the variant t names: the variant identical
 // to t, or, for a generic type written without type arguments, the first
-// variant instantiated from it; -1 when none.
+// variant instantiated from it; -1 when none. It follows t's path in the
+// origin's variant index (round-7 M4): no variant is scanned or
+// substituted to find it, only a wildcard candidate is checked.
 func (s *switchUnion) lookup(t Type, ops *int) int {
-	cands := s.orig.candidates(t, ops)
-	if n, ok := t.(*Named); ok && n.Orig == nil && len(n.TParams) > 0 {
-		if len(cands) > 0 {
-			return cands[0]
+	n, ok := t.(*Named)
+	if !ok {
+		return -1
+	}
+	ix := s.orig.index(ops)
+	if n.Orig == nil && len(n.TParams) > 0 {
+		if i, ok := ix.first[n]; ok {
+			return i
 		}
 		return -1
 	}
-	for _, i := range cands {
+	for _, cand := range ix.lookup(t, s.bind, ops) {
+		if cand.exact {
+			return cand.i
+		}
 		*ops++
-		if identical(s.at(i), t) {
-			return i
+		if identical(s.at(cand.i), t) {
+			return cand.i
 		}
 	}
 	return -1
+}
+
+// bind gives a type parameter of the union's declaration the instance's
+// type argument; outside an instance a type parameter stands for itself.
+func (s *switchUnion) bind(tp *TypeParam) Type {
+	if b, ok := s.m[tp]; ok {
+		return b
+	}
+	return tp
 }
 
 // caseVariant resolves a case type to its variant index in the union, -1

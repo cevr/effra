@@ -106,33 +106,9 @@ type Union struct {
 	// listed variant may name the lost one: no case diagnostic follows (D3).
 	Bad bool
 
-	// The variant index, built once on the first lookup: the variants of
-	// each origin type (a generic variant's declaration, a plain variant
-	// itself), so a case resolves by a lookup and a few identity checks,
-	// never a scan of the variants (round-5 M2). An instance union of a
-	// generic subject shares its origin union's index (switchUnion).
-	byOrigin map[*Named][]int
-}
-
-// candidates returns the indexes of the variants whose origin is t's.
-// ops counts the index entries built and the lookups made, for the
-// tests' linear bound.
-func (u *Union) candidates(t Type, ops *int) []int {
-	if u.byOrigin == nil {
-		u.byOrigin = make(map[*Named][]int, len(u.Variants))
-		for i, v := range u.Variants {
-			*ops++
-			if vn, ok := v.(*Named); ok {
-				u.byOrigin[vn.origin()] = append(u.byOrigin[vn.origin()], i)
-			}
-		}
-	}
-	*ops++
-	n, ok := t.(*Named)
-	if !ok {
-		return nil
-	}
-	return u.byOrigin[n.origin()]
+	// vindex is the variant index (variantindex.go), built on the first
+	// lookup and shared by every instance of a generic union.
+	vindex *variantIndex
 }
 
 // MachineType is a `machine[S, E]` declaration's type.
