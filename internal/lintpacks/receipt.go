@@ -9,7 +9,6 @@ import (
 
 	"effra.local/prototype/internal/compiler"
 	"effra.local/prototype/internal/producer"
-	sourcefile "effra.local/prototype/internal/source"
 	"effra.local/prototype/lint"
 )
 
@@ -99,6 +98,17 @@ type ReceiptPackRun struct {
 // A source that does not check is still measured: its runs show the
 // frontend alone, since no pack runs over unchecked source.
 func (s *Session) Receipt(ctx context.Context, path, target string, runs int) (Receipt, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return s.ReceiptSource(ctx, absolute, pathReader(absolute), target, runs)
+}
+
+// ReceiptSource is Receipt for a source the caller has admitted: every run
+// reads the bytes from source, and path, made absolute, names the source
+// for its URI and its imports. No path is read for the source.
+func (s *Session) ReceiptSource(ctx context.Context, path string, source SourceReader, target string, runs int) (Receipt, error) {
 	if runs < 1 || runs > MaxReceiptRuns {
 		return Receipt{}, fmt.Errorf("runs must be between 1 and %d", MaxReceiptRuns)
 	}
@@ -122,7 +132,7 @@ func (s *Session) Receipt(ctx context.Context, path, target string, runs int) (R
 	}
 	for run := range runs {
 		began := time.Now()
-		text, err := sourcefile.ReadRegularFile(absolute, 0)
+		text, err := source.Read(0)
 		if err != nil {
 			return Receipt{}, err
 		}

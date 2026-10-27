@@ -15,8 +15,10 @@ import (
 	"unicode/utf8"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/edition"
 	"effra.local/prototype/internal/lintpacks"
 	"effra.local/prototype/internal/producer"
+	"effra.local/prototype/internal/sketchfront"
 	sourcefile "effra.local/prototype/internal/source"
 )
 
@@ -437,9 +439,11 @@ func tools() []tool {
 	for field, property := range compiler.GraphOptionSchema() {
 		graphSchema["properties"].(map[string]any)[field] = property
 	}
+	editionSchema := map[string]any{"type": "object", "properties": map[string]any{"file": map[string]string{"type": "string", "description": "Workspace-relative .ef source file"}}, "required": []string{"file"}, "additionalProperties": false}
 	annotations := map[string]bool{"readOnlyHint": true, "destructiveHint": false, "openWorldHint": false}
 	return []tool{
 		{"project.describe", "Compiler capabilities, supported target, and guardrail limits", map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}, annotations},
+		{"project.edition", "The edition that governs one file and the manifest it came from, as the canonical edition JSON the CLI and LSP return", editionSchema, annotations},
 		{"code.format", "Format one source buffer or guarded workspace file without writing it", formatSchema, annotations},
 		{"project.check", "Check one file; return revision, bounded diagnostics, and timings", schema(false), annotations},
 		{"project.diagnostics", "Return compiler and semantic lint diagnostics with byte spans and UTF-16 ranges", lintSchema, annotations},
@@ -688,7 +692,17 @@ func formatCode(root string, args arguments) (any, error) {
 			uri = args.URI
 		}
 	} else {
-		source, fileURI, err := readFormatSource(root, args.File)
+		admitted, err := admitWorkspaceFile(root, args.File)
+		if err != nil {
+			return nil, err
+		}
+		defer admitted.Close()
+		// Only a legacy file reaches the legacy formatter. A source buffer has
+		// no directory and is legacy by default.
+		if refusal := editionRefusal("code.format", admitted.source.Resolution); refusal != nil {
+			return nil, fmt.Errorf("%s", refusal.String())
+		}
+		source, fileURI, err := readFormatSource(admitted)
 		if err != nil {
 			return nil, err
 		}
@@ -730,40 +744,84 @@ func formatCode(root string, args arguments) (any, error) {
 	return formatted, nil
 }
 
-func readFormatSource(root, relative string) ([]byte, string, error) {
-	source, requested, err := readWorkspaceSource(root, relative, maxFormatSourceBytes)
+func readFormatSource(admitted *workspaceFile) ([]byte, string, error) {
+	source, err := admitted.source.Read(maxFormatSourceBytes)
 	if errors.Is(err, sourcefile.ErrTooLarge) {
 		return nil, "", fmt.Errorf("format source exceeds %d MiB limit", maxFormatSourceBytes/(1024*1024))
 	}
 	if err != nil {
 		return nil, "", err
 	}
-	uri, err := compiler.FileURI(requested)
+	uri, err := compiler.FileURI(admitted.requested)
 	if err != nil {
 		return nil, "", err
 	}
 	return source, uri, nil
 }
 
-func readWorkspaceSource(root, relative string, maxBytes int) ([]byte, string, error) {
+// workspaceFile is a source file admitted inside the workspace: open, bound
+// to its edition, and not read yet. The caller closes it.
+type workspaceFile struct {
+	// requested is the workspace path as named, cleaned under the canonical
+	// root; URIs name it.
+	requested string
+	// source is the open file and its edition. Every read of the source
+	// reads this open file, never a path.
+	source *edition.Source
+}
+
+func (w *workspaceFile) Close() error { return w.source.Close() }
+
+// admitWorkspaceFile opens a workspace-relative .ef path through an os.Root
+// on the workspace, so a path or a link that leaves the workspace cannot be
+// opened at all, and binds the open file to its edition with the shared
+// edition.ResolveFile. It reads no source bytes: byte limits belong to the
+// tools that read the source, so project.edition admits a file of any size.
+func admitWorkspaceFile(root, relative string) (*workspaceFile, error) {
 	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err == nil {
+		canonicalRoot, err = filepath.Abs(canonicalRoot)
+	}
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	if filepath.IsAbs(relative) || relative == "" || filepath.Ext(relative) != ".ef" {
-		return nil, "", fmt.Errorf("file must be a workspace-relative .ef path")
+		return nil, fmt.Errorf("file must be a workspace-relative .ef path")
 	}
+	// MCP names a file lexically, as the go command treats file arguments:
+	// `link/..` is cleaned before any link is followed.
 	requested := filepath.Clean(filepath.Join(canonicalRoot, relative))
-	resolved, err := filepath.EvalSymlinks(requested)
+	physical, err := filepath.EvalSymlinks(requested)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	rel, err := filepath.Rel(canonicalRoot, resolved)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return nil, "", fmt.Errorf("file escapes workspace")
+	inside, err := filepath.Rel(canonicalRoot, physical)
+	if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("file escapes workspace")
 	}
-	source, err := sourcefile.ReadRegularFile(resolved, maxBytes)
-	return source, requested, err
+	// The file is opened through the root at its physical path. A component
+	// retargeted since that path was resolved cannot lead the open outside
+	// the workspace: the root refuses it.
+	workspace, err := os.OpenRoot(canonicalRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer workspace.Close()
+	file, err := workspace.OpenFile(inside, edition.SourceOpenFlags, 0)
+	if err != nil {
+		return nil, err
+	}
+	source, err := edition.ResolveFile(file, requested)
+	if err != nil {
+		return nil, err
+	}
+	// The open file came through the root. Its bound path names the same
+	// file, and the manifest lookup starts there, so it must be inside too.
+	if rel, err := filepath.Rel(canonicalRoot, source.Path); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		source.Close()
+		return nil, fmt.Errorf("file escapes workspace")
+	}
+	return &workspaceFile{requested: requested, source: source}, nil
 }
 
 func call(root string, packs *lintpacks.Session, name string, args arguments) (any, error) {
@@ -776,12 +834,22 @@ func call(root string, packs *lintpacks.Session, name string, args arguments) (a
 	if name == "lint.rules" {
 		return packs.Rules(), nil
 	}
+	if name == "project.edition" {
+		// The file is admitted as every tool admits it, so the workspace
+		// containment refusals hold; its content is not read for the edition.
+		admitted, err := admitWorkspaceFile(root, args.File)
+		if err != nil {
+			return nil, err
+		}
+		admitted.Close()
+		return json.RawMessage(admitted.source.Resolution.JSON()), nil
+	}
 	if name == "project.describe" {
 		return map[string]any{
 			"schemaVersion": compiler.SemanticSchemaVersion, "compilerVersion": CompilerVersion,
 			"runtimes": map[string]string{"go": "typed lazy closures; managed scopes and fibers; Go standard library"},
 			"targets":  []string{compiler.Target}, "defaultTarget": compiler.Target, "sourceExtension": ".ef", "workspace": root,
-			"operations": []string{"project.describe", "code.format", "project.check", "project.diagnostics", "code.inspect", "code.explain", "project.lint", "lint.rules", "code.typeAt", "code.type", "project.graph", "project.tests"}, "scope": "single-file disk snapshots or one explicit source buffer for code.format",
+			"operations": []string{"project.describe", "project.edition", "code.format", "project.check", "project.diagnostics", "code.inspect", "code.explain", "project.lint", "lint.rules", "code.typeAt", "code.type", "project.graph", "project.tests"}, "scope": "single-file disk snapshots or one explicit source buffer for code.format",
 			"guardrails": map[string]string{
 				"failures": "checked closed rows", "requirements": "checked nominal services",
 				"resourceOwnership":  "owned fibers join before scope resources are released; Go File guards closed handles",
@@ -812,7 +880,7 @@ func call(root string, packs *lintpacks.Session, name string, args arguments) (a
 		}
 		snapshot = compiler.SourceSnapshot{URI: uri, Origin: "disk"}
 	}
-	source, err := readSource(root, args.File)
+	source, resolution, err := readSource(root, args.File)
 	if err != nil {
 		return nil, err
 	}
@@ -820,7 +888,14 @@ func call(root string, packs *lintpacks.Session, name string, args arguments) (a
 	if target == "" {
 		target = compiler.Target
 	}
-	r := compiler.CompileAt(string(source), target, filepath.Dir(filepath.Join(root, args.File)))
+	// The edition comes from the file the source was read from, before any
+	// front-end analyses it. Only the legacy edition reaches CompileAt.
+	dir := filepath.Dir(filepath.Join(root, args.File))
+	if resolution.Diagnostic != nil || resolution.Edition != edition.Legacy {
+		snapshot.Text = string(source)
+		return foreignCall(packs, name, args, target, snapshot, resolution)
+	}
+	r := compiler.CompileAt(string(source), target, dir)
 	if err := r.Qualify(producer.Current()); err != nil {
 		return nil, err
 	}
@@ -974,12 +1049,104 @@ func call(root string, packs *lintpacks.Session, name string, args arguments) (a
 	response["typeProjectionUsage"] = usage
 	return response, nil
 }
-func readSource(root, relative string) ([]byte, error) {
-	source, _, err := readWorkspaceSource(root, relative, 2*1024*1024)
-	if errors.Is(err, sourcefile.ErrTooLarge) {
-		return nil, fmt.Errorf("source exceeds prototype 2 MiB limit")
+
+// fileTools are the tools that take a workspace file, each with the ticket
+// that adds it to the 2026 edition; an empty ticket means the edition
+// supports it. A tool missing here is refused for every edition but legacy,
+// so a tool added later is never passed to the legacy front-end.
+var fileTools = map[string]string{
+	"project.edition":     "",
+	"project.check":       "",
+	"project.diagnostics": "",
+	"code.format":         edition.TicketFormat,
+	"code.inspect":        edition.TicketChecker,
+	"code.explain":        edition.TicketChecker,
+	"code.type":           edition.TicketChecker,
+	"code.typeAt":         edition.TicketChecker,
+	"project.graph":       edition.TicketChecker,
+	"project.lint":        edition.TicketChecker,
+	"project.tests":       edition.TicketTests,
+}
+
+// editionRefusal is the refusal of a tool on a file of the resolution: EF144
+// for an unsupported manifest, EF145 for a tool the edition lacks.
+func editionRefusal(tool string, resolution edition.Resolution) *edition.Diagnostic {
+	if resolution.Diagnostic != nil {
+		return resolution.Diagnostic
 	}
-	return source, err
+	if resolution.Edition == edition.Legacy {
+		return nil
+	}
+	ticket, known := fileTools[tool]
+	if resolution.Edition == edition.E2026 && known && ticket == "" {
+		return nil
+	}
+	if !known || resolution.Edition != edition.E2026 {
+		ticket = "a later ticket"
+	}
+	refusal := edition.Unavailable(tool, resolution.Edition, ticket)
+	return &refusal
+}
+
+// foreignCall answers a semantic tool for a file the legacy front-end must
+// not read: an edition refusal, or a tool of the 2026 edition. project.check
+// and project.diagnostics report a refusal in their structured result; every
+// other tool returns it as the tool error.
+func foreignCall(packs *lintpacks.Session, name string, args arguments, target string, snapshot compiler.SourceSnapshot, resolution edition.Resolution) (any, error) {
+	refusal := editionRefusal(name, resolution)
+	if refusal == nil && name == "project.diagnostics" && packs.SelectsPacks() {
+		unavailable := edition.Unavailable("project.diagnostics with rule packs", resolution.Edition, edition.TicketChecker)
+		refusal = &unavailable
+	}
+	if refusal != nil && name != "project.check" && name != "project.diagnostics" {
+		return nil, fmt.Errorf("%s", refusal.String())
+	}
+	var r *compiler.Result
+	if refusal != nil {
+		r = compiler.ForeignResult(snapshot.Text, target, []compiler.Diagnostic{{Code: refusal.Code, Message: refusal.Message}})
+	} else {
+		r = sketchfront.Check(snapshot.Text).Result(snapshot.Text, target)
+	}
+	if err := r.Qualify(producer.Current()); err != nil {
+		return nil, err
+	}
+	if err := r.RequireProducer(args.ExpectedProducer); err != nil {
+		return nil, err
+	}
+	if args.ExpectedRevision != "" && args.ExpectedRevision != r.Revision {
+		return nil, fmt.Errorf("stale semantic revision; current revision is %s", r.Revision)
+	}
+	if name == "project.check" {
+		return r.ForeignCheckResponse(string(resolution.Edition)), nil
+	}
+	if name == "project.diagnostics" {
+		reason := edition.Unavailable("lint", edition.E2026, edition.TicketChecker).Message
+		if refusal != nil {
+			reason = refusal.String()
+		}
+		return r.ForeignReport(snapshot, args.Strict, reason).Bounded(maxInspectionItems)
+	}
+	// fileTools admits only the tools answered above.
+	return nil, fmt.Errorf("tool %s has no answer for edition %q", name, string(resolution.Edition))
+}
+
+// readSource admits a workspace file and reads it for analysis, within the
+// compiler's 2 MiB source bound. The bytes come from the admitted open
+// file, the file its edition is bound to.
+func readSource(root, relative string) ([]byte, edition.Resolution, error) {
+	admitted, err := admitWorkspaceFile(root, relative)
+	if err != nil {
+		return nil, edition.Resolution{}, err
+	}
+	defer admitted.Close()
+	source, err := admitted.source.Read(2 * 1024 * 1024)
+	if errors.Is(err, sourcefile.ErrTooLarge) {
+		return nil, edition.Resolution{}, fmt.Errorf("source exceeds prototype 2 MiB limit")
+	}
+	if err != nil {
+		return nil, edition.Resolution{}, err
+	}
+	return source, admitted.source.Resolution, nil
 }
 
 func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
@@ -999,6 +1166,13 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 	}
 	if fields == nil {
 		return args, fmt.Errorf("tool arguments must be an object")
+	}
+	if name == "project.edition" {
+		for key := range fields {
+			if key != "file" {
+				return args, fmt.Errorf("unknown tool argument %s", key)
+			}
+		}
 	}
 	if name == "code.typeAt" {
 		if _, ok := fields["offset"]; !ok {

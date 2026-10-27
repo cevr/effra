@@ -41,10 +41,35 @@ func ExpectationPath(fixture string) string {
 // over checked facts cannot run on it, so it cannot test them.
 var ErrUnchecked = errors.New("fixture source does not check")
 
+// SourceReader reads an admitted source: the caller opened the file once
+// and bound it to its edition, and Read returns the bytes of that open file
+// from its start, without opening a path again. *edition.Source is one.
+type SourceReader interface {
+	Read(maxBytes int) ([]byte, error)
+}
+
+// pathReader reads a source by its path, for the path entry points.
+type pathReader string
+
+func (p pathReader) Read(maxBytes int) ([]byte, error) {
+	return sourcefile.ReadRegularFile(string(p), maxBytes)
+}
+
 // Fixture lints one fixture file with the selected packs through the same
 // path as ef lint: compile, run every pack as a process over the protocol,
 // merge. The fixture is only read.
 func (s *Session) Fixture(ctx context.Context, path, target string) (Expectation, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return Expectation{}, err
+	}
+	return s.FixtureSource(ctx, absolute, pathReader(absolute), target)
+}
+
+// FixtureSource is Fixture for a source the caller has admitted: the bytes
+// come from source, and path, made absolute, names the fixture for its URI
+// and its imports. No path is read for the source.
+func (s *Session) FixtureSource(ctx context.Context, path string, source SourceReader, target string) (Expectation, error) {
 	if !s.SelectsPacks() {
 		return Expectation{}, fmt.Errorf("no rule pack is selected")
 	}
@@ -52,7 +77,7 @@ func (s *Session) Fixture(ctx context.Context, path, target string) (Expectation
 	if err != nil {
 		return Expectation{}, err
 	}
-	source, err := sourcefile.ReadRegularFile(absolute, 0)
+	text, err := source.Read(0)
 	if err != nil {
 		return Expectation{}, err
 	}
@@ -60,7 +85,7 @@ func (s *Session) Fixture(ctx context.Context, path, target string) (Expectation
 	if err != nil {
 		return Expectation{}, err
 	}
-	snapshot := compiler.SourceSnapshot{URI: uri, Origin: "disk", Text: string(source)}
+	snapshot := compiler.SourceSnapshot{URI: uri, Origin: "disk", Text: string(text)}
 	result := compiler.CompileAt(snapshot.Text, target, filepath.Dir(absolute))
 	if !result.Checked {
 		first := result.Diagnostics[0]

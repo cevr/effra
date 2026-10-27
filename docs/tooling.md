@@ -4,6 +4,7 @@ The compiler's checked model supplies CLI and MCP answers. These are default cap
 
 | CLI | MCP | Purpose |
 | --- | --- | --- |
+| `ef edition FILE` | `project.edition` | The file's [edition](specs/editions.md) as canonical JSON (`edition`, `source`, `manifest`, and `diagnostic` on EF144); LSP `effra/edition` returns the same bytes; exit 1 on EF144 |
 | `ef check FILE` | `project.check` | Non-disableable source admission diagnostics |
 | `ef diagnostics FILE [--strict] [--json]` | `project.diagnostics` | One shared compiler/lint report with byte spans and UTF-16 ranges |
 | `ef lint FILE [--strict] [--lint-config FILE] [--rules MANIFEST]...` | `project.lint` | Checked semantic advice merged with selected rule packs; separate `checked`, `lintPassed` and `complete` |
@@ -16,6 +17,8 @@ The compiler's checked model supplies CLI and MCP answers. These are default cap
 | `ef graph FILE` | `project.graph` | Dependencies, providers, calls and provision boundaries; with view options, one selected [graph view](#graph-views) |
 | `ef test FILE` | `project.tests` discovers cases | CLI executes; MCP remains read-only |
 | `ef fmt FILE... [--check] [--json]` / `ef fmt --stdin` | `code.format` | Canonical syntax-only formatting; CLI writes atomically, MCP returns a full-text preview and never writes |
+
+Every command and tool that takes a file first resolves the file's edition from the nearest `effra.json` ([editions](specs/editions.md)). A file no manifest governs is `legacy`, and every row above applies to it unchanged. A `2026` file supports `check`, `diagnostics`, `build` (without `--receipt`) and `run`, and MCP `project.check` and `project.diagnostics`, with prototype `S` codes; every other row is the EF145 refusal, and an unsupported manifest is EF144 on every row (see [edition diagnostics](#edition-diagnostics)). `ef fmt --stdin` and `code.format` with `source` have no directory and are `legacy`.
 
 File commands accept `--target go`, the only target and the default; any other target, including `js`, is the EF110 diagnostic. Semantic results identify the source/import revision and the executing compiler producer. MCP semantic file tools accept independent `expectedRevision` and `expectedProducer` guards; omitting `expectedProducer` requests fresh facts for that invocation and makes no cross-producer reuse claim. `code.format` accepts `expectedProducer`, while `expectedDigest` separately guards exact source bytes.
 
@@ -104,6 +107,16 @@ Codes are stable and grouped by the seam that owns them: `EF001` lexical errors,
 | assignment | `=` after a statement | planned | a new `let` name | [surface language](design.md#surface-language) plans local mutation |
 
 The table publishes the compiler's catalog: a test fails when a row's construct, backticked spellings or status drifts from it. Each help is cross-checked by a checked replacement program in `cmd/ef/absent_syntax_process_test.go`. The `unit` type and `throws` row keyword keep their own retired-spelling messages under `EF102` and `EF002`.
+
+### Edition diagnostics
+
+Every surface resolves a file's [edition](../GLOSSARY.md) before any front-end reads the file ([editions](specs/editions.md)). These codes are refusals of that step, like `EF110` for a target: they have no source location, and no front-end diagnostic accompanies them. They are declared once in `internal/edition`; `TestEditionDiagnosticsAreDocumented` fails when this table and the declarations drift. The diagnostic registry ([#79](https://github.com/cevr/effra/issues/79)) absorbs them later.
+
+| Code | Meaning | Message names |
+| --- | --- | --- |
+| EF144 | The edition manifest that governs the file is unsupported or malformed: an unknown id, invalid JSON, an unknown or repeated field, trailing data, a missing `edition`, a non-object, a non-regular file or a file over 64 KiB. | the manifest path, the value or defect found, and the supported ids `"legacy"` and `"2026"` |
+| EF145 | The operation is not available for the file's edition yet. | the operation, the edition, and the ticket that adds it: [#195](https://github.com/cevr/effra/issues/195) formatting; [#196](https://github.com/cevr/effra/issues/196) types, inspection, explanation, queries, graphs and lint; [#204](https://github.com/cevr/effra/issues/204) tests |
+| EF146 | The source cannot be bound to an edition. Every surface opens a source once, and the edition comes from the physical path of that open file. EF146 means the snapshot of the admission did not hold: the open file's physical path, read from the descriptor, changed while the edition was chosen, or one of the directories, `go.mod` files or `effra.json` manifests on its walk was moved, replaced, rewritten or added, or the opened file was unlinked. On the LSP it also means that the document path exists but is not a regular file that can be opened, or that a missing directory, manifest, `go.mod` or the file itself appeared in an unsaved document's path while it was admitted. It also means that an entry on the walk (a directory, a `go.mod`, a manifest or a link target) exists but cannot be inspected, for example because of a permission or I/O error: an inspection error is never taken as absence. Nothing is read from a refused source. | the path as given, and the physical path or the walk entry that changed, or the open error |
 
 ## Lint
 

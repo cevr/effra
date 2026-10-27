@@ -63,7 +63,7 @@ func TestProtocolLifecycleAndSemanticParity(t *testing.T) {
 		t.Fatal(result)
 	}
 	listed := responses[2]["result"].(map[string]any)["tools"].([]any)
-	if len(listed) != 12 {
+	if len(listed) != 13 {
 		t.Fatal(listed)
 	}
 	foundType := false
@@ -319,14 +319,14 @@ func TestWorkspaceBounds(t *testing.T) {
 	if err := os.Symlink(file, filepath.Join(root, "escape.ef")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readSource(root, "escape.ef"); err == nil {
+	if _, err := admitWorkspaceFile(root, "escape.ef"); err == nil {
 		t.Fatal("symlink escape accepted")
 	}
-	if _, err := readSource(root, file); err == nil {
+	if _, err := admitWorkspaceFile(root, file); err == nil {
 		t.Fatal("absolute path accepted")
 	}
 	rel, _ := filepath.Rel(root, file)
-	if _, err := readSource(root, rel); err == nil {
+	if _, err := admitWorkspaceFile(root, rel); err == nil {
 		t.Fatal("relative traversal accepted")
 	}
 }

@@ -17,12 +17,12 @@ import (
 	"time"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/edition"
 	"effra.local/prototype/internal/lintpacks"
 	"effra.local/prototype/internal/lsp"
 	"effra.local/prototype/internal/mcp"
 	"effra.local/prototype/internal/producer"
 	"effra.local/prototype/internal/receipt"
-	sourcefile "effra.local/prototype/internal/source"
 )
 
 func main() {
@@ -182,15 +182,27 @@ func locateSource(path string) (receipt.Location, error) {
 	return receipt.LocateSource(path)
 }
 
-// loadSource reads and checks the located source. Diagnostics name the
-// admitted path and module imports resolve beside it; the bytes come from
-// the file it reaches.
+// loadSource admits the located source and compiles it with the legacy
+// front-end. Commands admit once and route by edition first (command); this
+// path serves callers that load a known legacy source.
 func loadSource(source receipt.Location, target string) (*compiler.Result, compiler.SourceSnapshot, error) {
+	admitted, err := admitSource(source.Path())
+	if err != nil {
+		return nil, compiler.SourceSnapshot{}, err
+	}
+	defer admitted.Close()
+	return compileAdmitted(source, admitted, target)
+}
+
+// compileAdmitted reads the admitted open file and checks it. Diagnostics
+// name the admitted path and module imports resolve beside it; the bytes
+// come from the file the edition is bound to.
+func compileAdmitted(source receipt.Location, admitted *edition.Source, target string) (*compiler.Result, compiler.SourceSnapshot, error) {
 	uri, err := compiler.FileURI(source.Admitted())
 	if err != nil {
 		return nil, compiler.SourceSnapshot{}, err
 	}
-	text, err := sourcefile.ReadRegularFile(source.Path(), 0)
+	text, err := admitted.Read(0)
 	if err != nil {
 		return nil, compiler.SourceSnapshot{}, err
 	}
@@ -311,13 +323,16 @@ func targetError(target string) error {
 }
 func command(args []string) error {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h")) {
-		fmt.Println("Effra prototype\nusage: ef check FILE [--target go] | diagnostics FILE [--strict] [--json] [--target go] [LINT] | lint FILE [--strict] [--target go] [LINT] | lint rules [LINT] | lint test PATH... [--update] [LINT] | lint receipt FILE [--runs N] [--target go] [LINT] | test FILE [--target go] [--timeout-ms 30000] [--live] | graph FILE [--target go] [GRAPH VIEW OPTIONS] | query FILE BYTE_OFFSET [--target go] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go] [-o PATH] [--receipt PATH] | run FILE [--target go] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] [LINT] | lsp [--target go] [LINT]\nLINT: [--lint-config FILE] [--rules MANIFEST]... selects custom rule packs; a lint configuration error exits 2.")
+		fmt.Println("Effra prototype\nusage: ef check FILE [--target go] | edition FILE | diagnostics FILE [--strict] [--json] [--target go] [LINT] | lint FILE [--strict] [--target go] [LINT] | lint rules [LINT] | lint test PATH... [--update] [LINT] | lint receipt FILE [--runs N] [--target go] [LINT] | test FILE [--target go] [--timeout-ms 30000] [--live] | graph FILE [--target go] [GRAPH VIEW OPTIONS] | query FILE BYTE_OFFSET [--target go] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go] [-o PATH] [--receipt PATH] | run FILE [--target go] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] [LINT] | lsp [--target go] [LINT]\nLINT: [--lint-config FILE] [--rules MANIFEST]... selects custom rule packs; a lint configuration error exits 2.")
 		fmt.Println("type: ef type FILE (--symbol NAME | --offset BYTE | --definition TYPE_ID --revision REVISION) [--target go] [--json]")
 		fmt.Println(graphUsage())
 		return nil
 	}
 	if args[0] == "fmt" {
 		return formatCommand(args[1:])
+	}
+	if args[0] == "edition" {
+		return editionCommand(args[1:])
 	}
 	if args[0] == "lsp" {
 		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
@@ -378,9 +393,9 @@ func command(args []string) error {
 		}
 		return mcp.Serve(root, session, os.Stdin, os.Stdout)
 	}
-	switch args[0] {
-	case "check", "diagnostics", "lint", "query", "type", "graph", "inspect", "explain", "build", "run", "test":
-	default:
+	// The remaining file commands come from the table that routes them by
+	// edition; fmt, edition, lint test and lint receipt dispatched above.
+	if _, ok := lookupFileCommand(args[0]); !ok {
 		return fmt.Errorf("unknown command %s; use ef --help", args[0])
 	}
 	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
@@ -463,7 +478,18 @@ func command(args []string) error {
 	if err != nil {
 		return err
 	}
-	r, snapshot, err := loadSource(source, opts.target)
+	// The source is opened once and bound to its edition before any
+	// front-end reads it; every byte below comes from that open file. Only
+	// the legacy edition reaches the legacy front-end.
+	admitted, err := admitSource(source.Path())
+	if err != nil {
+		return err
+	}
+	defer admitted.Close()
+	if resolution := admitted.Resolution; resolution.Diagnostic != nil || resolution.Edition != edition.Legacy {
+		return foreignCommand(args[0], source, admitted, opts, session)
+	}
+	r, snapshot, err := compileAdmitted(source, admitted, opts.target)
 	if err != nil {
 		return err
 	}

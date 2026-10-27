@@ -188,8 +188,8 @@ func TestCLISmoke(t *testing.T) {
 			t.Fatalf("responses = %d, want 8: %v", len(responses), responses)
 		}
 		tools, _ := cliSmokeAt(t, responses[1], "result", "tools").([]any)
-		if len(tools) != 12 {
-			t.Fatalf("tools = %d, want 12", len(tools))
+		if len(tools) != 13 {
+			t.Fatalf("tools = %d, want 13", len(tools))
 		}
 		hasType := false
 		for index := range tools {

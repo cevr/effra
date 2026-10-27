@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/edition"
 	"effra.local/prototype/internal/producer"
 	sourcefile "effra.local/prototype/internal/source"
 )
@@ -278,15 +279,34 @@ func formatFiles(opts fmtOptions) (formatReport, error) {
 		if lstat.Mode()&os.ModeSymlink == 0 && !lstat.Mode().IsRegular() {
 			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_SPECIAL_FILE", path: displayPath, message: "source must be a regular file"})
 		}
-		resolvedPath, err := filepath.EvalSymlinks(path)
+		// The source is opened once and bound to its edition; the spelling
+		// is walked as the file system walks it (a `..` after a link applies
+		// to the link's target). The bytes come from that open file, and the
+		// replacement goes to its physical path only while that path still
+		// names the open file (validateFormatSnapshot), so the edition always
+		// governs the bytes that are formatted and written.
+		admitted, err := admitSource(path)
 		if err != nil {
-			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_READ", path: displayPath, message: err.Error()})
+			code := "EFMT_READ"
+			var admission *edition.AdmissionError
+			if errors.As(err, &admission) {
+				code = admission.Diagnostic.Code
+			}
+			return formatPlanFailure(&report, &formatAdapterError{code: code, path: displayPath, message: err.Error()})
+		}
+		resolvedPath, info := admitted.Path, admitted.Info()
+		// Only a legacy source reaches the legacy formatter.
+		if refusal := editionRefusal("fmt", admitted.Resolution); refusal != nil {
+			admitted.Close()
+			return formatPlanFailure(&report, &formatAdapterError{code: refusal.Code, path: displayPath, message: refusal.Message})
 		}
 		if planIndex, ok := byResolvedPath[resolvedPath]; ok {
+			admitted.Close()
 			report.Files[plans[planIndex].reportAt].RequestedPaths = append(report.Files[plans[planIndex].reportAt].RequestedPaths, displayPath)
 			continue
 		}
-		source, err := sourcefile.ReadRegularFile(path, maxFormatInputBytes)
+		source, err := admitted.Read(maxFormatInputBytes)
+		admitted.Close()
 		if err != nil {
 			code := "EFMT_READ"
 			message := err.Error()
@@ -299,13 +319,6 @@ func formatFiles(opts fmtOptions) (formatReport, error) {
 		inputTotal += len(source)
 		if inputTotal > maxFormatTotalInput {
 			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_INPUT_LIMIT", path: displayPath, message: fmt.Sprintf("request exceeds %d-byte aggregate input limit", maxFormatTotalInput)})
-		}
-		info, err := os.Stat(path)
-		if err != nil {
-			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_READ", path: displayPath, message: err.Error()})
-		}
-		if !info.Mode().IsRegular() {
-			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_SPECIAL_FILE", path: displayPath, message: "source must be a regular file"})
 		}
 
 		fileReport := formatFileReport{Path: displayPath, RequestedPaths: []string{displayPath}}
@@ -345,7 +358,7 @@ func formatFiles(opts fmtOptions) (formatReport, error) {
 			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_OUTPUT_LIMIT", path: displayPath, message: fmt.Sprintf("request exceeds %d-byte aggregate output limit", maxFormatTotalOutput)})
 		}
 		report.Files[reportAt].Completed = true
-		plans = append(plans, formatPlan{path: path, parentPath: filepath.Dir(resolvedPath), displayPath: displayPath, info: info, source: append([]byte(nil), source...), result: result, reportAt: reportAt})
+		plans = append(plans, formatPlan{path: resolvedPath, parentPath: filepath.Dir(resolvedPath), displayPath: displayPath, info: info, source: append([]byte(nil), source...), result: result, reportAt: reportAt})
 		byResolvedPath[resolvedPath] = len(plans) - 1
 	}
 	for index := range plans {
