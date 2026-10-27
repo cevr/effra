@@ -543,15 +543,40 @@ func (s *session) formatDocument(req request) error {
 	// Each document reaches its own edition's formatter; the edition is
 	// resolved now, so a manifest edit since the last change counts.
 	current := edition.ResolveDocument(path)
-	if refusal := formattingRefusal(captured, current); refusal != nil {
+	refuse := func(refusal *edition.Diagnostic) error {
 		return s.send(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{"code": -32803, "message": boundedDetail(documentContext(captured) + refusal.String()), "data": refusal}})
+	}
+	if refusal := formattingRefusal(captured, current); refusal != nil {
+		return refuse(refusal)
 	}
 	format := compiler.FormatSourceBounded
 	if current.Edition == edition.E2026 {
 		format = sketchfront.Format
 	}
 	result, err := format(captured.snapshot.Text, MaxFormattedBytes)
+	// The edition is resolved again before any edit is returned: edits
+	// computed by one edition's formatter are never returned once the
+	// manifest names another, or no longer resolves (spec risk 6).
+	if refusal := editionChanged(current, edition.ResolveDocument(path)); refusal != nil {
+		return refuse(refusal)
+	}
 	return s.completeFormatting(req.ID, path, captured, result, err)
+}
+
+// editionChanged is the refusal of formatting results computed under
+// before when the document's edition now resolves to after: the
+// resolution's own diagnostic (EF144, EF146) when it fails, EF145 when the
+// edition differs, and nil when it is the same.
+func editionChanged(before, after edition.Resolution) *edition.Diagnostic {
+	if after.Diagnostic != nil {
+		return after.Diagnostic
+	}
+	if after.Edition == before.Edition {
+		return nil
+	}
+	refusal := edition.Unavailable("textDocument/formatting", after.Edition, "a later ticket")
+	refusal.Message = fmt.Sprintf("textDocument/formatting: the manifest changed the document's edition from %s to %s while it was formatted; format again after the next change", before.Edition, after.Edition)
+	return &refusal
 }
 
 // formattingRefusal is EF144 for a document under an unsupported manifest,
