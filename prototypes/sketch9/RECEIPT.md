@@ -226,7 +226,7 @@ Host: shared exe workbox, AMD EPYC 9554P, 16 vCPU, load average 6–13; go1.27.0
 
 ## What changed
 
-- `sketchc build -rt kernel` links `effra.local/prototype/runtime/rt`. `sketchc trace [-json]` reads a recorded run against the checked model (README, "Kernel mode and traces").
+- `sketchc build -rt kernel` links `effra.local/prototype/runtime/rt`. `sketchc trace [-json]` reads a recorded run against the checked model (README, "Kernel mode and traces"). (Renamed with #218 on 2026-10-27: now `ergo.local/prototype/runtime/rt`.)
 - `sketch/defs.go`: `NewModel`, the definition table and the trace points, derived from the checked declarations. `sketch/emit_kernel.go`: the kernel `main`, the constants, the site table and the point events. `sketch/trace.go`: the query and its refusals.
 - `Scheduler.Sleep(d)` joins the prelude. Both runtimes lower it to `rt.Sleep`. `testdata/reject/sleep-not-duration.sketch` (S108) and `testdata/probes/sleep-timeout.sketch` (both outcomes of a timeout, embedded mode) cover it.
 - Default mode: for the 40 accepted programs (`testdata/checkout.sketch` and the accepted probes), the base `854f21e7` `sketchc` and this branch emit byte-identical `main.go`. The embedded `rt/rt.go` gains only `Sleep`.
@@ -271,7 +271,7 @@ The "without" binary is the same emitted program with the trace switch removed b
 | `./scripts/gate.sh` | 0 (`gate: passed 30 steps in 83.6s`, `gate-r3.log`) |
 | `cd prototypes/sketch9 && go vet ./... && go test -count=1 ./...` | 0 |
 
-- Schema `effra-trace-3`: a `body-exit` has no `link`; each reason of its cause carries its own `origin`. `sketch/trace.go` checks each origin against the reason it explains (`checkOrigins`), refuses a `body-exit` link, and explains each reason from its own origin; a reason without one says "origin not recorded". The events table prints the origins.
+- Schema `effra-trace-3`: a `body-exit` has no `link`; each reason of its cause carries its own `origin`. `sketch/trace.go` checks each origin against the reason it explains (`checkOrigins`), refuses a `body-exit` link, and explains each reason from its own origin; a reason without one says "origin not recorded". The events table prints the origins. (Renamed with #218 on 2026-10-27: the kernel now records `ergo-trace-3`, and the query reads both names.)
 - `TestQueryTraceRefuses` adds nine origin cases, among them a failure whose origin is a cleanup panic (the second review's compound case). `TestQueryTraceExplainsEachReason` checks the cause traces of a failure with two cleanup defects, a failure without an origin beside a cleanup defect, and a failure with an interruption.
 - `testdata/trace/two-calls.jsonl` and `two-timeouts.jsonl` were re-recorded with the round-3 runtime; their cause traces are unchanged.
 - The second review's native probes, rerun against real `rt.Scoped`, `rt.Run` and `Check`: the compound exit names the failed call for the failure and the release panic for the defect; the release call and the interrupted call each end with a `call-exit` (`round-3-receipts/native-*.log` in the unit directory).

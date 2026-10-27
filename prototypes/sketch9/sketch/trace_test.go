@@ -1,7 +1,6 @@
 package sketch
 
 import (
-	"bufio"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -69,7 +68,7 @@ func TestModelIDsAreDerivedAndStable(t *testing.T) {
 		t.Fatalf("%v\n%s", err, code)
 	}
 	for _, s := range []string{
-		`"latency.checkout/timeout.After#1"`, `rt.AfterSpan(t__,`, `rt.TracedRoot(`, `os.Getenv("EFFRA_TRACE")`,
+		`"latency.checkout/timeout.After#1"`, `rt.AfterSpan(t__,`, `rt.TracedRoot(`, `os.Getenv("ERGO_TRACE")`,
 		`const revision__ = "` + Revision(src) + `"`, `t__.TraceCall(`, `t__.TraceCallExit(`, `"timeout.sketch:32:2"`,
 	} {
 		if !strings.Contains(code, s) {
@@ -98,6 +97,31 @@ func recorded(src string, dropped int, evs ...TraceEvent) []byte {
 		b.WriteByte('\n')
 	}
 	return []byte(b.String())
+}
+
+// The query reads the schema the kernel records now and its name before the
+// #218 rename, which the recorded traces carry, names the one it read, and
+// refuses any other.
+func TestQueryTraceSchemaNames(t *testing.T) {
+	c, src := loadFile(t, "../testdata/trace/timeout.sketch")
+	m := NewModel(c)
+	data := string(recorded(src, 0, task(1, 0, "start", 1, 0), task(2, 0, "body-exit", 1, 0)))
+	for _, schema := range []string{TraceSchema, traceSchemaEffra, "other-trace-3"} {
+		ev, err := QueryTrace(m, Revision(src), []byte(strings.Replace(data, `"schema":"`+TraceSchema+`"`, `"schema":"`+schema+`"`, 1)))
+		if schema == "other-trace-3" {
+			if err == nil || !strings.Contains(err.Error(), TraceSchema) {
+				t.Errorf("%s: got %v; want a refusal naming %s", schema, err, TraceSchema)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: refused: %v", schema, err)
+			continue
+		}
+		if !strings.Contains(ev.Text(), "schema "+schema+")") {
+			t.Errorf("%s: text does not name the schema read:\n%s", schema, ev.Text())
+		}
+	}
 }
 
 // Events of timeout.sketch for hand-built traces.
@@ -446,31 +470,9 @@ func TestQueryTraceLabelsCandidates(t *testing.T) {
 	}
 }
 
-// kernelRoot finds the checkout that holds runtime/rt above the test.
-func kernelRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := filepath.Abs(".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for ; dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
-		if raw, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil {
-			sc := bufio.NewScanner(strings.NewReader(string(raw)))
-			if sc.Scan() && strings.TrimSpace(sc.Text()) == "module "+KernelModule {
-				return dir
-			}
-		}
-	}
-	t.Skip("no checkout of " + KernelModule + " above the test")
-	return ""
-}
-
 // The timeout example built in kernel mode records nothing by default, and a
 // recorded run answers "why did this time out" with the deadline and sites.
 func TestKernelTimeoutTrace(t *testing.T) {
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("no go tool")
-	}
 	root := kernelRoot(t)
 	c, src := loadFile(t, "../testdata/trace/timeout.sketch")
 	code, err := EmitWith(c, Options{Kernel: true, Revision: Revision(src)})
@@ -491,7 +493,7 @@ func TestKernelTimeoutTrace(t *testing.T) {
 	}
 	run := exec.Command(bin)
 	run.Dir = t.TempDir()
-	run.Env = append(os.Environ(), "EFFRA_TRACE=")
+	run.Env = append(os.Environ(), "ERGO_TRACE=")
 	out, err := run.Output()
 	if err != nil || string(out) != "gateway timed out\n" {
 		t.Fatalf("untraced run: %q, %v", out, err)
@@ -499,15 +501,22 @@ func TestKernelTimeoutTrace(t *testing.T) {
 	if entries, _ := os.ReadDir(run.Dir); len(entries) != 0 {
 		t.Fatalf("untraced run wrote %d files", len(entries))
 	}
+	// The variable is named literally, not through TraceEnv: it is the
+	// documented contract (README), and a program that reads another name
+	// would turn tracing off without a word.
 	tracePath := filepath.Join(dir, "timeout.jsonl")
 	traced := exec.Command(bin)
-	traced.Env = append(os.Environ(), "EFFRA_TRACE="+tracePath)
+	traced.Env = append(os.Environ(), "ERGO_TRACE="+tracePath)
 	if out, err := traced.Output(); err != nil || string(out) != "gateway timed out\n" {
 		t.Fatalf("traced run: %q, %v", out, err)
 	}
 	data, err := os.ReadFile(tracePath)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("a run with ERGO_TRACE set recorded no trace: %v", err)
+	}
+	var header TraceHeader
+	if line, _, _ := strings.Cut(string(data), "\n"); json.Unmarshal([]byte(line), &header) != nil || header.Schema != TraceSchema || header.Events == 0 {
+		t.Fatalf("a run with ERGO_TRACE set recorded header %+v; want schema %s and events", header, TraceSchema)
 	}
 	ev, err := QueryTrace(NewModel(c), Revision(src), data)
 	if err != nil {
@@ -529,9 +538,6 @@ func TestKernelTimeoutTrace(t *testing.T) {
 // masked, and only the handler lines and what they caught are compared: the
 // facts under a deadline depend on whether the child reached its sleep.
 func TestKernelProbeTraces(t *testing.T) {
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("no go tool")
-	}
 	root := kernelRoot(t)
 	seq := regexp.MustCompile(`seq \d+`)
 	for _, tc := range []struct {
@@ -570,7 +576,7 @@ func TestKernelProbeTraces(t *testing.T) {
 		}
 		tracePath := filepath.Join(dir, tc.name+".jsonl")
 		run := exec.Command(bin)
-		run.Env = append(os.Environ(), "EFFRA_TRACE="+tracePath)
+		run.Env = append(os.Environ(), "ERGO_TRACE="+tracePath)
 		if out, err := run.Output(); err != nil || string(out) != tc.out {
 			t.Fatalf("%s: traced run: %q, %v", tc.name, out, err)
 		}
