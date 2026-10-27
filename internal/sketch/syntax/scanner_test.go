@@ -99,11 +99,11 @@ func TestNumberForms(t *testing.T) {
 	}
 }
 
-// TestKeywords: 27 keywords; goto, fallthrough and const are not keywords
+// TestKeywords: 28 keywords; goto, fallthrough, const and uses are not keywords
 // but are never names.
 func TestKeywords(t *testing.T) {
-	if n := len(Keywords()); n != 27 {
-		t.Fatalf("%d keywords, want 27", n)
+	if n := len(Keywords()); n != 28 {
+		t.Fatalf("%d keywords, want 28", n)
 	}
 	for word := range removed {
 		if _, ok := keywords[word]; ok {

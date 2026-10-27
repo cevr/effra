@@ -64,8 +64,18 @@ func (c *converter) file(f *syntax.File) *File {
 				out.Funcs = append(out.Funcs, fn)
 			}
 		case *syntax.WireDecl:
+			// The checker of #196 owns what a wire header means: provides
+			// hides the unlisted entries, needs joins the with site's row.
+			refused := false
+			if d.Provides != nil {
+				c.refuse(d.Provides, "a wire's provides clause (checked by #196)")
+				refused = true
+			}
 			if d.Needs != nil {
-				c.refuse(d.Needs, "a wire's needs clause")
+				c.refuse(d.Needs, "a wire's needs clause (checked by #196)")
+				refused = true
+			}
+			if refused {
 				continue
 			}
 			out.Wires = append(out.Wires, &WireDecl{Pos: c.pos(d.Wire), Name: d.Name.Name, Entries: c.wireEntries(d.Body)})

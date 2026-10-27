@@ -59,6 +59,8 @@ func TestBridgeRefusesOutsideTheSubset(t *testing.T) {
 func TestBridgeRefusals(t *testing.T) {
 	for name, src := range map[string]string{
 		"wire needs":        "package p\nwire App needs A {\n\tStore = M{}\n}\n// LINE 2",
+		"wire provides":     "package p\nwire App provides A {\n\tStore = M{}\n}\n// LINE 2",
+		"wire both":         "package p\nwire App provides A needs B {\n\tStore = M{}\n}\n// LINE 2",
 		"wire two keys":     "package p\nwire App {\n\tA, B = M{}\n}\n// LINE 3",
 		"wire embed":        "package p\nwire App {\n\tShared\n}\n// LINE 3",
 		"wire replace":      "package p\nwire App {\n\treplace A = M{}\n}\n// LINE 3",
@@ -91,6 +93,14 @@ func TestBridgeRefusals(t *testing.T) {
 			out, diags := FromSyntax(f)
 			if out != nil || len(diags) == 0 || diags[0].Code != codeOutside || diags[0].Pos.Line != line {
 				t.Fatalf("got %v, want S109 on line %d", diags, line)
+			}
+			// A wire header's meaning belongs to the checker of #196.
+			if strings.Contains(src, "wire App provides") || strings.Contains(src, "wire App needs") {
+				for _, d := range diags {
+					if !strings.Contains(d.Msg, "#196") {
+						t.Fatalf("%+v does not name #196", d)
+					}
+				}
 			}
 		})
 	}

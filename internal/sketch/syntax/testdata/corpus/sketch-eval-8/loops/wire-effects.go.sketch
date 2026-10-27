@@ -59,7 +59,7 @@ func OpenOrders() (Orders, error[ConnectFailed]) needs Config, Clock, Scheduler 
 	return try OpenPostgres()
 }
 
-wire Live needs Orders {
+wire Live provides Orders {
 	Config = EnvConfig{}
 	Orders = OpenOrders // effectful: runs during the build
 }

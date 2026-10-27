@@ -3,9 +3,10 @@ package syntax
 // The AST follows go/ast: types are expressions, every node has Pos and End,
 // and comments live in File.Comments in source order with a Doc group on the
 // nodes that carry documentation. Effra's constructs have dedicated nodes
-// (ErrorRow, NeedsClause, TryExpr, CatchExpr, TypeSwitchStmt, MachineType,
-// WireDecl, WireLit, GoExpr, CallExpr.Trailing). The parser resolves no
-// names: with(…) and timeout.After(…) are ordinary calls.
+// (ErrorRow, NeedsClause, ProvidesClause, TryExpr, CatchExpr,
+// TypeSwitchStmt, MachineType, WireDecl, WireLit, GoExpr,
+// CallExpr.Trailing). The parser resolves no names: with(…) and
+// timeout.After(…) are ordinary calls.
 
 // Node is any syntax node.
 type Node interface {
@@ -150,13 +151,17 @@ type FuncDecl struct {
 	Body       *BlockStmt
 }
 
-// WireDecl is `wire Name [needs A, B] { entries }`.
+// WireDecl is `wire Name [provides A, B] [needs C, D] { entries }`.
+// Provides lists the capabilities the wire exposes; the entries it builds
+// and does not list stay private to its build. Needs lists the capabilities
+// its providers require from the with site. Either clause may be nil.
 type WireDecl struct {
-	Doc   *CommentGroup
-	Wire  Pos
-	Name  *Ident
-	Needs *NeedsClause
-	Body  *WireBody
+	Doc      *CommentGroup
+	Wire     Pos
+	Name     *Ident
+	Provides *ProvidesClause
+	Needs    *NeedsClause
+	Body     *WireBody
 }
 
 func (d *ImportDecl) Pos() Pos { return d.Import }
@@ -317,6 +322,16 @@ func (u *NeedsClause) End() Pos {
 	}
 	return u.Names[len(u.Names)-1].End()
 }
+
+// ProvidesClause is a named wire's exposure: `provides A, B`. It is never
+// parenthesised, because it stands only in a wire header.
+type ProvidesClause struct {
+	Provides Pos
+	Names    []Expr
+}
+
+func (u *ProvidesClause) Pos() Pos { return u.Provides }
+func (u *ProvidesClause) End() Pos { return u.Names[len(u.Names)-1].End() }
 
 // ---------------------------------------------------------------- expressions and types
 

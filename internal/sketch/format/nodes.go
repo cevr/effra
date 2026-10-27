@@ -59,6 +59,12 @@ func (p *printer) decl(d syntax.Decl) {
 		p.token(d.Wire, "wire")
 		p.space()
 		p.ident(d.Name)
+		if d.Provides != nil {
+			p.space()
+			p.token(d.Provides.Provides, "provides")
+			p.space()
+			p.exprList(d.Provides.Names, 1)
+		}
 		if d.Needs != nil {
 			p.space()
 			p.needs(d.Needs)

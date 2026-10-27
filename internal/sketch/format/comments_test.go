@@ -22,7 +22,7 @@ var nestedChains = []struct{ name, src string }{
 	{"type params and instantiation", "package p\n\ntype Pair[K comparable, V any] struct {\n\tk, l K\n\tv    V\n}\n\nvar p = Pair[string, int]{k: \"a\", v: 1}\n"},
 	{"catch and type switch tuples", "package p\n\nfunc f() {\n\tr := try g(a, b) catch e {\n\tcase A, b.B:\n\t\tlog(e)\n\t}\n\tswitch x, y := r.(type), s.(type) {\n\tcase (A, _), (B, C):\n\tdefault:\n\t}\n}\n"},
 	{"statements", "package p\n\nfunc f() {\nL:\n\tfor i := 0; i < n; i++ {\n\t\tif a, b := g(); a {\n\t\t\tcontinue L\n\t\t} else if b {\n\t\t\tbreak\n\t\t}\n\t}\n\tfor k, v := range m {\n\t\tch <- k\n\t\tx += v\n\t}\n\tselect {\n\tcase v, ok := <-ch:\n\t\t_ = v\n\tcase (<-done):\n\t}\n\tdefer close(ch)\n\tgo f(x)\n}\n"},
-	{"wire and machine", "package p\n\nwire W needs A, B {\n\tC, D = X{}\n\treplace e.E = Y{a, b}\n\tShared\n}\n\ntype M machine[S, E] {\n\tinitial Idle{}\n\tstep f\n}\n"},
+	{"wire and machine", "package p\n\nwire W provides A, B needs C {\n\tC, D = X{}\n\treplace e.E = Y{a, b}\n\tShared\n}\n\ntype M machine[S, E] {\n\tinitial Idle{}\n\tstep f\n}\n"},
 	{"imports and vars", "package p\n\nimport (\n\t\"a\"\n\tb \"c\"\n\t. \"d\"\n\tgo \"net/url\"\n)\n\nvar (\n\tx, y = 1, 2\n\tz    = f(x, y)\n)\n"},
 }
 

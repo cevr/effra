@@ -13,9 +13,10 @@ func (p Pos) IsValid() bool { return p >= 0 }
 // Token is the kind of a lexical token.
 type Token int
 
-// The tokens. Keywords are the 27 of docs/spec/grammar.md (Keywords): Go's
-// 25 without goto, fallthrough and const, plus try, catch, needs, wire and
-// machine. replace, initial and step are contextual and lex as IDENT.
+// The tokens. Keywords are the 28 of docs/spec/grammar.md (Keywords): Go's
+// 25 without goto, fallthrough and const, plus try, catch, needs, provides,
+// wire and machine. replace, initial and step are contextual and lex as
+// IDENT.
 const (
 	ILLEGAL Token = iota
 	EOF
@@ -107,6 +108,7 @@ const (
 	TRY
 	CATCH
 	NEEDS
+	PROVIDES
 	WIRE
 	MACHINE
 	keywordEnd
@@ -140,7 +142,7 @@ var tokens = [...]string{
 	IF: "if", IMPORT: "import", INTERFACE: "interface", MAP: "map", PACKAGE: "package",
 	RANGE: "range", RETURN: "return", SELECT: "select", STRUCT: "struct", SWITCH: "switch",
 	TYPE: "type", VAR: "var",
-	TRY: "try", CATCH: "catch", NEEDS: "needs", WIRE: "wire", MACHINE: "machine",
+	TRY: "try", CATCH: "catch", NEEDS: "needs", PROVIDES: "provides", WIRE: "wire", MACHINE: "machine",
 }
 
 // String is the token's spelling for operators and keywords, and its class
@@ -152,7 +154,7 @@ func (t Token) String() string {
 	return "token(?)"
 }
 
-// IsKeyword reports whether t is one of the 27 keywords.
+// IsKeyword reports whether t is one of the 28 keywords.
 func (t Token) IsKeyword() bool { return keywordBeg < t && t < keywordEnd }
 
 // IsLiteral reports whether t is an identifier or a basic literal.
@@ -166,7 +168,7 @@ var keywords = func() map[string]Token {
 	return m
 }()
 
-// Keywords lists the 27 keywords in token order.
+// Keywords lists the 28 keywords in token order.
 func Keywords() []string {
 	var out []string
 	for t := keywordBeg + 1; t < keywordEnd; t++ {
@@ -175,14 +177,19 @@ func Keywords() []string {
 	return out
 }
 
-// removed are Go keywords the language removes (grammar.md, Keywords). They
-// lex as identifiers, because they are not keywords, but no declaration,
-// statement or name may use them: generated Go reserves them, and a program
-// written with them is a Go program the language does not admit.
+// removed are the words the language refuses (grammar.md, Keywords): the Go
+// keywords it removes, and uses, the spelling of needs before 2026-10-27
+// (#217). They lex as identifiers, because they are not keywords, but no
+// declaration, statement or name may use them: generated Go reserves the Go
+// keywords, a program written with them is a Go program the language does
+// not admit, and old text that says uses gets a direct repair. A removed
+// word where a needs clause can stand is the same error (parseSignature,
+// parseWireDecl).
 var removed = map[string]string{
 	"goto":        "goto is not part of the language; use structured control flow",
 	"fallthrough": "fallthrough is not part of the language; list the cases together",
 	"const":       "const is not part of the language; a package-level var is immutable",
+	"uses":        "`uses` is now `needs`",
 }
 
 // Precedence is the binary precedence of op, or 0 when op is not a binary

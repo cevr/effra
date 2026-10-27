@@ -42,6 +42,33 @@ func TestMalformed(t *testing.T) {
 	}
 }
 
+// TestUsesHint (#217): the removed keyword uses is S001 with the fix hint
+// "`uses` is now `needs`", spanning the uses token itself, wherever a needs
+// clause, a provides clause or a name can stand.
+func TestUsesHint(t *testing.T) {
+	for _, m := range sketchtest.MalformedTable {
+		if !strings.HasPrefix(m.Name, "uses-hint-") {
+			continue
+		}
+		t.Run(m.Name, func(t *testing.T) {
+			_, err := Parse(m.Src)
+			var e *Error
+			if !errors.As(err, &e) || e.Code != CodeSyntax || e.Message != "`uses` is now `needs`" {
+				t.Fatalf("got %v, want S001 \"`uses` is now `needs`\"", err)
+			}
+			if got := m.Src[e.Offset : e.Offset+e.Length]; got != "uses" || strings.Count(m.Src, "uses") != 1 {
+				t.Fatalf("span %q at %d:%d, want the one uses token", got, e.Line, e.Column)
+			}
+		})
+	}
+	// needs and provides are keywords, so neither is a name.
+	for _, word := range []string{"needs", "provides"} {
+		if _, err := Parse("package p\n\nvar " + word + " = 1\n"); err == nil {
+			t.Fatalf("%s is a name", word)
+		}
+	}
+}
+
 // TestRefusedForms: Go forms outside the language, and ambiguities that
 // must resolve one way, each give S001 with a message naming the problem.
 func TestRefusedForms(t *testing.T) {
@@ -188,6 +215,21 @@ func TestAdmittedForms(t *testing.T) {
 	}
 	if len(run.Type.Needs.Names) != 3 {
 		t.Fatal("declaration needs")
+	}
+	// A wire header: provides, needs, both in that order, or neither.
+	wires := parse("package p\nwire A provides X, y.Y {\n\tS = M{}\n}\nwire B needs C {\n\tS = M{}\n}\nwire D provides X needs C, E {\n\tS = M{}\n}\nwire F {\n\tS = M{}\n}\n").Decls
+	for i, want := range []struct{ provides, needs int }{{2, 0}, {0, 1}, {1, 2}, {0, 0}} {
+		w := wires[i].(*WireDecl)
+		provides, needs := 0, 0
+		if w.Provides != nil {
+			provides = len(w.Provides.Names)
+		}
+		if w.Needs != nil {
+			needs = len(w.Needs.Names)
+		}
+		if provides != want.provides || needs != want.needs {
+			t.Fatalf("wire %s: provides %d, needs %d; want %d and %d", w.Name.Name, provides, needs, want.provides, want.needs)
+		}
 	}
 	// Grouped struct fields, several wire keys, an unconstrained parameter.
 	g := parse("package p\ntype P[T] struct {\n\tA, B T\n}\nwire W {\n\tC, D = X{}\n\treplace E = Y{}\n\tShared\n}\n")
