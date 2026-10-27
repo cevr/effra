@@ -55,6 +55,13 @@ func lintReceiptCommand(args []string) error {
 	if len(paths) != 1 || filepath.Ext(paths[0]) != ".ef" {
 		return invalidInvocation(fmt.Errorf("%s", lintReceiptUsage))
 	}
+	absolute, err := filepath.Abs(paths[0])
+	if err != nil {
+		return err
+	}
+	if refusal := editionRefusal("lint receipt", resolveSource(absolute)); refusal != nil {
+		return editionError(refusal)
+	}
 	session, err := loadLint(selection)
 	if err != nil {
 		return err

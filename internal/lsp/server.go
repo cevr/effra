@@ -19,8 +19,10 @@ import (
 	"unicode/utf8"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/edition"
 	"effra.local/prototype/internal/lintpacks"
 	"effra.local/prototype/internal/producer"
+	"effra.local/prototype/internal/sketchfront"
 )
 
 const MaxDocuments = 32
@@ -41,6 +43,9 @@ type document struct {
 	// analysis is the compiler result of exactly this accepted snapshot. It is
 	// replaced with the snapshot and released on close or shutdown.
 	analysis *compiler.Result
+	// legacy reports that the legacy front-end produced analysis. Any other
+	// analysis is diagnostics-only: navigation and formatting refuse it.
+	legacy bool
 }
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -258,6 +263,11 @@ func (s *session) handle(req request) error {
 			return s.reject(req, -32600, "formatting must be a request")
 		}
 		return s.formatDocument(req)
+	case "effra/edition":
+		if req.ID == nil {
+			return s.reject(req, -32600, "effra/edition must be a request")
+		}
+		return s.editionRequest(req)
 	default:
 		if req.ID == nil && strings.HasPrefix(req.Method, "$/") {
 			return nil
@@ -358,10 +368,31 @@ func (s *session) synchronize(req request) error {
 		uri = old.snapshot.URI
 	}
 	doc := document{snapshot: compiler.SourceSnapshot{URI: uri, Origin: "buffer", Text: text}, path: path, version: *p.TextDocument.Version}
-	doc.analysis = compiler.CompileAt(text, s.target, filepath.Dir(path))
+	// Every analysis resolves the edition afresh in the directory the
+	// compiler resolves imports in, so a manifest edit takes effect at the
+	// next change. Only the legacy edition reaches CompileAt.
+	var report compiler.DiagnosticReport
+	resolution := edition.Resolve(filepath.Dir(path))
+	switch {
+	case resolution.Diagnostic != nil:
+		doc.analysis = compiler.ForeignResult(text, s.target, []compiler.Diagnostic{{Code: resolution.Diagnostic.Code, Message: resolution.Diagnostic.Message}})
+		report = doc.analysis.ForeignReport(doc.snapshot, false, resolution.Diagnostic.String())
+	case resolution.Edition == edition.E2026:
+		doc.analysis = sketchfront.Check(text).Result(text, s.target)
+		report = doc.analysis.ForeignReport(doc.snapshot, false, edition.Unavailable("lint", edition.E2026, edition.TicketChecker).Message)
+	case resolution.Edition == edition.Legacy:
+		doc.legacy = true
+		doc.analysis = compiler.CompileAt(text, s.target, filepath.Dir(path))
+	default:
+		unavailable := edition.Unavailable("analysis", resolution.Edition, "a later ticket")
+		doc.analysis = compiler.ForeignResult(text, s.target, []compiler.Diagnostic{{Code: unavailable.Code, Message: unavailable.Message}})
+		report = doc.analysis.ForeignReport(doc.snapshot, false, unavailable.String())
+	}
 	s.documents[path] = doc
 	s.bytes += len(text) - len(old.snapshot.Text)
-	report := doc.analysis.DiagnosticReportWith(doc.snapshot, false, s.lint.Run(context.Background(), doc.analysis, doc.snapshot))
+	if doc.legacy {
+		report = doc.analysis.DiagnosticReportWith(doc.snapshot, false, s.lint.Run(context.Background(), doc.analysis, doc.snapshot))
+	}
 	if _, err := report.Bounded(MaxDiagnostics); err != nil {
 		return s.rejectDocument(req, -32603, doc, err.Error())
 	}
@@ -438,6 +469,11 @@ func (s *session) navigate(req request) error {
 	if !exists {
 		return s.failure(req.ID, -32602, "document is not open")
 	}
+	// Navigation answers from legacy facts only: a document whose analysis or
+	// current manifest is another edition has no answer yet (#196).
+	if current := edition.Resolve(filepath.Dir(path)); !doc.legacy || current.Diagnostic != nil || current.Edition != edition.Legacy {
+		return s.result(req.ID, nil)
+	}
 	positions := compiler.NewSourcePositions(doc.snapshot.Text)
 	offset, ok := positions.Offset(compiler.DiagnosticPosition{Line: int(*p.Position.Line), Character: int(*p.Position.Character)})
 	if !ok {
@@ -497,8 +533,53 @@ func (s *session) formatDocument(req request) error {
 	if !exists {
 		return s.failure(req.ID, -32602, "document is not open")
 	}
+	// Only a legacy document reaches the legacy formatter; the edition is
+	// resolved now, so a manifest edit since the last change counts.
+	if refusal := formattingRefusal(captured, edition.Resolve(filepath.Dir(path))); refusal != nil {
+		return s.send(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{"code": -32803, "message": boundedDetail(documentContext(captured) + refusal.String()), "data": refusal}})
+	}
 	result, err := compiler.FormatSourceBounded(captured.snapshot.Text, MaxFormattedBytes)
 	return s.completeFormatting(req.ID, path, captured, result, err)
+}
+
+// formattingRefusal is EF144 for a document under an unsupported manifest
+// and EF145 for any edition but legacy.
+func formattingRefusal(doc document, current edition.Resolution) *edition.Diagnostic {
+	if current.Diagnostic != nil {
+		return current.Diagnostic
+	}
+	if doc.legacy && current.Edition == edition.Legacy {
+		return nil
+	}
+	ticket := edition.TicketFormat
+	if current.Edition != edition.E2026 {
+		ticket = "a later ticket"
+	}
+	refusal := edition.Unavailable("textDocument/formatting", current.Edition, ticket)
+	if current.Edition == edition.Legacy {
+		// The document's last analysis was another edition's; formatting
+		// waits for the next change to analyse it as legacy.
+		refusal.Message = "textDocument/formatting needs a legacy analysis; the manifest changed since the last change notification"
+	}
+	return &refusal
+}
+
+// editionRequest answers effra/edition with the canonical edition JSON of
+// one file URI, open or not. The file is never read.
+func (s *session) editionRequest(req request) error {
+	var p struct {
+		TextDocument struct {
+			URI string `json:"uri"`
+		} `json:"textDocument"`
+	}
+	if !objectParams(req.Params, &p) {
+		return s.failure(req.ID, -32602, "invalid effra/edition parameters")
+	}
+	path, err := documentPath(p.TextDocument.URI)
+	if err != nil {
+		return s.failure(req.ID, -32602, err.Error())
+	}
+	return s.result(req.ID, json.RawMessage(edition.Resolve(filepath.Dir(path)).JSON()))
 }
 
 // completeFormatting answers a formatting result computed for the captured

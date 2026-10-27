@@ -63,7 +63,7 @@ func TestProtocolLifecycleAndSemanticParity(t *testing.T) {
 		t.Fatal(result)
 	}
 	listed := responses[2]["result"].(map[string]any)["tools"].([]any)
-	if len(listed) != 12 {
+	if len(listed) != 13 {
 		t.Fatal(listed)
 	}
 	foundType := false

@@ -1,0 +1,29 @@
+// A module of the earlier edition: the effra.json beside this file names
+// "legacy" explicitly, the edition a file without a manifest also gets. The
+// same workspace builds the 2026 edition's module in ../sketch.
+error NotFound
+
+service Greeter {
+    effect fn greet(name: string) -> string raises { NotFound }
+}
+
+impl Friends for Greeter {
+    effect fn greet(name: string) -> string raises { NotFound } {
+        if name == "Ada" {
+            "hello, " + name
+        } else {
+            fail NotFound
+        }
+    }
+}
+
+effect fn line(name: string) -> string uses { Greeter } {
+    run Greeter.greet(name).catch<NotFound>("no friend named " + name)
+}
+
+effect fn main() -> void {
+    let ada = run line("Ada").provide<Greeter>(Friends)
+    run Console.log(ada).provide<Console>(Stdout)
+    let bob = run line("Bob").provide<Greeter>(Friends)
+    run Console.log(bob).provide<Console>(Stdout)
+}

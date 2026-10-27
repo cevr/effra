@@ -198,7 +198,7 @@ func parseManifest(data []byte) (json.RawMessage, string) {
 func refuse(path, reason string) Resolution {
 	return Resolution{Source: SourceManifest, Manifest: path, Diagnostic: &Diagnostic{
 		Code:    CodeUnsupported,
-		Message: fmt.Sprintf("edition manifest %s %s; it must be one JSON object {\"edition\": \"<id>\"} naming a supported edition: %s", path, reason, supportedList()),
+		Message: fmt.Sprintf("edition manifest %s %s; it must be one JSON object {\"edition\": \"ID\"} naming a supported edition: %s", path, reason, supportedList()),
 	}}
 }
 

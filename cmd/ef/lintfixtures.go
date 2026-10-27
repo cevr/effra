@@ -55,16 +55,27 @@ func lintTestCommand(args []string) error {
 	if len(paths) == 0 {
 		return invalidInvocation(fmt.Errorf("%s", lintTestUsage))
 	}
+	fixtures, err := lintFixtures(paths)
+	if err != nil {
+		return invalidInvocation(err)
+	}
+	// Every fixture's edition is resolved before any pack loads or runs; only
+	// legacy fixtures reach the legacy front-end.
+	for _, fixture := range fixtures {
+		absolute, err := filepath.Abs(fixture)
+		if err != nil {
+			return err
+		}
+		if refusal := editionRefusal("lint test", resolveSource(absolute)); refusal != nil {
+			return fmt.Errorf("%s: %s", fixture, refusal.String())
+		}
+	}
 	session, err := loadLint(selection)
 	if err != nil {
 		return err
 	}
 	if !session.SelectsPacks() {
 		return invalidInvocation(fmt.Errorf("ef lint test needs a selected rule pack: --rules, or --lint-config with packs"))
-	}
-	fixtures, err := lintFixtures(paths)
-	if err != nil {
-		return invalidInvocation(err)
 	}
 	// Expectations are admitted before any pack runs: one that exists but
 	// is not a regular file is refused without being opened.

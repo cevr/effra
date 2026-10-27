@@ -268,6 +268,10 @@ func formatFiles(opts fmtOptions) (formatReport, error) {
 		if filepath.Ext(path) != ".ef" {
 			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_PATH", path: displayPath, message: "source file must have .ef extension"})
 		}
+		// Only a legacy source reaches the legacy formatter.
+		if refusal := editionRefusal("fmt", resolveSource(path)); refusal != nil {
+			return formatPlanFailure(&report, &formatAdapterError{code: refusal.Code, path: displayPath, message: refusal.Message})
+		}
 		lstat, err := os.Lstat(path)
 		if err != nil {
 			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_READ", path: displayPath, message: err.Error()})

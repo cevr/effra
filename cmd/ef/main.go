@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/edition"
 	"effra.local/prototype/internal/lintpacks"
 	"effra.local/prototype/internal/lsp"
 	"effra.local/prototype/internal/mcp"
@@ -311,13 +312,16 @@ func targetError(target string) error {
 }
 func command(args []string) error {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h")) {
-		fmt.Println("Effra prototype\nusage: ef check FILE [--target go] | diagnostics FILE [--strict] [--json] [--target go] [LINT] | lint FILE [--strict] [--target go] [LINT] | lint rules [LINT] | lint test PATH... [--update] [LINT] | lint receipt FILE [--runs N] [--target go] [LINT] | test FILE [--target go] [--timeout-ms 30000] [--live] | graph FILE [--target go] [GRAPH VIEW OPTIONS] | query FILE BYTE_OFFSET [--target go] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go] [-o PATH] [--receipt PATH] | run FILE [--target go] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] [LINT] | lsp [--target go] [LINT]\nLINT: [--lint-config FILE] [--rules MANIFEST]... selects custom rule packs; a lint configuration error exits 2.")
+		fmt.Println("Effra prototype\nusage: ef check FILE [--target go] | edition FILE | diagnostics FILE [--strict] [--json] [--target go] [LINT] | lint FILE [--strict] [--target go] [LINT] | lint rules [LINT] | lint test PATH... [--update] [LINT] | lint receipt FILE [--runs N] [--target go] [LINT] | test FILE [--target go] [--timeout-ms 30000] [--live] | graph FILE [--target go] [GRAPH VIEW OPTIONS] | query FILE BYTE_OFFSET [--target go] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go] [-o PATH] [--receipt PATH] | run FILE [--target go] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] [LINT] | lsp [--target go] [LINT]\nLINT: [--lint-config FILE] [--rules MANIFEST]... selects custom rule packs; a lint configuration error exits 2.")
 		fmt.Println("type: ef type FILE (--symbol NAME | --offset BYTE | --definition TYPE_ID --revision REVISION) [--target go] [--json]")
 		fmt.Println(graphUsage())
 		return nil
 	}
 	if args[0] == "fmt" {
 		return formatCommand(args[1:])
+	}
+	if args[0] == "edition" {
+		return editionCommand(args[1:])
 	}
 	if args[0] == "lsp" {
 		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
@@ -378,9 +382,9 @@ func command(args []string) error {
 		}
 		return mcp.Serve(root, session, os.Stdin, os.Stdout)
 	}
-	switch args[0] {
-	case "check", "diagnostics", "lint", "query", "type", "graph", "inspect", "explain", "build", "run", "test":
-	default:
+	// The remaining file commands come from the table that routes them by
+	// edition; fmt, edition, lint test and lint receipt dispatched above.
+	if _, ok := lookupFileCommand(args[0]); !ok {
 		return fmt.Errorf("unknown command %s; use ef --help", args[0])
 	}
 	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
@@ -462,6 +466,11 @@ func command(args []string) error {
 	source, err := locateSource(opts.positional[0])
 	if err != nil {
 		return err
+	}
+	// The edition is resolved in the directory loadSource compiles in, before
+	// any front-end reads the file. Only the legacy edition reaches it.
+	if resolution := resolveSource(source.Admitted()); resolution.Diagnostic != nil || resolution.Edition != edition.Legacy {
+		return foreignCommand(args[0], source, opts, session, resolution)
 	}
 	r, snapshot, err := loadSource(source, opts.target)
 	if err != nil {
