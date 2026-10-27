@@ -149,6 +149,18 @@ func fits32(a, b int64) bool {
 	return uint64(a+1<<31)|uint64(b+1<<31) < 1<<32
 }
 
+// fits32Shift is the same test with a shift instead of a 64-bit bound, a
+// spelling the round 1 review measured. It is kept as a candidate.
+func fits32Shift(a, b int64) bool {
+	return (uint64(a+1<<31)|uint64(b+1<<31))>>32 == 0
+}
+
+// mulSlowDefect is the bits.Mul64 slow path kept out of line, so that the
+// fast path does not carry MULQ's fixed-register moves.
+//
+//go:noinline
+func mulSlowDefect(a, b int64) int64 { return mulDefectBits(a, b) }
+
 // ---- inputs -------------------------------------------------------------------
 
 // Item is one accounting line in cents.
@@ -382,12 +394,87 @@ func SumFailRange(items []Item) (int64, error) {
 	return total, nil
 }
 
+// SumFailDirect is the typed failure lowered without helpers: each check
+// branches from its predicate straight to `return 0, Overflow{}`, so the
+// error interface is formed only at the exits. It has the same (int64,
+// error) result and the same sequential overflow semantics as the helper
+// variants, and it is what a Go programmer writes by hand for this contract.
+//
+//go:noinline
+func SumFailDirect(items []Item) (int64, error) {
+	var total int64
+	for i := range items {
+		it := &items[i]
+		var line int64
+		if fits32(it.Qty, it.Price) {
+			line = it.Qty * it.Price
+		} else {
+			p, overflow := mulBits(it.Qty, it.Price)
+			if overflow {
+				return 0, Overflow{}
+			}
+			line = p
+		}
+		net := line - it.Discount
+		if (line^it.Discount)&(line^net) < 0 {
+			return 0, Overflow{}
+		}
+		next := total + net
+		if (next^total)&(next^net) < 0 {
+			return 0, Overflow{}
+		}
+		total = next
+	}
+	return total, nil
+}
+
+// SumDefectRangeShift is SumDefectRange with the fits32Shift predicate.
+//
+//go:noinline
+func SumDefectRangeShift(items []Item) int64 {
+	var total int64
+	for i := range items {
+		it := &items[i]
+		var line int64
+		if fits32Shift(it.Qty, it.Price) {
+			line = it.Qty * it.Price
+		} else {
+			line = mulDefectBits(it.Qty, it.Price)
+		}
+		net := subDefectXor(line, it.Discount)
+		total = addDefectXor(total, net)
+	}
+	return total
+}
+
+// SumDefectRangeOutline is SumDefectRangeShift with the slow multiply out
+// of line.
+//
+//go:noinline
+func SumDefectRangeOutline(items []Item) int64 {
+	var total int64
+	for i := range items {
+		it := &items[i]
+		var line int64
+		if fits32Shift(it.Qty, it.Price) {
+			line = it.Qty * it.Price
+		} else {
+			line = mulSlowDefect(it.Qty, it.Price)
+		}
+		net := subDefectXor(line, it.Discount)
+		total = addDefectXor(total, net)
+	}
+	return total
+}
+
 // ---- kernel 2: hash mix that relies on wrap ----------------------------------------
 //
 // h = h*31 + b over the key's bytes, the polynomial string hash. With
-// lowercase letters h*31 passes 2^63 at the thirteenth byte, so a key of at
-// most twelve bytes never overflows and a longer key always does. Wrap
-// returns a hash; a checked variant reports the overflow at byte index 12.
+// lowercase ASCII letters h*31 passes 2^63 at the thirteenth byte, so a
+// lowercase ASCII key of at most twelve bytes never overflows and a longer
+// one always does. Wrap returns a hash; a checked variant reports the
+// overflow at byte index 12. Other bytes move the threshold: thirteen zero
+// bytes never overflow, and some binary keys first overflow at the +.
 
 //go:noinline
 func HashWrap(key []byte) int64 {

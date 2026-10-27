@@ -12,7 +12,7 @@ import (
 const (
 	benchItems   = 1024
 	benchSeed    = 0x108
-	shortKeyLen  = 12 // the longest lowercase key whose hash never overflows
+	shortKeyLen  = 12 // the longest lowercase ASCII key whose hash never overflows
 	shortKeys    = 256
 	longKeyLen   = 4096
 	overflowByte = 12 // byte index at which a longer key first overflows
@@ -148,11 +148,14 @@ var sumVariants = []sumVariant{
 	{"defect-xor", infallible(SumDefectXor)},
 	{"defect-bits", infallible(SumDefectBits)},
 	{"defect-range", infallible(SumDefectRange)},
+	{"defect-range-shift", infallible(SumDefectRangeShift)},
+	{"defect-range-outline", infallible(SumDefectRangeOutline)},
 	{"fail-cmp", SumFailCmp},
 	{"fail-post", SumFailPost},
 	{"fail-xor", SumFailXor},
 	{"fail-bits", SumFailBits},
 	{"fail-range", SumFailRange},
+	{"fail-direct", SumFailDirect},
 }
 
 func bigSum(items []Item) *big.Int {
@@ -292,7 +295,7 @@ func TestHashMixPolicy(t *testing.T) {
 			}
 		}
 	}
-	// The extremes of the alphabet bound every lowercase key.
+	// The extremes of the alphabet bound every lowercase ASCII key.
 	for _, c := range []byte{'a', 'z'} {
 		key := make([]byte, overflowByte+1)
 		for i := range key {
@@ -300,6 +303,78 @@ func TestHashMixPolicy(t *testing.T) {
 		}
 		if !bigHash(key[:overflowByte]).IsInt64() || bigHash(key).IsInt64() {
 			t.Fatalf("a key of %q does not first overflow at byte index %d", c, overflowByte)
+		}
+	}
+}
+
+// TestHashMixOutsideLowercase shows that the byte index 12 threshold belongs
+// to lowercase ASCII keys. Thirteen zero bytes never overflow. The second key
+// is MaxInt64 in base 31 with its last digit raised by one: its last product
+// is in range and the addition is the first overflow, so every checked
+// variant must refuse it at the +.
+func TestHashMixOutsideLowercase(t *testing.T) {
+	zero := make([]byte, overflowByte+1)
+	for _, v := range hashVariants {
+		if got, err := v.hash(zero); got != 0 || err != nil {
+			t.Errorf("%s on 13 zero bytes = (%d, %v), want (0, nil)", v.name, got, err)
+		}
+	}
+	key := []byte{11, 22, 0, 3, 18, 9, 5, 17, 18, 10, 4, 3, 8}
+	if !bigHash(key[:len(key)-1]).IsInt64() || bigHash(key).IsInt64() {
+		t.Fatal("the addition key does not first overflow at its last byte")
+	}
+	last := new(big.Int).Mul(bigHash(key[:len(key)-1]), big.NewInt(31))
+	if !last.IsInt64() {
+		t.Fatal("the addition key overflows at the multiplication, not the addition")
+	}
+	for _, v := range hashVariants {
+		var (
+			got int64
+			err error
+		)
+		r := recovered(func() { got, err = v.hash(key) })
+		switch {
+		case v.name == "wrap" || v.name == "explicit-wrap":
+			if r != nil || err != nil || got != uintHash(key) {
+				t.Errorf("%s on the addition key = (%d, %v, panic %v), want %d", v.name, got, err, r, uintHash(key))
+			}
+		case v.name[:6] == "defect":
+			if r != overflowDefect {
+				t.Errorf("%s on the addition key recovered %v, want the overflow defect", v.name, r)
+			}
+		default:
+			if r != nil || got != 0 || !errors.As(err, new(Overflow)) {
+				t.Errorf("%s on the addition key = (%d, %v, panic %v), want (0, Overflow)", v.name, got, err, r)
+			}
+		}
+	}
+}
+
+// TestRangeSpellings checks both 32-bit predicates against int32 round trips
+// and runs every accounting variant on single products over all operand
+// pairs, so the inline fast and slow paths of the range and direct kernels
+// meet math/big on both sides of the boundary.
+func TestRangeSpellings(t *testing.T) {
+	xs := operands()
+	for _, a := range xs {
+		for _, b := range xs {
+			want := a == int64(int32(a)) && b == int64(int32(b))
+			if fits32(a, b) != want || fits32Shift(a, b) != want {
+				t.Fatalf("fits32(%d, %d) = %v, fits32Shift = %v, want %v", a, b, fits32(a, b), fits32Shift(a, b), want)
+			}
+			exact := new(big.Int).Mul(big.NewInt(a), big.NewInt(b))
+			items := []Item{{Qty: a, Price: b}}
+			for _, v := range sumVariants[1:] {
+				var (
+					got int64
+					err error
+				)
+				r := recovered(func() { got, err = v.sum(items) })
+				failed := r != nil || err != nil
+				if failed == exact.IsInt64() || (!failed && got != exact.Int64()) {
+					t.Fatalf("%s on %d * %d = (%d, %v, panic %v), exact %s", v.name, a, b, got, err, r, exact)
+				}
+			}
 		}
 	}
 }
