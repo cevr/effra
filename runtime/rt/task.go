@@ -20,10 +20,18 @@ type Task struct {
 	// no atomic read-modify-write.
 	stopped atomic.Bool
 	mask    uint32
-	id      uint64
-	span    string
-	parent  *Task
-	values  *values // G1 context; owner goroutine only
+	// acquiring counts the mask regions that are Acquire's registration step
+	// (I2 item 4), not releases; owner goroutine only.
+	acquiring uint32
+	id        uint64
+	span      string
+	parent    atomic.Pointer[Task] // live link; cleared when t finishes
+	values    *values              // G1 context; owner goroutine only
+
+	// shielded is fixed before t is linked: t was started while its owner was
+	// inside a masked region, so the owner's ambient stop does not cascade
+	// into it. The cascade reads only this field, never the owner's mask.
+	shielded bool
 
 	mu    sync.Mutex
 	stop  chan struct{} // made by Done on first use, closed by Interrupt
@@ -38,22 +46,29 @@ func Root(span string) *Task {
 	return &Task{id: nextID.Add(1), span: span}
 }
 
-// init links t as a child of parent. A child starts interruptible, wherever it
-// is started (pinned Effect 4: fork is interruptible unless asked to inherit);
-// masked starts the child inside one masked region, for GoMasked. A child
-// starts stopped when its parent can observe a stop; a parent inside a masked
-// region has not observed its stop, so a child it starts there (for example a
-// timeout inside a release) runs until its owner scope stops it.
+// init links t as a child of parent. A child starts interruptible (pinned
+// Effect 4: fork is interruptible unless asked to inherit); masked starts it
+// inside one masked region, for GoMasked.
+//
+// A child started while parent is inside a masked region (a release, a defer
+// body, a GoMasked body), other than Acquire's registration step, is
+// release-owned and shielded: the ambient stop that
+// cascades from parent does not reach it, whether the stop came before or
+// after the start, so the release runs to completion (I2, R9). Its handle's
+// Stop, a timeout and its scope's drain still interrupt it directly. This is
+// Trio's shielded cancel scope and Effect's uninterruptible finalizer. Any
+// other child starts stopped when parent is stopped.
 func (t *Task) init(parent *Task, span string, masked bool) {
 	t.id = nextID.Add(1)
 	t.span = span
-	t.parent = parent
+	t.parent.Store(parent)
 	t.values = parent.values
+	t.shielded = parent.mask > parent.acquiring
 	if masked {
 		t.mask = 1
 	}
 	parent.mu.Lock()
-	if parent.stopped.Load() && parent.mask == 0 {
+	if !t.shielded && parent.stopped.Load() {
 		t.stopped.Store(true)
 	}
 	t.next = parent.first
@@ -69,7 +84,7 @@ func (t *Task) init(parent *Task, span string, masked bool) {
 // ancestors (G2, rule 3). Every descendant has finished by now, so no chain
 // walk can still pass through t.
 func (t *Task) detach() {
-	p := t.parent
+	p := t.parent.Load()
 	p.mu.Lock()
 	if t.prev != nil {
 		t.prev.next = t.next
@@ -81,7 +96,7 @@ func (t *Task) detach() {
 	}
 	t.prev, t.next = nil, nil
 	p.mu.Unlock()
-	t.parent = nil
+	t.parent.Store(nil)
 }
 
 // ID is the task's number, unique in the process.
@@ -92,20 +107,22 @@ func (t *Task) Span() string { return t.span }
 
 // Parent is the task that started t while t runs, and nil for a root or a
 // finished task. It is a live link, not a record: a defect keeps its ancestry
-// as copied frames.
-func (t *Task) Parent() *Task { return t.parent }
+// as copied frames. Safe from any goroutine.
+func (t *Task) Parent() *Task { return t.parent.Load() }
 
 // Chain copies t and its live ancestors as frames, from t to the root, at
 // most 32. Call it from t's goroutine while t runs; a defect records it then.
 func (t *Task) Chain() []Frame {
 	var frames []Frame
-	for x := t; x != nil && len(frames) < maxChain; x = x.parent {
+	for x := t; x != nil && len(frames) < maxChain; x = x.parent.Load() {
 		frames = append(frames, Frame{Task: x.id, Span: x.span})
 	}
 	return frames
 }
 
-// Interrupt requests that t and every task below it stop. It does not wait.
+// Interrupt requests that t and every task below it stop, except the subtree
+// of a shielded child (see init), which only a direct Interrupt reaches. It
+// does not wait.
 // Each task observes the request at its next interruption point outside a
 // mask. Interrupt is idempotent and safe from any goroutine.
 func (t *Task) Interrupt() {
@@ -118,7 +135,9 @@ func (t *Task) Interrupt() {
 		// Locks are taken ancestor first; detach takes only the parent's
 		// lock, so the walk cannot deadlock with a finishing child.
 		for c := t.first; c != nil; c = c.next {
-			c.Interrupt()
+			if !c.shielded {
+				c.Interrupt()
+			}
 		}
 	}
 	t.mu.Unlock()

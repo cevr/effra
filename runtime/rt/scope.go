@@ -75,7 +75,11 @@ func (c callFunc) release(any) { c.f() }
 // poll. A failed open registers nothing.
 func Acquire[R any](s *Scope, open func() (R, error), close func(R)) (R, error) {
 	m := s.task.Mask()
-	defer m.Unmask()
+	s.task.acquiring++
+	defer func() {
+		s.task.acquiring--
+		m.Unmask()
+	}()
 	r, err := open()
 	if err == nil {
 		s.push(entry{run: closeWith[R]{close}, v: r})
@@ -117,7 +121,7 @@ func (s *Scope) End(err *error) {
 	if err != nil {
 		*err = exit
 	} else if exit != nil {
-		panic(exit)
+		panic(transport{exit})
 	}
 }
 

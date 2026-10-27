@@ -34,8 +34,15 @@
 //   - [Run] is the task boundary shared by every child and the root: emitted
 //     main runs its body through it and exits with [ExitCode]. It and
 //     [Scope.End] apply stop-wins: a stop the task can observe beats success.
-//   - A finished task drops its parent link, so ancestry retention is
+//   - A child started inside a release (a masked region other than
+//     Acquire's registration step) is shielded: the ambient stop cascade
+//     does not reach it, so the release completes (Trio shielded cancel
+//     scopes, Effect uninterruptible finalizers, Go context.WithoutCancel).
+//     Its handle's Stop, a timeout and its scope's drain still stop it.
+//   - A finished task drops its atomic parent link, so ancestry retention is
 //     bounded (G2); a defect keeps its chain as at most 32 copied frames.
+//   - An exit crosses code with no error row only inside the package's own
+//     transport; any other panic value, a *Cause included, is a defect.
 //   - [Clock] and [Scheduler] are the time capabilities, with a [Live] and a
 //     deterministic [Virtual] implementation. [After] is the timeout, written
 //     as an ordinary library function over [Go]-style tasks and a [Scheduler].

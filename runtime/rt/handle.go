@@ -29,6 +29,8 @@ func Go[T any](s *Scope, span string, body func(*Task) (T, error)) *Handle[T] {
 // uninterruptibleMask). A stop is deferred for the whole body except inside
 // restore.Interruptible, which runs with the child unmasked: the restore of
 // ZIO and Effect. A stop the body never observes does not replace its result.
+// restore belongs to the body: use it only on the child's goroutine and only
+// while the body runs; it must not escape the callback.
 func GoMasked[T any](s *Scope, span string, body func(t *Task, restore Mask) (T, error)) *Handle[T] {
 	h := spawn(s.task, span, true, func(t *Task) (T, error) {
 		return body(t, Mask{t: t, outer: 0})
@@ -108,6 +110,6 @@ func (h *Handle[T]) Stop() error {
 // so the releasing scope records it. It does nothing on a consumed handle.
 func (h *Handle[T]) Close() {
 	if err := h.Stop(); err != nil {
-		panic(err)
+		panic(transport{err})
 	}
 }

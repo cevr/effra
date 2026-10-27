@@ -78,13 +78,17 @@ func (c *Cause) AddInterruption() {
 	c.Reasons = append(c.Reasons, Reason{Kind: KindInterruption})
 }
 
-// Add records an error in canonical form: nil adds nothing, a *Cause adds its
-// reasons, Interrupted adds an interruption and any other error is a typed
-// failure.
+// Add records an error in canonical form: nil adds nothing, a non-nil *Cause
+// adds its reasons, Interrupted adds an interruption and any other error,
+// including a typed-nil *Cause, is a typed failure.
 func (c *Cause) Add(err error) {
 	switch e := err.(type) {
 	case nil:
 	case *Cause:
+		if e == nil {
+			c.AddFailure(err)
+			return
+		}
 		for _, r := range e.Reasons {
 			if r.Kind == KindInterruption {
 				c.AddInterruption()
@@ -101,22 +105,36 @@ func (c *Cause) Add(err error) {
 	}
 }
 
-// recovered records a recovered panic raised in task t. A *Cause or
-// Interrupted panic carries an exit through code with no error row; any other
-// value is a defect.
+// transport carries an exit through code with no error row: Scope.End(nil) and
+// Handle.Close panic with it, and a recovery unpacks only this type. Every
+// other panic value, a *Cause included, is a defect recorded as it is.
+type transport struct{ err error }
+
+func (t transport) Error() string {
+	if t.err == nil {
+		return "rt: empty exit transport"
+	}
+	return t.err.Error()
+}
+
+// recovered records a recovered panic raised in task t. A transport with an
+// exit, or the Interrupted sentinel that Check panics with, carries an exit;
+// any other value is a defect. It never dereferences the payload, so a
+// recovery cannot itself panic and skip cleanup.
 func (c *Cause) recovered(t *Task, p any, inRelease bool) {
 	switch e := p.(type) {
-	case *Cause:
-		c.Add(e)
+	case transport:
+		if e.err != nil {
+			c.Add(e.err)
+			return
+		}
 	case error:
 		if e == Interrupted {
 			c.AddInterruption()
 			return
 		}
-		c.defect(t, p, inRelease)
-	default:
-		c.defect(t, p, inRelease)
 	}
+	c.defect(t, p, inRelease)
 }
 
 func (c *Cause) defect(t *Task, p any, inRelease bool) {
@@ -144,6 +162,9 @@ func (c *Cause) Err() error {
 // Error prints each reason on its own line; a defect is followed by its chain
 // of tasks and spans, failing task first (G2).
 func (c *Cause) Error() string {
+	if c == nil {
+		return "<nil *rt.Cause>"
+	}
 	var b strings.Builder
 	for i, r := range c.Reasons {
 		if i > 0 {
@@ -172,6 +193,9 @@ func (c *Cause) Error() string {
 // errors.As, for Go interop. A catch dispatches through Failure instead, which
 // matches only a lone typed failure.
 func (c *Cause) Unwrap() []error {
+	if c == nil {
+		return nil
+	}
 	var errs []error
 	for _, r := range c.Reasons {
 		switch r.Kind {
@@ -191,6 +215,9 @@ func Failure(err error) (error, bool) {
 	case nil:
 		return nil, false
 	case *Cause:
+		if e == nil {
+			return err, true // a typed-nil *Cause is an ordinary typed failure (Add)
+		}
 		if len(e.Reasons) == 1 && e.Reasons[0].Kind == KindFailure {
 			return e.Reasons[0].Err, true
 		}
@@ -210,7 +237,7 @@ func OnlyInterruption(err error) bool {
 		return true
 	}
 	c, ok := err.(*Cause)
-	if !ok || len(c.Reasons) == 0 {
+	if !ok || c == nil || len(c.Reasons) == 0 {
 		return false
 	}
 	for _, r := range c.Reasons {
@@ -238,7 +265,7 @@ func ExitCode(err error) int {
 // exit that may never be dropped (laws R3, R6, R8).
 func defectsOf(err error) error {
 	e, ok := err.(*Cause)
-	if !ok {
+	if !ok || e == nil {
 		return nil
 	}
 	var c Cause
