@@ -594,8 +594,8 @@ func TestUnavailableOperationsReportEF145(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	supported := []string{"edition", "check", "diagnostics", "build", "run"}
-	tickets := regexp.MustCompile(`#(195|196|204)\b`)
+	supported := []string{"edition", "check", "diagnostics", "build", "run", "fmt"}
+	tickets := regexp.MustCompile(`#(196|204)\b`)
 	for _, command := range fileCommands {
 		if slices.Contains(supported, command.name) {
 			continue
@@ -629,7 +629,7 @@ func TestUnavailableOperationsReportEF145(t *testing.T) {
 	var names []string
 	var calls []map[string]any
 	for name, required := range tools {
-		if slices.Contains([]string{"project.edition", "project.check", "project.diagnostics"}, name) {
+		if slices.Contains([]string{"project.edition", "project.check", "project.diagnostics", "code.format"}, name) {
 			continue
 		}
 		names = append(names, name)
@@ -643,7 +643,8 @@ func TestUnavailableOperationsReportEF145(t *testing.T) {
 		}
 		onlyCodes(t, "MCP "+name, string(responses[index+1]["result"]), edition.CodeUnavailable)
 	}
-	// LSP: formatting is EF145; navigation has no answer.
+	// LSP: the formatted module needs no formatting edit; navigation has no
+	// answer.
 	uri := editionURI(path)
 	messages := lspSession(t, binary, workspace, []map[string]any{
 		lspOpen(uri, string(original)),
@@ -654,14 +655,8 @@ func TestUnavailableOperationsReportEF145(t *testing.T) {
 	if published := lspPublished(t, messages, uri); len(published) != 0 {
 		t.Fatalf("the clean 2026 module published %v", published)
 	}
-	format := lspReply(t, messages, "format")
-	var refusal struct {
-		Code    int `json:"code"`
-		Message string
-		Data    edition.Diagnostic `json:"data"`
-	}
-	if err := json.Unmarshal(format["error"], &refusal); err != nil || refusal.Data.Code != edition.CodeUnavailable || !strings.Contains(refusal.Message, "#195") {
-		t.Fatalf("formatting answered %s %s, want an EF145 error", format["result"], format["error"])
+	if format := lspReply(t, messages, "format"); format["error"] != nil || string(format["result"]) != "[]" {
+		t.Fatalf("formatting answered %s %s, want no edits", format["result"], format["error"])
 	}
 	for _, id := range []string{"hover", "definition"} {
 		if reply := lspReply(t, messages, id); string(reply["result"]) != "null" {

@@ -44,8 +44,11 @@ type document struct {
 	// replaced with the snapshot and released on close or shutdown.
 	analysis *compiler.Result
 	// legacy reports that the legacy front-end produced analysis. Any other
-	// analysis is diagnostics-only: navigation and formatting refuse it.
+	// analysis is diagnostics-only: navigation refuses it.
 	legacy bool
+	// analysed is the edition the analysis resolved, empty when the
+	// resolution failed. Formatting needs it to equal the current edition.
+	analysed edition.Edition
 }
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -374,6 +377,9 @@ func (s *session) synchronize(req request) error {
 	// change. Only the legacy edition reaches CompileAt.
 	var report compiler.DiagnosticReport
 	resolution := edition.ResolveDocument(path)
+	if resolution.Diagnostic == nil {
+		doc.analysed = resolution.Edition
+	}
 	switch {
 	case resolution.Diagnostic != nil:
 		doc.analysis = compiler.ForeignResult(text, s.target, []compiler.Diagnostic{{Code: resolution.Diagnostic.Code, Message: resolution.Diagnostic.Message}})
@@ -534,33 +540,36 @@ func (s *session) formatDocument(req request) error {
 	if !exists {
 		return s.failure(req.ID, -32602, "document is not open")
 	}
-	// Only a legacy document reaches the legacy formatter; the edition is
+	// Each document reaches its own edition's formatter; the edition is
 	// resolved now, so a manifest edit since the last change counts.
-	if refusal := formattingRefusal(captured, edition.ResolveDocument(path)); refusal != nil {
+	current := edition.ResolveDocument(path)
+	if refusal := formattingRefusal(captured, current); refusal != nil {
 		return s.send(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{"code": -32803, "message": boundedDetail(documentContext(captured) + refusal.String()), "data": refusal}})
 	}
-	result, err := compiler.FormatSourceBounded(captured.snapshot.Text, MaxFormattedBytes)
+	format := compiler.FormatSourceBounded
+	if current.Edition == edition.E2026 {
+		format = sketchfront.Format
+	}
+	result, err := format(captured.snapshot.Text, MaxFormattedBytes)
 	return s.completeFormatting(req.ID, path, captured, result, err)
 }
 
-// formattingRefusal is EF144 for a document under an unsupported manifest
-// and EF145 for any edition but legacy.
+// formattingRefusal is EF144 for a document under an unsupported manifest,
+// EF145 for an edition without a formatter, and EF145 when the manifest
+// changed the document's edition since its last analysis.
 func formattingRefusal(doc document, current edition.Resolution) *edition.Diagnostic {
 	if current.Diagnostic != nil {
 		return current.Diagnostic
 	}
-	if doc.legacy && current.Edition == edition.Legacy {
+	formattable := current.Edition == edition.Legacy || current.Edition == edition.E2026
+	if formattable && doc.analysed == current.Edition {
 		return nil
 	}
-	ticket := edition.TicketFormat
-	if current.Edition != edition.E2026 {
-		ticket = "a later ticket"
-	}
-	refusal := edition.Unavailable("textDocument/formatting", current.Edition, ticket)
-	if current.Edition == edition.Legacy {
+	refusal := edition.Unavailable("textDocument/formatting", current.Edition, "a later ticket")
+	if formattable {
 		// The document's last analysis was another edition's; formatting
-		// waits for the next change to analyse it as legacy.
-		refusal.Message = "textDocument/formatting needs a legacy analysis; the manifest changed since the last change notification"
+		// waits for the next change to analyse it in the current edition.
+		refusal.Message = fmt.Sprintf("textDocument/formatting needs a %s analysis; the manifest changed since the last change notification", current.Edition)
 	}
 	return &refusal
 }

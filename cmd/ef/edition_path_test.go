@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,14 +14,15 @@ import (
 // directory link applies to the link's target. The edition must come from
 // the file that walk reaches, in check mode and in place, so a legacy-shaped
 // file under a 2026 or unsupported manifest never reaches the legacy
-// formatter. A lexically cleaned spelling names a different directory, with
-// no manifest, which would resolve legacy.
+// formatter: the 2026 formatter refuses its legacy syntax with S001, and an
+// unsupported manifest is EF144. A lexically cleaned spelling names a
+// different directory, with no manifest, which would resolve legacy.
 func TestFormatterResolvesTheEditionOfTheFileItReads(t *testing.T) {
 	binary := buildTestCLI(t)
 	for _, manifest := range []struct {
 		name, content, code string
 	}{
-		{"2026", `{"edition":"2026"}`, edition.CodeUnavailable},
+		{"2026", `{"edition":"2026"}`, "source cannot be formatted: S001 at 1:1: "},
 		{"unsupported", `{"edition":"2099"}`, edition.CodeUnsupported},
 	} {
 		for _, mode := range [][]string{{"fmt", "--check"}, {"fmt"}} {
@@ -136,8 +136,8 @@ func TestEditionParityForALargeFile(t *testing.T) {
 // An unsaved LSP document spelled through a directory link, with or without
 // missing directories below it, or through a dangling file link, resolves
 // where the file would be created. A legacy-shaped buffer there is 2026
-// source: it publishes S001 and formatting is refused with EF145, as for
-// the physical spelling.
+// source: it publishes S001, and the 2026 formatter refuses it with S001,
+// as for the physical spelling.
 func TestUnsavedDocumentsResolveThroughLinks(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := editionWorkspace(t)
@@ -171,12 +171,9 @@ func TestUnsavedDocumentsResolveThroughLinks(t *testing.T) {
 			if published := lspPublished(t, lsp, uri); len(published) == 0 || published[0]["code"] != "S001" {
 				t.Fatalf("the legacy-shaped 2026 buffer published %v, want S001", published)
 			}
-			var refusal struct {
-				Data edition.Diagnostic `json:"data"`
-			}
 			format := lspReply(t, lsp, "format")
-			if err := json.Unmarshal(format["error"], &refusal); err != nil || refusal.Data.Code != edition.CodeUnavailable {
-				t.Fatalf("formatting answered %s %s, want EF145", format["result"], format["error"])
+			if !strings.Contains(string(format["error"]), "cannot format: S001: ") {
+				t.Fatalf("formatting answered %s %s, want the 2026 formatter's S001", format["result"], format["error"])
 			}
 		})
 	}

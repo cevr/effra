@@ -1,0 +1,114 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/sketchfront"
+)
+
+// sketchUnformatted formats to sketchCleanSource.
+const sketchUnformatted = "package p\n\n\n\nfunc main()  uses Console {\n        Console.Println(\"ok\")\n}\n"
+
+// TestFmtFormatsEachFileWithItsEditionsFormatter: one ef fmt request with a
+// 2026 file and a legacy file formats each with its own edition's
+// formatter, names that formatter per file, and writes both in place; the
+// three surfaces agree on the 2026 text; a 2026 syntax error is EFMT_SYNTAX
+// naming S001; --stdin stays legacy.
+func TestFmtFormatsEachFileWithItsEditionsFormatter(t *testing.T) {
+	binary := buildTestCLI(t)
+	root := editionWorkspace(t)
+	sketch := filepath.Join(root, "new", "main.ef")
+	legacy := filepath.Join(root, "old", "main.ef")
+	malformed := filepath.Join(root, "new", "bad.ef")
+	editionWrite(t, filepath.Join(root, "new", "effra.json"), `{"edition":"2026"}`)
+	editionWrite(t, sketch, sketchUnformatted)
+	legacyUnformatted := strings.ReplaceAll(legacyCleanSource, "    ", "  ")
+	editionWrite(t, legacy, legacyUnformatted)
+	malformedSource := "package p\n\nfunc main() {\n\tx := )\n}\n"
+	editionWrite(t, malformed, malformedSource)
+
+	// Check mode: both files change, each under its own formatter.
+	stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "--check", "--json", "new/main.ef", "old/main.ef")
+	if code != 1 {
+		t.Fatalf("ef fmt --check: exit %d, want 1\n%s\n%s", code, stdout, stderr)
+	}
+	var report formatReport
+	if err := json.Unmarshal(stdout, &report); err != nil {
+		t.Fatalf("report %s: %v", stdout, err)
+	}
+	if report.FormatterVersion != compiler.FormatterIdentity || len(report.Files) != 2 {
+		t.Fatalf("report %+v", report)
+	}
+	for index, want := range []string{sketchfront.FormatterIdentity, compiler.FormatterIdentity} {
+		if file := report.Files[index]; file.FormatterVersion != want || !file.Changed || file.Written {
+			t.Fatalf("file %d: %+v, want formatter %s, changed, not written", index, file, want)
+		}
+	}
+	if report.Files[0].OutputDigest != compiler.FormatDigest(sketchCleanSource) {
+		t.Fatalf("2026 output digest %s, want the digest of the canonical text", report.Files[0].OutputDigest)
+	}
+
+	// MCP and the LSP give the same 2026 text before anything is written.
+	responses := mcpSession(t, binary, root, []map[string]any{{"name": "code.format", "arguments": map[string]any{"file": "new/main.ef"}}})
+	var tool struct {
+		Structured struct {
+			Text             string `json:"text"`
+			FormatterVersion string `json:"formatterVersion"`
+		} `json:"structuredContent"`
+	}
+	if err := json.Unmarshal(responses[1]["result"], &tool); err != nil || tool.Structured.Text != sketchCleanSource || tool.Structured.FormatterVersion != sketchfront.FormatterIdentity {
+		t.Fatalf("MCP code.format answered %s", responses[1]["result"])
+	}
+	uri := editionURI(sketch)
+	messages := lspSession(t, binary, root, []map[string]any{
+		lspOpen(uri, sketchUnformatted),
+		lspSmokeCall("textDocument/formatting", map[string]any{"textDocument": map[string]any{"uri": uri}, "options": map[string]any{"tabSize": 4, "insertSpaces": true}}, "format"),
+	})
+	var edits []struct {
+		NewText string `json:"newText"`
+	}
+	if reply := lspReply(t, messages, "format"); json.Unmarshal(reply["result"], &edits) != nil || len(edits) != 1 || edits[0].NewText != sketchCleanSource {
+		t.Fatalf("LSP formatting answered %s %s", reply["result"], reply["error"])
+	}
+
+	// Write mode writes both files with their own formatter's text.
+	if stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "new/main.ef", "old/main.ef"); code != 0 {
+		t.Fatalf("ef fmt: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	if after, err := os.ReadFile(sketch); err != nil || string(after) != sketchCleanSource {
+		t.Fatalf("the 2026 file is %q (%v)", after, err)
+	}
+	legacyFormatted, err := compiler.FormatSource(legacyUnformatted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after, err := os.ReadFile(legacy); err != nil || string(after) != legacyFormatted.Text {
+		t.Fatalf("the legacy file is %q (%v)", after, err)
+	}
+
+	// A 2026 syntax error: EFMT_SYNTAX naming S001 and its position, nothing
+	// written.
+	_, stderr, code = runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "new/bad.ef")
+	if code != 2 || !strings.Contains(string(stderr), "EFMT_SYNTAX") || !strings.Contains(string(stderr), "source cannot be formatted: S001 at 4:7: ") {
+		t.Fatalf("ef fmt of a malformed 2026 file: exit %d, stderr %q", code, stderr)
+	}
+	stdout, _, _ = runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "--json", "new/bad.ef")
+	report = formatReport{}
+	if err := json.Unmarshal(stdout, &report); err != nil || len(report.Failures) != 1 || report.Failures[0].Code != "EFMT_SYNTAX" ||
+		len(report.Failures[0].Diagnostics) != 1 || report.Failures[0].Diagnostics[0].Code != "S001" {
+		t.Fatalf("ef fmt --json of a malformed 2026 file: %s", stdout)
+	}
+	if after, err := os.ReadFile(malformed); err != nil || string(after) != malformedSource {
+		t.Fatal("the malformed file changed")
+	}
+
+	// --stdin has no directory and stays legacy: it refuses 2026 text.
+	if stdout, _, code := runSmokeCLI(t, editionDeadline, binary, root, sketchUnformatted, "fmt", "--stdin"); code != 2 || len(stdout) != 0 {
+		t.Fatalf("ef fmt --stdin of 2026 text: exit %d, stdout %q", code, stdout)
+	}
+}

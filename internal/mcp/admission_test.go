@@ -152,8 +152,9 @@ func retargetInsideTheWorkspace(t *testing.T, stage string) {
 // A source directory moved during the admission, keeping its inode, with a
 // link left at the old spelling that leads below the moved 2026 manifest,
 // never makes code.format run the legacy formatter: the source stays under
-// the 2026 manifest throughout, so the tool answers EF145 for 2026 or
-// refuses with EF146. Ported from the round 3 review probe.
+// the 2026 manifest throughout, so the 2026 formatter refuses its legacy
+// syntax with S001, or the admission refuses with EF146. The legacy
+// formatter would accept the source. Ported from the round 3 review probe.
 func TestDirectoryMovedDuringAdmissionNeverFormatsAsLegacy(t *testing.T) {
 	for _, stage := range []string{edition.StageOpened, edition.StageResolving, edition.StageWalked} {
 		t.Run(stage, func(t *testing.T) {
@@ -204,8 +205,8 @@ func TestDirectoryMovedDuringAdmissionNeverFormatsAsLegacy(t *testing.T) {
 			if err == nil {
 				t.Fatalf("code.format ran the legacy formatter on a 2026 source: %v", result)
 			}
-			if !strings.HasPrefix(err.Error(), edition.CodeAdmission+": ") && !strings.HasPrefix(err.Error(), edition.CodeUnavailable+": ") {
-				t.Fatalf("code.format: %v; want %s or %s", err, edition.CodeUnavailable, edition.CodeAdmission)
+			if !strings.HasPrefix(err.Error(), edition.CodeAdmission+": ") && !strings.HasPrefix(err.Error(), "source cannot be formatted: S001 at 1:1: ") {
+				t.Fatalf("code.format: %v; want the 2026 formatter's S001 or %s", err, edition.CodeAdmission)
 			}
 		})
 	}

@@ -39,7 +39,7 @@ var fileCommands = []fileCommand{
 	{name: "inspect", ticket: edition.TicketChecker},
 	{name: "explain", ticket: edition.TicketChecker},
 	{name: "test", ticket: edition.TicketTests},
-	{name: "fmt", ticket: edition.TicketFormat},
+	{name: "fmt"},
 	{name: "lint test", ticket: edition.TicketChecker},
 	{name: "lint receipt", ticket: edition.TicketChecker},
 }

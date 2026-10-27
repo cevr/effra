@@ -161,3 +161,59 @@ func jsonString(text string) string {
 	data, _ := json.Marshal(text)
 	return string(data)
 }
+
+// TestCodeFormatFollowsTheEdition: code.format formats a 2026 file with the
+// 2026 formatter and names it, refuses a 2026 syntax error with its S code,
+// and keeps the legacy formatter for a legacy file and for a source buffer.
+func TestCodeFormatFollowsTheEdition(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	unformatted := "package main\n\nfunc main()  uses Console {\nConsole.Println(\"a\")\n}\n"
+	formatted := "package main\n\nfunc main() uses Console {\n\tConsole.Println(\"a\")\n}\n"
+	for rel, text := range map[string]string{
+		"go.mod":           "module workspace\n",
+		"legacy.ef":        "fn ok() -> string { \"ok\" }\n",
+		"new/effra.json":   `{"edition":"2026"}`,
+		"new/main.ef":      unformatted,
+		"new/malformed.ef": "package main\n\nfunc main() {\n\tx := )\n}\n",
+	} {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call := func(arguments string) string { return `{"name":"code.format","arguments":` + arguments + `}` }
+	responses := serveCalls(t, root,
+		call(`{"file":"new/main.ef"}`),
+		call(`{"file":"new/malformed.ef"}`),
+		call(`{"file":"legacy.ef"}`),
+		call(`{"source":`+jsonString(unformatted)+`}`),
+	)
+	structured := func(index int) map[string]any {
+		t.Helper()
+		result := responses[index]["result"].(map[string]any)
+		if isError, _ := result["isError"].(bool); isError {
+			t.Fatalf("call %d is an error: %v", index, result["content"])
+		}
+		return result["structuredContent"].(map[string]any)
+	}
+	if got := structured(0); got["text"] != formatted || got["formatterVersion"] != "effra-2026/formatter-1" || got["changed"] != true {
+		t.Fatalf("2026 file: %v", got)
+	}
+	if text, isError := toolText(t, responses[1]); !isError || !strings.HasPrefix(text, "source cannot be formatted: S001 at 4:7: ") {
+		t.Fatalf("2026 syntax error: %q (error %v)", text, isError)
+	}
+	if got := structured(2); got["formatterVersion"] == "effra-2026/formatter-1" {
+		t.Fatalf("legacy file used the 2026 formatter: %v", got)
+	}
+	// A source buffer has no directory and stays legacy: the legacy
+	// formatter refuses the 2026 text.
+	if text, isError := toolText(t, responses[3]); !isError || strings.Contains(text, "S001") {
+		t.Fatalf("source buffer: %q (error %v)", text, isError)
+	}
+}
