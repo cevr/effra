@@ -188,8 +188,14 @@ func writeEnv(path string) error {
 	if head, err := command("git", "rev-parse", "HEAD"); err == nil {
 		fmt.Fprintf(&b, "head: %s", head)
 	}
-	if dirty, err := command("git", "status", "--porcelain", "--", "docs/research/overflow-bench"); err == nil {
-		fmt.Fprintf(&b, "package clean: %v\n", len(bytes.TrimSpace(dirty)) == 0)
+	// The result directories are excluded: the run's own directory is
+	// untracked while it runs.
+	if dirty, err := command("git", "status", "--porcelain", "--", "docs/research/overflow-bench",
+		":(exclude)docs/research/overflow-bench/results"); err == nil {
+		fmt.Fprintf(&b, "package clean (results excluded): %v\n", len(bytes.TrimSpace(dirty)) == 0)
+		if s := strings.TrimSpace(string(dirty)); s != "" {
+			fmt.Fprintf(&b, "package changes:\n%s\n", s)
+		}
 	}
 	if v, err := command("go", "version"); err == nil {
 		fmt.Fprintf(&b, "go: %s", v)
