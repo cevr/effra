@@ -563,6 +563,11 @@ func isResource[V any](v V) bool {
 //   - It dispatches on the value v holds, not on the storage that holds it:
 //     a union or an interface releases its dynamic variant, and a caller that
 //     keeps v in storage (an agent's *S) passes the value, not the pointer.
+//     Its domain is a value that implements Close itself. A struct with a
+//     resource field and no generated Close, or a slice, array or map of
+//     resources, is not released: that needs the compiler's generated drop
+//     glue (resources.md R1, R34, R37; research note, Gap A8), which this
+//     prototype does not hand-build.
 //   - It runs the release as one release of t, the current task: masked, so
 //     it runs to completion although t is stopped (I2, R9), inside an owner
 //     scope, so rt records a panic as an in-release defect with t's chain. It

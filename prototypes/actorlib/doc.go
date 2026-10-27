@@ -33,7 +33,10 @@
 // lowers to Go's error; a lone typed failure is returned as itself. A resource
 // that Effra releases at scope end lowers to a Close call on every path where
 // it is still owned. A message struct with resource fields gets the generated
-// Close of resources.md R3, which releases each of them. Every value the
+// Close of resources.md R3, which releases each of them in reverse
+// declaration order and runs every remaining release after a defect. Other
+// aggregates get no hand-written drop glue here: a value is released only
+// when it implements Close itself (research note, Gap A8). Every value the
 // library itself releases (a refused message, an undeliverable answer or
 // failure, a queued message, the state) goes through one helper, drop: it
 // dispatches on the value held, not on its storage, releases an outcome by

@@ -60,12 +60,14 @@ func (event[S, E, O]) machineMsg(S, E, O)      {}
 func (stateQuery[S, E, O]) machineMsg(S, E, O) {}
 
 // Close is the generated release of a struct with resource fields (R3): it
-// releases every field that may be a resource, the event by its variant and
-// the reply, and runs the reply's release even when the event's panics. It
-// runs inside a drop (the drain's or a refused Send's).
+// releases every field that may be a resource in reverse declaration order,
+// the reply before the event, and the event's release runs even when the
+// reply's panics. It runs inside a drop (the drain's or a refused Send's),
+// which masks the current task and records each panic as an in-release
+// defect.
 func (m event[S, E, O]) Close() {
-	defer m.reply.Close()
-	closeField(m.ev)
+	defer closeField(m.ev) // declared first, released last
+	m.reply.Close()
 }
 func (m stateQuery[S, E, O]) Close() { m.reply.Close() }
 
@@ -113,6 +115,12 @@ func StartMachine[S, E, O any](s *rt.Scope, span string, m Machine[S, E, O], cap
 			}
 			if msg.reply.s != nil {
 				msg.reply.Send(t, d) // Reply.Send copies (snapshot)
+			} else if done, ok := d.(Done[S, O]); ok {
+				// A Send asks for no decision, so the handler owns the
+				// output it discards. The output is a value of a type
+				// parameter: drop releases it when it has a Close. Done
+				// itself has no generated release (research note, Gap A8).
+				drop(t, done.Output, nil)
 			}
 			if end {
 				return End(st), nil
