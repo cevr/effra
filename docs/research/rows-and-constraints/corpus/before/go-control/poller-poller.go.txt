@@ -1,0 +1,73 @@
+package poller
+
+import (
+	"context"
+	"log"
+	"time"
+
+	"golang.org/x/sync/errgroup"
+)
+
+type Reading struct {
+	At    time.Time
+	Value float64
+}
+
+type Source func(context.Context) (float64, error)
+type Sink func([]Reading) error
+
+// poll reads src every interval until ctx ends; a full channel blocks it.
+func poll(parent, ctx context.Context, src Source, every time.Duration, out chan<- Reading) error {
+	defer close(out)
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return parent.Err() // nil at the local deadline; the caller's cancellation otherwise
+		case now := <-ticker.C:
+			v, err := src(ctx)
+			if err != nil {
+				log.Printf("poll failed: %v", err)
+				continue
+			}
+			select {
+			case out <- Reading{now, v}:
+			case <-ctx.Done():
+				return parent.Err()
+			}
+		}
+	}
+}
+
+// batch flushes readings in groups of size, then flushes the remainder.
+func batch(in <-chan Reading, size int, flush Sink) error {
+	var buf []Reading
+	for r := range in {
+		buf = append(buf, r)
+		if len(buf) == size {
+			if err := flush(buf); err != nil {
+				return err
+			}
+			buf = nil
+		}
+	}
+	if len(buf) > 0 {
+		return flush(buf)
+	}
+	return nil
+}
+
+// Run polls for d; a flush failure stops the poller.
+func Run(ctx context.Context, src Source, flush Sink, d time.Duration) error {
+	local, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
+	ch := make(chan Reading, 16)
+	g, gctx := errgroup.WithContext(local)
+	g.Go(func() error { return poll(ctx, gctx, src, time.Second, ch) })
+	g.Go(func() error { return batch(ch, 5, flush) })
+	if err := g.Wait(); err != nil {
+		return err
+	}
+	return ctx.Err() // a cancellation during the final flush is not success
+}

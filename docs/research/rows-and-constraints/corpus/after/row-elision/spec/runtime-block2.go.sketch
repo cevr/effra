@@ -1,0 +1,19 @@
+// docs/spec/runtime.md#block2, rewritten by measure.py for candidate row-elision
+type State interface{ Closed | Open | HalfOpen }
+type Signal interface{ Failure | Success | Retry }
+
+func step(s State, sig Signal) Decision[State, string] {
+	switch s, sig := s.(type), sig.(type) {
+	case (Closed, Failure):
+		return Enter{Open{sig.Endpoint}}
+	case (HalfOpen, Success):
+		return Enter{Closed{0}}
+	case (_, _):
+		return Ignore{}
+	}
+}
+
+type Breaker machine[State, Signal] {
+	initial Closed{0}
+	step    step
+}

@@ -1,0 +1,59 @@
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+)
+
+type wordCount struct {
+	word  string
+	count int
+}
+
+func topWords(path string, n int) ([]wordCount, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	counts := map[string]int{}
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		for _, w := range strings.Fields(strings.ToLower(scanner.Text())) {
+			counts[w]++
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	words := make([]wordCount, 0, len(counts))
+	for w, c := range counts {
+		words = append(words, wordCount{w, c})
+	}
+	sort.Slice(words, func(i, j int) bool {
+		if words[i].count != words[j].count {
+			return words[i].count > words[j].count
+		}
+		return words[i].word < words[j].word
+	})
+	if len(words) > n {
+		words = words[:n]
+	}
+	return words, nil
+}
+
+func main() {
+	words, err := topWords(os.Args[1], 5)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	for _, w := range words {
+		fmt.Println(w.word, w.count)
+	}
+}

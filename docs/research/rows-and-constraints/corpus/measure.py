@@ -1,0 +1,1269 @@
+#!/usr/bin/env python3
+"""Measure the #135 candidates against the sketch corpus.
+
+Usage, from the repository root:
+
+    python3 -I docs/research/rows-and-constraints/corpus/measure.py           # print the tables
+    python3 -I docs/research/rows-and-constraints/corpus/measure.py --write   # regenerate after/, counts.json and the note's tables
+    python3 -I docs/research/rows-and-constraints/corpus/measure.py --check   # fail when any of them is stale
+
+Standard library only. The script reads:
+  - corpus/before/: copies of sketch-eval-8/five, sketch-eval-9, sketch-eval-9/loops,
+    sketch 10 and the matched Go controls, pinned by before.sha256;
+  - corpus/before/library/implied.go.sketch: the library signatures the corpus calls;
+  - docs/spec/*.md (fenced `go` blocks) and prototypes/sketch9/testdata (in place).
+
+It parses every signature with one small parser, applies each candidate as a
+mechanical rewrite, writes the rewritten corpus to corpus/after/<candidate>/,
+parses the rewritten text again and counts from that parse. Every number in
+docs/research/rows-and-constraints.md between `measure.py` markers comes from here.
+"""
+import argparse
+import hashlib
+import json
+import re
+import sys
+from bisect import bisect_right
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[3]
+BEFORE = HERE / "before"
+AFTER = HERE / "after"
+NOTE = ROOT / "docs" / "research" / "rows-and-constraints.md"
+COUNTS = HERE / "counts.json"
+
+LIBRARY_PACKAGES = {
+    "tasks", "timeout", "retry", "build", "sync", "json", "http", "slices",
+    "cmp", "builtin", "options", "batch", "testing",
+}
+# docs/spec shows two library functions, types.md Map and runtime.md timeout.After; every other example is user code.
+SPEC_LIBRARY_NAMES = {"Map", "After"}
+# Candidate 2: the method entry of the #116/#125 spelling and the named constraint that replaces it.
+WHERE_TO_CONSTRAINT = {"Compare": "cmp.Ordered", "Equal": "comparable", "FindMany": "Batched[K, V]"}
+TPARAM = re.compile(r"^[A-Z][0-9]*$")
+# Each S101/S102 negative fixture of the prototype, classified by reading it: what keeps
+# it failing once unexported rows may be inferred. A judgement per file, recorded here so
+# that the counts in the note come from this script.
+#   written: a row written on an unexported function, not main, is too small;
+#   main:    main's written row is too small (the diagnostic moves if main's rows are inferred);
+#   absent:  a function with no written row is relied on to have an empty row;
+#   wire:    a closed named wire, a rule about wires, not function rows.
+FIXTURE_AUDIT = {
+    "prototypes/sketch9/testdata/reject/undeclared-error.sketch": ("written", "pay declares GatewayDown only"),
+    "prototypes/sketch9/testdata/reject/missing-capability.sketch": ("written", "pay declares uses Orders only"),
+    "prototypes/sketch9/testdata/reject/unprovided.sketch": ("main", "main uses Console only, calls pay"),
+    "prototypes/sketch9/testdata/probes/wire-initializer-error.sketch": ("main", "try fail() escapes to main, which has no row"),
+    "prototypes/sketch9/testdata/probes/wire-initializer.sketch": ("main", "an inline provider needs Store in main"),
+    "prototypes/sketch9/testdata/probes/wire-sibling.sketch": ("main", "an inline provider needs Store in main"),
+    "prototypes/sketch9/testdata/probes/function-uses-control.sketch": ("main", "main calls get, which uses Other"),
+    "prototypes/sketch9/testdata/probes/error-as-value.sketch": ("absent", "identity returns a Fault value with no row"),
+    "prototypes/sketch9/testdata/probes/named-wire-failure.sketch": ("wire", "a named wire lets a failure escape"),
+    "prototypes/sketch9/testdata/probes/named-wire-requirement.sketch": ("wire", "a named wire needs Store from its caller"),
+}
+
+TOKEN = re.compile(r"""
+ (?P<nl>\n)
+|(?P<ws>[ \t\r\f]+)
+|(?P<lcomment>//[^\n]*)
+|(?P<bcomment>/\*.*?\*/)
+|(?P<raw>`[^`]*`)
+|(?P<str>"(?:\\.|[^"\\\n])*")
+|(?P<rune>'(?:\\.|[^'\\\n])+')
+|(?P<num>[0-9][0-9A-Za-z_.]*)
+|(?P<ident>[^\W\d]\w*)
+|(?P<op>\.\.\.|<-|:=|==|!=|<=|>=|&&|\|\||\+\+|--|\+=|-=|\*=|/=)
+|(?P<punct>.)
+""", re.S | re.X)
+
+
+class Tok:
+    __slots__ = ("kind", "text", "start", "end")
+
+    def __init__(self, kind, text, start, end):
+        self.kind, self.text, self.start, self.end = kind, text, start, end
+
+    def __repr__(self):
+        return f"{self.kind}:{self.text!r}"
+
+
+def tokenize(src):
+    out = []
+    for m in TOKEN.finditer(src):
+        kind = m.lastgroup
+        if kind in ("ws", "lcomment", "bcomment"):
+            continue
+        out.append(Tok(kind, m.group(), m.start(), m.end()))
+    out.append(Tok("eof", "", len(src), len(src)))
+    return out
+
+
+class Sig:
+    """One signature: a declaration, a method spec, a literal, a function type or a type declaration."""
+
+    def __init__(self, **kw):
+        self.kind = kw["kind"]          # func, method, iface, literal, functype, typedecl, wire
+        self.name = kw.get("name", "")
+        self.package = kw.get("package", "")
+        self.parent = kw.get("parent")
+        self.start = kw.get("start", 0)
+        self.line = kw.get("line", 0)
+        self.name_end = kw.get("name_end")
+        self.brackets = []              # (name, constraint text or "")
+        self.where = []                 # (subject, method, type text)
+        self.where_span = None
+        self.params_end = None
+        self.tail_end = None
+        self.result_kind = "none"       # none, type, error, tuple
+        self.value_text = None
+        self.errors = []
+        self.uses = []
+        self.idents = []                # (name, position) with position type, error or uses
+        self.children = []
+        self.machine = False
+        self.untyped_params = False
+
+    def exported(self):
+        return bool(self.name) and self.name[0].isupper()
+
+    def all_sigs(self):
+        yield self
+        for c in self.children:
+            yield from c.all_sigs()
+
+
+class Parser:
+    def __init__(self, src, source):
+        self.src = src
+        self.source = source
+        self.toks = tokenize(src)
+        self.nl_offsets = [i for i, ch in enumerate(src) if ch == "\n"]
+        self.package = ""
+        self.sigs = []                  # top-level records, children hang off them
+        self.declared = {}              # package -> declared type, capability and wire names
+
+    def line_of(self, off):
+        return bisect_right(self.nl_offsets, off - 1) + 1
+
+    def t(self, i):
+        return self.toks[min(i, len(self.toks) - 1)]
+
+    def skip_nl(self, i):
+        while self.t(i).kind == "nl":
+            i += 1
+        return i
+
+    def balanced(self, i, open_, close):
+        """i at the opening token; returns the index after the matching close."""
+        depth = 0
+        while True:
+            tok = self.t(i)
+            if tok.kind == "eof":
+                return i
+            if tok.text == open_:
+                depth += 1
+            elif tok.text == close:
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+            i += 1
+
+    # ---- types -------------------------------------------------------
+    def parse_type(self, i, sig, pos="type", in_group=True):
+        i = self.skip_nl(i) if in_group else i
+        tok = self.t(i)
+        if tok.text in ("*", "...", "&"):
+            return self.parse_type(i + 1, sig, pos, in_group)
+        if tok.text == "<-":
+            return self.parse_type(i + 1, sig, pos, in_group)
+        if tok.text == "[":
+            j = i + 1
+            while self.t(j).text != "]" and self.t(j).kind != "eof":
+                j += 1
+            return self.parse_type(j + 1, sig, pos, in_group)
+        if tok.text == "map":
+            j = self.parse_type(i + 2, sig, pos)
+            j = self.skip_nl(j)
+            return self.parse_type(j + 1, sig, pos, in_group)
+        if tok.text == "chan":
+            j = i + 1
+            if self.t(j).text == "<-":
+                j += 1
+            return self.parse_type(j, sig, pos, in_group)
+        if tok.text == "func":
+            child = Sig(kind="functype", package=self.package, parent=sig, start=tok.start, line=self.line_of(tok.start))
+            j = self.parse_sig_rest(i + 1, child, in_params=True)
+            sig.children.append(child)
+            return j
+        if tok.text in ("struct", "interface") and self.t(i + 1).text == "{":
+            return self.balanced(i + 1, "{", "}")
+        if tok.text == "(":
+            end = self.balanced(i, "(", ")")
+            return end
+        if tok.kind == "ident":
+            name = tok.text
+            j = i + 1
+            if self.t(j).text == "." and self.t(j + 1).kind == "ident":
+                name = name + "." + self.t(j + 1).text
+                j += 2
+            sig.idents.append((name, pos))
+            if self.t(j).text == "[" and self.t(j + 1).text != "]":
+                j = self.parse_type_args(j, sig, "error" if name == "error" else pos)
+            return j
+        return i + 1
+
+    def parse_type_args(self, i, sig, pos):
+        """i at '['; type arguments separated by ',' and '|'."""
+        j = i + 1
+        while True:
+            j = self.parse_type(j, sig, pos)
+            j = self.skip_nl(j)
+            if self.t(j).text in (",", "|"):
+                j += 1
+                continue
+            if self.t(j).text == "]":
+                return j + 1
+            if self.t(j).kind == "eof":
+                return j
+            j += 1
+
+    def parse_error_row(self, i, sig, outer):
+        """i at 'error', next is '['. Returns the index after ']'."""
+        j = i + 2
+        entries = []
+        while True:
+            j = self.skip_nl(j)
+            start = self.t(j).start
+            k = self.parse_type(j, sig, "error")
+            entries.append(self.src[start:self.t(k - 1).end].strip())
+            j = self.skip_nl(k)
+            if self.t(j).text == "|":
+                j += 1
+                continue
+            break
+        if self.t(j).text == "]":
+            j += 1
+        if outer:
+            sig.errors.extend(e for e in entries if e)
+        return j
+
+    # ---- signatures --------------------------------------------------
+    def parse_params(self, i, sig):
+        """i at '('. Returns index after ')'."""
+        end = self.balanced(i, "(", ")")
+        items, cur, depth = [], [], 0
+        for k in range(i + 1, end - 1):
+            tok = self.t(k)
+            if tok.kind == "nl":
+                continue
+            if tok.text in "([{":
+                depth += 1
+            elif tok.text in ")]}":
+                depth -= 1
+            if tok.text == "," and depth == 0:
+                items.append(cur)
+                cur = []
+            else:
+                cur.append(k)
+        if cur:
+            items.append(cur)
+
+        def named(item):
+            if len(item) < 2 or self.t(item[0]).kind != "ident":
+                return False
+            second = self.t(item[1]).text
+            if second == ".":
+                return False
+            if second == "[":
+                return len(item) > 2 and (self.t(item[2]).text == "]" or self.t(item[2]).kind == "num")
+            return True
+
+        any_named = any(named(it) for it in items)
+        for it in items:
+            if named(it):
+                self.parse_type(it[1], sig)
+            elif len(it) == 1 and self.t(it[0]).kind == "ident" and (any_named or sig.kind == "literal"):
+                if not any_named:
+                    sig.untyped_params = True
+                continue  # a grouped name, or a literal parameter whose type is inferred
+            elif it:
+                self.parse_type(it[0], sig)
+        return end
+
+    def parse_uses(self, i, sig, in_params):
+        """i at 'uses'."""
+        j = i + 1
+        while True:
+            tok = self.t(j)
+            if tok.kind != "ident":
+                break
+            name, k = tok.text, j + 1
+            if self.t(k).text == "." and self.t(k + 1).kind == "ident":
+                name += "." + self.t(k + 1).text
+                k += 2
+            sig.uses.append(name)
+            sig.idents.append((name, "uses"))
+            j = k
+            if self.t(j).text != ",":
+                break
+            # In a parameter list, a comma may end the clause: `uses R, next T`.
+            nxt, after = self.t(j + 1), self.t(j + 2)
+            if in_params and nxt.kind == "ident" and after.text not in (",", ")", "{", ".") and after.kind != "nl":
+                break
+            j += 1
+        return j
+
+    def parse_where(self, i, sig):
+        """i at 'where'. Entries `X.m: Type` separated by ','; ends at a newline or '{'."""
+        start = self.t(i).start
+        j = i + 1
+        while self.t(j).kind == "ident" and self.t(j + 1).text == "." and self.t(j + 3).text == ":":
+            subject, method = self.t(j).text, self.t(j + 2).text
+            k = self.parse_type(j + 4, sig, in_group=False)
+            sig.where.append((subject, method, self.src[self.t(j + 4).start:self.t(k - 1).end]))
+            sig.idents.append((subject, "type"))
+            j = k
+            if self.t(j).text == ",":
+                j += 1
+                continue
+            break
+        sig.where_span = (start, self.t(j - 1).end)
+        return j
+
+    def parse_sig_rest(self, i, sig, in_params=False):
+        """i at '(' of the parameters (after any receiver, name and bracket list)."""
+        if self.t(i).text != "(":
+            sig.params_end = self.t(i).start
+            sig.tail_end = sig.params_end
+            return i
+        j = self.parse_params(i, sig)
+        sig.params_end = self.t(j - 1).end
+        last = j - 1
+        tok = self.t(j)
+        stops = {"{", ",", ")", "]", "}", ";", "=", ""}
+        if tok.kind == "ident" and tok.text == "error" and self.t(j + 1).text == "[":
+            sig.result_kind = "error"
+            j = self.parse_error_row(j, sig, outer=True)
+            last = j - 1
+        elif tok.text == "(":
+            end = self.balanced(j, "(", ")")
+            parts, cur, depth = [], [], 0
+            for k in range(j + 1, end - 1):
+                tk = self.t(k)
+                if tk.kind == "nl":
+                    continue
+                if tk.text in "([{":
+                    depth += 1
+                elif tk.text in ")]}":
+                    depth -= 1
+                if tk.text == "," and depth == 0:
+                    parts.append(cur)
+                    cur = []
+                else:
+                    cur.append(k)
+            if cur:
+                parts.append(cur)
+            is_err = lambda p: self.t(p[0]).text == "error" and len(p) > 1 and self.t(p[1]).text == "["
+            if len(parts) == 2 and is_err(parts[1]):
+                sig.result_kind = "tuple"
+                self.parse_type(parts[0][0], sig)
+                sig.value_text = self.src[self.t(parts[0][0]).start:self.t(parts[0][-1]).end]
+                self.parse_error_row(parts[1][0], sig, outer=True)
+            else:
+                sig.result_kind = "type"
+                for p in parts:
+                    self.parse_type(p[0], sig)
+                sig.value_text = self.src[tok.start:self.t(end - 1).end]
+            j = end
+            last = j - 1
+        elif tok.kind != "nl" and tok.text not in stops and tok.text not in ("uses", "where") and tok.kind != "eof":
+            sig.result_kind = "type"
+            k = self.parse_type(j, sig, in_group=False)
+            sig.value_text = self.src[tok.start:self.t(k - 1).end]
+            j = k
+            last = j - 1
+        if self.t(j).text == "uses":
+            j = self.parse_uses(j, sig, in_params)
+            last = j - 1
+        if self.t(j).text == "where":
+            j = self.parse_where(j, sig)
+            last = j - 1
+        sig.tail_end = self.t(last).end
+        return j
+
+    def parse_bracket_list(self, i, sig):
+        """i at '['; `[T C, U]`."""
+        end = self.balanced(i, "[", "]")
+        k = i + 1
+        while k < end - 1:
+            name = self.t(k).text
+            c_start = k + 1
+            depth = 0
+            m = c_start
+            while m < end - 1 and not (self.t(m).text == "," and depth == 0):
+                if self.t(m).text == "[":
+                    depth += 1
+                elif self.t(m).text == "]":
+                    depth -= 1
+                m += 1
+            constraint = self.src[self.t(c_start).start:self.t(m - 1).end] if m > c_start else ""
+            sig.brackets.append((name, constraint))
+            k = m + 1
+        return end
+
+    # ---- the file ----------------------------------------------------
+    def run(self):
+        stack = []          # ("struct"|"iface"|"block", typedecl Sig or None)
+        i = 0
+        prev_sig = "nl"
+        while self.t(i).kind != "eof":
+            tok = self.t(i)
+            text = tok.text
+            if tok.kind == "nl":
+                prev_sig = "nl"
+                i += 1
+                continue
+            if text == "package" and not stack and self.t(i + 1).kind == "ident":
+                self.package = self.t(i + 1).text
+                i += 2
+                continue
+            if text == "type" and self.t(i + 1).kind == "ident" and (not stack or stack[-1][0] == "block"):
+                name_tok = self.t(i + 1)
+                if not stack:
+                    self.declared.setdefault(self.package, set()).add(name_tok.text)
+                td = Sig(kind="typedecl", name=name_tok.text, package=self.package, start=tok.start,
+                         line=self.line_of(tok.start), name_end=name_tok.end)
+                j = i + 2
+                if self.t(j).text == "[" and self.t(j + 1).kind == "ident" and self.t(j + 2).text in ("]", ",", ")") or (
+                        self.t(j).text == "[" and self.t(j + 1).kind == "ident" and self.t(j + 2).kind == "ident"):
+                    j = self.parse_bracket_list(j, td)
+                if not stack:
+                    self.sigs.append(td)
+                if self.t(j).text in ("struct", "interface") and self.t(j + 1).text == "{":
+                    stack.append(("struct" if self.t(j).text == "struct" else "iface", td))
+                    i = j + 2
+                    prev_sig = "{"
+                    continue
+                if self.t(j).text == "machine":
+                    td.machine = True
+                j = self.parse_type(j, td, in_group=False)
+                td.tail_end = self.t(j - 1).end
+                i = j
+                continue
+            if text == "wire" and not stack and self.t(i + 1).kind == "ident":
+                name_tok = self.t(i + 1)
+                self.declared.setdefault(self.package, set()).add(name_tok.text)
+                j = i + 2
+                if self.t(j).text == "uses":
+                    w = Sig(kind="wire", name=name_tok.text, package=self.package, start=tok.start, line=self.line_of(tok.start))
+                    j = self.parse_uses(j, w, False)
+                    w.tail_end = self.t(j - 1).end
+                    self.sigs.append(w)
+                i = j
+                continue
+            if stack and stack[-1][0] == "iface" and tok.kind == "ident" and prev_sig in ("nl", "{", ";") and self.t(i + 1).text == "(":
+                m = Sig(kind="iface", name=text, package=self.package, parent=stack[-1][1], start=tok.start,
+                        line=self.line_of(tok.start), name_end=tok.end)
+                j = self.parse_sig_rest(i + 1, m)
+                stack[-1][1].children.append(m)
+                i = j
+                prev_sig = "sig"
+                continue
+            if text == "func":
+                if not stack:
+                    sig = Sig(kind="func", package=self.package, start=tok.start, line=self.line_of(tok.start))
+                    j = i + 1
+                    if self.t(j).text == "(":
+                        sig.kind = "method"
+                        rend = self.balanced(j, "(", ")")
+                        inner = [self.t(k) for k in range(j + 1, rend - 1)]
+                        if "[" in [x.text for x in inner]:
+                            b = [x.text for x in inner]
+                            open_at = b.index("[")
+                            for x in inner[open_at + 1:]:
+                                if x.kind == "ident":
+                                    sig.brackets.append((x.text, ""))
+                        j = rend
+                    if self.t(j).kind == "ident":
+                        sig.name = self.t(j).text
+                        sig.name_end = self.t(j).end
+                        j += 1
+                    if self.t(j).text == "[":
+                        j = self.parse_bracket_list(j, sig)
+                    j = self.parse_sig_rest(j, sig)
+                    self.sigs.append(sig)
+                    i = j
+                    continue
+                sig = Sig(kind="literal", package=self.package, start=tok.start, line=self.line_of(tok.start))
+                parent = stack[-1][1] if stack[-1][0] == "struct" else None
+                j = self.parse_sig_rest(i + 1, sig)
+                if self.t(j).text != "{":
+                    sig.kind = "functype"
+                    sig.untyped_params = False
+                if parent is not None and sig.kind == "functype":
+                    sig.parent = parent
+                    parent.children.append(sig)
+                else:
+                    self.sigs.append(sig)
+                i = j
+                continue
+            if text == "{":
+                stack.append(("block", None))
+            elif text == "}":
+                if stack:
+                    stack.pop()
+            prev_sig = text
+            i += 1
+        return self
+
+
+# ---- corpus --------------------------------------------------------------
+def md_blocks(text):
+    """Yield (index, block text, offset) for each fenced go block."""
+    for n, m in enumerate(re.finditer(r"^```go\n(.*?)^```", text, re.S | re.M)):
+        yield n, m.group(1), m.start(1)
+
+
+class Unit:
+    """One parsed source unit: a file, or one fenced block of a Markdown file."""
+
+    def __init__(self, group, rel, text, kind="file", block=None, negative=False):
+        self.group, self.rel, self.text, self.kind, self.block, self.negative = group, rel, text, kind, block, negative
+        self.parser = Parser(text, rel).run()
+
+    def audience(self, sig):
+        if self.group == "fixtures":
+            return "fixture"
+        if sig.package in LIBRARY_PACKAGES or self.group == "library":
+            return "library"
+        if self.group == "spec" and top(sig).name in SPEC_LIBRARY_NAMES:
+            return "library"
+        return "user"
+
+
+def top(sig):
+    while sig.parent is not None:
+        sig = sig.parent
+    return sig
+
+
+def load_units():
+    units = []
+    for group in ("eval8-five", "eval9", "eval9-loops", "library"):
+        for path in sorted((BEFORE / group).glob("*.go.sketch")):
+            units.append(Unit(group, f"{group}/{path.name}", path.read_text()))
+    s10 = BEFORE / "sketch10" / "sketch-10.md"
+    for n, block, _ in md_blocks(s10.read_text()):
+        units.append(Unit("sketch10", f"sketch10/sketch-10.md#block{n}", block, "block", n))
+    for path in sorted((ROOT / "docs" / "spec").glob("*.md")):
+        for n, block, _ in md_blocks(path.read_text()):
+            units.append(Unit("spec", f"docs/spec/{path.name}#block{n}", block, "block", n))
+    tdir = ROOT / "prototypes" / "sketch9" / "testdata"
+    for path in sorted(tdir.rglob("*.sketch")):
+        text = path.read_text()
+        units.append(Unit("fixtures", str(path.relative_to(ROOT)), text, negative="// want" in text))
+    return units
+
+
+def verify_before():
+    manifest = HERE / "before.sha256"
+    bad = []
+    for line in manifest.read_text().splitlines():
+        digest, rel = line.split(maxsplit=1)
+        path = BEFORE / rel
+        if not path.exists() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            bad.append(rel)
+    return bad
+
+
+# ---- classification ------------------------------------------------------
+def role(sig):
+    if sig.kind == "literal":
+        return "literal"
+    if sig.kind in ("iface",):
+        return "interface method"
+    if sig.kind == "functype":
+        return "function type"
+    if sig.kind == "typedecl":
+        return "type declaration"
+    if sig.kind == "wire":
+        return "wire exposure"
+    if sig.kind == "method":
+        return "method"
+    if sig.name == "main":
+        return "main"
+    if re.match(r"^Test[A-Z0-9_]", sig.name):
+        return "test"
+    if re.match(r"^Law[A-Z0-9_]", sig.name):
+        return "law"
+    return "exported function" if sig.exported() else "unexported function"
+
+
+def declared_names(unit, sig):
+    return unit.parser.declared.get(sig.package, set())
+
+
+def tparams(unit, sig):
+    """Type and row parameters of a signature and its nested function types: name -> kind."""
+    declared = declared_names(unit, sig)
+    out = {}
+    for s in sig.all_sigs():
+        for name, constraint in s.brackets:
+            out.setdefault(name, "error" if constraint == "error" else "type")
+        for name, pos in s.idents:
+            if TPARAM.match(name) and name not in declared:
+                if pos in ("error", "uses") or name not in out:
+                    out[name] = pos if pos in ("error", "uses") else out.get(name, "type")
+    return out
+
+
+def row_vars(unit, sig):
+    declared = declared_names(unit, sig)
+    return {e for e in sig.errors + sig.uses if TPARAM.match(e) and e not in declared}
+
+
+def entries(sig):
+    return len(sig.errors) + len(sig.uses)
+
+
+def total_entries(sig):
+    """Row entries of a signature and of the function types nested in it."""
+    return sum(entries(s) for s in sig.all_sigs())
+
+
+def counted(sig):
+    """Signatures listed in the inventory: every function-shaped record, and type declarations
+    that are generic, machines, or hold a function-typed field."""
+    if sig.kind == "typedecl":
+        return bool(sig.brackets) or sig.machine or any(c.kind == "functype" for c in sig.children)
+    return True
+
+
+def sig_tokens(unit, sig):
+    end = sig.tail_end if sig.tail_end is not None else sig.start
+    return sum(1 for t in tokenize(unit.text[sig.start:end]) if t.kind not in ("nl", "eof"))
+
+
+def iter_records(units):
+    """Every top-level record and every interface method; nested function types stay with their parent."""
+    for u in units:
+        for s in u.parser.sigs:
+            if s.kind == "typedecl":
+                if counted(s):
+                    yield u, s
+                for c in s.children:
+                    if c.kind == "iface":
+                        yield u, c
+            else:
+                yield u, s
+
+
+# ---- candidates ----------------------------------------------------------
+def c1_elides(sig, variant):
+    """Candidate 1: rows of these signatures are inferred and need not be written.
+
+    Variants, cumulative: "unexported" (unexported functions and function literals),
+    "tests" (plus TestX, the landing rule), "main" (plus main, measured and refused)."""
+    r = role(sig)
+    if r in ("literal", "unexported function"):
+        return True
+    if r == "test":
+        return variant in ("tests", "main")
+    if r == "main":
+        return variant == "main"
+    return False
+
+
+def tail_text(sig, keep_err=lambda e: True, keep_use=lambda u: True, keep_where=True):
+    parts = []
+    errs = [e for e in sig.errors if keep_err(e)]
+    if sig.result_kind == "tuple":
+        parts.append(f"({sig.value_text}, error[{' | '.join(errs)}])" if errs else sig.value_text)
+    elif sig.result_kind == "error":
+        if errs:
+            parts.append(f"error[{' | '.join(errs)}]")
+    elif sig.result_kind == "type":
+        parts.append(sig.value_text)
+    us = [u for u in sig.uses if keep_use(u)]
+    if us:
+        parts.append("uses " + ", ".join(us))
+    if sig.where and keep_where:
+        parts.append("where " + ", ".join(f"{s}.{m}: {t}" for s, m, t in sig.where))
+    return (" " + " ".join(parts)) if parts else ""
+
+
+def edit_tail(sig, **kw):
+    return (sig.params_end, sig.tail_end, tail_text(sig, **kw))
+
+
+def c1_edits(unit, variant):
+    edits = []
+    for _, s in iter_records([unit]):
+        if s.kind in ("func", "method", "literal") and c1_elides(s, variant) and entries(s):
+            edits.append(edit_tail(s, keep_err=lambda e: False, keep_use=lambda u: False))
+    return edits
+
+
+def c2_edits(unit):
+    edits = []
+    for _, s in iter_records([unit]):
+        if not s.where:
+            continue
+        cons = []
+        for subject, method, _ in s.where:
+            c = WHERE_TO_CONSTRAINT[method]
+            if s.package == "cmp" and c.startswith("cmp."):
+                c = c[len("cmp."):]
+            cons.append(f"{subject} {c}")
+        edits.append((s.name_end, s.name_end, "[" + ", ".join(cons) + "]"))
+        edits.append(edit_tail(s, keep_where=False))
+    return edits
+
+
+def passthrough(unit, sig):
+    """Row variables of function-typed parameters that also appear in the declaration's own rows."""
+    own = row_vars(unit, sig)
+    child_vars = set()
+    for c in sig.children:
+        child_vars |= row_vars(unit, c)
+    return own & child_vars, child_vars - own
+
+
+def c3_edits(unit):
+    """Candidate 3 as an implicit-callback rule: drop pass-through row variables everywhere they are written."""
+    edits = []
+    for _, s in iter_records([unit]):
+        if s.kind not in ("func", "method", "iface"):
+            continue
+        through, _ = passthrough(unit, s)
+        if not through:
+            continue
+        keep = lambda e, through=through: e not in through
+        for c in s.children:
+            if row_vars(unit, c) & through:
+                edits.append(edit_tail(c, keep_err=keep, keep_use=keep))
+        edits.append(edit_tail(s, keep_err=keep, keep_use=keep))
+    return edits
+
+
+def apply_edits(text, edits):
+    for start, end, new in sorted(edits, key=lambda e: e[0], reverse=True):
+        text = text[:start] + new + text[end:]
+    return text
+
+
+CANDIDATES = {
+    "row-elision": lambda u: c1_edits(u, "tests"),
+    "named-constraints": c2_edits,
+    "function-type-rows": c3_edits,
+}
+
+
+def rewrite(units):
+    """Return {candidate: [Unit after]} and the files to write."""
+    out, files = {}, {}
+    for cand, fn in CANDIDATES.items():
+        after_units = []
+        md_out = {}
+        for u in units:
+            new = apply_edits(u.text, fn(u)) if u.group != "fixtures" else u.text
+            au = Unit(u.group, u.rel, new, u.kind, u.block, u.negative)
+            after_units.append(au)
+            if u.group in ("fixtures", "spec") or new == u.text:
+                if u.group == "spec" and new != u.text:
+                    stem = u.rel.split("/")[-1].replace(".md#", "-")
+                    files[f"{cand}/spec/{stem}.go.sketch"] = f"// {u.rel}, rewritten by measure.py for candidate {cand}\n" + new
+                continue
+            if u.kind == "block":
+                md_out.setdefault(u.rel.split("#")[0], {})[u.block] = new
+            else:
+                files[f"{cand}/{u.rel}"] = new
+        for rel, blocks in md_out.items():
+            src = (BEFORE / rel).read_text()
+            pieces, last = [], 0
+            for n, block, off in md_blocks(src):
+                pieces.append(src[last:off])
+                pieces.append(blocks.get(n, block))
+                last = off + len(block)
+            pieces.append(src[last:])
+            files[f"{cand}/{rel}"] = "".join(pieces)
+        out[cand] = after_units
+    return out, files
+
+
+# ---- measurements ----------------------------------------------------------
+def inventory(units):
+    rows = []
+    for u, s in iter_records(units):
+        tp = tparams(u, s)
+        rows.append({
+            "unit": u.rel, "line": s.line, "group": u.group, "audience": u.audience(s),
+            "negative": u.negative, "role": role(s), "name": s.name or "(literal)" if s.kind == "literal" else s.name or "(anonymous)",
+            "exported": s.exported(), "entries": total_entries(s), "own": entries(s),
+            "tparams": sorted(tp), "tparam_kinds": tp, "brackets": [b for b, _ in s.brackets],
+            "constraints": [c for _, c in s.brackets if c] + [f"{x}.{m}" for x, m, _ in s.where],
+            "machine": s.machine, "tokens": sig_tokens(u, s),
+        })
+    return rows
+
+
+def summarize(rows, pred):
+    sel = [r for r in rows if pred(r)]
+    return {
+        "signatures": len(sel),
+        "with_rows": sum(1 for r in sel if r["entries"]),
+        "with_tparams": sum(1 for r in sel if r["tparams"]),
+        "row_entries": sum(r["entries"] for r in sel),
+        "tokens": sum(r["tokens"] for r in sel),
+    }
+
+
+def corpus_pred(r):
+    return r["group"] != "fixtures"
+
+
+def measure(units, after):
+    inv = inventory(units)
+    res = {"inventory": {}, "candidates": {}, "gap23": {}, "honesty": {}, "go": {}}
+
+    # Inventory by audience and role.
+    by = {}
+    for r in inv:
+        if r["negative"]:
+            key = ("fixture (negative)", r["role"])
+        else:
+            key = (r["audience"], r["role"])
+        by.setdefault(key, []).append(r)
+    res["inventory"]["by_audience_role"] = {
+        f"{a} / {ro}": summarize(v, lambda r: True) for (a, ro), v in sorted(by.items())
+    }
+    for aud in ("user", "library", "fixture"):
+        res["inventory"][aud] = summarize(inv, lambda r, aud=aud: r["audience"] == aud and not r["negative"])
+    res["inventory"]["fixture_negative"] = summarize(inv, lambda r: r["negative"])
+    res["inventory"]["user_by_group"] = {
+        g: summarize(inv, lambda r, g=g: r["group"] == g and r["audience"] == "user")
+        for g in ("eval8-five", "eval9", "eval9-loops", "sketch10", "spec")
+    }
+    res["inventory"]["tparam_signatures"] = [
+        {"unit": r["unit"], "line": r["line"], "name": r["name"], "audience": r["audience"],
+         "role": r["role"], "tparams": r["tparam_kinds"], "brackets": r["brackets"], "constraints": r["constraints"]}
+        for r in inv if r["tparams"] and corpus_pred(r)
+    ]
+
+    # Candidate 1, step by step, on the corpus (fixtures excluded).
+    c1 = {}
+    for variant in ("unexported", "tests", "main"):
+        removed = {"user": 0, "library": 0}
+        sigs = {"user": 0, "library": 0}
+        for u, s in iter_records(units):
+            if u.group == "fixtures" or not entries(s):
+                continue
+            if s.kind in ("func", "method", "literal") and c1_elides(s, variant):
+                removed[u.audience(s)] += entries(s)
+                sigs[u.audience(s)] += 1
+        c1[variant] = {"removed_user": removed["user"], "removed_library": removed["library"],
+                       "signatures_user": sigs["user"], "signatures_library": sigs["library"]}
+    after_inv = inventory(after["row-elision"])
+    before_user = summarize(inv, lambda r: corpus_pred(r) and r["audience"] == "user")
+    after_user = summarize(after_inv, lambda r: corpus_pred(r) and r["audience"] == "user")
+    c1["before_user"], c1["after_user"] = before_user, after_user
+    c1["after_user_by_role"] = {}
+    for ro in sorted({r["role"] for r in after_inv if corpus_pred(r) and r["audience"] == "user"}):
+        b = summarize(inv, lambda r, ro=ro: corpus_pred(r) and r["audience"] == "user" and r["role"] == ro)
+        a = summarize(after_inv, lambda r, ro=ro: corpus_pred(r) and r["audience"] == "user" and r["role"] == ro)
+        c1["after_user_by_role"][ro] = {"before": b["row_entries"], "after": a["row_entries"], "signatures": b["signatures"]}
+    res["candidates"]["row-elision"] = c1
+
+    # Candidate 2: constrained signatures, before and after, and the Gleam alternative.
+    c2 = {"user_constrained": 0, "library_constrained": 0, "where_entries": 0, "bracket_constraints_after": 0,
+          "tokens_before": 0, "tokens_after": 0, "gleam_params_added": 0, "list": []}
+    after2 = {(u.rel, s.line, s.name): (u, s) for u, s in iter_records(after["named-constraints"])}
+    for u, s in iter_records(units):
+        if u.group == "fixtures":
+            continue
+        if s.where or any(c for _, c in s.brackets if c != "error"):
+            aud = u.audience(s)
+            c2[f"{aud}_constrained"] += 1
+            c2["where_entries"] += len(s.where)
+            au, as_ = after2[(u.rel, s.line, s.name)]
+            c2["bracket_constraints_after"] += sum(1 for _, c in as_.brackets if c)
+            c2["tokens_before"] += sig_tokens(u, s)
+            c2["tokens_after"] += sig_tokens(au, as_)
+            # Gleam: no constraint; each method entry becomes an explicit function parameter.
+            c2["gleam_params_added"] += len(s.where)
+            c2["list"].append({"unit": u.rel, "name": s.name, "before": u.text[s.start:s.tail_end],
+                               "after": au.text[as_.start:as_.tail_end]})
+    # Equality on a non-comparable type: T.Equal on []int in poller_test.
+    eq_noncomparable = 0
+    for u in units:
+        if u.group == "fixtures":
+            continue
+        eq_noncomparable += len(re.findall(r"T\.Equal\([^\n]*\[\]int\{", u.text))
+    c2["equal_on_slices"] = eq_noncomparable
+    res["candidates"]["named-constraints"] = c2
+
+    # Candidate 3: pass-through rows of function-typed parameters.
+    c3 = {"decls_with_row_vars": 0, "user_decls_with_row_vars": 0, "row_var_occurrences": 0,
+          "removed_by_implicit": 0, "absorbed": 0, "absorbed_list": [], "error_uses_pairs": 0,
+          "saved_by_combined": 0, "empty_row_callbacks": 0, "empty_row_list": [],
+          "functype_multi_uses": 0, "functype_with_rows": 0, "user_functype_with_row_vars": 0, "list": []}
+    for u, s in iter_records(units):
+        if u.group == "fixtures":
+            continue
+        for x in s.all_sigs():
+            if x.kind == "functype" and entries(x):
+                c3["functype_with_rows"] += 1
+                if len(x.uses) > 1:
+                    c3["functype_multi_uses"] += 1
+                if row_vars(u, x) and u.audience(s) == "user":
+                    c3["user_functype_with_row_vars"] += 1
+        if s.kind not in ("func", "method", "iface", "typedecl"):
+            continue
+        occ = sum(1 for x in s.all_sigs() for e in x.errors + x.uses if e in row_vars(u, x))
+        if occ:
+            c3["decls_with_row_vars"] += 1
+            c3["row_var_occurrences"] += occ
+            if u.audience(s) == "user":
+                c3["user_decls_with_row_vars"] += 1
+            c3["list"].append({"unit": u.rel, "name": s.name, "occurrences": occ, "audience": u.audience(s)})
+        if s.kind == "typedecl":
+            continue
+        through, absorbed = passthrough(u, s)
+        c3["removed_by_implicit"] += sum(1 for x in s.all_sigs() for e in x.errors + x.uses if e in through)
+        if absorbed:
+            c3["absorbed"] += len(absorbed)
+            c3["absorbed_list"].append(f"{s.package}.{s.name}: {', '.join(sorted(absorbed))}")
+        err_through = {v for v in through if any(v in x.errors for x in s.all_sigs())}
+        use_through = {v for v in through if any(v in x.uses for x in s.all_sigs())}
+        pairs = min(len(err_through), len(use_through))
+        c3["error_uses_pairs"] += pairs
+        if pairs:
+            c3["saved_by_combined"] += sum(1 for x in s.all_sigs() for e in x.uses if e in use_through)
+        if any(x.kind == "functype" for x in s.children) and tparams(u, s):
+            for c in s.children:
+                if c.kind == "functype" and not entries(c):
+                    c3["empty_row_callbacks"] += 1
+                    c3["empty_row_list"].append(f"{s.package}.{s.name}: {u.text[c.start:c.tail_end]}")
+    after3 = inventory(after["function-type-rows"])
+    c3["library_entries_before"] = summarize(inv, lambda r: corpus_pred(r) and r["audience"] == "library")["row_entries"]
+    c3["library_entries_after"] = summarize(after3, lambda r: corpus_pred(r) and r["audience"] == "library")["row_entries"]
+    c3["user_entries_before"] = before_user["row_entries"]
+    c3["user_entries_after"] = summarize(after3, lambda r: corpus_pred(r) and r["audience"] == "user")["row_entries"]
+    res["candidates"]["function-type-rows"] = c3
+
+    # Gap 23: which names are parameters.
+    single_declared = sorted({(u.rel, n) for u in units if u.group != "fixtures"
+                              for p, names in u.parser.declared.items() for n in names if TPARAM.match(n)})
+    names = {}
+    for r in inv:
+        if corpus_pred(r):
+            for n, k in r["tparam_kinds"].items():
+                names.setdefault(f"{n} ({k})", 0)
+                names[f"{n} ({k})"] += 1
+    bare_t = sum(len(re.findall(r"(?<![\w.])T\.Equal\(", u.text)) for u in units if u.group != "fixtures")
+    explicit_inst = 0
+    for u in units:
+        if u.group == "fixtures":
+            continue
+        explicit_inst += len(re.findall(r"\b(?:json\.Decode|http\.ReadJSON|retry\.On)\[", u.text))
+    res["gap23"] = {
+        "single_letter_declarations": [f"{a}: {b}" for a, b in single_declared],
+        "parameter_names": dict(sorted(names.items())),
+        "bare_T_capability_calls": bare_t,
+        "explicit_instantiation_calls": explicit_inst,
+        "bracket_lists": sum(1 for r in inv if corpus_pred(r) and r["brackets"]),
+    }
+
+    # Honesty checks.
+    leaks = []
+    for u, s in iter_records(units):
+        if u.group != "fixtures" and s.kind == "typedecl" and s.machine and s.exported():
+            leaks.append(f"{u.rel}: type {s.name}")
+    neg = [u.rel for u in units if u.group == "fixtures" and u.negative and re.search(r"// want S10[12]\b", u.text)]
+    missing = sorted(set(neg) - set(FIXTURE_AUDIT)) + sorted(set(FIXTURE_AUDIT) - set(neg))
+    if missing:
+        raise SystemExit(f"FIXTURE_AUDIT is out of date: {missing}")
+    audit = {}
+    for rel in neg:
+        audit.setdefault(FIXTURE_AUDIT[rel][0], []).append(rel.split("/")[-1].removesuffix(".sketch"))
+    laws = [f"{u.rel}: {s.name} ({entries(s)} entries)" for u, s in iter_records(units)
+            if u.group != "fixtures" and role(s) == "law"]
+    provider_methods = summarize(inv, lambda r: corpus_pred(r) and r["audience"] == "user" and r["role"] == "method")
+    res["honesty"] = {
+        "exported_machine_types": leaks,
+        "negative_fixtures_S101_S102": {k: sorted(v) for k, v in sorted(audit.items())},
+        "negative_fixtures_S101_S102_total": len(neg),
+        "laws": laws,
+        "user_methods": provider_methods,
+        "wire_exposures": [f"{u.rel}: wire {s.name} uses {', '.join(s.uses)}" for u, s in iter_records(units)
+                           if s.kind == "wire" and u.group != "fixtures"],
+        "derived_codec_rows": sum(u.text.count("// DERIVED") for u in units if u.group == "library"),
+    }
+
+    # Sources.
+    src = {}
+    for u in units:
+        k = "fixtures (negative)" if u.negative else u.group
+        src.setdefault(k, {"units": 0, "lines": 0})
+        src[k]["units"] += 1
+        src[k]["lines"] += u.text.count("\n")
+    res["sources"] = src
+
+    # Go controls: signature tokens of matched functions.
+    pairs = {"fetchall-main": "eval9-loops/fetchall.go.sketch", "ledger-main": "eval9-loops/ledger.go.sketch",
+             "poller-poller": "eval9-loops/poller.go.sketch", "poller-poller_test": "eval9-loops/poller_test.go.sketch",
+             "wordcount-main": "eval9-loops/wordcount.go.sketch"}
+    eff_before = {u.rel: u for u in units}
+    eff_after = {u.rel: u for u in after["row-elision"]}
+    table = []
+    tot = {"go": 0, "before": 0, "after": 0}
+    for go_name, rel in pairs.items():
+        gu = Unit("go", f"go-control/{go_name}.go.txt", (BEFORE / "go-control" / f"{go_name}.go.txt").read_text())
+        gsigs = {s.name.lower(): s for s in gu.parser.sigs if s.kind == "func"}
+        bsigs = {s.name.lower(): s for s in eff_before[rel].parser.sigs if s.kind == "func"}
+        asigs = {s.name.lower(): s for s in eff_after[rel].parser.sigs if s.kind == "func"}
+        for name in sorted(set(gsigs) & set(bsigs)):
+            row = {"program": rel.split("/")[-1], "function": bsigs[name].name,
+                   "go": sig_tokens(gu, gsigs[name]), "before": sig_tokens(eff_before[rel], bsigs[name]),
+                   "after": sig_tokens(eff_after[rel], asigs[name]),
+                   "go_text": gu.text[gsigs[name].start:gsigs[name].tail_end],
+                   "before_text": eff_before[rel].text[bsigs[name].start:bsigs[name].tail_end],
+                   "after_text": eff_after[rel].text[asigs[name].start:asigs[name].tail_end]}
+            table.append(row)
+            for k in tot:
+                tot[k] += row[k]
+    res["go"] = {"matched": table, "totals": tot}
+    return res, inv
+
+
+# ---- rendering -------------------------------------------------------------
+def md_table(header, rows):
+    out = ["| " + " | ".join(header) + " |", "| " + " | ".join("---" for _ in header) + " |"]
+    for r in rows:
+        out.append("| " + " | ".join(str(x) for x in r) + " |")
+    return "\n".join(out)
+
+
+def render(res, inv):
+    sec = {}
+    sec["sources"] = md_table(["Group", "Files or fenced blocks", "Lines"],
+                              [[k, v["units"], v["lines"]] for k, v in res["sources"].items()])
+    inv_rows = []
+    for key, v in res["inventory"]["by_audience_role"].items():
+        inv_rows.append([key, v["signatures"], v["with_rows"], v["row_entries"], v["with_tparams"]])
+    sec["inventory"] = md_table(["Audience / role", "Signatures", "With rows", "Row entries", "With type parameters"], inv_rows)
+
+    g = res["inventory"]["user_by_group"]
+    sec["inventory-groups"] = md_table(
+        ["Source (user-facing)", "Signatures", "With rows", "Row entries", "With type parameters"],
+        [[k, v["signatures"], v["with_rows"], v["row_entries"], v["with_tparams"]] for k, v in g.items()])
+
+    tps = res["inventory"]["tparam_signatures"]
+    sec["tparams"] = md_table(
+        ["Signature", "Audience", "Role", "Parameters (kind)", "Bracket list", "Constraint"],
+        [[f"`{t['name']}` ({t['unit']}:{t['line']})", t["audience"], t["role"],
+          ", ".join(f"{n} ({k})" for n, k in sorted(t["tparams"].items())),
+          ", ".join(t["brackets"]) or "none", ", ".join(t["constraints"]) or "none"] for t in tps])
+
+    c1 = res["candidates"]["row-elision"]
+    sec["c1"] = md_table(
+        ["Step", "User signatures elided", "User row entries removed", "Library row entries removed"],
+        [["unexported functions and literals", c1["unexported"]["signatures_user"], c1["unexported"]["removed_user"], c1["unexported"]["removed_library"]],
+         ["plus tests (lands)", c1["tests"]["signatures_user"], c1["tests"]["removed_user"], c1["tests"]["removed_library"]],
+         ["plus `main` (refused)", c1["main"]["signatures_user"], c1["main"]["removed_user"], c1["main"]["removed_library"]]])
+    sec["c1-roles"] = md_table(
+        ["User role", "Signatures", "Row entries before", "Row entries after"],
+        [[ro, v["signatures"], v["before"], v["after"]] for ro, v in c1["after_user_by_role"].items()]
+        + [["**all user-facing**", c1["before_user"]["signatures"], c1["before_user"]["row_entries"], c1["after_user"]["row_entries"]]])
+
+    c2 = res["candidates"]["named-constraints"]
+    sec["c2"] = md_table(
+        ["Measure", "Value"],
+        [["user-facing signatures that need a constraint", c2["user_constrained"]],
+         ["library signatures that need a constraint", c2["library_constrained"]],
+         ["method entries written before (`where T.M: …`)", c2["where_entries"]],
+         ["named constraints written after (`[T cmp.Ordered]`)", c2["bracket_constraints_after"]],
+         ["signature tokens before / after", f"{c2['tokens_before']} / {c2['tokens_after']}"],
+         ["Gleam alternative: function parameters added", c2["gleam_params_added"]],
+         ["`T.Equal` calls on a non-comparable `[]int`", c2["equal_on_slices"]]])
+    sec["c2-list"] = "\n".join(f"- `{x['before']}`\n  → `{x['after']}`" for x in c2["list"])
+
+    c3 = res["candidates"]["function-type-rows"]
+    sec["c3"] = md_table(
+        ["Measure", "Value"],
+        [["declarations with row variables / user-facing among them", f"{c3['decls_with_row_vars']} / {c3['user_decls_with_row_vars']}"],
+         ["row-variable occurrences in them", c3["row_var_occurrences"]],
+         ["function types with written rows / with more than one `uses` entry", f"{c3['functype_with_rows']} / {c3['functype_multi_uses']}"],
+         ["user-facing function types with a row variable", c3["user_functype_with_row_vars"]],
+         ["entries removed by implicit callback rows (3c)", c3["removed_by_implicit"]],
+         ["library row entries before / after 3c", f"{c3['library_entries_before']} / {c3['library_entries_after']}"],
+         ["user row entries before / after 3c", f"{c3['user_entries_before']} / {c3['user_entries_after']}"],
+         ["entries saved by one combined row variable (3b)", c3["saved_by_combined"]],
+         ["callback row variables absorbed, not passed through", f"{c3['absorbed']} ({'; '.join(c3['absorbed_list'])})"],
+         ["empty-row callbacks in generic declarations (meaning flips under 3c)", c3["empty_row_callbacks"]]])
+    sec["c3-empty"] = "\n".join(f"- `{x}`" for x in c3["empty_row_list"])
+
+    g23 = res["gap23"]
+    sec["gap23"] = md_table(
+        ["Measure", "Value"],
+        [["package-level declarations with a one-letter name", f"{len(g23['single_letter_declarations'])} ({'; '.join(g23['single_letter_declarations'])})"],
+         ["parameter names used (kind: signatures)", ", ".join(f"{k}: {v}" for k, v in g23["parameter_names"].items())],
+         ["bracket lists written (explicit instantiation or constraint)", g23["bracket_lists"]],
+         ["calls with explicit type arguments (`json.Decode[…]`, `http.ReadJSON[…]`, `retry.On[…]`)", g23["explicit_instantiation_calls"]],
+         ["bare `T.Equal` calls on the imported capability `testing.T`", g23["bare_T_capability_calls"]]])
+
+    h = res["honesty"]
+    sec["honesty"] = md_table(
+        ["Check", "Value"],
+        [["exported machine types whose rows come from their step", f"{len(h['exported_machine_types'])} ({'; '.join(h['exported_machine_types'])})"],
+         ["laws (rows kept)", "; ".join(h["laws"])],
+         ["user-facing methods (rows kept): signatures / row entries", f"{h['user_methods']['signatures']} / {h['user_methods']['row_entries']}"],
+         ["prototype negative fixtures for S101 or S102", h["negative_fixtures_S101_S102_total"]]]
+        + [[f"… that rely on: {k}", f"{len(v)} ({', '.join(v)})"] for k, v in h["negative_fixtures_S101_S102"].items()]
+        + [["`wire … uses` exposure clauses (not in docs/spec)", "; ".join(h["wire_exposures"])],
+           ["library signatures whose rows are derived from a type's codec (no candidate states them)", h["derived_codec_rows"]]])
+
+    # Prose with numbers: generated, so that no count in the note is typed by hand.
+    c1t, c1m, ub = c1["tests"], c1["main"], c1["before_user"]
+    by_role = c1["after_user_by_role"]
+    kept_roles = ("exported function", "interface method", "method")
+    tparam_users = [t for t in tps if t["audience"] == "user"]
+    gt = res["go"]["totals"]
+    sec["answer"] = "\n".join([
+        f"- **Row elision lands** for unexported functions, function literals and `TestX` functions. It removes "
+        f"{c1t['removed_user']} of the {ub['row_entries']} row entries in user-facing signatures. In the Go-controlled "
+        f"loop programs, signature tokens fall from {gt['before']} to {gt['after']}, against {gt['go']} for Go.",
+        f"- **Named constraints land** in Go's bracket list, `func Max[T cmp.Ordered](a, b T) T`. A bracket list is "
+        f"written only when it carries a constraint or fixes an order for explicit type arguments. "
+        f"{c2['user_constrained']} user-facing signatures in the corpus need a constraint; {c2['library_constrained']} library signatures do.",
+        f"- **Row parameters on function types stay explicit.** All {c3['row_var_occurrences']} row-variable occurrences "
+        f"are in library code ({c3['user_decls_with_row_vars']} user-facing). Each simplification that would remove them "
+        f"hides a failure from a reader or loses a resource rule.",
+        "- **Refused:** row elision for `main`, for laws and for methods; constraints inferred from bodies; one combined "
+        "row variable; implicit callback rows.",
+    ])
+    sec["inventory-notes"] = "\n".join([
+        f"- Users write rows, not generics. {ub['row_entries']} row entries are in user-facing signatures; "
+        f"{len(tparam_users)} user-facing declarations have a type parameter "
+        f"({', '.join('`' + t['name'] + '`' for t in tparam_users)}, the generic structs of the retry recipe).",
+        f"- Every row variable is in library code: {c3['decls_with_row_vars']} declarations, {c3['user_decls_with_row_vars']} of them user-facing.",
+        f"- Unexported functions and tests hold {by_role['unexported function']['before'] + by_role['test']['before']} "
+        f"of the {ub['row_entries']} user-facing entries; `main` holds {by_role['main']['before']}. Exported functions, "
+        f"methods and capability methods hold {sum(by_role[r]['before'] for r in kept_roles)}.",
+    ])
+    hn = h["negative_fixtures_S101_S102"]
+    sec["decision"] = md_table(["Candidate", "Decision", "Measured", "Cost"], [
+        ["1. Infer rows of unexported functions and literals", "**Land**",
+         f"{c1['unexported']['removed_user']} user entries removed",
+         "package-level row fixpoint; a missing row reads as \"inferred\" on unexported code; inlay hints needed"],
+        ["1. Infer rows of `TestX`", "**Land**", f"{c1t['removed_user'] - c1['unexported']['removed_user']} more user entries removed",
+         "none beyond the above"],
+        ["1. Infer rows of `main`", "Refuse",
+         f"would remove {c1m['removed_user'] - c1t['removed_user']} entries; {len(hn.get('main', []))} of "
+         f"{h['negative_fixtures_S101_S102_total']} S101/S102 fixtures change, `wire-initializer-error` is accepted",
+         "the host contract and exit failures become implicit"],
+        ["1. Infer rows of `LawX`", "Refuse", f"{by_role['law']['before']} entry kept",
+         "a provider law's `uses` selects the providers it is checked against"],
+        ["1. Infer rows of methods on unexported types", "Refuse for v0", f"{by_role['method']['before']} entries kept",
+         "needs export reachability; leaks rows when an exported function returns the type"],
+        ["1. Machine steps named by an exported type spell rows", "**Land (new rule)**",
+         f"{len(h['exported_machine_types'])} exported machine types", "one more rule in the checker"],
+        ["2. Named constraints in Go's bracket list", "**Land**",
+         f"{c2['user_constrained']} user, {c2['library_constrained']} library signatures; {c2['tokens_before']} → {c2['tokens_after']} signature tokens",
+         "two ways to introduce a parameter, limited to Go's cases"],
+        ["2. Gleam: explicit functions, no constraints", "Refuse", f"{c2['gleam_params_added']} parameters added",
+         "no `comparable`; callers pass compare functions"],
+        ["2. Roc: constraints inferred", "Refuse", f"{c2['user_constrained']} user signatures to simplify",
+         "a hidden requirement on exported generics"],
+        ["2. Gap 23 naming rule and `[F error]`", "**Land**",
+         f"{len(g23['single_letter_declarations'])} one-letter declaration (library `testing.T`); "
+         f"{g23['explicit_instantiation_calls']} calls with explicit type arguments", "one-letter type names reserved"],
+        ["3a. Explicit row parameters, kinds by position", "**Land (status quo)**",
+         f"{c3['row_var_occurrences']} row-variable occurrences, {c3['user_functype_with_row_vars']} in user-facing function types",
+         "library authors write `E` and `R`"],
+        ["3b. One combined row variable", "Refuse", f"{c3['saved_by_combined']} library entries saved",
+         "cannot state per-row transformations"],
+        ["3c. Implicit callback rows", "Refuse",
+         f"{c3['library_entries_before'] - c3['library_entries_after']} library entries saved, "
+         f"{c3['user_entries_before'] - c3['user_entries_after']} user",
+         f"hides failures; {c3['empty_row_callbacks']} empty-row callbacks flip, among them the infallible release; cannot absorb"],
+        ["Grammar: `uses (A, B)` in a function-typed parameter", "**Land**",
+         f"{c3['functype_multi_uses']} corpus occurrences", "none in the corpus"],
+    ])
+
+    go = res["go"]
+    sec["go"] = md_table(
+        ["Program", "Function", "Go tokens", "Sketch tokens before", "Sketch tokens after candidate 1"],
+        [[r["program"], f"`{r['function']}`", r["go"], r["before"], r["after"]] for r in go["matched"]]
+        + [["**total**", "", go["totals"]["go"], go["totals"]["before"], go["totals"]["after"]]])
+    sec["go-text"] = "\n".join(
+        f"- `{r['function']}`\n  - Go: `{r['go_text']}`\n  - before: `{r['before_text']}`\n  - after: `{r['after_text']}`"
+        for r in go["matched"])
+    return sec
+
+
+def splice_note(note, sec):
+    def repl(m):
+        name = m.group(1)
+        if name not in sec:
+            raise SystemExit(f"note names an unknown table {name!r}")
+        return f"<!-- measure.py:begin {name} -->\n{sec[name]}\n<!-- measure.py:end {name} -->"
+    return re.sub(r"<!-- measure\.py:begin ([\w-]+) -->.*?<!-- measure\.py:end \1 -->", repl, note, flags=re.S)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--write", action="store_true")
+    ap.add_argument("--check", action="store_true")
+    args = ap.parse_args()
+
+    bad = verify_before()
+    if bad:
+        print("before/ differs from before.sha256:", ", ".join(bad))
+        return 1
+    units = load_units()
+    after, files = rewrite(units)
+    res, inv = measure(units, after)
+    sec = render(res, inv)
+    counts = json.dumps(res, indent=1, sort_keys=True) + "\n"
+
+    if args.write or args.check:
+        stale = []
+        expected = {AFTER / rel: text for rel, text in files.items()}
+        existing = set(AFTER.rglob("*")) if AFTER.exists() else set()
+        for path, text in expected.items():
+            if not path.exists() or path.read_text() != text:
+                stale.append(str(path.relative_to(HERE)))
+        for path in existing:
+            if path.is_file() and path not in expected:
+                stale.append(f"{path.relative_to(HERE)} (not generated)")
+        if not COUNTS.exists() or COUNTS.read_text() != counts:
+            stale.append("counts.json")
+        note = NOTE.read_text() if NOTE.exists() else ""
+        new_note = splice_note(note, sec)
+        if new_note != note:
+            stale.append("rows-and-constraints.md tables")
+        if args.check:
+            if stale:
+                print("stale:", *stale, sep="\n  ")
+                return 1
+            print("measure.py: counts, after/ and the note's tables are current")
+            return 0
+        for path, text in expected.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        COUNTS.write_text(counts)
+        if note:
+            NOTE.write_text(new_note)
+        unexpected = [s for s in stale if s.endswith("(not generated)")]
+        if unexpected:
+            print("remove by hand, not generated:", *unexpected, sep="\n  ")
+        print(f"wrote {len(expected)} after/ files, counts.json and the note's tables")
+        return 0
+    for name, text in sec.items():
+        print(f"## {name}\n{text}\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

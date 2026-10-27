@@ -1,0 +1,2 @@
+// docs/spec/types.md#block4, rewritten by measure.py for candidate function-type-rows
+func Map(xs []A, limit int64, f func(A) B) []B

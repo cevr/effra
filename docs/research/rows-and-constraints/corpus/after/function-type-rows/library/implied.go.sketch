@@ -1,0 +1,133 @@
+// Library signatures that the sketch corpus calls but does not declare.
+// Reconstruction for #135, written for this spike; not compiled, not normative.
+//
+// Spelling: docs/spec v0 (implicit type parameters, row parameters E and R
+// kinded by position). A bracket list appears only where a parameter cannot
+// be found from the value parameters (explicit instantiation) or carries a
+// constraint. Constraints are written in the method-entry form of the #116
+// and #125 notes (`where T.Compare: ...`): that is the "before" spelling of
+// candidate 2, and measure.py rewrites it.
+//
+// Each declaration names its corpus call site. A comment marked DERIVED notes
+// rows that no ordinary signature can state (codec rows, #49).
+
+package timeout
+
+type Expired struct{}
+
+// fetchall.go.sketch fetchOnce; checkout.go.sketch checkout; poller.go.sketch Run
+func After(d duration, f func() A) (A, error[Expired]) uses Scheduler
+
+package retry
+
+type Policy struct{ base duration; times int }
+
+// fetchall.go.sketch fetch; wire-effects.go.sketch OpenPostgres
+func Exponential(base duration) Policy
+func (p Policy) Times(n int) Policy
+func On[F error](p Policy, f func() A) A uses Scheduler
+
+package tasks
+
+type Policy struct{ restart bool }
+type Group struct{ policy Policy }
+
+// observe.go.sketch main; actor.go.sketch supervised; sketch-10.md section 1
+func Set(p Policy) Group
+func (g Group) Go(f func() error[E])
+func (g Group) Stop()
+
+package build
+
+// wire-effects.go.sketch OpenPostgres calls Scope.Acquire and Scope.Go. Go has
+// no generic methods, so the generic operations are package functions that
+// charge the Scope capability (see the inventory note).
+type Scope interface{ Close() }
+
+func Acquire(open func() A, release func(A)) A uses Scope
+func Go(f func()) uses Scope
+
+package sync
+
+type Tx interface{ Commit() }
+type TxRef[T] struct{ cell T }
+type Ref[T] struct{ cell T }
+
+// stm-batching.go.sketch move, transfer, withdrawWhenFunded
+func (r TxRef[T]) Load() T uses Tx
+func (r TxRef[T]) Store(v T) uses Tx
+func Atomically(f func() A uses Tx) A
+func Retry() uses Tx
+
+// poller_test.go.sketch Recorder
+func (r Ref[T]) Update(f func(v *T))
+func (r Ref[T]) Load() T
+
+package json
+
+type DecodeFailed struct{}
+type EncodeFailed struct{}
+type Codec[T] struct{ MaxBytes int; MaxDepth int }
+
+// codec-transforms.go.sketch; http-endpoints.go.sketch restoreOrder
+func (c Codec[T]) Decode(s string) (T, error[DecodeFailed]) // DERIVED: plus the codec rows of T
+func (c Codec[T]) Encode(v T) (string, error[EncodeFailed]) // DERIVED: plus the codec rows of T
+func Decode[T](s string) (T, error[DecodeFailed])            // DERIVED: plus the codec rows of T
+func Encode(v A) (string, error[EncodeFailed])               // DERIVED: plus the codec rows of A
+
+package http
+
+type Request struct{ Method string; Path string; ContentType string; Body string }
+type Response struct{ Status int }
+type UnsupportedMediaType struct{}
+
+// http-endpoints.go.sketch created, placeOrder, api
+func ReadJSON[T](req Request, maxBytes int) (T, error[UnsupportedMediaType | json.DecodeFailed]) // DERIVED: plus the codec rows of T
+func JSON(status int, v A) Response // DERIVED: plus the encode rows of A
+func Status(code int) Response
+func Fail(code int, cause A) Response
+
+type Routes[R] map[string]func(Request) Response uses R
+
+func (r Routes[R]) Serve(req Request) Response uses R
+
+package slices
+
+// wordcount.go.sketch topWords
+func SortFunc(xs *[]A, compare func(A, A) int)
+
+package cmp
+
+// wordcount.go.sketch topWords
+func Compare(a, b T) int where T.Compare: func(T, T) int
+func Or(vals ...T) T where T.Equal: func(T, T) bool
+
+package builtin
+
+// wordcount.go.sketch topWords: min(n, len(words))
+func min(a, b T) T where T.Compare: func(T, T) int
+
+package options
+
+// tasks-map.go.sketch Map
+func Values(xs []Option[A]) []A
+
+package batch
+
+type Window struct{ d duration }
+type Max struct{ n int }
+type Loader[K, V] struct{ window Window; max Max }
+
+// stm-batching.go.sketch wire Live: a user constraint interface. The corpus
+// also maps FindMany to the capability's Find; no candidate states that.
+func Resolve(source P, w Window, m Max) Loader[K, V] where P.FindMany: func(P, []K) map[K]Option[V]
+
+package testing
+
+// codec-transforms, http-endpoints and poller_test call T.Equal on a
+// capability. Go has no generic interface methods, so Equal is a package
+// function charging T. Its arguments include []int (poller_test), which is
+// not comparable, so Equal takes no comparable constraint.
+type T interface{ Fail(msg string) }
+
+func Equal(got, want A) uses T

@@ -1,0 +1,100 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"time"
+
+	"golang.org/x/sync/errgroup"
+)
+
+var errUnauthorized = errors.New("unauthorized")
+
+type result struct {
+	url   string
+	bytes int
+	ok    bool
+}
+
+func fetchOnce(ctx context.Context, url string) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return 0, errUnauthorized
+	}
+	if resp.StatusCode >= 500 {
+		return 0, fmt.Errorf("server error %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	return len(body), err
+}
+
+// fetch retries transient failures three times with exponential backoff.
+func fetch(ctx context.Context, url string) (result, error) {
+	delay := 100 * time.Millisecond
+	for attempt := 1; ; attempt++ {
+		n, err := fetchOnce(ctx, url)
+		if err == nil {
+			return result{url, n, true}, nil
+		}
+		if errors.Is(err, errUnauthorized) || ctx.Err() != nil {
+			return result{}, err
+		}
+		if attempt == 3 {
+			return result{url: url}, nil
+		}
+		select {
+		case <-time.After(delay):
+			delay *= 2
+		case <-ctx.Done():
+			return result{}, ctx.Err()
+		}
+	}
+}
+
+// fetchAll runs at most 8 fetches at once; the first fatal error cancels the rest.
+func fetchAll(ctx context.Context, urls []string) ([]result, error) {
+	results := make([]result, len(urls))
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(8)
+	for i, url := range urls {
+		g.Go(func() error {
+			r, err := fetch(ctx, url)
+			results[i] = r
+			return err
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+func main() {
+	results, err := fetchAll(context.Background(), os.Args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	ok, total := 0, 0
+	for _, r := range results {
+		if r.ok {
+			ok++
+			total += r.bytes
+		}
+	}
+	fmt.Println(ok, "ok,", len(results)-ok, "failed,", total, "bytes")
+}

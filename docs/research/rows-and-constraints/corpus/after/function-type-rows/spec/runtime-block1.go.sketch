@@ -1,0 +1,2 @@
+// docs/spec/runtime.md#block1, rewritten by measure.py for candidate function-type-rows
+func After(d duration, body func() T) (T, error[Expired]) uses Scheduler

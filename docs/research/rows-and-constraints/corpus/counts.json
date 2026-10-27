@@ -1,0 +1,1191 @@
+{
+ "candidates": {
+  "function-type-rows": {
+   "absorbed": 1,
+   "absorbed_list": [
+    "tasks.Go: E"
+   ],
+   "decls_with_row_vars": 11,
+   "empty_row_callbacks": 7,
+   "empty_row_list": [
+    "build.Acquire: func(A)",
+    "sync.Update: func(v *T)",
+    "slices.SortFunc: func(A, A) int",
+    "cmp.Compare: func(T, T) int",
+    "cmp.Or: func(T, T) bool",
+    "builtin.min: func(T, T) int",
+    "batch.Resolve: func(P, []K) map[K]Option[V]"
+   ],
+   "error_uses_pairs": 6,
+   "functype_multi_uses": 0,
+   "functype_with_rows": 11,
+   "library_entries_after": 21,
+   "library_entries_before": 51,
+   "list": [
+    {
+     "audience": "library",
+     "name": "Map",
+     "occurrences": 4,
+     "unit": "eval9-loops/tasks-map.go.sketch"
+    },
+    {
+     "audience": "library",
+     "name": "After",
+     "occurrences": 4,
+     "unit": "library/implied.go.sketch"
+    },
+    {
+     "audience": "library",
+     "name": "On",
+     "occurrences": 4,
+     "unit": "library/implied.go.sketch"
+    },
+    {
+     "audience": "library",
+     "name": "Go",
+     "occurrences": 3,
+     "unit": "library/implied.go.sketch"
+    },
+    {
+     "audience": "library",
+     "name": "Acquire",
+     "occurrences": 4,
+     "unit": "library/implied.go.sketch"
+    },
+    {
+     "audience": "library",
+     "name": "Go",
+     "occurrences": 2,
+     "unit": "library/implied.go.sketch"
+    },
+    {
+     "audience": "library",
+     "name": "Atomically",
+     "occurrences": 2,
+     "unit": "library/implied.go.sketch"
+    },
+    {
+     "audience": "library",
+     "name": "Routes",
+     "occurrences": 1,
+     "unit": "library/implied.go.sketch"
+    },
+    {
+     "audience": "library",
+     "name": "Serve",
+     "occurrences": 1,
+     "unit": "library/implied.go.sketch"
+    },
+    {
+     "audience": "library",
+     "name": "After",
+     "occurrences": 4,
+     "unit": "docs/spec/runtime.md#block1"
+    },
+    {
+     "audience": "library",
+     "name": "Map",
+     "occurrences": 4,
+     "unit": "docs/spec/types.md#block4"
+    }
+   ],
+   "removed_by_implicit": 30,
+   "row_var_occurrences": 33,
+   "saved_by_combined": 12,
+   "user_decls_with_row_vars": 0,
+   "user_entries_after": 289,
+   "user_entries_before": 289,
+   "user_functype_with_row_vars": 0
+  },
+  "named-constraints": {
+   "bracket_constraints_after": 4,
+   "equal_on_slices": 1,
+   "gleam_params_added": 4,
+   "library_constrained": 4,
+   "list": [
+    {
+     "after": "func Compare[T Ordered](a, b T) int",
+     "before": "func Compare(a, b T) int where T.Compare: func(T, T) int",
+     "name": "Compare",
+     "unit": "library/implied.go.sketch"
+    },
+    {
+     "after": "func Or[T comparable](vals ...T) T",
+     "before": "func Or(vals ...T) T where T.Equal: func(T, T) bool",
+     "name": "Or",
+     "unit": "library/implied.go.sketch"
+    },
+    {
+     "after": "func min[T cmp.Ordered](a, b T) T",
+     "before": "func min(a, b T) T where T.Compare: func(T, T) int",
+     "name": "min",
+     "unit": "library/implied.go.sketch"
+    },
+    {
+     "after": "func Resolve[P Batched[K, V]](source P, w Window, m Max) Loader[K, V]",
+     "before": "func Resolve(source P, w Window, m Max) Loader[K, V] where P.FindMany: func(P, []K) map[K]Option[V]",
+     "name": "Resolve",
+     "unit": "library/implied.go.sketch"
+    }
+   ],
+   "tokens_after": 67,
+   "tokens_before": 101,
+   "user_constrained": 0,
+   "where_entries": 4
+  },
+  "row-elision": {
+   "after_user": {
+    "row_entries": 115,
+    "signatures": 185,
+    "tokens": 1806,
+    "with_rows": 59,
+    "with_tparams": 2
+   },
+   "after_user_by_role": {
+    "exported function": {
+     "after": 37,
+     "before": 37,
+     "signatures": 20
+    },
+    "interface method": {
+     "after": 15,
+     "before": 15,
+     "signatures": 23
+    },
+    "law": {
+     "after": 1,
+     "before": 1,
+     "signatures": 3
+    },
+    "literal": {
+     "after": 0,
+     "before": 2,
+     "signatures": 13
+    },
+    "main": {
+     "after": 39,
+     "before": 39,
+     "signatures": 14
+    },
+    "method": {
+     "after": 18,
+     "before": 18,
+     "signatures": 27
+    },
+    "test": {
+     "after": 0,
+     "before": 50,
+     "signatures": 16
+    },
+    "type declaration": {
+     "after": 2,
+     "before": 2,
+     "signatures": 5
+    },
+    "unexported function": {
+     "after": 0,
+     "before": 122,
+     "signatures": 62
+    },
+    "wire exposure": {
+     "after": 3,
+     "before": 3,
+     "signatures": 2
+    }
+   },
+   "before_user": {
+    "row_entries": 289,
+    "signatures": 185,
+    "tokens": 2424,
+    "with_rows": 123,
+    "with_tparams": 2
+   },
+   "main": {
+    "removed_library": 0,
+    "removed_user": 213,
+    "signatures_library": 0,
+    "signatures_user": 77
+   },
+   "tests": {
+    "removed_library": 0,
+    "removed_user": 174,
+    "signatures_library": 0,
+    "signatures_user": 64
+   },
+   "unexported": {
+    "removed_library": 0,
+    "removed_user": 124,
+    "signatures_library": 0,
+    "signatures_user": 48
+   }
+  }
+ },
+ "gap23": {
+  "bare_T_capability_calls": 19,
+  "bracket_lists": 17,
+  "explicit_instantiation_calls": 14,
+  "parameter_names": {
+   "A (type)": 12,
+   "B (type)": 2,
+   "E (error)": 8,
+   "F (error)": 1,
+   "K (type)": 2,
+   "P (type)": 1,
+   "R (uses)": 10,
+   "T (type)": 17,
+   "V (type)": 2
+  },
+  "single_letter_declarations": [
+   "library/implied.go.sketch: T"
+  ]
+ },
+ "go": {
+  "matched": [
+   {
+    "after": 7,
+    "after_text": "func fetch(url string) Result",
+    "before": 20,
+    "before_text": "func fetch(url string) (Result, error[Unauthorized]) uses http.Client, Scheduler",
+    "function": "fetch",
+    "go": 16,
+    "go_text": "func fetch(ctx context.Context, url string) (result, error)",
+    "program": "fetchall.go.sketch"
+   },
+   {
+    "after": 11,
+    "after_text": "func fetchAll(urls []string) []Result",
+    "before": 24,
+    "before_text": "func fetchAll(urls []string) ([]Result, error[Unauthorized]) uses http.Client, Scheduler",
+    "function": "fetchAll",
+    "go": 20,
+    "go_text": "func fetchAll(ctx context.Context, urls []string) ([]result, error)",
+    "program": "fetchall.go.sketch"
+   },
+   {
+    "after": 7,
+    "after_text": "func fetchOnce(url string) int",
+    "before": 26,
+    "before_text": "func fetchOnce(url string) (int, error[Unauthorized | Failed | timeout.Expired]) uses http.Client, Scheduler",
+    "function": "fetchOnce",
+    "go": 16,
+    "go_text": "func fetchOnce(ctx context.Context, url string) (int, error)",
+    "program": "fetchall.go.sketch"
+   },
+   {
+    "after": 20,
+    "after_text": "func main() error[Unauthorized] uses http.Client, os.Args, Scheduler, Console",
+    "before": 20,
+    "before_text": "func main() error[Unauthorized] uses http.Client, os.Args, Scheduler, Console",
+    "function": "main",
+    "go": 4,
+    "go_text": "func main()",
+    "program": "fetchall.go.sketch"
+   },
+   {
+    "after": 15,
+    "after_text": "func apply(accounts *[]Account, transfers []Transfer) int",
+    "before": 15,
+    "before_text": "func apply(accounts *[]Account, transfers []Transfer) int",
+    "function": "apply",
+    "go": 14,
+    "go_text": "func apply(accounts []account, transfers []transfer) int",
+    "program": "ledger.go.sketch"
+   },
+   {
+    "after": 6,
+    "after_text": "func main() uses Console",
+    "before": 6,
+    "before_text": "func main() uses Console",
+    "function": "main",
+    "go": 4,
+    "go_text": "func main()",
+    "program": "ledger.go.sketch"
+   },
+   {
+    "after": 12,
+    "after_text": "func move(from, to *Account, amount int64)",
+    "before": 16,
+    "before_text": "func move(from, to *Account, amount int64) error[Insufficient]",
+    "function": "move",
+    "go": 13,
+    "go_text": "func move(from, to *account, amount int64) error",
+    "program": "ledger.go.sketch"
+   },
+   {
+    "after": 10,
+    "after_text": "func batch(in chan Reading, size int)",
+    "before": 16,
+    "before_text": "func batch(in chan Reading, size int) error[FlushFailed] uses Sink",
+    "function": "batch",
+    "go": 15,
+    "go_text": "func batch(in <-chan Reading, size int, flush Sink) error",
+    "program": "poller.go.sketch"
+   },
+   {
+    "after": 7,
+    "after_text": "func poll(out chan Reading)",
+    "before": 13,
+    "before_text": "func poll(out chan Reading) uses Source, Clock, Console",
+    "function": "poll",
+    "go": 24,
+    "go_text": "func poll(parent, ctx context.Context, src Source, every time.Duration, out chan<- Reading) error",
+    "program": "poller.go.sketch"
+   },
+   {
+    "after": 22,
+    "after_text": "func Run(d time.Duration) error[FlushFailed] uses Source, Sink, Clock, Scheduler, Console",
+    "before": 22,
+    "before_text": "func Run(d time.Duration) error[FlushFailed] uses Source, Sink, Clock, Scheduler, Console",
+    "function": "Run",
+    "go": 20,
+    "go_text": "func Run(ctx context.Context, src Source, flush Sink, d time.Duration) error",
+    "program": "poller.go.sketch"
+   },
+   {
+    "after": 4,
+    "after_text": "func TestRunBatches()",
+    "before": 12,
+    "before_text": "func TestRunBatches() error[FlushFailed] uses testing.T",
+    "function": "TestRunBatches",
+    "go": 9,
+    "go_text": "func TestRunBatches(t *testing.T)",
+    "program": "poller_test.go.sketch"
+   },
+   {
+    "after": 24,
+    "after_text": "func main() error[fs.NotFound | fs.ReadFailed] uses fs.Files, os.Args, Console",
+    "before": 24,
+    "before_text": "func main() error[fs.NotFound | fs.ReadFailed] uses fs.Files, os.Args, Console",
+    "function": "main",
+    "go": 4,
+    "go_text": "func main()",
+    "program": "wordcount.go.sketch"
+   },
+   {
+    "after": 12,
+    "after_text": "func topWords(path string, n int) []WordCount",
+    "before": 29,
+    "before_text": "func topWords(path string, n int) ([]WordCount, error[fs.NotFound | fs.ReadFailed]) uses fs.Files",
+    "function": "topWords",
+    "go": 16,
+    "go_text": "func topWords(path string, n int) ([]wordCount, error)",
+    "program": "wordcount.go.sketch"
+   }
+  ],
+  "totals": {
+   "after": 157,
+   "before": 243,
+   "go": 175
+  }
+ },
+ "honesty": {
+  "derived_codec_rows": 6,
+  "exported_machine_types": [
+   "eval8-five/machine-breaker.go.sketch: type CircuitBreaker",
+   "sketch10/sketch-10.md#block0: type Breaker",
+   "docs/spec/runtime.md#block2: type Breaker"
+  ],
+  "laws": [
+   "eval9-loops/ledger.go.sketch: LawMoveConservesMoney (0 entries)",
+   "docs/spec/types.md#block5: LawRoundTrip (0 entries)",
+   "docs/spec/types.md#block5: LawFindAfterPut (1 entries)"
+  ],
+  "negative_fixtures_S101_S102": {
+   "absent": [
+    "error-as-value"
+   ],
+   "main": [
+    "function-uses-control",
+    "unprovided",
+    "wire-initializer",
+    "wire-initializer-error",
+    "wire-sibling"
+   ],
+   "wire": [
+    "named-wire-failure",
+    "named-wire-requirement"
+   ],
+   "written": [
+    "missing-capability",
+    "undeclared-error"
+   ]
+  },
+  "negative_fixtures_S101_S102_total": 10,
+  "user_methods": {
+   "row_entries": 18,
+   "signatures": 27,
+   "tokens": 385,
+   "with_rows": 16,
+   "with_tparams": 0
+  },
+  "wire_exposures": [
+   "eval8-five/layers.go.sketch: wire App uses Account, Invoice",
+   "eval9-loops/wire-effects.go.sketch: wire Live uses Orders"
+  ]
+ },
+ "inventory": {
+  "by_audience_role": {
+   "fixture (negative) / exported function": {
+    "row_entries": 0,
+    "signatures": 1,
+    "tokens": 4,
+    "with_rows": 0,
+    "with_tparams": 0
+   },
+   "fixture (negative) / interface method": {
+    "row_entries": 11,
+    "signatures": 32,
+    "tokens": 224,
+    "with_rows": 11,
+    "with_tparams": 0
+   },
+   "fixture (negative) / main": {
+    "row_entries": 50,
+    "signatures": 69,
+    "tokens": 378,
+    "with_rows": 50,
+    "with_tparams": 0
+   },
+   "fixture (negative) / method": {
+    "row_entries": 10,
+    "signatures": 31,
+    "tokens": 351,
+    "with_rows": 10,
+    "with_tparams": 0
+   },
+   "fixture (negative) / unexported function": {
+    "row_entries": 45,
+    "signatures": 48,
+    "tokens": 408,
+    "with_rows": 35,
+    "with_tparams": 0
+   },
+   "fixture / exported function": {
+    "row_entries": 0,
+    "signatures": 1,
+    "tokens": 7,
+    "with_rows": 0,
+    "with_tparams": 0
+   },
+   "fixture / interface method": {
+    "row_entries": 2,
+    "signatures": 12,
+    "tokens": 70,
+    "with_rows": 2,
+    "with_tparams": 0
+   },
+   "fixture / main": {
+    "row_entries": 36,
+    "signatures": 40,
+    "tokens": 232,
+    "with_rows": 36,
+    "with_tparams": 0
+   },
+   "fixture / method": {
+    "row_entries": 2,
+    "signatures": 11,
+    "tokens": 115,
+    "with_rows": 2,
+    "with_tparams": 0
+   },
+   "fixture / unexported function": {
+    "row_entries": 30,
+    "signatures": 35,
+    "tokens": 291,
+    "with_rows": 25,
+    "with_tparams": 0
+   },
+   "library / exported function": {
+    "row_entries": 42,
+    "signatures": 23,
+    "tokens": 485,
+    "with_rows": 13,
+    "with_tparams": 19
+   },
+   "library / interface method": {
+    "row_entries": 0,
+    "signatures": 3,
+    "tokens": 11,
+    "with_rows": 0,
+    "with_tparams": 0
+   },
+   "library / method": {
+    "row_entries": 8,
+    "signatures": 10,
+    "tokens": 156,
+    "with_rows": 6,
+    "with_tparams": 8
+   },
+   "library / type declaration": {
+    "row_entries": 1,
+    "signatures": 5,
+    "tokens": 16,
+    "with_rows": 1,
+    "with_tparams": 5
+   },
+   "library / unexported function": {
+    "row_entries": 0,
+    "signatures": 1,
+    "tokens": 21,
+    "with_rows": 0,
+    "with_tparams": 1
+   },
+   "user / exported function": {
+    "row_entries": 37,
+    "signatures": 20,
+    "tokens": 265,
+    "with_rows": 11,
+    "with_tparams": 0
+   },
+   "user / interface method": {
+    "row_entries": 15,
+    "signatures": 23,
+    "tokens": 230,
+    "with_rows": 15,
+    "with_tparams": 0
+   },
+   "user / law": {
+    "row_entries": 1,
+    "signatures": 3,
+    "tokens": 31,
+    "with_rows": 1,
+    "with_tparams": 0
+   },
+   "user / literal": {
+    "row_entries": 2,
+    "signatures": 13,
+    "tokens": 72,
+    "with_rows": 2,
+    "with_tparams": 0
+   },
+   "user / main": {
+    "row_entries": 39,
+    "signatures": 14,
+    "tokens": 191,
+    "with_rows": 13,
+    "with_tparams": 0
+   },
+   "user / method": {
+    "row_entries": 18,
+    "signatures": 27,
+    "tokens": 385,
+    "with_rows": 16,
+    "with_tparams": 0
+   },
+   "user / test": {
+    "row_entries": 50,
+    "signatures": 16,
+    "tokens": 254,
+    "with_rows": 16,
+    "with_tparams": 0
+   },
+   "user / type declaration": {
+    "row_entries": 2,
+    "signatures": 5,
+    "tokens": 24,
+    "with_rows": 1,
+    "with_tparams": 2
+   },
+   "user / unexported function": {
+    "row_entries": 122,
+    "signatures": 62,
+    "tokens": 962,
+    "with_rows": 46,
+    "with_tparams": 0
+   },
+   "user / wire exposure": {
+    "row_entries": 3,
+    "signatures": 2,
+    "tokens": 10,
+    "with_rows": 2,
+    "with_tparams": 0
+   }
+  },
+  "fixture": {
+   "row_entries": 70,
+   "signatures": 99,
+   "tokens": 715,
+   "with_rows": 65,
+   "with_tparams": 0
+  },
+  "fixture_negative": {
+   "row_entries": 116,
+   "signatures": 181,
+   "tokens": 1365,
+   "with_rows": 106,
+   "with_tparams": 0
+  },
+  "library": {
+   "row_entries": 51,
+   "signatures": 42,
+   "tokens": 689,
+   "with_rows": 20,
+   "with_tparams": 33
+  },
+  "tparam_signatures": [
+   {
+    "audience": "user",
+    "brackets": [
+     "T"
+    ],
+    "constraints": [],
+    "line": 5,
+    "name": "Attempt",
+    "role": "type declaration",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "eval8-five/recipes-retry.go.sketch"
+   },
+   {
+    "audience": "user",
+    "brackets": [
+     "T"
+    ],
+    "constraints": [],
+    "line": 10,
+    "name": "RetryPolicy",
+    "role": "type declaration",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "eval8-five/recipes-retry.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [],
+    "line": 8,
+    "name": "Map",
+    "role": "exported function",
+    "tparams": {
+     "A": "type",
+     "B": "type",
+     "E": "error",
+     "R": "uses"
+    },
+    "unit": "eval9-loops/tasks-map.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [],
+    "line": 19,
+    "name": "After",
+    "role": "exported function",
+    "tparams": {
+     "A": "type",
+     "E": "error",
+     "R": "uses"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [
+     "F"
+    ],
+    "constraints": [
+     "error"
+    ],
+    "line": 28,
+    "name": "On",
+    "role": "exported function",
+    "tparams": {
+     "A": "type",
+     "E": "error",
+     "F": "error",
+     "R": "uses"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [],
+    "line": 37,
+    "name": "Go",
+    "role": "method",
+    "tparams": {
+     "E": "error",
+     "R": "uses"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [],
+    "line": 47,
+    "name": "Acquire",
+    "role": "exported function",
+    "tparams": {
+     "A": "type",
+     "E": "error",
+     "R": "uses"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [],
+    "line": 48,
+    "name": "Go",
+    "role": "exported function",
+    "tparams": {
+     "R": "uses"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [
+     "T"
+    ],
+    "constraints": [],
+    "line": 53,
+    "name": "TxRef",
+    "role": "type declaration",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [
+     "T"
+    ],
+    "constraints": [],
+    "line": 54,
+    "name": "Ref",
+    "role": "type declaration",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [
+     "T"
+    ],
+    "constraints": [],
+    "line": 57,
+    "name": "Load",
+    "role": "method",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [
+     "T"
+    ],
+    "constraints": [],
+    "line": 58,
+    "name": "Store",
+    "role": "method",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [],
+    "line": 59,
+    "name": "Atomically",
+    "role": "exported function",
+    "tparams": {
+     "A": "type",
+     "E": "error"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [
+     "T"
+    ],
+    "constraints": [],
+    "line": 63,
+    "name": "Update",
+    "role": "method",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [
+     "T"
+    ],
+    "constraints": [],
+    "line": 64,
+    "name": "Load",
+    "role": "method",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [
+     "T"
+    ],
+    "constraints": [],
+    "line": 70,
+    "name": "Codec",
+    "role": "type declaration",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [
+     "T"
+    ],
+    "constraints": [],
+    "line": 73,
+    "name": "Decode",
+    "role": "method",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [
+     "T"
+    ],
+    "constraints": [],
+    "line": 74,
+    "name": "Encode",
+    "role": "method",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [
+     "T"
+    ],
+    "constraints": [],
+    "line": 75,
+    "name": "Decode",
+    "role": "exported function",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [],
+    "line": 76,
+    "name": "Encode",
+    "role": "exported function",
+    "tparams": {
+     "A": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [
+     "T"
+    ],
+    "constraints": [],
+    "line": 85,
+    "name": "ReadJSON",
+    "role": "exported function",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [],
+    "line": 86,
+    "name": "JSON",
+    "role": "exported function",
+    "tparams": {
+     "A": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [],
+    "line": 88,
+    "name": "Fail",
+    "role": "exported function",
+    "tparams": {
+     "A": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [
+     "R"
+    ],
+    "constraints": [],
+    "line": 90,
+    "name": "Routes",
+    "role": "type declaration",
+    "tparams": {
+     "R": "uses"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [
+     "R"
+    ],
+    "constraints": [],
+    "line": 92,
+    "name": "Serve",
+    "role": "method",
+    "tparams": {
+     "R": "uses"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [],
+    "line": 97,
+    "name": "SortFunc",
+    "role": "exported function",
+    "tparams": {
+     "A": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [
+     "T.Compare"
+    ],
+    "line": 102,
+    "name": "Compare",
+    "role": "exported function",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [
+     "T.Equal"
+    ],
+    "line": 103,
+    "name": "Or",
+    "role": "exported function",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [
+     "T.Compare"
+    ],
+    "line": 108,
+    "name": "min",
+    "role": "unexported function",
+    "tparams": {
+     "T": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [],
+    "line": 113,
+    "name": "Values",
+    "role": "exported function",
+    "tparams": {
+     "A": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [
+     "K",
+     "V"
+    ],
+    "constraints": [],
+    "line": 119,
+    "name": "Loader",
+    "role": "type declaration",
+    "tparams": {
+     "K": "type",
+     "V": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [
+     "P.FindMany"
+    ],
+    "line": 123,
+    "name": "Resolve",
+    "role": "exported function",
+    "tparams": {
+     "K": "type",
+     "P": "type",
+     "V": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [],
+    "line": 133,
+    "name": "Equal",
+    "role": "exported function",
+    "tparams": {
+     "A": "type"
+    },
+    "unit": "library/implied.go.sketch"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [],
+    "line": 1,
+    "name": "After",
+    "role": "exported function",
+    "tparams": {
+     "E": "error",
+     "R": "uses",
+     "T": "type"
+    },
+    "unit": "docs/spec/runtime.md#block1"
+   },
+   {
+    "audience": "library",
+    "brackets": [],
+    "constraints": [],
+    "line": 1,
+    "name": "Map",
+    "role": "exported function",
+    "tparams": {
+     "A": "type",
+     "B": "type",
+     "E": "error",
+     "R": "uses"
+    },
+    "unit": "docs/spec/types.md#block4"
+   }
+  ],
+  "user": {
+   "row_entries": 289,
+   "signatures": 185,
+   "tokens": 2424,
+   "with_rows": 123,
+   "with_tparams": 2
+  },
+  "user_by_group": {
+   "eval8-five": {
+    "row_entries": 107,
+    "signatures": 64,
+    "tokens": 806,
+    "with_rows": 44,
+    "with_tparams": 2
+   },
+   "eval9": {
+    "row_entries": 63,
+    "signatures": 39,
+    "tokens": 595,
+    "with_rows": 31,
+    "with_tparams": 0
+   },
+   "eval9-loops": {
+    "row_entries": 65,
+    "signatures": 34,
+    "tokens": 493,
+    "with_rows": 25,
+    "with_tparams": 0
+   },
+   "sketch10": {
+    "row_entries": 36,
+    "signatures": 26,
+    "tokens": 324,
+    "with_rows": 16,
+    "with_tparams": 0
+   },
+   "spec": {
+    "row_entries": 18,
+    "signatures": 22,
+    "tokens": 206,
+    "with_rows": 7,
+    "with_tparams": 0
+   }
+  }
+ },
+ "sources": {
+  "eval8-five": {
+   "lines": 556,
+   "units": 6
+  },
+  "eval9": {
+   "lines": 389,
+   "units": 5
+  },
+  "eval9-loops": {
+   "lines": 373,
+   "units": 7
+  },
+  "fixtures": {
+   "lines": 423,
+   "units": 40
+  },
+  "fixtures (negative)": {
+   "lines": 688,
+   "units": 69
+  },
+  "library": {
+   "lines": 133,
+   "units": 1
+  },
+  "sketch10": {
+   "lines": 251,
+   "units": 6
+  },
+  "spec": {
+   "lines": 159,
+   "units": 21
+  }
+ }
+}

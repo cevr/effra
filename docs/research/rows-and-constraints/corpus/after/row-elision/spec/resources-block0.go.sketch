@@ -1,0 +1,6 @@
+// docs/spec/resources.md#block0, rewritten by measure.py for candidate row-elision
+func copyFile(src, dst string) {
+	in := try FS.Open(src)
+	out := try FS.Create(dst) // if this fails, in is still closed
+	try io.Copy(out, in)      // lends out and in
+}                             // out closed, then in

@@ -1,0 +1,23 @@
+package poller
+
+import (
+	"context"
+	"slices"
+	"testing"
+	"testing/synctest"
+	"time"
+)
+
+func TestRunBatches(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var sizes []int
+		src := func(context.Context) (float64, error) { return 1, nil }
+		flush := func(b []Reading) error { sizes = append(sizes, len(b)); return nil }
+		if err := Run(t.Context(), src, flush, 10500*time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(sizes, []int{5, 5}) {
+			t.Fatalf("got batch sizes %v", sizes)
+		}
+	})
+}

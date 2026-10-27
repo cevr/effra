@@ -1,0 +1,62 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"slices"
+)
+
+var errInsufficient = errors.New("insufficient funds")
+
+type account struct {
+	id      string
+	balance int64
+	history []int64
+}
+
+type transfer struct {
+	from, to int
+	amount   int64
+}
+
+func move(from, to *account, amount int64) error {
+	if from.balance < amount {
+		return fmt.Errorf("%s: %w", from.id, errInsufficient)
+	}
+	from.balance -= amount
+	to.balance += amount
+	from.history = append(from.history, -amount)
+	to.history = append(to.history, amount)
+	return nil
+}
+
+// apply mutates accounts in place and returns how many transfers it rejected.
+func apply(accounts []account, transfers []transfer) int {
+	rejected := 0
+	for _, t := range transfers {
+		if t.from == t.to { // from and to would alias the same account
+			rejected++
+			continue
+		}
+		if err := move(&accounts[t.from], &accounts[t.to], t.amount); err != nil {
+			rejected++
+		}
+	}
+	return rejected
+}
+
+// snapshot deep-copies accounts; a plain assignment would share the backing arrays.
+func snapshot(accounts []account) []account {
+	out := slices.Clone(accounts)
+	for i := range out {
+		out[i].history = slices.Clone(out[i].history)
+	}
+	return out
+}
+
+func main() {
+	accounts := []account{{id: "a", balance: 100}, {id: "b", balance: 50}}
+	before := snapshot(accounts)
+	rejected := apply(accounts, []transfer{{0, 1, 30}, {1, 0, 500}, {0, 0, 10}})
+	fmt.Println(before[0].balance, accounts[0].balance, rejected) // 100 70 2
+}

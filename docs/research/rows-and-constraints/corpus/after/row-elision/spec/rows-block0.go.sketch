@@ -1,0 +1,5 @@
+// docs/spec/rows.md#block0, rewritten by measure.py for candidate row-elision
+func pay(id string) string {
+	order := try Orders.Find(id)
+	return Gateway.Charge(order)
+}
