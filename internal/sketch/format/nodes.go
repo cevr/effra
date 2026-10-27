@@ -872,6 +872,11 @@ func (p *printer) expr1(x syntax.Expr, depth int) {
 		p.token(x.Rparen, ")")
 	case *syntax.SelectorExpr:
 		p.expr1(x.X, depth)
+		if lit, ok := x.X.(*syntax.BasicLit); ok && lit.Kind == syntax.INT {
+			// `0 .A` printed as `0.A` would scan as the number `0.`; a
+			// blank keeps the tokens apart (go/printer's mayCombine).
+			p.space()
+		}
 		p.synth(".")
 		if p.breakBefore(x.Sel.Pos()) {
 			p.indent++
