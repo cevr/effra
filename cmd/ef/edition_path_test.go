@@ -74,11 +74,12 @@ func TestEditionFollowsTheFileALinkReaches(t *testing.T) {
 	if err := os.Symlink(filepath.Join(root, "new", "main.ef"), link); err != nil {
 		t.Fatal(err)
 	}
-	resolution, err := sourceEdition(link)
+	admitted, err := admitSource(link)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := string(resolution.JSON())
+	admitted.Close()
+	want := string(admitted.Resolution.JSON())
 	if !strings.Contains(want, `"edition":"2026"`) {
 		t.Fatalf("the shared admission resolved %s through the link", want)
 	}

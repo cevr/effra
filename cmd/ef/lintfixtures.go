@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"effra.local/prototype/internal/edition"
 	"effra.local/prototype/internal/lintpacks"
 	sourcefile "effra.local/prototype/internal/source"
 )
@@ -59,19 +60,26 @@ func lintTestCommand(args []string) error {
 	if err != nil {
 		return invalidInvocation(err)
 	}
-	// Every fixture's edition is resolved before any pack loads or runs; only
-	// legacy fixtures reach the legacy front-end. The path is the one
-	// Session.Fixture reads: the fixture made absolute.
+	// Every fixture is opened once and bound to its edition before any pack
+	// loads or runs; only legacy fixtures reach the legacy front-end. The
+	// packs then read each fixture from its open file, never from its path.
+	admitted := make([]*edition.Source, 0, len(fixtures))
+	defer func() {
+		for _, source := range admitted {
+			source.Close()
+		}
+	}()
 	for _, fixture := range fixtures {
 		absolute, err := filepath.Abs(fixture)
 		if err != nil {
 			return err
 		}
-		resolution, err := sourceEdition(absolute)
+		source, err := admitSource(absolute)
 		if err != nil {
 			return invalidInvocation(fmt.Errorf("%s: %w", fixture, err))
 		}
-		if refusal := editionRefusal("lint test", resolution); refusal != nil {
+		admitted = append(admitted, source)
+		if refusal := editionRefusal("lint test", source.Resolution); refusal != nil {
 			return fmt.Errorf("%s: %s", fixture, refusal.String())
 		}
 	}
@@ -90,8 +98,8 @@ func lintTestCommand(args []string) error {
 		}
 	}
 	failed := 0
-	for _, fixture := range fixtures {
-		actual, err := session.Fixture(context.Background(), fixture, target)
+	for index, fixture := range fixtures {
+		actual, err := session.FixtureSource(context.Background(), fixture, admitted[index], target)
 		if err != nil {
 			fmt.Printf("FAIL %s: %v\n", fixture, err)
 			failed++

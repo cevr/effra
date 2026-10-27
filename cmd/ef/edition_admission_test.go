@@ -112,3 +112,20 @@ func TestFormatterRefusesASourceRetargetedDuringAdmission(t *testing.T) {
 		}
 	}
 }
+
+// lint test and lint receipt open each source once and hand the open file
+// to the packs. A source replaced by a link to the 2026 module after it was
+// opened is refused with EF146 before any pack loads.
+func TestLintCommandsRefuseASourceRetargetedDuringAdmission(t *testing.T) {
+	for _, args := range [][]string{{"lint", "test"}, {"lint", "receipt"}} {
+		root := admissionWorkspace(t)
+		source := filepath.Join(root, "old", "main.ef")
+		editionWrite(t, source, legacyCleanSource)
+		restore := retargetAt(t, edition.StageOpened, source, filepath.Join(root, "new", "main.ef"))
+		err := runCommand(append(append([]string{}, args...), source)...)
+		restore()
+		if err == nil || !strings.Contains(err.Error(), edition.CodeAdmission+": ") {
+			t.Fatalf("ef %s: %v, want the %s refusal", strings.Join(args, " "), err, edition.CodeAdmission)
+		}
+	}
+}

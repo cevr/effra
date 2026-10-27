@@ -65,18 +65,6 @@ func admitSource(path string) (*edition.Source, error) {
 	return edition.ResolveFile(file, path)
 }
 
-// sourceEdition admits the source at path and returns its edition. lint
-// test and lint receipt use it to refuse a non-legacy source before any
-// pack runs; internal/lintpacks then reads the path itself.
-func sourceEdition(path string) (edition.Resolution, error) {
-	admitted, err := admitSource(path)
-	if err != nil {
-		return edition.Resolution{}, err
-	}
-	admitted.Close()
-	return admitted.Resolution, nil
-}
-
 // editionRefusal is the refusal of running command on a source of the
 // resolution: EF144 for an unsupported manifest, EF145 for a command the
 // edition does not support. A legacy source and a supported command have

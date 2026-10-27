@@ -58,20 +58,21 @@ func lintReceiptCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	// The source is admitted like every other CLI source before any run, at
-	// the path Session.Receipt reads: the source made absolute.
-	resolution, err := sourceEdition(absolute)
+	// The source is opened once and bound to its edition like every other
+	// CLI source before any run; every run reads it from that open file.
+	admitted, err := admitSource(absolute)
 	if err != nil {
 		return err
 	}
-	if refusal := editionRefusal("lint receipt", resolution); refusal != nil {
+	defer admitted.Close()
+	if refusal := editionRefusal("lint receipt", admitted.Resolution); refusal != nil {
 		return editionError(refusal)
 	}
 	session, err := loadLint(selection)
 	if err != nil {
 		return err
 	}
-	receipt, err := session.Receipt(context.Background(), paths[0], target, runs)
+	receipt, err := session.ReceiptSource(context.Background(), absolute, admitted, target, runs)
 	if err != nil {
 		return err
 	}
