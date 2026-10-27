@@ -1,488 +1,375 @@
 # Ergo
 
-**Go's directness and native binaries. Effect's typed failures, explicit dependencies and owned lifetimes. Algebraic data types with exhaustive matching. One small language.**
-
-Ergo is an experimental application language. You write `.ef` files and `ergo` compiles them to a single static Go executable. Go is the only target; [Effect](https://effect.website) is the model for the guarantees, not a runtime. Every function signature states what it returns, every way it can fail and every service it needs, and the compiler checks all three.
-
-The aim is Effect for Go: application code with Go's simplicity, Effect's guarantees and a standard library covering what Effect does, in Ergo's own idioms ([north star](NORTH_STAR.md)). What runs today is server-focused.
-
-> **Status: runnable prototype.** Everything in the first two sections compiles and runs today. The gate checks every Ergo snippet that isn't labelled as a sketch. Syntax and APIs will still change.
-
-## One program, three languages
-
-Here is a checkout step written three ways: look up an order, ask a payment gateway to authorize it within 500 ms, and describe the result. The payment result is a closed sum type, and every failure is a named, typed error. All three versions are checked in and print the same thing.
-
-### Ergo
-
-```rust
-error OrderNotFound { id: string }
-error GatewayDown
-
-record Order {
-    id: string
-    total: i64
-}
-
-enum Payment {
-    Pending
-    Authorized { authId: string }
-    Declined { reason: string }
-}
-
-service Orders {
-    effect fn find(id: string) -> Order raises { OrderNotFound }
-}
-
-service Gateway {
-    effect fn authorize(order: Order) -> Payment raises { GatewayDown }
-}
-
-effect fn checkout(id: string) -> string
-    raises { OrderNotFound, GatewayDown, Timeout }
-    uses { Orders, Gateway, Scheduler }
-{
-    let order = run Orders.find(id)
-    let payment = run Gateway.authorize(order).timeout(500)
-    match payment {
-        Payment.Pending => "pending"
-        Payment.Authorized { authId } => "paid " + authId
-        Payment.Declined { reason } => "declined: " + reason
-    }
-}
-```
-
-The signature tells the whole story. `checkout` returns a `string`. It can fail with exactly `OrderNotFound`, `GatewayDown` or `Timeout`. It needs `Orders`, `Gateway` and `Scheduler`, the last because `.timeout` needs a clock to race against. The body is ordinary top-to-bottom code: `run` executes a deferred effect, and the match is exhaustive. Calling `checkout("42")` only builds a lazy program. The caller decides where it runs and what it's provided with ([full program](examples/checkout.ef)):
-
-```rust
-// From examples/checkout.ef
-layer Live {
-    Orders = MemoryOrders
-    Gateway = FakeGateway("auth-7")
-    Scheduler = LiveScheduler
-}
-```
-
-### TypeScript with Effect 4
-
-```ts
-// From examples/compare/checkout.ts
-import { Cause, Context, Data, Effect, Layer } from "effect"
-
-class OrderNotFound extends Data.TaggedError("OrderNotFound")<{ readonly id: string }> {}
-class GatewayDown extends Data.TaggedError("GatewayDown") {}
-
-interface Order {
-  readonly id: string
-  readonly total: number
-}
-
-type Payment = Data.TaggedEnum<{
-  Pending: {}
-  Authorized: { readonly authId: string }
-  Declined: { readonly reason: string }
-}>
-const Payment = Data.taggedEnum<Payment>()
-
-class Orders extends Context.Service<Orders, {
-  readonly find: (id: string) => Effect.Effect<Order, OrderNotFound>
-}>()("Orders") {}
-
-class Gateway extends Context.Service<Gateway, {
-  readonly authorize: (order: Order) => Effect.Effect<Payment, GatewayDown>
-}>()("Gateway") {}
-
-// Inferred: Effect<string, OrderNotFound | GatewayDown | TimeoutError, Orders | Gateway>
-const checkout = (id: string) =>
-  Effect.gen(function* () {
-    const orders = yield* Orders
-    const gateway = yield* Gateway
-    const order = yield* orders.find(id)
-    const payment = yield* gateway.authorize(order).pipe(Effect.timeout("500 millis"))
-    return Payment.$match(payment, {
-      Pending: () => "pending",
-      Authorized: ({ authId }) => `paid ${authId}`,
-      Declined: ({ reason }) => `declined: ${reason}`
-    })
-  })
-```
-
-Effect gives you the same guarantees, and Ergo borrows its model directly. The cost is in the encoding: service classes declared through a two-stage generic, generators with `yield*`, `pipe`, and a contract that is inferred rather than written down. You only see that contract by hovering.
-
-### Go
+**A Go-shaped language that compiles to plain Go and checks the guarantees large Go programs keep only by convention.** The guarantees come from [Effect](https://effect.website), the TypeScript library: typed errors, tracked dependencies, safe resources, structured concurrency with interruption, every failure cause kept, built-in tracing and testable time. Ergo puts them in the language. The compiler checks them and then erases them, so a checked row adds no wrapper type and no run-time cost.
 
 ```go
-// From examples/compare/go/main.go
-type OrderNotFoundError struct{ ID string }
+import (
+	"testing"
+	"timeout"
+)
 
-func (e *OrderNotFoundError) Error() string { return "order not found: " + e.ID }
-
-var ErrGatewayDown = errors.New("gateway down")
-
-type Order struct {
-	ID    string
-	Total int64
+// A function's signature lists every way it can fail and every service it needs.
+func Charge(card Card, amount int64) (Receipt, error[Declined | Frozen | timeout.Expired]) needs Accounts, Payments, Scheduler {
+	return timeout.After(2s) { // the block runs as a child task; at 2s it is stopped and drained
+		lock := try Accounts.Lock(card) // a resource: released on every exit, the timeout included
+		Payments.Charge(lock, amount)   // lends lock for the call
+	}
 }
 
-// Payment is a closed set only by convention: any type with isPayment satisfies it.
-type Payment interface{ isPayment() }
+// A law. It must hold for every Payments provider, and ergo test checks it like a fuzz target.
+func LawRefundNeverExceedsCharge(r Receipt) bool needs Payments {
+	return Payments.Refundable(r) <= r.Amount
+}
 
-type Pending struct{}
-type Authorized struct{ AuthID string }
+// A test with replaced providers and virtual time: no sleeps and no mock framework.
+wire SlowWorld {
+	Accounts  = MemoryAccounts{}
+	Payments  = NewSlowGateway         // a constructor: it answers after 5s on this wire's Scheduler
+	Scheduler = testing.VirtualClock{} // jumps to the next timer when every task waits
+}
+
+func TestSlowGatewayTimesOut() needs testing.T {
+	r := with(SlowWorld) { Charge(Card{Number: "4242"}, 100) } catch {
+	case timeout.Expired:
+		Receipt{ID: "timed-out"} // reached at once, in virtual time
+	case Declined, Frozen:
+		Receipt{}
+	}
+	T.Equal(r.ID, "timed-out")
+}
+```
+
+Designed output; `ergo test` does not run 2026-edition files yet:
+
+```console
+$ ergo test --trace
+TestSlowGatewayTimesOut  ok  virtual 2s
+  └ timeout.After(2s)    pay.ef:10:9   expired
+      └ Accounts.Lock    pay.ef:11:15  released
+      └ Payments.Charge  pay.ef:12:3   interrupted
+```
+
+In about thirty lines, the compiler checks what Go leaves to convention. Every failure is in a type. Every dependency is declared. The lock cannot leak. The timeout stops its block and waits for its cleanup. The law covers every Payments provider. The test runs in virtual time. The trace needs no logging code. The emitted Go is plain `if err != nil`, ordinary interfaces and calls into a small task runtime.
+
+> **Status: design and prototype.** The parser and the formatter of the 2026 edition are in the main compiler. `ergo check`, `build` and `run` accept a prototype subset of it. The full checker and the Go lowering are in progress, and the standard library is designed. The code on this page is the designed language, and each section says what runs today. See the [status table](#status).
+
+## The guarantees
+
+| Guarantee | What it means | In Go today | In Ergo |
+| --- | --- | --- | --- |
+| **Typed errors** | You can see every way a function fails, and the compiler knows which failures you handled. | `error` says only "something failed" | `error[NotFound \| Declined]`, exhaustive `catch` |
+| **Tracked dependencies** | You can see every service a function needs. A missing one is a compile error. | `context.Context` values, globals, constructor plumbing | `needs` rows, `wire … provides`, `with` |
+| **Resource safety** | Everything acquired is released once, on every exit: success, failure, panic or cancellation. | `defer`, if you remember it | release at scope end; moves and lends |
+| **Structured concurrency** | No task outlives its scope. A stop reaches every child. A stop cannot cut cleanup short. | goroutines can leak; `context` is cooperative | scoped tasks, interruption points, masked release |
+| **Every cause kept** | When several things fail, you get all of them, with defects kept apart from expected failures. | the first error wins; a panic crashes | one cause with every failure, defect and interruption |
+| **Built-in observability** | Every task and every service call can be traced, keyed to its source, with no code changes. | spans added by hand | trace events named by the compiler; off adds no allocations |
+| **Testable time and effects** | A test swaps any service, the clock included, with no mock framework. | interfaces and hand-written fakes | `replace` in a test wire; `testing.VirtualClock` |
+| **Laws** | You state what must always hold, and every implementation is checked against it. | comments and example tests | `func LawX`, found like `TestX` |
+
+Ergo keeps Go's spelling, Go's runtime and garbage collector, and single static binaries built by `go build`. Effect delivers its guarantees as a runtime library of wrapper values. Ergo checks them in the compiler and emits ordinary Go, so a function is still a function and an error type still implements `error`.
+
+---
+
+## Errors you can see
+
+```go
+type NotFound struct{ ID string }
 type Declined struct{ Reason string }
 
-func (Pending) isPayment()    {}
-func (Authorized) isPayment() {}
-func (Declined) isPayment()   {}
-
-type Orders interface {
-	Find(ctx context.Context, id string) (Order, error)
+func Checkout(id string, card Card) (Receipt, error[NotFound | Declined]) needs Orders, Payments {
+	order := try Orders.Get(id)
+	receipt := try Payments.Authorize(card, order.Total)
+	Orders.Save(order.Paid())
+	return receipt
 }
 
-type Gateway interface {
-	Authorize(ctx context.Context, order Order) (Payment, error)
-}
-
-// Checkout can fail with *OrderNotFoundError, ErrGatewayDown or context.DeadlineExceeded,
-// but the signature only says error, and only this comment says which.
-func Checkout(ctx context.Context, orders Orders, gateway Gateway, id string) (string, error) {
-	order, err := orders.Find(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-	payment, err := gateway.Authorize(ctx, order)
-	if err != nil {
-		return "", err
-	}
-	switch p := payment.(type) {
-	case Pending:
-		return "pending", nil
-	case Authorized:
-		return "paid " + p.AuthID, nil
+func Settle(id string, card Card) error[NotFound] needs Orders, Payments {
+	receipt := try Checkout(id, card) catch {
 	case Declined:
-		return "declined: " + p.Reason, nil
-	default: // the compiler cannot prove this unreachable; nil also lands here
-		return "", fmt.Errorf("unknown payment %T", payment)
+		Receipt{} // handled: Declined leaves the row
+	} // NotFound is not handled: try passes it up, into the row of Settle
+	Orders.Note(id, receipt.ID)
+}
+```
+
+- `try` passes a failure up, and the caller's row must include it.
+- A `catch` without `try` must handle every failure in the row. A `catch` after `try` handles the types it names and passes the rest up.
+- Interruption and defects are in no row. They pass through every `catch`.
+- In Go, these become plain `if err != nil { return … }`. The row is checked, then erased.
+
+*Today:* the prototype checker enforces these rules ([rows](docs/spec/rows.md)). A method call on a value, such as `order.Paid()`, is designed.
+
+## Needs and provides
+
+```go
+wire Store provides Orders needs Config {
+	Orders = OpenPostgres // a constructor that returns a resource: closed when the with block ends
+}
+
+wire Live provides Orders, Payments {
+	Store
+	Payments = Stripe{}
+	Config   = EnvConfig{} // Store uses it; callers cannot see it
+}
+
+func main() error[NotFound | Declined | DialFailed] needs Console {
+	receipt := try with(Live) { Checkout("ord-7", Card{Number: "4242"}) }
+	Console.Println(receipt.ID)
+}
+```
+
+- `needs` lists what a function requires. `provides` lists what a named wire exposes. Every other entry stays private to the wire's build.
+- `with` meets the needs of its block. A capability that nothing provides is a compile error that names it.
+- A constructor's failures join the row of the `with` that builds it, so `main` lists `DialFailed`.
+- Prior art: Effect's `Layer<ROut, E, RIn>`, Roc's `provides` and `requires`, and Google Wire.
+
+### Tests replace providers, with no mock framework
+
+```go
+wire Fixture provides Orders, Payments, Scheduler {
+	Live
+	replace Orders   = MemoryOrders{} // OpenPostgres is never built
+	replace Payments = FakePayments{Decline: "4000"}
+	Scheduler        = testing.VirtualClock{}
+}
+```
+
+*Today:* the prototype checks `needs` rows, inline wires and closed named wires. The `provides` and `needs` wire header, constructors, embedding and `replace` are parsed and formatted, and their checks are designed ([rows](docs/spec/rows.md#wire)).
+
+## Resources close themselves
+
+```go
+func copyFile(src, dst string) error[NotFound | WriteFailed] needs FS {
+	in := try FS.Open(src)
+	out := try FS.Create(dst) // if this fails, in is still closed
+	try io.Copy(out, in)      // lends out and in
+} // out closed, then in
+```
+
+- A type with `Close` is a resource. So is a struct with a resource field. The scope that owns a resource closes it, in reverse order, on every exit.
+- Returning a resource, storing it in a struct or giving it to a task moves it. Using it after a move is a compile error.
+- Passing a resource as an argument lends it. A lent resource cannot escape the call, so no lifetime annotations are needed.
+- Releases run to completion, even when the scope ends because it was stopped.
+- There is no `defer f.Close()` to forget, and no double close.
+
+*Today:* designed ([resources](docs/spec/resources.md)). `runtime/rt` implements the release rules that emitted code will call.
+
+## Tasks that cannot leak
+
+```go
+func Prices(ids []string) ([]Price, error[NotFound | timeout.Expired]) needs Catalog, Scheduler {
+	return timeout.After(2s) {
+		tasks.Map(ids, 8, func(id string) (Price, error[NotFound]) needs Catalog {
+			return Catalog.Price(id)
+		})
 	}
 }
 ```
 
-Go's version is the most direct to read, and Ergo keeps that directness: plain statements, no generators, no combinator chains. What Go can't tell you is which errors come back, whether the switch covers every case, or what a nil `Payment` would do.
+- `tasks.Map` keeps input order and runs at most 8 calls at once. The first failure stops the rest.
+- A child task belongs to a scope. The scope waits for it, stops it on timeout and keeps every cause: the timeout, each child failure and each cleanup defect.
+- A stop is checked at interruption points, and cleanup runs uninterrupted.
+- `go f(x)` starts a task and gives a `Task[T, E]`. A `Task` is a resource, so its owner scope stops and drains it.
 
-### Same mistakes, three compilers
+*Today:* `runtime/rt` implements the task tree, stops, masks and `timeout.After`. The prototype checks `timeout.After`. `go`, `Task` and the `tasks` package are designed ([runtime](docs/spec/runtime.md#tasks)).
 
-Each row makes one mistake in the program above and records what happens. The Ergo column is the actual `ergo diagnostics` output, verified by the gate ([`TestReadmeSmoke`](cmd/ergo/readme_smoke_test.go)).
+## Machines and actors, as ordinary code
 
-| Mistake | Go | TypeScript + Effect | Ergo |
-| --- | --- | --- | --- |
-| Forget the `Declined` case | Compiles; falls into `default` at runtime | Type error | `EF117: missing match arm for Payment.Declined` |
-| Add the timeout but don't declare it | Compiles; a new error appears at runtime | Compiles; the inferred error union silently widens | `EF107: undeclared failures: Timeout` |
-| A caller forgets to handle `Timeout` | Compiles | Compiles unless a return type is written by hand | `EF107: undeclared failures: Timeout` |
-| Forget to wire the `Gateway` implementation | Compiles if `nil` is passed or a struct field is left unset; panics when called | Type error at `runPromise` | `EF108: missing service requirements: Gateway` |
-| Build an `Order` without its `total` | Compiles; `total` is silently `0` | Type error | `EF114: missing payload field total` |
-| Typo a variant field (`auth` for `authId`) | Compile error | Type error | `EF114: unknown payload field auth` |
+```go
+type State interface{ Closed | Open | HalfOpen }
+type Signal interface{ Failure | Success | Retry }
 
-### At a glance
-
-| | Go | TypeScript + Effect | Ergo |
-| --- | --- | --- | --- |
-| Which failures can happen | `error`; read the body | Inferred `E` type parameter | Declared in `raises { … }` and checked |
-| What a function needs | Parameters, struct fields, `context` | Inferred `R` type parameter | Declared in `uses { … }` and checked |
-| Sum types | Interface plus marker method, open to anyone | `Data.TaggedEnum` plus `$match` | `enum` with payloads; `match` is exhaustive |
-| Absence | `nil` pointers, interfaces, maps and slices | `null`/`undefined` (strict mode tracks them) | No null; absence is `Option<T>` |
-| Control flow | Plain statements | Generators, `yield*`, `pipe` | Plain statements; `run` marks each effect |
-| Concurrency | Goroutines plus `context`; you own cleanup | Fibers with structured interruption | `scope`, `fork`, `join`, `interrupt`; a scope waits for its children's cleanup |
-| Dependency wiring | Constructors written by hand | `Layer` values | `layer` declarations the compiler checks and can graph |
-| Output | Static native binary | JavaScript on Node, Bun or a browser | Static native Go binary |
-
-## A tour of what works today
-
-### Data without null
-
-Records, enums with payloads and generic types compose, and nothing is ever `nil`. The bundled `Data` module supplies `Option` and `Result`:
-
-```rust
-import Data "ergo/data"
-
-record User {
-    name: string
+func step(s State, sig Signal) (Decision[State, string], error[ProbeDown]) needs Probe {
+	switch s, sig := s.(type), sig.(type) {
+	case (Closed, Failure):
+		return Enter{Open{sig.Endpoint}}
+	case (HalfOpen, Success):
+		return Enter{Closed{0}}
+	case (_, _):
+		return Ignore{}
+	}
 }
 
-fn label(user: Data.Option<User>) -> string {
-    match user {
-        Data.Option.None => "missing"
-        Data.Option.Some { value: found } => found.name
-    }
+type Breaker machine[State, Signal] {
+	initial Closed{0}
+	step    step
 }
 
-fn lookup(id: string) -> Data.Option<User> {
-    if id == "42" {
-        Data.Option.Some { value: User { name: "Ada" } }
-    } else {
-        Data.Option<User>.None {}
-    }
+func trip(endpoint string) error[actor.Stopped] needs Probe {
+	b := actor.StartMachine(Breaker{}, 16) // the actor library runs it; stopped at scope end
+	try b.Send(Failure{Endpoint: endpoint})
+}
+
+func join(name string) (int64, error[RoomFull | actor.Stopped | actor.NoReply]) {
+	room := actor.StartAgent(Room{}, 16)
+	return actor.Call(room.Address(), func(r *Room) (int64, error[RoomFull]) { return r.Join(name) })
 }
 ```
 
-### Matching several values at once
+- `step` is an ordinary function. Its switch must cover every pair of state and signal. `ergo inspect` will draw the machine's graph from its cases.
+- Actors are a library, not syntax. `actor.Start`, `actor.Ask` with a typed `actor.Reply[T, E]`, `actor.StartMachine`, `actor.StartAgent` and `actor.Call` are ordinary code, and no compiler rule names them.
+- A reply is a resource. Every ask is answered once, or the caller gets `actor.NoReply` or `actor.Stopped`.
 
-`match` takes several subjects and checks every combination of their variants. An arm can list alternatives with `|`, and a name bound in every alternative is bound once. Here a session's transitions are one table:
+*Today:* the `machine` declaration and the multi-subject switch parse, and their checks are designed ([runtime](docs/spec/runtime.md#machines-and-actors)). The actor library's Go lowering runs in [`prototypes/actorlib`](prototypes/actorlib/doc.go), with its cost measured ([#101 note](docs/research/actor-library.md)).
 
-```rust
-enum Session {
-    Idle
-    Active { key: string }
-    Closed
+## Laws: say what must always hold
+
+```go
+// Found by name, like TestX, and run with generated inputs and shrinking.
+func LawRoundTrip(o Order) bool {
+	decoded := ParseOrder(o.Wire()) catch {
+	case DecodeFailed:
+		return false // a decode failure refutes the law, with the shrunk input
+	}
+	return decoded == o
 }
 
-enum Event {
-    Open { key: string }
-    Refresh { key: string }
-    Close
-}
-
-enum Step {
-    Go { next: Session }
-    Stay
-    Reject { reason: string }
-}
-
-fn step(state: Session, event: Event) -> Step {
-    match state, event {
-        Session.Idle, Event.Open { key } | Event.Refresh { key } => Step.Go { next: Session.Active { key } }
-        Session.Active { key: current }, Event.Open { key } => if current == key { Step.Stay {} } else { Step.Reject { reason: "busy " + current } }
-        Session.Active, Event.Refresh { key } => Step.Go { next: Session.Active { key } }
-        Session.Idle | Session.Active, Event.Close => Step.Go { next: Session.Closed {} }
-        Session.Closed, Event.Open | Event.Refresh | Event.Close => Step.Reject { reason: "closed" }
-    }
+// A provider law: it is checked against every provider wired for Store.
+func LawFindAfterPut(id string, v Order) bool needs Store {
+	Store.Put(id, v)
+	return Store.Find(id) == v
 }
 ```
 
-Leave out a pair, for example by dropping `Session.Active` from the `Event.Close` arm, and the check fails with `EF117`, naming the missing combination.
+- A law is a function named `LawX` that returns `bool`. `ergo test` checks it with generated arguments.
+- A law with `needs` applies to every provider of that capability. A new provider must pass the same laws as the old one.
+- A refuted law fails the build. A passing law is reported as tested, never as proved.
+- Under research: evidence values and a tier of laws that are proved instead of tested ([laws note](docs/research/laws.md)).
 
-### Errors with payloads, and recovery that removes them
+*Today:* designed ([types](docs/spec/types.md#laws), [#162](https://github.com/cevr/ergo/issues/162)). The #125 spike built the law check, generators, shrinker and receipts for the earlier language, on a branch that is not merged.
 
-Errors are nominal and can carry fields. `.catch<E>(fallback)` removes exactly `E` from the failure row and leaves the rest to the type checker:
+## Observability by construction
 
-```rust
-// From examples/checkout.ef
-effect fn report(id: string) -> void uses { Console } {
-    let outcome = run checkout(id).provide(Live)
-        .catch<OrderNotFound>("no such order")
-        .catch<GatewayDown>("gateway down")
-        .catch<Timeout>("gateway timed out")
-    run Console.log(outcome)
+The checker knows every definition, every capability call and every row. So the compiler names every trace event, and the source needs no span calls. The [#188 spike](docs/research/traceability.md) put this into `runtime/rt` and the prototype compiler. This is real output of the prototype's trace query, recorded on 2026-10-27, for a run where a 100ms timeout stopped a 2s gateway call (trimmed; [full run](docs/previews/2026-10-27-traceability.md)):
+
+```text
+$ go run ./cmd/sketchc trace testdata/trace/timeout.sketch timeout.jsonl
+tasks
+  #1 latency.main (func) at timeout.sketch:81:1, exit: success
+    #2 latency.checkout/timeout.After#1 (timeout block) at timeout.sketch:39:17, exit: interrupted
+
+cause trace of the root exit (links recorded by the runtime; candidates are labelled)
+  task #1 latency.main (func, timeout.sketch:81:1) exited with success
+    handled timeout.Expired at timeout.sketch:75:2 in latency.report (task #1, seq 12)
+      caught the deadline of task #2 latency.checkout/timeout.After#1 (seq 6): the timeout block timeout.After(100ms) at timeout.sketch:39:17 in latency.checkout, row error[latency.GatewayDown | timeout.Expired]
+        call host.Scheduler.Sleep at timeout.sketch:32:2 was open when the deadline passed (call seq 5); it ended interrupted (call-exit seq 8)
+        cancel-request of task #2 (seq 7)
+        task #2 observed the stop in latency.roundTrip at timeout.sketch:32:2 (seq 9)
+        task #2 exited with interrupted (seq 10)
+```
+
+- The query follows a failure back along links that the runtime recorded, to its deadline, child task or failed call. Where no link was recorded, it says so and labels the candidates.
+- Tracing off adds no allocations, and its time cost is inside the measurement noise. Each recorded event costs about 60 to 130 ns (measured, see [Performance](#performance-measured)).
+- A written trace holds no values by default. It names failures by type.
+- Designed, not built: `ergo trace`, `ergo ps` for the live task tree of a running program, and an OpenTelemetry exporter. The mapping to OpenTelemetry spans is written; the exporter is not.
+
+## Built for agents
+
+Agents read the same checked model as the compiler. The CLI and the MCP server share it. A diagnostic has a registered code, a position and a message. This is real output of the current CLI for a 2026-edition file whose `pay` calls `Gateway` without declaring it:
+
+```console
+$ ergo diagnostics pay.ef
+pay.ef:21:23: error S102: pay requires Gateway, which its needs clause does not list and no with provides
+```
+
+`ergo inspect` answers the same questions as JSON. For a 2026-edition file it reports EF145 until the checker lands ([#196](https://github.com/cevr/ergo/issues/196)). Designed output:
+
+```console
+$ ergo inspect checkout.ef Checkout
+{
+  "def": "checkout.Checkout",
+  "errors": ["checkout.Declined", "checkout.NotFound"],
+  "needs": ["checkout.Orders", "checkout.Payments"],
+  "calls": ["Orders.Get", "Payments.Authorize", "Orders.Save"]
 }
 ```
 
-`report` declares no failures, so deleting any one of those `.catch` lines is a compile error.
+- Each code has its rule, its spec section and, where one exists, a fixture ([diagnostics](docs/spec/diagnostics.md)).
+- One formatter, `ergo fmt`, gives one canonical layout, so agent edits make small, stable diffs.
+- Every effect is in the signature, so an agent can change a function without reading its whole call graph.
 
-### Layers: dependency graphs the compiler can see
+## Go interop
 
-A `layer` binds services to implementations. Layers merge by identity, so a store shared by two domains is built once. A fixture swaps one node for the whole graph:
+```go
+import go "strconv" // every call through strconv charges go.Foreign
 
-```rust
-// From examples/layers.ef
-layer Shared {
-    Store = Memory("live")
-}
-layer Accounts {
-    merge Shared;
-    Account = AccountLive
-}
-layer Invoices {
-    merge Shared;
-    Invoice = InvoiceLive
-}
-layer App provides { Account, Invoice } {
-    merge Accounts, Invoices
-}
-layer Fixture {
-    merge App;
-    replace Store = Memory("fixture")
+func parsePort(text string) (int64, error[go.Error]) needs go.Foreign {
+	return strconv.ParseInt(text, 10, 64)
 }
 ```
 
-`provides` hides `Store` from callers. `replace` happens before anything is constructed, and `ergo graph` shows the selected graph.
+- Go's `(T, error)` becomes `(T, error[go.Error])`. A Go result that may be nil becomes `Option`. A Go panic becomes a defect. Slices and maps are copied at the boundary.
+- A bodiless declaration with a `//ef:go pkg.Func` directive binds one Go function with stated types, and a generated adapter checks them.
+- The emitted Go stays readable. The prototype carries source positions in `//line` directives, so Go panics, pprof, delve and the race detector point at Ergo lines.
 
-### Structured concurrency
+*Today:* designed for the 2026 edition ([grammar](docs/spec/grammar.md#declarations)). The earlier `.ef` language imports Go packages today ([interop](docs/interop.md)).
 
-Children belong to a scope. Interrupting one waits for its cleanup to finish before the next line runs:
+## Performance, measured
 
-```rust
-// From examples/latest-task.ef
-effect fn replacement() -> string uses { Clock } {
-    scope {
-        let previous = fork search("old")
-        run previous.interrupt()
-        let current = fork search("new")
-        run current.join()
-    }
-}
-```
+Ergo is designed to lower to the Go you would write by hand: rows are erased, generics stay Go generics, and `try` becomes `if err != nil`. Each row below links its receipt.
 
-### Go packages, without writing bindings
+| Measured | Result | Receipt |
+| --- | --- | --- |
+| Tracing off | no extra allocations; the time difference is inside the noise | [`runtime/rt` receipt, #188](runtime/rt/RECEIPT.md#tracing-off-and-on-188) |
+| One traced event | about 60 to 130 ns | [traceability note](docs/research/traceability.md#measured-overhead) |
+| Interruption check | one atomic load: 1.4 to 2.3 ns, about 0.3x a `select` on a channel | [`runtime/rt` receipt](runtime/rt/RECEIPT.md#design-notes) |
+| Library actor against hand-written Go with the same contract | 1.16x to 1.60x the baseline's time (paired medians, five operations) | [#101 note, Q8](docs/research/actor-library.md#q8-cost) |
+| Checked overflow on an accounting sum | 2.2x to 2.5x the wrapping time, so `+`, `-` and `*` wrap by default | [#108 record](docs/research/numeric-arithmetic.md#cost-of-checked-overflow-in-emitted-go-108-2026-10-27) |
+| Rebuild of an emitted program after a one-literal edit | emit 4 to 5 ms, `go build` 234 to 260 ms (single samples) | [`prototypes/sketch9` receipt](prototypes/sketch9/RECEIPT.md#build-time-of-the-emitted-checkout-program) |
 
-The compiler reads signatures straight from Go export data. Native calls are deferred, need an explicit `Foreign` capability, and keep Go's error as data until you choose to raise it:
+Performance claims in this repo require receipts. Each receipt names its machine and its load. The losses stay in the table: the actor library is slower than the hand-written baseline today.
 
-```rust
-import go strconv "strconv"
+## What Ergo does not do
 
-effect fn parse(text: string) -> bool raises { GoError } uses { Foreign } {
-    run strconv.ParseBool(text).orFail()
-}
-```
+- Go is the only target. Ergo adds no scheduler and no garbage collector; it uses Go's.
+- There is no `nil`. Absence is `Option[T]`.
+- There are no pointer fields and no reference fields. Linked structures use unions, index arenas or `sync.Ref`. This is a loss against Go.
+- There is no `goto`, `fallthrough`, `const`, type assertion or type alias. A union switch replaces the type assertion.
+- There are no macros and no user-defined operators. A construct that the compiler must know gets a keyword. A dot form is always a library.
+- Expected failures are not exceptions: they are in the row. A panic is a defect, kept apart from typed failures.
+- There is no package-level mutable state and no `init` function.
+- A loop that calls no capability and starts no task has no interruption point, so a stop waits until the loop ends.
+- In v0, `int64` is the only integer type. Other numeric types and floating point are designed with [#81](https://github.com/cevr/ergo/issues/81).
+- Kernels, hard real-time and execution without a garbage collector are out of scope.
 
-### Tests are ordinary effects
+## Status
 
-Tests are effect functions whose names start with `test_`. A fixture is just another provider, and each test gets a fresh owning scope. `ergo test` runs them:
-
-```rust
-// From examples/testing.ef
-effect fn test_recovery() -> void raises { AssertionFailed } uses { Assert } {
-    let actual = run greeting("unknown")
-        .provide<Directory>(FixtureDirectory)
-        .catch<Missing>("Unknown user")
-    run Assert.equalText(actual, "Unknown user")
-}
-```
-
-### One compiler model for people, editors and agents
-
-`ergo check`, `inspect`, `explain`, `graph`, `diagnostics`, `lint`, `lsp` and `mcp` all read the same checked model. `ergo fmt` works from syntax alone, so it also formats code that does not type-check yet. Ask why `checkout` needs what it needs:
-
-```sh
-$ ergo explain examples/checkout.ef checkout | jq -c '.symbol.contributions[] | {line: .span.line, kind, names}'
-{"line":33,"kind":"failure","names":["OrderNotFound"]}
-{"line":33,"kind":"requirement","names":["Orders"]}
-{"line":34,"kind":"failure","names":["GatewayDown","Timeout"]}
-{"line":34,"kind":"requirement","names":["Gateway","Scheduler"]}
-```
-
-Line 33 is `run Orders.find(id)`; line 34 is the gateway call with its timeout. The MCP server exposes the same facts to coding agents. Its semantic answers carry the source revision they were computed from, and a request that passes `expectedRevision` is refused if the source has changed since. Without it, the server answers from the current source, except that a type lookup by definition ID requires `expectedRevision` (an ID is only meaningful for the source it came from). Editors get the same model through `ergo lsp`: diagnostics, hover and go-to-definition answer from the query behind `ergo type --offset`, and document formatting is the `ergo fmt` formatter. Range formatting, references and rename are not implemented yet.
-
-## Where it's going
-
-Each row states what has landed on this branch, what is in flight and what is only specified or designed. A feature ships only when it runs on Go, with diagnostics and tooling support.
-
-| Capability | Status |
+| Part | Status |
 | --- | --- |
-| Payload-aware recovery: `.recover<E>(handler)` passes the error's fields to an effectful handler | Landed ([`recovery-outcome.ef`](examples/recovery-outcome.ef), [`recovery-codec.ef`](examples/recovery-codec.ef)); reified `Exit` is not exposed |
-| Layer runtime: concurrent shared acquisition, rollback and cleanup in reverse order | Shared build-owned acquisition with individually cancellable waiters landed; the remaining units are in progress |
-| Codecs derived from records and enums, with explicit wire ↔ domain transformations | Structural JSON derivation through [`ergo/json`](docs/bundled-modules.md) and explicit transformed witnesses composed with `with` run, including at typed HTTP endpoints |
-| Graph views: `ergo graph --kind layers\|machine --format mermaid\|dot`, plus MCP and editor views | In progress |
-| HTTP server with bounded, owned shutdown (`Http.listen`) | Landed with typed endpoints and route tables ([`http-transport.ef`](examples/http-transport.ef), [`http-endpoints.ef`](examples/http-endpoints.ef)) and a shared wire corpus; streaming bodies are not built |
-| Rich Go interop: host types, methods, `io.Reader`/`io.Writer`, `context` | Host types, methods, interface assignment, checked I/O and `context` forwarding landed; owned resources and callbacks in progress |
-| Library modules: `pub` exports and module-qualified identity | Designed |
-| State machines: ordinary step functions run by an owned runtime | The `machine` declaration, decision syntax (`enter`, `stay`, `ignore`, `reject`, `done`), its static `stay` check and inspectable plans landed ([`machine-search.ef`](examples/machine-search.ef)); the runtime is specified, not built |
-| Actors with explicit mailbox budgets and owned behavior | [Specified](docs/specs/actors.md); not built |
-| Evidence and proofs: values that carry what was checked | [Designed](docs/research/opaque-values-and-evidence.md) |
-| Numeric application code: floating point, loops and numeric buffers | Direction; not built ([#117](https://github.com/cevr/ergo/issues/117)) |
-| Swappable effect runtimes: a userland provider admitted by the runtime laws, beside Ergo's own Go runtime | [Specified research](docs/research/lawful-runtime-contract.md); neither the RS1 law suite ([#124](https://github.com/cevr/ergo/issues/124)) nor the Effect-suite harness ([#123](https://github.com/cevr/ergo/issues/123)) runs yet |
-| Laws as a general construct for behavior types can't state | Admitted, not built; shape open ([#125](https://github.com/cevr/ergo/issues/125)) |
+| Parser and `ergo fmt` for the 2026 edition | In the main compiler ([#195](https://github.com/cevr/ergo/issues/195)) |
+| `ergo check`, `build` and `run` on a 2026-edition module | Accept the prototype subset: rows, `try`, `catch`, closed wires and `timeout.After` ([example](examples/editions/sketch/main.ef)) |
+| Checker: types, generics, error and needs rows | In progress ([#196](https://github.com/cevr/ergo/issues/196)) |
+| Linearity, borrows and captures | Designed ([#197](https://github.com/cevr/ergo/issues/197)) |
+| Lowering to Go in the main compiler | Open ([#50](https://github.com/cevr/ergo/issues/50)); prototype in [`prototypes/sketch9`](prototypes/sketch9/README.md) |
+| Task runtime `runtime/rt` | In the main tree, with tracing ([#198](https://github.com/cevr/ergo/issues/198), [#188](https://github.com/cevr/ergo/issues/188)) |
+| Standard library | Designed ([outline](docs/spec/stdlib.md), [#206](https://github.com/cevr/ergo/issues/206)) |
+| Laws | Designed ([#162](https://github.com/cevr/ergo/issues/162)); the [#125 spike](docs/research/laws.md) prototyped them for the earlier language on an unmerged branch |
+| Actors as a library | Landed as a spike in [`prototypes/actorlib`](prototypes/actorlib/doc.go) ([#101](https://github.com/cevr/ergo/issues/101), closed); the std package is [#57](https://github.com/cevr/ergo/issues/57) |
+| Go interop for the 2026 edition | Designed |
+| The earlier `.ef` language (`internal/compiler`) | Still builds and runs; [#205](https://github.com/cevr/ergo/issues/205) retires it |
 
-### Proofs you can't forget to check
+## Learn more
 
-Following *Ghosts of Departed Proofs* and Bend's laws-as-obligations, the plan is for the result of a check to become a value that only its owning module can construct. The sensitive operation then takes that value instead of a raw ID:
+- [Specification](docs/spec/README.md): grammar, types, rows, resources, runtime, standard library and diagnostics.
+- [North star](NORTH_STAR.md): the seven pillars and how ties are broken.
+- [Prior art](PRIOR_ART.md): Effect, the source of the guarantees, and Go, Gleam, ReScript, Elixir, MoonBit, Borgo and others, with what Ergo takes from each.
+- [Glossary](GLOSSARY.md): every domain term.
+- [Roadmap](https://github.com/cevr/ergo/issues/1): the live Wayfinder map ([how it works](docs/wayfinder/README.md)).
 
-```rust
-// Sketch: not implemented; syntax will change.
-pub readonly record RefundGrant {
-    order: OrderId
-    actor: UserId
-}
+## Working in this repo
 
-effect fn authorizeRefund(actor: User, order: Order) -> RefundGrant
-    raises { Forbidden } uses { Policy }
-
-effect fn refund(grant: RefundGrant) -> Receipt raises { GatewayDown } uses { Gateway }
-```
-
-With this in place:
-- Skipping authorization becomes a type error.
-- A grant names the exact order and actor that were approved, so it can't be swapped for another order.
-- The evidence compiles down to the plain IDs it holds, with no proof objects at runtime.
-
-Service laws, such as "decode after encode returns the input", become obligations that every implementation must pass. They are reported honestly as *tested*, never as proved.
-
-### State machines from ordinary functions
-
-The transition table in [the tour](#matching-several-values-at-once) already compiles: a multi-subject match whose every state and event pair is checked. Running it as a machine is specified; the declaration and its checks have landed, the runtime has not. In [the machine spec](docs/specs/state-machines.md), an owned runtime admits events, runs each step and owns the work each state starts, as one form of [actor](docs/specs/actors.md) behavior. A step can be a pure function or an effect with its own failures and services.
-
-A machine is a small `machine` declaration that names its initial state and its ordinary step functions. The declaration earns its place because the compiler checks something no library can: a `stay` decision must keep the state's variant. A step returns the predeclared `decision<S, O>` and writes `enter next`, `stay next`, `ignore`, `reject` or `done output`; [`machine-search.ef`](examples/machine-search.ef) shows each form. Behavior stays in ordinary functions.
-
-## Try it
-
-You need Go 1.27+ and Git.
+You need Go 1.27 or later and Git.
 
 ```sh
 git clone https://github.com/cevr/ergo.git
 cd ergo
 go build -o bin/ergo ./cmd/ergo
 
-./bin/ergo run examples/checkout.ef               # paid auth-7 / no such order
-./bin/ergo build examples/checkout.ef             # static executable in dist/
-./bin/ergo diagnostics examples/missing-service.ef  # expected failure: EF108
-./bin/ergo inspect examples/checkout.ef checkout  # the checked contract as JSON
-./bin/ergo graph examples/layers.ef               # services, providers and layers
-./bin/ergo test examples/testing.ef
-./bin/ergo mcp .                                  # compiler tools for agents over stdio
-./bin/ergo lsp                                    # diagnostics, hover, definition and formatting over LSP
+./bin/ergo run examples/editions/sketch/main.ef    # a 2026-edition module: hello, Ada / no friend named Bob
+./bin/ergo fmt --check examples/editions/sketch/main.ef
+./scripts/gate.sh                                  # the merge gate: formatting, vet, tests, CLI, MCP and LSP checks
 ```
 
-Native builds lower checked source into typed Go closures and run `go build`. The executable needs no Ergo installation to run, and contains only the declarations and runtime modules its entry point reaches. `--target js` is the EF110 diagnostic: since 2026-10-26 Go is the only target.
-
-## Runnable examples
-
-| Example | What it demonstrates |
-| --- | --- |
-| [checkout.ef](examples/checkout.ef) | The program from the top of this page |
-| [main.ef](examples/main.ef) | Nominal services, explicit provision and typed recovery |
-| [workflow.ef](examples/workflow.ef) | Authorization, lookup and delivery with three service contracts |
-| [data.ef](examples/data.ef) | Records, enums and exhaustive matching |
-| [generic-users.ef](examples/generic-users.ef) | Generic records with `Option` and `Result` |
-| [layers.ef](examples/layers.ef) | Shared construction, hidden dependencies and whole-graph fixture replacement |
-| [layers-workflow.ef](examples/layers-workflow.ef) | Configured layer provision and retained operation failures |
-| [latest-task.ef](examples/latest-task.ef) | Replace an owned child after interruption and cleanup finish |
-| [recipes-retry.ef](examples/recipes-retry.ef) | Lazy typed recipes stored in generic records and Option; each retry runs again |
-| [recipes-queue.ef](examples/recipes-queue.ef) | Recipe enum payloads, Result slots and recipe-returning callable fields |
-| [recovery-outcome.ef](examples/recovery-outcome.ef) | Payload-binding recovery of a stored job recipe into an Outcome |
-| [recovery-codec.ef](examples/recovery-codec.ef) | Effectful recovery handler converting a decode failure into a domain failure |
-| [concurrency.ef](examples/concurrency.ef) | Child join/interrupt and deadline recovery |
-| [causal.ef](examples/causal.ef) | Managed virtual time, shared latches and causal cleanup tests |
-| [quiescence.ef](examples/quiescence.ef) | The quiescence barrier for forked work that registers no new timer |
-| [quiescence-wakes.ef](examples/quiescence-wakes.ef) | The barrier and `advance` with wakes in flight: cancellation and signalled waiters |
-| [latch-handoff.ef](examples/latch-handoff.ef) | Latch handoff: a signal makes waiters runnable, and interrupting the signaller afterwards cannot affect a waiter it does not own |
-| [callables-service.ef](examples/callables-service.ef) | Callbacks that are generic over failure and service rows |
-| [testing.ef](examples/testing.ef) | Fixture providers, typed recovery and owned children in tests |
-| [imports.ef](examples/imports.ef) | Automatic native signatures, partial results and context forwarding |
-| [http-transport.ef](examples/http-transport.ef) | Bounded buffered HTTP/1.1 with explicit limits, typed handler failures and owned shutdown |
-| [http.ef](examples/http.ef) | HTTP routes over `Http.listen`, SDK calls, file scopes and managed shutdown |
-| [lifecycle.ef](examples/lifecycle.ef) | Scoped files, cancellation and runtime snapshots |
-| [ownership.ef](examples/ownership.ef) | Borrowed outer handles and checked scoped file ownership |
-
-## Learn more
-
-- [Implemented syntax and limits](docs/prototype.md)
-- [Runtime contracts](docs/runtime.md)
-- [Go interop](docs/interop.md)
-- [Bundled modules](docs/bundled-modules.md)
-- [Testing](docs/testing.md)
-- Tooling: [CLI](docs/tooling.md), [MCP](docs/mcp.md), [LSP](docs/lsp.md)
-- [Showcases](docs/showcases.md): real application patterns, with proposals clearly labelled
-- [Design sketch](docs/design.md) and [contender roadmap](docs/contender-roadmap.md)
-- [Language evolution previews](docs/previews/README.md): dated snapshots of how constructs and syntax read over time
-- [North star](NORTH_STAR.md), [prior art](PRIOR_ART.md) (Effect, Go, Gleam, ReScript, Elixir, Borgo, Bend and others) and [glossary](GLOSSARY.md)
-- [Upstream conformance](docs/conformance.md): Effect behavior mapped to Go acceptance tests
-
-Open design questions are tracked in the [Wayfinder map](https://github.com/cevr/ergo/issues/1) on GitHub (`go run ./cmd/wayfinder frontier`; see [docs/wayfinder](docs/wayfinder/README.md)).
-
-## Development
-
-```sh
-./scripts/gate.sh     # formatting, vet, tests, real Go programs, CLI/MCP/LSP parity, live HTTP
-go test -race ./...
-```
-
-Fast compilation is a design constraint; see the [measurement receipts](docs/prototype.md#baseline). Ergo is an application language. Kernels, hard real-time and no-GC execution are out of scope.
+- A module opts into the 2026 edition with an `ergo.json` of `{"edition": "2026"}`. A file without one is the earlier language.
+- Where things live: the parser in `internal/sketch/syntax`, the formatter in `internal/sketch/format`, the prototype checker and its bridge in `internal/sketch/proto`, the task runtime in `runtime/rt`, the CLI in `cmd/ergo`, and the specification in `docs/spec`.
+- The earlier language lives in `internal/compiler` and `examples/` until [#205](https://github.com/cevr/ergo/issues/205). Its documents are [implemented syntax](docs/prototype.md), [tooling](docs/tooling.md), [testing](docs/testing.md) and [bundled modules](docs/bundled-modules.md).
