@@ -110,11 +110,14 @@ func declareSteps(root string, packages []string) ([]*Step, error) {
 	}
 	add(&Step{Name: "go test (other packages)", Needs: []string{"go test build"}, Argv: append([]string{"go", "test", testTimeout}, unsharded...), ToolEnv: testTools})
 	// prototypes/sketch9 is its own module, so ./... never reaches it, but its
-	// kernel mode links this checkout's runtime/rt. Its kernel tests build and
-	// run programs against that runtime through a go build subprocess, whose
-	// reads Go's test cache cannot see, so they run uncached. Inside this
-	// checkout a module mismatch fails them; they never skip here (#218).
-	add(&Step{Name: "go test ./prototypes/sketch9/sketch (kernel)", Argv: []string{"go", "test", "-C", "prototypes/sketch9", testTimeout, "-count=1", "-run", "^TestKernel", "./sketch/"}})
+	// kernel mode links this checkout's runtime/rt. ERGO_REPO_ROOT gives its
+	// kernel tests that checkout explicitly: set, any problem with it (a
+	// missing directory, a go.mod Go refuses, another module) fails them, and
+	// they skip only when it is unset (#218). The tests build and run programs
+	// against that runtime through a go build subprocess, whose reads Go's test
+	// cache cannot see, so they run uncached; env sets the variable, which the
+	// filtered environment of a plain go test step would drop.
+	add(&Step{Name: "go test ./prototypes/sketch9/sketch (kernel)", Argv: []string{"env", "ERGO_REPO_ROOT=" + root, "go", "test", "-C", "prototypes/sketch9", testTimeout, "-count=1", "-run", "^TestKernel", "./sketch/"}})
 	// Without a VCS stamp the binary depends only on its sources, so a commit
 	// that changes none of them reuses the link instead of relinking for a
 	// new revision. The gate's bin/ergo therefore declares no vcs.revision in
