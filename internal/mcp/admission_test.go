@@ -60,32 +60,38 @@ func retarget(t *testing.T, stage, link, target string) func() {
 	})
 }
 
-// A source link retargeted to a file outside the workspace after the file
-// was opened is refused by every file tool; no byte of the outside file is
-// returned, under the workspace URI or any other.
-func TestRetargetedSourceOutsideTheWorkspaceIsRefused(t *testing.T) {
-	for _, tool := range []string{"code.format", "project.check", "project.diagnostics", "project.edition"} {
-		t.Run(tool, func(t *testing.T) {
-			root, link, outside := retargetWorkspace(t)
-			defer retarget(t, edition.StageOpened, link, outside)()
-			var result any
-			var err error
-			if tool == "code.format" {
-				args, decodeErr := decodeArguments(tool, json.RawMessage(`{"file":"src.ef"}`))
-				if decodeErr != nil {
-					t.Fatal(decodeErr)
+// A source link retargeted to a file outside the workspace at any step of
+// the admission never makes a file tool read the outside file. The file was
+// opened through the workspace root, so the tool either answers for that
+// opened file, under its own edition, or is refused with EF146.
+func TestRetargetedSourceOutsideTheWorkspaceIsNeverRead(t *testing.T) {
+	for _, stage := range []string{edition.StageOpened, edition.StageResolving, edition.StageWalked} {
+		for _, tool := range []string{"code.format", "project.check", "project.diagnostics", "project.edition"} {
+			t.Run(stage+"/"+tool, func(t *testing.T) {
+				root, link, outside := retargetWorkspace(t)
+				defer retarget(t, stage, link, outside)()
+				var result any
+				var err error
+				if tool == "code.format" {
+					args, decodeErr := decodeArguments(tool, json.RawMessage(`{"file":"src.ef"}`))
+					if decodeErr != nil {
+						t.Fatal(decodeErr)
+					}
+					result, err = formatCode(root, args)
+				} else {
+					result, err = call(root, nil, tool, arguments{File: "src.ef"})
 				}
-				result, err = formatCode(root, args)
-			} else {
-				result, err = call(root, nil, tool, arguments{File: "src.ef"})
-			}
-			if err == nil || !strings.HasPrefix(err.Error(), edition.CodeAdmission+": ") {
-				t.Fatalf("%s: %v, %v; want the %s refusal", tool, result, err, edition.CodeAdmission)
-			}
-			if strings.Contains(fmt.Sprint(result), "outsideMarker") {
-				t.Fatalf("%s returned the outside file: %v", tool, result)
-			}
-		})
+				if err != nil && !strings.HasPrefix(err.Error(), edition.CodeAdmission+": ") {
+					t.Fatalf("%s: %v; want an answer for the opened file or the %s refusal", tool, err, edition.CodeAdmission)
+				}
+				if strings.Contains(fmt.Sprint(result), "outsideMarker") {
+					t.Fatalf("%s returned the outside file: %v", tool, result)
+				}
+				if tool == "project.edition" && err == nil && !strings.Contains(fmt.Sprintf("%s", result), `"edition":"legacy"`) {
+					t.Fatalf("project.edition answered %s, not the opened file's edition", result)
+				}
+			})
+		}
 	}
 }
 
@@ -105,10 +111,17 @@ func TestSourceLinkOutsideTheWorkspaceCannotBeOpened(t *testing.T) {
 	}
 }
 
-// A source link retargeted to another workspace file with legacy bytes
-// after it was opened is refused: the bytes of one file are never checked
-// under another file's edition.
-func TestRetargetedSourceInsideTheWorkspaceIsRefused(t *testing.T) {
+// A source link retargeted to another workspace file with legacy bytes at
+// any step of the admission never mixes the two files: the opened 2026 file
+// is checked under 2026, or the admission is refused with EF146. The legacy
+// bytes are never checked, and never under the 2026 edition.
+func TestRetargetedSourceInsideTheWorkspaceNeverMixesFiles(t *testing.T) {
+	for _, stage := range []string{edition.StageOpened, edition.StageResolving, edition.StageWalked} {
+		t.Run(stage, func(t *testing.T) { retargetInsideTheWorkspace(t, stage) })
+	}
+}
+
+func retargetInsideTheWorkspace(t *testing.T, stage string) {
 	root, link, _ := retargetWorkspace(t)
 	if err := os.WriteFile(filepath.Join(root, "inside", "effra.json"), []byte(`{"edition":"2026"}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -123,8 +136,86 @@ func TestRetargetedSourceInsideTheWorkspaceIsRefused(t *testing.T) {
 	if err := os.WriteFile(legacy, []byte("effect fn main() -> void { void }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	defer retarget(t, edition.StageOpened, link, legacy)()
-	if result, err := call(root, nil, "project.check", arguments{File: "src.ef"}); err == nil || !strings.HasPrefix(err.Error(), edition.CodeAdmission+": ") {
-		t.Fatalf("project.check: %v, %v; want the %s refusal", result, err, edition.CodeAdmission)
+	defer retarget(t, stage, link, legacy)()
+	result, err := call(root, nil, "project.check", arguments{File: "src.ef"})
+	if err != nil {
+		if !strings.HasPrefix(err.Error(), edition.CodeAdmission+": ") {
+			t.Fatalf("project.check: %v; want a clean 2026 check or the %s refusal", err, edition.CodeAdmission)
+		}
+		return
 	}
+	if data := string(mustJSON(t, result)); !strings.Contains(data, `"edition":"2026"`) || !strings.Contains(data, `"diagnostics":[]`) {
+		t.Fatalf("project.check did not check the opened file cleanly under 2026: %s", data)
+	}
+}
+
+// A source directory moved during the admission, keeping its inode, with a
+// link left at the old spelling that leads below the moved 2026 manifest,
+// never makes code.format run the legacy formatter: the source stays under
+// the 2026 manifest throughout, so the tool answers EF145 for 2026 or
+// refuses with EF146. Ported from the round 3 review probe.
+func TestDirectoryMovedDuringAdmissionNeverFormatsAsLegacy(t *testing.T) {
+	for _, stage := range []string{edition.StageOpened, edition.StageResolving, edition.StageWalked} {
+		t.Run(stage, func(t *testing.T) {
+			root := t.TempDir()
+			pkg := filepath.Join(root, "pkg")
+			moved := filepath.Join(root, "moved")
+			if err := os.MkdirAll(filepath.Join(pkg, "nested"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for path, text := range map[string]string{
+				filepath.Join(root, "go.mod"):           "module x\n",
+				filepath.Join(pkg, "effra.json"):        `{"edition":"2026"}`,
+				filepath.Join(pkg, "nested", "main.ef"): "fn oldSyntax() -> string { \"legacy\" }\n",
+			} {
+				if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			didMove := false
+			restore := edition.SetAdmissionHook(func(reached string) {
+				if reached != stage || didMove {
+					return
+				}
+				didMove = true
+				if err := os.Rename(pkg, moved); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(filepath.Join(moved, "prefix"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(filepath.Join(moved, "nested"), filepath.Join(moved, "prefix", "nested")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(moved, "prefix"), pkg); err != nil {
+					t.Fatal(err)
+				}
+			})
+			args, err := decodeArguments("code.format", json.RawMessage(`{"file":"pkg/nested/main.ef"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := formatCode(root, args)
+			restore()
+			if physical := edition.ResolveDocument(filepath.Join(moved, "prefix", "nested", "main.ef")); !didMove || physical.Edition != edition.E2026 {
+				t.Fatalf("invalid control: moved=%v physical=%s", didMove, physical.JSON())
+			}
+			t.Logf("%s: %v", stage, err)
+			if err == nil {
+				t.Fatalf("code.format ran the legacy formatter on a 2026 source: %v", result)
+			}
+			if !strings.HasPrefix(err.Error(), edition.CodeAdmission+": ") && !strings.HasPrefix(err.Error(), edition.CodeUnavailable+": ") {
+				t.Fatalf("code.format: %v; want %s or %s", err, edition.CodeUnavailable, edition.CodeAdmission)
+			}
+		})
+	}
+}
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }

@@ -12,15 +12,9 @@ package edition
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"strings"
-
-	sourcefile "effra.local/prototype/internal/source"
 )
 
 // Edition identifies one language edition. Ids are exact and case-sensitive.
@@ -102,50 +96,16 @@ type Resolution struct {
 // governs across a Go module boundary), or at the filesystem root. With no
 // manifest, the edition is Default with source "default". Resolve never
 // reads a source file and keeps no cache, so a manifest edit takes effect at
-// the next call. The walk takes each directory's lexical parent, so a
-// surface passes a directory with its links resolved; ResolveFile does.
+// the next call. Surfaces do not call it: they admit a source with ResolveFile or
+// ResolveDocument, which walk the same rule from a physical path and
+// validate what they read.
 func Resolve(dir string) Resolution {
-	absolute, err := filepath.Abs(dir)
-	if err != nil {
-		return Resolution{Source: SourceDefault, Diagnostic: &Diagnostic{Code: CodeUnsupported, Message: fmt.Sprintf("cannot locate the edition manifest for %s: %v", dir, err)}}
-	}
-	for current := absolute; ; {
-		manifest := filepath.Join(current, ManifestName)
-		if _, err := os.Lstat(manifest); err == nil {
-			return readManifest(manifest)
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return refuse(manifest, fmt.Sprintf("cannot be inspected: %v", err))
-		}
-		if info, err := os.Stat(filepath.Join(current, "go.mod")); err == nil && !info.IsDir() {
-			break
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			break
-		}
-		current = parent
-	}
-	return Resolution{Edition: Default, Source: SourceDefault}
+	return walk(dir).resolution
 }
 
-// readManifest admits one manifest: a regular file of at most
-// MaxManifestBytes holding exactly one JSON object {"edition": "<id>"}.
-func readManifest(path string) Resolution {
-	// A FIFO or device is refused before it is opened, so a resolution never
-	// blocks; ReadRegularFile checks the opened descriptor again.
-	if info, err := os.Stat(path); err == nil && !info.Mode().IsRegular() {
-		return refuse(path, "is not a regular file")
-	}
-	data, err := sourcefile.ReadRegularFile(path, MaxManifestBytes)
-	if errors.Is(err, sourcefile.ErrTooLarge) {
-		return refuse(path, fmt.Sprintf("exceeds %d bytes", MaxManifestBytes))
-	}
-	if errors.Is(err, fs.ErrNotExist) {
-		return refuse(path, "is a link to a missing file")
-	}
-	if err != nil {
-		return refuse(path, fmt.Sprintf("is unreadable: %v", err))
-	}
+// manifestResolution decides the edition from a manifest's bytes: exactly
+// one JSON object {"edition": "<id>"} naming a supported edition.
+func manifestResolution(path string, data []byte) Resolution {
 	value, reason := parseManifest(data)
 	if reason != "" {
 		return refuse(path, reason)
