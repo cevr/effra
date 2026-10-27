@@ -29,7 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"effra.local/prototype/runtime/rt"
+	"ergo.local/prototype/runtime/rt"
 )
 
 // DefaultCapacity is the number of events a recorder keeps unless told

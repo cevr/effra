@@ -371,7 +371,7 @@ func writeAsm(out, root string) error {
 	clean := func(b []byte) string {
 		s := strings.ReplaceAll(string(b), root+"/docs/research/overflow-bench/", "")
 		s = strings.ReplaceAll(s, root+"/", "")
-		return strings.ReplaceAll(s, "effra.local/prototype/docs/research/overflow-bench.", "ob.")
+		return strings.ReplaceAll(s, "ergo.local/prototype/docs/research/overflow-bench.", "ob.")
 	}
 	var keep strings.Builder
 	in := false

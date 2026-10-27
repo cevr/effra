@@ -84,7 +84,7 @@ func TestImportedPartialValuesAndContextForwarding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := `import go sdk "effra.local/prototype/examples/sdk"
+	source := `import go sdk "ergo.local/prototype/examples/sdk"
 effect fn main() -> string raises {GoError} {
  let partial = run sdk.Lookup("missing").provide<Foreign>(Host)
  let timed = run sdk.Lookup("slow").orFail().timeout(1).catch<Timeout>("done").provide<Foreign>(Host).provide<Scheduler>(LiveScheduler)
@@ -119,8 +119,8 @@ effect fn main() -> string raises {GoError} {
 func TestBindingMetadataRejectsUnknownFields(t *testing.T) {
 	dir := t.TempDir()
 	for name, contents := range map[string]string{
-		"go.mod":              "module example.test/contracts\n\ngo 1.27\n",
-		"effra.bindings.json": `{"strings.ToUpper":{"cancellaton":"cooperative"}}`,
+		"go.mod":             "module example.test/contracts\n\ngo 1.27\n",
+		"ergo.bindings.json": `{"strings.ToUpper":{"cancellaton":"cooperative"}}`,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0600); err != nil {
 			t.Fatal(err)
@@ -132,7 +132,7 @@ func TestBindingMetadataRejectsUnknownFields(t *testing.T) {
 	}
 }
 
-// Every effra.bindings.json key must name a declaration: a function or a
+// Every ergo.bindings.json key must name a declaration: a function or a
 // method's go/types full name, resolved in the package the key names, which
 // source need not import. An unknown key is refused when metadata loads, one
 // sorted diagnostic per key, with near misses from the same package. A key
@@ -185,27 +185,27 @@ effect fn main() -> string {
 		}
 		return "{" + strings.Join(entries, ",") + "}"
 	}
-	write("effra.bindings.json", contract(known))
+	write("ergo.bindings.json", contract(known))
 	if r := CompileAt(source, "go", dir); !r.Checked {
 		t.Fatalf("declared keys refused: %+v", r.Diagnostics)
 	}
-	write("effra.bindings.json", contract([]string{
+	write("ergo.bindings.json", contract([]string{
 		"example.test/keys.Fecth", "(example.test/keys.Client).Lookup", "example.test/keys.Client",
 		"example.test/missing.Fetch", "Fetch", "(example.test/keys.Wrapped).Shared", "(*example.test/keys.Boxed).Get",
 		"(*example.test/keys.Box[int64]).Get", "std.F", "example.test/keys/....Fetch",
 	}))
 	r := CompileAt(source, "go", dir)
 	want := []string{
-		`effra.bindings.json key "(*example.test/keys.Box[int64]).Get" matches no Go function or method; near: "(*example.test/keys.Box[T]).Get"`,
-		`effra.bindings.json key "(*example.test/keys.Boxed).Get" matches no Go function or method; near: "(*example.test/keys.Box[T]).Get"`,
-		`effra.bindings.json key "(example.test/keys.Client).Lookup" matches no Go function or method; near: "(*example.test/keys.Client).Lookup"`,
-		`effra.bindings.json key "(example.test/keys.Wrapped).Shared" matches no Go function or method; near: "(example.test/keys.shared).Shared"`,
-		`effra.bindings.json key "Fetch" is not a go/types full name such as "path.Func" or "(*path.Type).Method"`,
-		`effra.bindings.json key "example.test/keys.Client" matches no Go function or method`,
-		`effra.bindings.json key "example.test/keys.Fecth" matches no Go function or method; near: "example.test/keys.Fetch"`,
-		`effra.bindings.json key "example.test/keys/....Fetch" names package example.test/keys/..., which does not load: example.test/keys/... is a go list pattern, not an import path`,
-		`effra.bindings.json key "example.test/missing.Fetch" names package example.test/missing, which does not load: `,
-		`effra.bindings.json key "std.F" names package std, which does not load: std is a go list pattern, not an import path`,
+		`ergo.bindings.json key "(*example.test/keys.Box[int64]).Get" matches no Go function or method; near: "(*example.test/keys.Box[T]).Get"`,
+		`ergo.bindings.json key "(*example.test/keys.Boxed).Get" matches no Go function or method; near: "(*example.test/keys.Box[T]).Get"`,
+		`ergo.bindings.json key "(example.test/keys.Client).Lookup" matches no Go function or method; near: "(*example.test/keys.Client).Lookup"`,
+		`ergo.bindings.json key "(example.test/keys.Wrapped).Shared" matches no Go function or method; near: "(example.test/keys.shared).Shared"`,
+		`ergo.bindings.json key "Fetch" is not a go/types full name such as "path.Func" or "(*path.Type).Method"`,
+		`ergo.bindings.json key "example.test/keys.Client" matches no Go function or method`,
+		`ergo.bindings.json key "example.test/keys.Fecth" matches no Go function or method; near: "example.test/keys.Fetch"`,
+		`ergo.bindings.json key "example.test/keys/....Fetch" names package example.test/keys/..., which does not load: example.test/keys/... is a go list pattern, not an import path`,
+		`ergo.bindings.json key "example.test/missing.Fetch" names package example.test/missing, which does not load: `,
+		`ergo.bindings.json key "std.F" names package std, which does not load: std is a go list pattern, not an import path`,
 	}
 	if r.Checked || len(r.Diagnostics) != len(want) {
 		t.Fatalf("unknown keys: %+v", r.Diagnostics)
@@ -243,14 +243,14 @@ func TestBindingMetadataChecksEveryKeyWhenListingFails(t *testing.T) {
 	// The fake go fails only the listing of key packages; every other command
 	// runs the real toolchain.
 	write(filepath.Join(bin, "go"), `#!/bin/sh
-printf '%s\n' "$*" >> "$EFFRA_FAKE_GO_LOG"
+printf '%s\n' "$*" >> "$ERGO_FAKE_GO_LOG"
 if [ "$1" = list ] && [ "$2" = -e ]; then
-	case "$EFFRA_FAKE_GO_LIST" in
+	case "$ERGO_FAKE_GO_LIST" in
 	fail) echo "simulated go list failure" >&2; exit 1 ;;
 	garbage) echo '{"ImportPath":'; exit 0 ;;
 	esac
 fi
-exec "$EFFRA_REAL_GO" "$@"
+exec "$ERGO_REAL_GO" "$@"
 `, 0o700)
 	write(filepath.Join(dir, "go.mod"), "module example.test/listing\n\ngo 1.27\n", 0o600)
 	write(filepath.Join(dir, "listing.go"), `package listing
@@ -268,24 +268,24 @@ func First() interface {
 }
 `, 0o600)
 	write(filepath.Join(dir, "other", "other.go"), "package other\n\nfunc F() string { return \"other\" }\n", 0o600)
-	write(filepath.Join(dir, "effra.bindings.json"), `{"(interface).Lookup":{"context":"fiber","cancellation":"cooperative"},
+	write(filepath.Join(dir, "ergo.bindings.json"), `{"(interface).Lookup":{"context":"fiber","cancellation":"cooperative"},
  "example.test/listing.Fecth":{"cancellation":"unknown"},
  "example.test/listing/other.F":{"cancellation":"unknown"},
  "std.F":{"cancellation":"unknown"}}`, 0o600)
 	log := filepath.Join(bin, "go.log")
-	t.Setenv("EFFRA_REAL_GO", realGo)
-	t.Setenv("EFFRA_FAKE_GO_LOG", log)
+	t.Setenv("ERGO_REAL_GO", realGo)
+	t.Setenv("ERGO_FAKE_GO_LOG", log)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	for _, tc := range []struct{ mode, failure string }{
 		{"fail", "go list: exit status 1: simulated go list failure"},
 		{"garbage", "go list: unexpected EOF"},
 	} {
-		t.Setenv("EFFRA_FAKE_GO_LIST", tc.mode)
+		t.Setenv("ERGO_FAKE_GO_LIST", tc.mode)
 		if err := os.WriteFile(log, nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
 		r := CompileAt(`import go l "example.test/listing"
-import Data "effra/data"
+import Data "ergo/data"
 effect fn main() -> string {
     match run l.First().provide<Foreign>(Host) {
         Data.Option.None => "none",
@@ -303,10 +303,10 @@ effect fn main() -> string {
 			t.Fatalf("%s: go calls %q, want one listing of exactly the missing key package", tc.mode, calls)
 		}
 		want := []string{
-			`EF111 effra.bindings.json key "(interface).Lookup" names a method of an unnamed interface`,
-			`EF111 effra.bindings.json key "example.test/listing.Fecth" matches no Go function or method`,
-			`EF111 effra.bindings.json key "example.test/listing/other.F" names package example.test/listing/other, which does not load: ` + tc.failure,
-			`EF111 effra.bindings.json key "std.F" names package std, which does not load: std is a go list pattern, not an import path`,
+			`EF111 ergo.bindings.json key "(interface).Lookup" names a method of an unnamed interface`,
+			`EF111 ergo.bindings.json key "example.test/listing.Fecth" matches no Go function or method`,
+			`EF111 ergo.bindings.json key "example.test/listing/other.F" names package example.test/listing/other, which does not load: ` + tc.failure,
+			`EF111 ergo.bindings.json key "std.F" names package std, which does not load: std is a go list pattern, not an import path`,
 			`EF106 incorrect Go argument count`,
 		}
 		if r.Checked || len(r.Diagnostics) < len(want) {
@@ -330,8 +330,8 @@ effect fn main() -> string {
 func TestBindingMetadataValidationOrderIsStable(t *testing.T) {
 	dir := t.TempDir()
 	for name, contents := range map[string]string{
-		"go.mod":              "module example.test/order\n\ngo 1.27\n",
-		"effra.bindings.json": `{"example.test/order.MissingB":{"cancellation":"invalid"},"example.test/order.MissingA":{"context":"invalid"},"example.test/order.MissingC":{"context":"invalid"}}`,
+		"go.mod":             "module example.test/order\n\ngo 1.27\n",
+		"ergo.bindings.json": `{"example.test/order.MissingB":{"cancellation":"invalid"},"example.test/order.MissingA":{"context":"invalid"},"example.test/order.MissingC":{"context":"invalid"}}`,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0600); err != nil {
 			t.Fatal(err)
@@ -347,9 +347,9 @@ func TestBindingMetadataValidationOrderIsStable(t *testing.T) {
 func TestContextForwardingUsesPackageIdentity(t *testing.T) {
 	dir := t.TempDir()
 	for name, contents := range map[string]string{
-		"go.mod":              "module example.test/context\n\ngo 1.27\n",
-		"context.go":          "package context\ntype Context struct{}\nfunc Lookup(ctx Context) string { return \"bad\" }\n",
-		"effra.bindings.json": `{"example.test/context.Lookup":{"context":"fiber","cancellation":"cooperative"}}`,
+		"go.mod":             "module example.test/context\n\ngo 1.27\n",
+		"context.go":         "package context\ntype Context struct{}\nfunc Lookup(ctx Context) string { return \"bad\" }\n",
+		"ergo.bindings.json": `{"example.test/context.Lookup":{"context":"fiber","cancellation":"cooperative"}}`,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0600); err != nil {
 			t.Fatal(err)

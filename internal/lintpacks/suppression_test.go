@@ -12,17 +12,17 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/compiler"
-	"effra.local/prototype/internal/lintpacks"
-	"effra.local/prototype/internal/lsp"
-	"effra.local/prototype/internal/mcp"
-	"effra.local/prototype/lint"
+	"ergo.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/lintpacks"
+	"ergo.local/prototype/internal/lsp"
+	"ergo.local/prototype/internal/mcp"
+	"ergo.local/prototype/lint"
 )
 
 // surfaceReports is one source analysed by every surface under one
 // session: the CLI's lint result and diagnostic report (the same session
-// and merge the ef command uses), MCP project.lint and project.diagnostics,
-// and the LSP effra/lintStatus notification of a client that opted in.
+// and merge the ergo command uses), MCP project.lint and project.diagnostics,
+// and the LSP ergo/lintStatus notification of a client that opted in.
 type surfaceReports struct {
 	lint      compiler.LintResult
 	report    compiler.DiagnosticReport
@@ -81,9 +81,9 @@ func analyseOnEverySurface(t *testing.T, session *lintpacks.Session, target, tex
 
 	var in, lspOut bytes.Buffer
 	for _, message := range []any{
-		map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"capabilities": map[string]any{"experimental": map[string]any{"effraLintStatus": true}}}},
+		map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"capabilities": map[string]any{"experimental": map[string]any{"ergoLintStatus": true}}}},
 		map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}},
-		map[string]any{"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": map[string]any{"textDocument": map[string]any{"uri": uri, "languageId": "effra", "version": 1, "text": text}}},
+		map[string]any{"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": map[string]any{"textDocument": map[string]any{"uri": uri, "languageId": "ergo", "version": 1, "text": text}}},
 	} {
 		body, _ := json.Marshal(message)
 		fmt.Fprintf(&in, "Content-Length: %d\r\n\r\n%s", len(body), body)
@@ -105,7 +105,7 @@ func analyseOnEverySurface(t *testing.T, session *lintpacks.Session, target, tex
 		switch message.Method {
 		case "textDocument/publishDiagnostics":
 			out.published = message.Params.Diagnostics
-		case "effra/lintStatus":
+		case "ergo/lintStatus":
 			statuses++
 			if message.Params.URI != uri || message.Params.Version != 1 || message.Params.Revision != result.Revision {
 				t.Fatalf("lint status identity: %s", body)
@@ -114,7 +114,7 @@ func analyseOnEverySurface(t *testing.T, session *lintpacks.Session, target, tex
 		}
 	}
 	if statuses != 1 {
-		t.Fatalf("%d effra/lintStatus notifications", statuses)
+		t.Fatalf("%d ergo/lintStatus notifications", statuses)
 	}
 	return out
 }
@@ -140,7 +140,7 @@ func TestSuppressionStatesAgreeAcrossSurfaces(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	const directive = "// effra-lint-disable-next-line fixture/rename-main -- the entry point keeps its name\n"
+	const directive = "// ergo-lint-disable-next-line fixture/rename-main -- the entry point keeps its name\n"
 	const main = "effect fn main() -> void { void }\n"
 	// 50,000 statements exhaust the 100,000 lexical syntax facts while
 	// staying inside the LSP's 256 KiB document limit.
@@ -209,8 +209,8 @@ func TestSuppressionOfDisabledRuleSurvivesPackFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := load(t, lintpacks.Selection{Config: writeConfig(t, `{"version":1,"packs":[{"manifest":`+strconv.Quote(manifest)+`}],"rules":{"fixture/rename-main":"off"}}`)})
-	const off = "// effra-lint-disable-next-line fixture/rename-main -- the entry point keeps its name\n"
-	const requested = "// effra-lint-disable-next-line fixture/other -- reviewed\n"
+	const off = "// ergo-lint-disable-next-line fixture/rename-main -- the entry point keeps its name\n"
+	const requested = "// ergo-lint-disable-next-line fixture/other -- reviewed\n"
 	text := requested + "effect fn helper() -> void { void }\n" + off + "effect fn main() -> void { void }\n"
 	got := analyseOnEverySurface(t, session, "go", text)
 	if len(got.lint.Packs) != 1 || got.lint.Packs[0].Failure == nil || got.lint.Packs[0].Failure.Code != lint.FailureCrashed {
@@ -235,9 +235,9 @@ func TestLintStatusNotificationIsOptIn(t *testing.T) {
 	_, snapshot := compile(t)
 	var in, out bytes.Buffer
 	for _, message := range []any{
-		map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"capabilities": map[string]any{"experimental": map[string]any{"effraLintStatus": false}}}},
+		map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"capabilities": map[string]any{"experimental": map[string]any{"ergoLintStatus": false}}}},
 		map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}},
-		map[string]any{"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": map[string]any{"textDocument": map[string]any{"uri": snapshot.URI, "languageId": "effra", "version": 1, "text": snapshot.Text}}},
+		map[string]any{"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": map[string]any{"textDocument": map[string]any{"uri": snapshot.URI, "languageId": "ergo", "version": 1, "text": snapshot.Text}}},
 	} {
 		body, _ := json.Marshal(message)
 		fmt.Fprintf(&in, "Content-Length: %d\r\n\r\n%s", len(body), body)

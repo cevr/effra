@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/receipt"
+	"ergo.local/prototype/internal/receipt"
 )
 
 // physicalRoot returns a temporary directory without symbolic links in its

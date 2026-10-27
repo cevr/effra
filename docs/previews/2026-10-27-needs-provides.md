@@ -2,7 +2,7 @@
 
 Labels: **Tested candidate** and **Proposed**. Supersedes the `uses` spelling of [the Go-shaped language preview](2026-10-27-go-sketch.md), which stays unchanged as the record of that day. Ticket: [#217](https://github.com/cevr/ergo/issues/217). Normative text: [grammar.md, Keywords](../spec/grammar.md#keywords) and [rows.md, Wire](../spec/rows.md#wire) rule 8.
 
-- **Tested candidate** snippets depend on branch `wf10/sweep` at commit `71fc9ab4`, which implements the parser, the formatter and the bridge refusals. Commands, run on that commit in a scratch directory with the manifest `{"edition": "2026"}`: `ef check`, `ef fmt --check` and `ef run`. Each snippet states its result. After the Ergo rename on the same branch ([2026-10-27-ergo.md](2026-10-27-ergo.md)), the binary is `ergo` and the manifest is `ergo.json`.
+- **Tested candidate** snippets depend on branch `wf10/sweep` at commit `71fc9ab4`, which implements the parser, the formatter and the bridge refusals. Commands, run on that commit in a scratch directory with the manifest `{"edition": "2026"}`: `ergo check`, `ergo fmt --check` and `ergo run`. Each snippet states its result. After the Ergo rename on the same branch ([2026-10-27-ergo.md](2026-10-27-ergo.md)), the binary is `ergo` and the manifest is `ergo.json`.
 - **Proposed** means the checking of a wire header, which [#196](https://github.com/cevr/ergo/issues/196) owns.
 
 ## What changed
@@ -20,7 +20,7 @@ One word now has one meaning. `uses` meant requirements on a signature and expos
 
 ## Tested candidate: a function that needs a capability
 
-`ef check` exits 0, `ef fmt --check` reports "already formatted", and `ef run` prints `o-1 paid`.
+`ergo check` exits 0, `ergo fmt --check` reports "already formatted", and `ergo run` prints `o-1 paid`.
 
 ```go
 package checkout
@@ -64,7 +64,7 @@ func main() needs Console {
 
 ## Tested candidate: a wire header, parsed and formatted
 
-`ef fmt` rewrites `wire App   provides Account,Invoice    needs Config,Clock{` to the header below, and `ef fmt --check` then reports "already formatted". `ef check` refuses both clauses with S109, "a wire's provides clause (checked by #196) is outside the implemented subset" at 3:10 and the same for `needs` at 3:36.
+`ergo fmt` rewrites `wire App   provides Account,Invoice    needs Config,Clock{` to the header below, and `ergo fmt --check` then reports "already formatted". `ergo check` refuses both clauses with S109, "a wire's provides clause (checked by #196) is outside the implemented subset" at 3:10 and the same for `needs` at 3:36.
 
 ```go
 package billing
@@ -84,7 +84,7 @@ Designed in [rows.md](../spec/rows.md#wire) rule 8; checked by #196.
 
 ## Tested candidate: the old spelling gets a repair
 
-`ef check` and `ef fmt` both report S001 at 3:13, spanning the `uses` token: "`uses` is now `needs`". `ef fmt` exits 2 and leaves the file unchanged.
+`ergo check` and `ergo fmt` both report S001 at 3:13, spanning the `uses` token: "`uses` is now `needs`". `ergo fmt` exits 2 and leaves the file unchanged.
 
 ```text
 package checkout

@@ -57,7 +57,7 @@ func TestGoBackendConformance(t *testing.T) {
 	if err = application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
-	if err = os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0644); err != nil {
+	if err = os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module ergo.generated\n\ngo 1.27\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	program := filepath.Join(dir, "main.go")
@@ -66,7 +66,7 @@ func TestGoBackendConformance(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertions := `package main
-import("testing";er "effra.generated/runtime")
+import("testing";er "ergo.generated/runtime")
 
 func TestGeneratedSemantics(t *testing.T) {
  er.Run(func(fc *er.FiberContext)er.Exit[struct{}]{
@@ -146,7 +146,7 @@ func runGoCommand(dir string, args ...string) ([]byte, error) {
 	return command.CombinedOutput()
 }
 
-// generatedGoEnvironment builds generated modules as `ef build` does, with
+// generatedGoEnvironment builds generated modules as `ergo build` does, with
 // -trimpath. Each test writes its module to a fresh temporary directory;
 // without -trimpath that directory is part of every package's build key, so
 // the identical generated runtime recompiled for every test and every run.

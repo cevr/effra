@@ -1,3 +1,3 @@
-module effra.local/prototype
+module ergo.local/prototype
 
 go 1.27

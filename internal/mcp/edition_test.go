@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/edition"
+	"ergo.local/prototype/internal/edition"
 )
 
 // serveCalls runs one session that initializes and then sends each tool
@@ -76,9 +76,9 @@ func TestProjectEditionTool(t *testing.T) {
 	}
 	write("go.mod", "module workspace\n")
 	write("main.ef", "effect fn main() -> void { void }\n")
-	write("new/effra.json", `{"edition":"2026"}`)
+	write("new/ergo.json", `{"edition":"2026"}`)
 	write("new/main.ef", "package p\n")
-	write("bad/effra.json", `{"edition":"2099"}`)
+	write("bad/ergo.json", `{"edition":"2099"}`)
 	write("bad/main.ef", "package p\n")
 
 	// The tool is listed with its schema.
@@ -175,7 +175,7 @@ func TestCodeFormatFollowsTheEdition(t *testing.T) {
 	for rel, text := range map[string]string{
 		"go.mod":           "module workspace\n",
 		"legacy.ef":        "fn ok() -> string { \"ok\" }\n",
-		"new/effra.json":   `{"edition":"2026"}`,
+		"new/ergo.json":    `{"edition":"2026"}`,
 		"new/main.ef":      unformatted,
 		"new/malformed.ef": "package main\n\nfunc main() {\n\tx := )\n}\n",
 	} {
@@ -202,13 +202,13 @@ func TestCodeFormatFollowsTheEdition(t *testing.T) {
 		}
 		return result["structuredContent"].(map[string]any)
 	}
-	if got := structured(0); got["text"] != formatted || got["formatterVersion"] != "effra-2026/formatter-1" || got["changed"] != true {
+	if got := structured(0); got["text"] != formatted || got["formatterVersion"] != "ergo-2026/formatter-1" || got["changed"] != true {
 		t.Fatalf("2026 file: %v", got)
 	}
 	if text, isError := toolText(t, responses[1]); !isError || !strings.HasPrefix(text, "source cannot be formatted: S001 at 4:7: ") {
 		t.Fatalf("2026 syntax error: %q (error %v)", text, isError)
 	}
-	if got := structured(2); got["formatterVersion"] == "effra-2026/formatter-1" {
+	if got := structured(2); got["formatterVersion"] == "ergo-2026/formatter-1" {
 		t.Fatalf("legacy file used the 2026 formatter: %v", got)
 	}
 	// A source buffer has no directory and stays legacy: the legacy

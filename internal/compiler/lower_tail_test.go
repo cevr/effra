@@ -181,7 +181,7 @@ func (s *Symbol) function(t *testing.T, r *Result) *Function {
 	return nil
 }
 
-const tailVoidAndDataSource = `import Data "effra/data"
+const tailVoidAndDataSource = `import Data "ergo/data"
 
 fn pick(first: Data.Option<string>, second: Data.Option<string>, again: bool) -> string {
     if again {

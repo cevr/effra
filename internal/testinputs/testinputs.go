@@ -35,7 +35,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/testinputs/testenv"
+	"ergo.local/prototype/internal/testinputs/testenv"
 )
 
 // ToolDigest is the variable through which the gate passes a digest of the

@@ -56,7 +56,7 @@ func runSession(t *testing.T, calls ...any) ([]map[string]any, error) {
 func initialize() any  { return call("initialize", map[string]any{}, 1) }
 func initialized() any { return call("initialized", map[string]any{}, nil) }
 func open(uri, text string, version int) any {
-	return call("textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": uri, "languageId": "effra", "version": version, "text": text}}, nil)
+	return call("textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": uri, "languageId": "ergo", "version": version, "text": text}}, nil)
 }
 func change(uri, text string, version int) any {
 	return call("textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": uri, "version": version}, "contentChanges": []any{map[string]any{"text": text}}}, nil)
@@ -67,7 +67,7 @@ func closeDoc(uri string) any {
 func shutdown() any { return call("shutdown", nil, 2) }
 
 func TestOrderedDocumentsAndReopen(t *testing.T) {
-	uri := "file:///tmp/effra-unsaved.ef"
+	uri := "file:///tmp/ergo-unsaved.ef"
 	messages, err := runSession(t, initialize(), initialized(), open(uri, "fn bad() -> string { true }", 7), change(uri, "fn ok() -> string { \"ok\" }", 8), change(uri, "fn bad() -> string { false }", 7), closeDoc(uri), open(uri, "fn bad() -> string { false }", 1), shutdown(), call("exit", nil, nil))
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +134,7 @@ func TestAdmissionLimitsReleaseAndOperationalFailure(t *testing.T) {
 	s := session{out: io.Discard, target: "go", phase: 2, documents: map[string]document{}}
 	for i := 0; i < MaxDocuments; i++ {
 		req := request{Method: "textDocument/didOpen"}
-		b, _ := json.Marshal(map[string]any{"textDocument": map[string]any{"uri": "file:///tmp/d" + strings.Repeat("x", i) + ".ef", "languageId": "effra", "version": 1, "text": ""}})
+		b, _ := json.Marshal(map[string]any{"textDocument": map[string]any{"uri": "file:///tmp/d" + strings.Repeat("x", i) + ".ef", "languageId": "ergo", "version": 1, "text": ""}})
 		req.Params = b
 		if err := s.synchronize(req); err != nil {
 			t.Fatal(err)
@@ -143,14 +143,14 @@ func TestAdmissionLimitsReleaseAndOperationalFailure(t *testing.T) {
 	var out bytes.Buffer
 	s.out = &out
 	req := request{Method: "textDocument/didOpen"}
-	req.Params, _ = json.Marshal(map[string]any{"textDocument": map[string]any{"uri": "file:///tmp/overflow.ef", "languageId": "effra", "version": 1, "text": ""}})
+	req.Params, _ = json.Marshal(map[string]any{"textDocument": map[string]any{"uri": "file:///tmp/overflow.ef", "languageId": "ergo", "version": 1, "text": ""}})
 	if err := s.synchronize(req); err != nil {
 		t.Fatal(err)
 	}
 	if len(s.documents) != MaxDocuments || !strings.Contains(out.String(), "window/logMessage") {
 		t.Fatal("count limit failed")
 	}
-	messages, err := runSession(t, initialize(), initialized(), open("file:///tmp/failure.ef", "import go missing \"effra.invalid/missing\"\n", 1), shutdown())
+	messages, err := runSession(t, initialize(), initialized(), open("file:///tmp/failure.ef", "import go missing \"ergo.invalid/missing\"\n", 1), shutdown())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -29,16 +29,16 @@ type bundledDeclaration struct {
 }
 
 var bundledIndex = map[string]map[string]bundledDeclaration{
-	"effra/functions":   {"call": {Source: "bundled/functions/call.ef"}, "identity": {Source: "bundled/functions/identity.ef"}, "forwardFile": {Source: "bundled/functions/forward-file.ef"}, "suffixed": {Source: "bundled/functions/suffixed.ef"}},
-	"effra/conversions": {"Codec": {Source: "bundled/conversions/codec.ef"}, "witness": {Source: "bundled/conversions/witness.ef", Dependencies: []string{"Codec"}}},
-	"effra/data":        {"Option": {Source: "bundled/data/option.ef"}, "Result": {Source: "bundled/data/result.ef"}},
-	"effra/constants":   {"defaultSuffix": {Source: "bundled/constants/default-suffix.ef"}},
-	"effra/json":        {"codec": {Derivation: jsonCodecDerivation}},
-	i64TextModule:       {"format": {Source: "bundled/i64/format.ef", Intrinsic: i64FormatOp}, "parse": {Source: "bundled/i64/parse.ef", Intrinsic: i64ParseOp}},
+	"ergo/functions":   {"call": {Source: "bundled/functions/call.ef"}, "identity": {Source: "bundled/functions/identity.ef"}, "forwardFile": {Source: "bundled/functions/forward-file.ef"}, "suffixed": {Source: "bundled/functions/suffixed.ef"}},
+	"ergo/conversions": {"Codec": {Source: "bundled/conversions/codec.ef"}, "witness": {Source: "bundled/conversions/witness.ef", Dependencies: []string{"Codec"}}},
+	"ergo/data":        {"Option": {Source: "bundled/data/option.ef"}, "Result": {Source: "bundled/data/result.ef"}},
+	"ergo/constants":   {"defaultSuffix": {Source: "bundled/constants/default-suffix.ef"}},
+	"ergo/json":        {"codec": {Derivation: jsonCodecDerivation}},
+	i64TextModule:      {"format": {Source: "bundled/i64/format.ef", Intrinsic: i64FormatOp}, "parse": {Source: "bundled/i64/parse.ef", Intrinsic: i64ParseOp}},
 }
 
 const bundledInterfaceVersion = "1"
-const SemanticProducerIdentity = "effra/checker-abi-10/bundled-interface-5"
+const SemanticProducerIdentity = "ergo/checker-abi-10/bundled-interface-5"
 const maxBundledDeclarations = 256
 const maxBundledReferences = 4096
 const maxBundledSourceBytes = 1 << 20

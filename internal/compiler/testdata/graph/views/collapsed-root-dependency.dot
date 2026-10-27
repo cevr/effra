@@ -1,4 +1,4 @@
-digraph "effra-graph:dependency:844ec8bd50b85b7f6e39964833478d00" {
+digraph "ergo-graph:dependency:0467be505538b7a6b29db474b7faaa03" {
   rankdir=LR;
   n1 [label="call @ 4:49", id="expression:expression:function:main:210:run:214:call"];
   n2 [label="run @ 4:45", id="expression:function:main:210:run"];

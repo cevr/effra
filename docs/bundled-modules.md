@@ -1,7 +1,7 @@
 # Compiler-distributed modules
 
 Effra admits explicit portable imports from a finite compiler distribution.
-`import Fns "effra/functions"` resolves the ordinary `Fns.call` forwarding
+`import Fns "ergo/functions"` resolves the ordinary `Fns.call` forwarding
 function, the pure `Fns.identity` function, the managed callback forwarding
 function `Fns.forwardFile`, and `Fns.suffixed(input, suffix = "!")`, whose
 constant default is bound at each caller that omits it (see
@@ -47,7 +47,7 @@ summaries must match the admitted transport. Borrowing and acquisition remain
 distinct through `Fns.forwardFile`; callback forwarding does not grant an escape
 from a closing scope. This boundary makes no cache-performance claim.
 
-The finite distributed `effra/conversions` module also provides first-order
+The finite distributed `ergo/conversions` module also provides first-order
 record-template `Codec` data and the source-backed `witness` factory described
 in [the bundled-interface contract](specs/bundled-interfaces.md). Witness
 construction is checked ordinary data construction; it does not implement
@@ -57,11 +57,11 @@ explanatory output and is never admitted as executable ownership proof.
 
 ## Decimal i64 text
 
-The distributed `effra/i64` module converts between `i64` and decimal text and
+The distributed `ergo/i64` module converts between `i64` and decimal text and
 provides the `I64ParseFailure` failure:
 
 ```rust
-import I64 "effra/i64"
+import I64 "ergo/i64"
 
 effect fn quantity(text: string) -> i64 raises { I64ParseFailure } {
     run I64.parse(text)
@@ -85,12 +85,12 @@ summaries treat them as ordinary bundled functions. Native output imports
 
 ## Structural JSON codecs
 
-The distributed `effra/json` module provides the `codec` derivation and the
+The distributed `ergo/json` module provides the `codec` derivation and the
 `JsonDecodeFailure` and `JsonEncodeFailure` failures. A derive declaration
 names an explicit witness:
 
 ```
-import Json "effra/json"
+import Json "ergo/json"
 
 derive customerJson = Json.codec<Customer>(maxBodyBytes: 1024, maxDepth: 1)
 ```
@@ -102,7 +102,7 @@ They are called, passed and inspected like any other function; structural
 derivation adds no service requirement. Several witnesses may derive one
 type, and witnesses with the same type and bounds share one plan.
 
-Derivation follows the `effra/json-structural-1` profile: strings, booleans,
+Derivation follows the `ergo/json-structural-1` profile: strings, booleans,
 `void` as `null`, full-range `i64` as a decimal string, first-order records
 and closed payload enums discriminated by `_tag`. Excess properties are
 ignored, the first issue stops decoding, and output follows declared field
@@ -119,7 +119,7 @@ only of a [failure witness](#failure-witnesses-and-typed-endpoints), which
 must name a failure declared in its own module. Plans are limited to 4096
 nodes and 65536 fields and variants.
 
-`ef check` and MCP `project.check` report each witness under `codecs`, with
+`ergo check` and MCP `project.check` report each witness under `codecs`, with
 its domain and wire types and each direction's function, failures and
 requirements, and its plan under `codecPlans` with stable node identities. A
 native application retains a plan, its adapters and the runtime `codec`
@@ -240,9 +240,9 @@ composition and a configuration caller.
 
 ## Machine decisions (removed)
 
-The `effra/machines` module and its `Step<S, O>` enum are removed. Machine
+The `ergo/machines` module and its `Step<S, O>` enum are removed. Machine
 decisions are syntax: a step or completion function returns the predeclared
 `decision<S, O>` and writes `enter e`, `stay e`, `ignore`, `reject` or
 `done e` (see [decisions](specs/state-machines.md#decisions)). Importing
-`effra/machines` is the ordinary unknown-bundled-module diagnostic (EF126),
+`ergo/machines` is the ordinary unknown-bundled-module diagnostic (EF126),
 with a help that names the rewrite. A user enum named `Step` is ordinary data.

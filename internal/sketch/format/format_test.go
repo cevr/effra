@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/sketch/sketchtest"
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/sketchtest"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // check asserts the formatter's properties on one parseable input: the

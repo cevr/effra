@@ -64,7 +64,7 @@ func TestLintProvisionAndTypeAt(t *testing.T) {
 func TestLintReasonedNextLineSuppressions(t *testing.T) {
 	source := `effect fn task() -> string { "ok" }
 effect fn main() -> void {
-// effra-lint-disable-next-line unused-recipe -- intentionally deferred hook
+// ergo-lint-disable-next-line unused-recipe -- intentionally deferred hook
 let forgotten = task()
 let alsoForgotten = task();
 void}`
@@ -90,7 +90,7 @@ void}`
 
 	stringDirective := `effect fn task() -> string { "ok" }
 effect fn main() -> void {
-let text = "// effra-lint-disable-next-line unused-recipe -- this is data"
+let text = "// ergo-lint-disable-next-line unused-recipe -- this is data"
 let forgotten = task();
 void}`
 	stringResult := Compile(stringDirective)
@@ -103,7 +103,7 @@ void}`
 	}
 
 	sameLine := `effect fn main() -> void {
-// effra-lint-disable-next-line redundant-provision -- both nested boundaries are deliberate
+// ergo-lint-disable-next-line redundant-provision -- both nested boundaries are deliberate
 run Console.log("x").provide<Console>(Stdout).provide<Console>(Stdout)
 }`
 	sameLineResult := Compile(sameLine)
@@ -125,7 +125,7 @@ func TestLintSuppressionValidation(t *testing.T) {
 		{
 			"unknown rule",
 			`effect fn main() -> void {
-// effra-lint-disable-next-line future-rule -- waiting for a future rule
+// ergo-lint-disable-next-line future-rule -- waiting for a future rule
 void}`,
 			"unknown lint rule future-rule",
 			2,
@@ -134,7 +134,7 @@ void}`,
 			"missing reason",
 			`effect fn task() -> string { "ok" }
 effect fn main() -> void {
-// effra-lint-disable-next-line unused-recipe
+// ergo-lint-disable-next-line unused-recipe
 let forgotten = task();
 void}`,
 			"must include a non-empty reason",
@@ -143,7 +143,7 @@ void}`,
 		{
 			"multiple rules",
 			`effect fn main() -> void {
-// effra-lint-disable-next-line unused-recipe redundant-provision -- one target is required
+// ergo-lint-disable-next-line unused-recipe redundant-provision -- one target is required
 void}`,
 			"must name exactly one lint rule",
 			2,
@@ -151,7 +151,7 @@ void}`,
 		{
 			"unused",
 			`effect fn main() -> void {
-// effra-lint-disable-next-line unused-recipe -- no advice is on the next line
+// ergo-lint-disable-next-line unused-recipe -- no advice is on the next line
 void}`,
 			"unused lint suppression",
 			2,
@@ -191,7 +191,7 @@ void}`,
 
 func TestLintSuppressionCannotHideCompilerDiagnostics(t *testing.T) {
 	source := `effect fn main() -> void {
-// effra-lint-disable-next-line unused-recipe -- this must never hide a compiler error
+// ergo-lint-disable-next-line unused-recipe -- this must never hide a compiler error
 run Console.log("x")
 }`
 	r := Compile(source)
@@ -343,7 +343,7 @@ func TestUnusedGoImportAdviceKeepsInitialization(t *testing.T) {
 			t.Fatalf("EFL003 rule description: %+v", rule)
 		}
 	}
-	suppressed := Compile("// effra-lint-disable-next-line unused-go-import -- the package registers a driver\n" + source)
+	suppressed := Compile("// ergo-lint-disable-next-line unused-go-import -- the package registers a driver\n" + source)
 	if lint := suppressed.Lint(true); !lint.LintPassed || len(lint.LintDiagnostics) != 0 {
 		t.Fatalf("suppressed EFL003: %+v", lint)
 	}

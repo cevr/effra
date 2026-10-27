@@ -10,7 +10,7 @@ import (
 	"testing"
 	"unicode/utf16"
 
-	"effra.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/compiler"
 )
 
 // utf16Column counts the UTF-16 code units of text, independently of the
@@ -118,7 +118,7 @@ func TestFormat(t *testing.T) {
 	if err != nil || again.Changed || again.Text != want {
 		t.Fatalf("formatted text changed again: %+v, %v", again, err)
 	}
-	if FormatterIdentity != "effra-2026/formatter-1" {
+	if FormatterIdentity != "ergo-2026/formatter-1" {
 		t.Fatalf("identity %q", FormatterIdentity)
 	}
 

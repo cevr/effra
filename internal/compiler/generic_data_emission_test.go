@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const bundledDataExecutable = `import Data "effra/data"
+const bundledDataExecutable = `import Data "ergo/data"
 record User {name:string}
 record Missing {message:string}
 fn present()->Data.Option<User>{Data.Option.Some {value:User {name:"Ada"}}}
@@ -35,7 +35,7 @@ func TestBundledGenericDataAdmissionAndExecution(t *testing.T) {
 	if !r.Checked || len(r.BundledInterfaces) != 1 || len(r.Program.BundledTemplates) != 2 {
 		t.Fatal("go", r.Diagnostics, r.BundledInterfaces)
 	}
-	dto := r.projector.admittedSummaries["effra/data"]
+	dto := r.projector.admittedSummaries["ergo/data"]
 	if len(dto.Templates) != 2 || dto.Templates[0].Kind != "enum" || len(dto.Templates[0].Variants) != 2 {
 		t.Fatal("ordinary closed enum transport absent", dto.Templates)
 	}
@@ -201,7 +201,7 @@ func runGenericDataNative(t *testing.T, source, expected string) {
 	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
-	for name, content := range map[string]string{"go.mod": "module effra.generated\n\ngo 1.27\n", "main.go": generated} {
+	for name, content := range map[string]string{"go.mod": "module ergo.generated\n\ngo 1.27\n", "main.go": generated} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
 			t.Fatal(err)
 		}

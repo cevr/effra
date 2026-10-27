@@ -18,7 +18,7 @@ effect fn program() -> void raises { IoError } uses { Clock, Files, Runtime, Con
         let text = run scopedRead()
         run Console.log(text)
         let outcome = run worker().timeout(1).catch<Timeout>(void)
-        let home = run Env.get("EFFRA_DEMO_LABEL")
+        let home = run Env.get("ERGO_DEMO_LABEL")
         run Console.log("label: " + home)
     }
 }

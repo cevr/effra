@@ -11,9 +11,9 @@
       "parent": null,
       "state": "open",
       "stateReason": null,
-      "title": "Effra: Effect for Go",
-      "updatedAt": "2026-10-26T23:18:16Z",
-      "url": "https://github.com/cevr/effra/issues/1"
+      "title": "Ergo: Effect's guarantees, checked by the compiler, in plain Go",
+      "updatedAt": "2026-10-27T16:24:51Z",
+      "url": "https://github.com/cevr/ergo/issues/1"
     },
     {
       "assignees": [],
@@ -29,7 +29,7 @@
       "stateReason": null,
       "title": "Machines in the sketch (rollup)",
       "updatedAt": "2026-10-26T23:09:54Z",
-      "url": "https://github.com/cevr/effra/issues/2"
+      "url": "https://github.com/cevr/ergo/issues/2"
     },
     {
       "assignees": [],
@@ -48,7 +48,7 @@
       "stateReason": null,
       "title": "Sketch `machine`: checker, plan value, direct step lowering",
       "updatedAt": "2026-10-26T23:20:38Z",
-      "url": "https://github.com/cevr/effra/issues/3"
+      "url": "https://github.com/cevr/ergo/issues/3"
     },
     {
       "assignees": [],
@@ -68,7 +68,7 @@
       "stateReason": null,
       "title": "Second machine provider: the virtual test runtime runs the same plans",
       "updatedAt": "2026-10-26T23:09:57Z",
-      "url": "https://github.com/cevr/effra/issues/4"
+      "url": "https://github.com/cevr/ergo/issues/4"
     },
     {
       "assignees": [],
@@ -83,7 +83,7 @@
       "stateReason": "completed",
       "title": "Does explicit run and contract inspection make the tiny language useful?",
       "updatedAt": "2026-10-08T18:45:47Z",
-      "url": "https://github.com/cevr/effra/issues/5"
+      "url": "https://github.com/cevr/ergo/issues/5"
     },
     {
       "assignees": [],
@@ -100,7 +100,7 @@
       "stateReason": "completed",
       "title": "What cancellation and resource ownership contract must both targets preserve?",
       "updatedAt": "2026-10-26T21:15:03Z",
-      "url": "https://github.com/cevr/effra/issues/6"
+      "url": "https://github.com/cevr/ergo/issues/6"
     },
     {
       "assignees": [],
@@ -117,7 +117,7 @@
       "stateReason": null,
       "title": "Package boundary and interface summary for sketch packages lowered to Go",
       "updatedAt": "2026-10-26T23:09:59Z",
-      "url": "https://github.com/cevr/effra/issues/7"
+      "url": "https://github.com/cevr/ergo/issues/7"
     },
     {
       "assignees": [],
@@ -132,7 +132,7 @@
       "stateReason": "completed",
       "title": "What shared semantics make a Go backend credible?",
       "updatedAt": "2026-10-26T21:14:45Z",
-      "url": "https://github.com/cevr/effra/issues/8"
+      "url": "https://github.com/cevr/ergo/issues/8"
     },
     {
       "assignees": [],
@@ -147,7 +147,7 @@
       "stateReason": "completed",
       "title": "How can Go and TypeScript imports avoid binding boilerplate while exposing trust?",
       "updatedAt": "2026-10-26T21:15:06Z",
-      "url": "https://github.com/cevr/effra/issues/9"
+      "url": "https://github.com/cevr/ergo/issues/9"
     },
     {
       "assignees": [],
@@ -167,7 +167,7 @@
       "stateReason": null,
       "title": "Actor inspection and adoption examples (Go)",
       "updatedAt": "2026-10-26T23:10:01Z",
-      "url": "https://github.com/cevr/effra/issues/10"
+      "url": "https://github.com/cevr/ergo/issues/10"
     },
     {
       "assignees": [],
@@ -188,7 +188,7 @@
       "stateReason": null,
       "title": "Actor protocol: typed Send/Ask from a machine or interface",
       "updatedAt": "2026-10-26T23:10:02Z",
-      "url": "https://github.com/cevr/effra/issues/11"
+      "url": "https://github.com/cevr/ergo/issues/11"
     },
     {
       "assignees": [],
@@ -204,7 +204,7 @@
       "stateReason": "not_planned",
       "title": "Restricted ordinary actor receive loops",
       "updatedAt": "2026-10-26T23:21:45Z",
-      "url": "https://github.com/cevr/effra/issues/12"
+      "url": "https://github.com/cevr/ergo/issues/12"
     },
     {
       "assignees": [],
@@ -225,7 +225,7 @@
       "stateReason": null,
       "title": "actor runtime: bounded mailbox, FIFO, cleanup before reply (Go)",
       "updatedAt": "2026-10-26T23:10:04Z",
-      "url": "https://github.com/cevr/effra/issues/13"
+      "url": "https://github.com/cevr/ergo/issues/13"
     },
     {
       "assignees": [],
@@ -243,7 +243,7 @@
       "stateReason": null,
       "title": "Small executables from direct-Go lowering (rollup)",
       "updatedAt": "2026-10-26T23:19:08Z",
-      "url": "https://github.com/cevr/effra/issues/14"
+      "url": "https://github.com/cevr/ergo/issues/14"
     },
     {
       "assignees": [],
@@ -261,7 +261,7 @@
       "stateReason": "not_planned",
       "title": "Implement the accepted capability and lawful-runtime synthesis",
       "updatedAt": "2026-10-26T23:21:48Z",
-      "url": "https://github.com/cevr/effra/issues/15"
+      "url": "https://github.com/cevr/ergo/issues/15"
     },
     {
       "assignees": [],
@@ -279,7 +279,7 @@
       "stateReason": "not_planned",
       "title": "Owned client lifetime bridge for view and foreign components (VW4)",
       "updatedAt": "2026-10-26T23:21:51Z",
-      "url": "https://github.com/cevr/effra/issues/16"
+      "url": "https://github.com/cevr/ergo/issues/16"
     },
     {
       "assignees": [],
@@ -295,7 +295,7 @@
       "stateReason": "completed",
       "title": "Versioned custom lint rules and shared rule packs",
       "updatedAt": "2026-10-09T15:10:54Z",
-      "url": "https://github.com/cevr/effra/issues/17"
+      "url": "https://github.com/cevr/ergo/issues/17"
     },
     {
       "assignees": [],
@@ -313,7 +313,7 @@
       "stateReason": "completed",
       "title": "Shared formatter through versioned LSP documents",
       "updatedAt": "2026-10-09T15:06:49Z",
-      "url": "https://github.com/cevr/effra/issues/18"
+      "url": "https://github.com/cevr/ergo/issues/18"
     },
     {
       "assignees": [],
@@ -332,7 +332,7 @@
       "stateReason": "completed",
       "title": "Payload-aware typed recovery and outcomes",
       "updatedAt": "2026-10-09T19:21:28Z",
-      "url": "https://github.com/cevr/effra/issues/19"
+      "url": "https://github.com/cevr/ergo/issues/19"
     },
     {
       "assignees": [],
@@ -348,7 +348,7 @@
       "stateReason": "completed",
       "title": "Canonical comment-preserving formatter with CLI and MCP",
       "updatedAt": "2026-10-08T18:45:51Z",
-      "url": "https://github.com/cevr/effra/issues/20"
+      "url": "https://github.com/cevr/ergo/issues/20"
     },
     {
       "assignees": [],
@@ -370,7 +370,7 @@
       "stateReason": "completed",
       "title": "Production fixture and tool conformance",
       "updatedAt": "2026-10-08T18:45:56Z",
-      "url": "https://github.com/cevr/effra/issues/21"
+      "url": "https://github.com/cevr/ergo/issues/21"
     },
     {
       "assignees": [],
@@ -386,7 +386,7 @@
       "stateReason": "completed",
       "title": "Closed application data and exhaustive interpretation",
       "updatedAt": "2026-10-08T18:46:00Z",
-      "url": "https://github.com/cevr/effra/issues/22"
+      "url": "https://github.com/cevr/ergo/issues/22"
     },
     {
       "assignees": [],
@@ -402,7 +402,7 @@
       "stateReason": "completed",
       "title": "Reasoned semantic lint suppression",
       "updatedAt": "2026-10-08T18:46:03Z",
-      "url": "https://github.com/cevr/effra/issues/23"
+      "url": "https://github.com/cevr/ergo/issues/23"
     },
     {
       "assignees": [],
@@ -421,7 +421,7 @@
       "stateReason": "completed",
       "title": "Reject proven closed-owner handle escape",
       "updatedAt": "2026-10-08T18:46:07Z",
-      "url": "https://github.com/cevr/effra/issues/24"
+      "url": "https://github.com/cevr/ergo/issues/24"
     },
     {
       "assignees": [],
@@ -439,7 +439,7 @@
       "stateReason": "completed",
       "title": "Dependency-capturing provider composition",
       "updatedAt": "2026-10-08T18:46:11Z",
-      "url": "https://github.com/cevr/effra/issues/25"
+      "url": "https://github.com/cevr/ergo/issues/25"
     },
     {
       "assignees": [],
@@ -455,7 +455,7 @@
       "stateReason": "completed",
       "title": "Production foundation implementation",
       "updatedAt": "2026-10-08T18:46:15Z",
-      "url": "https://github.com/cevr/effra/issues/26"
+      "url": "https://github.com/cevr/ergo/issues/26"
     },
     {
       "assignees": [],
@@ -471,7 +471,7 @@
       "stateReason": "completed",
       "title": "Causal synchronization and scheduler-backed tests",
       "updatedAt": "2026-10-08T18:46:19Z",
-      "url": "https://github.com/cevr/effra/issues/27"
+      "url": "https://github.com/cevr/ergo/issues/27"
     },
     {
       "assignees": [],
@@ -492,7 +492,7 @@
       "stateReason": "not_planned",
       "title": "Complete 34-directory framework adoption corpus",
       "updatedAt": "2026-10-26T23:21:53Z",
-      "url": "https://github.com/cevr/effra/issues/28"
+      "url": "https://github.com/cevr/ergo/issues/28"
     },
     {
       "assignees": [],
@@ -510,7 +510,7 @@
       "stateReason": "completed",
       "title": "Isolated owned native generated modules",
       "updatedAt": "2026-10-08T18:46:23Z",
-      "url": "https://github.com/cevr/effra/issues/29"
+      "url": "https://github.com/cevr/ergo/issues/29"
     },
     {
       "assignees": [],
@@ -528,7 +528,7 @@
       "stateReason": "completed",
       "title": "Reusable generic data and product matching",
       "updatedAt": "2026-10-09T15:10:50Z",
-      "url": "https://github.com/cevr/effra/issues/30"
+      "url": "https://github.com/cevr/ergo/issues/30"
     },
     {
       "assignees": [],
@@ -547,7 +547,7 @@
       "stateReason": null,
       "title": "Call sketch code from Go; Go callbacks into sketch",
       "updatedAt": "2026-10-26T23:11:13Z",
-      "url": "https://github.com/cevr/effra/issues/31"
+      "url": "https://github.com/cevr/ergo/issues/31"
     },
     {
       "assignees": [],
@@ -565,7 +565,7 @@
       "stateReason": null,
       "title": "Go interop: `import go`, `go.Foreign`, typed bindings (rollup)",
       "updatedAt": "2026-10-26T23:11:15Z",
-      "url": "https://github.com/cevr/effra/issues/32"
+      "url": "https://github.com/cevr/ergo/issues/32"
     },
     {
       "assignees": [],
@@ -583,7 +583,7 @@
       "stateReason": "completed",
       "title": "Native Go receiver methods and interface assignment",
       "updatedAt": "2026-10-09T15:06:46Z",
-      "url": "https://github.com/cevr/effra/issues/33"
+      "url": "https://github.com/cevr/ergo/issues/33"
     },
     {
       "assignees": [],
@@ -602,7 +602,7 @@
       "stateReason": null,
       "title": "Go host calls: context cancellation, uninterruptible host waits, resource borrowing (G8)",
       "updatedAt": "2026-10-26T23:11:17Z",
-      "url": "https://github.com/cevr/effra/issues/34"
+      "url": "https://github.com/cevr/ergo/issues/34"
     },
     {
       "assignees": [],
@@ -621,7 +621,7 @@
       "stateReason": "completed",
       "title": "Canonical Go host types and complete return tuples",
       "updatedAt": "2026-10-09T15:06:42Z",
-      "url": "https://github.com/cevr/effra/issues/35"
+      "url": "https://github.com/cevr/ergo/issues/35"
     },
     {
       "assignees": [],
@@ -639,7 +639,7 @@
       "stateReason": "not_planned",
       "title": "One-to-one JSX view notation (VW6)",
       "updatedAt": "2026-10-26T23:21:55Z",
-      "url": "https://github.com/cevr/effra/issues/36"
+      "url": "https://github.com/cevr/ergo/issues/36"
     },
     {
       "assignees": [],
@@ -659,7 +659,7 @@
       "stateReason": null,
       "title": "`wire` and `with`: graph, effectful constructors, build scope (rollup)",
       "updatedAt": "2026-10-26T23:11:19Z",
-      "url": "https://github.com/cevr/effra/issues/37"
+      "url": "https://github.com/cevr/ergo/issues/37"
     },
     {
       "assignees": [],
@@ -680,7 +680,7 @@
       "stateReason": null,
       "title": "LSP for the sketch: rows, footprints, consume points",
       "updatedAt": "2026-10-26T23:21:15Z",
-      "url": "https://github.com/cevr/effra/issues/38"
+      "url": "https://github.com/cevr/ergo/issues/38"
     },
     {
       "assignees": [],
@@ -701,7 +701,7 @@
       "stateReason": null,
       "title": "Effectful wire constructors and typed startup errors",
       "updatedAt": "2026-10-26T23:11:23Z",
-      "url": "https://github.com/cevr/effra/issues/39"
+      "url": "https://github.com/cevr/ergo/issues/39"
     },
     {
       "assignees": [],
@@ -719,7 +719,7 @@
       "stateReason": null,
       "title": "Parameterized wires, `fresh`, nested `with`",
       "updatedAt": "2026-10-26T23:11:25Z",
-      "url": "https://github.com/cevr/effra/issues/40"
+      "url": "https://github.com/cevr/ergo/issues/40"
     },
     {
       "assignees": [],
@@ -737,7 +737,7 @@
       "stateReason": "completed",
       "title": "Checked static layer plans and construction graphs",
       "updatedAt": "2026-10-09T15:06:40Z",
-      "url": "https://github.com/cevr/effra/issues/41"
+      "url": "https://github.com/cevr/ergo/issues/41"
     },
     {
       "assignees": [],
@@ -756,7 +756,7 @@
       "stateReason": null,
       "title": "Concurrent wire build and reverse-order rollback on `build.Scope`",
       "updatedAt": "2026-10-26T23:11:27Z",
-      "url": "https://github.com/cevr/effra/issues/42"
+      "url": "https://github.com/cevr/ergo/issues/42"
     },
     {
       "assignees": [],
@@ -775,7 +775,7 @@
       "stateReason": null,
       "title": "`ef inspect` for wire graphs",
       "updatedAt": "2026-10-26T23:11:29Z",
-      "url": "https://github.com/cevr/effra/issues/43"
+      "url": "https://github.com/cevr/ergo/issues/43"
     },
     {
       "assignees": [],
@@ -793,7 +793,7 @@
       "stateReason": "completed",
       "title": "Versioned LSP documents and shared diagnostics",
       "updatedAt": "2026-10-08T18:46:33Z",
-      "url": "https://github.com/cevr/effra/issues/44"
+      "url": "https://github.com/cevr/ergo/issues/44"
     },
     {
       "assignees": [],
@@ -815,7 +815,7 @@
       "stateReason": null,
       "title": "Machine inspection in `ef inspect` and MCP",
       "updatedAt": "2026-10-26T23:11:31Z",
-      "url": "https://github.com/cevr/effra/issues/45"
+      "url": "https://github.com/cevr/ergo/issues/45"
     },
     {
       "assignees": [],
@@ -835,7 +835,7 @@
       "stateReason": "completed",
       "title": "Canonical machine plans and transition checks",
       "updatedAt": "2026-10-12T07:10:10Z",
-      "url": "https://github.com/cevr/effra/issues/46"
+      "url": "https://github.com/cevr/ergo/issues/46"
     },
     {
       "assignees": [],
@@ -855,7 +855,7 @@
       "stateReason": "not_planned",
       "title": "Machine behavior on the shared owned actor runtime",
       "updatedAt": "2026-10-26T23:18:56Z",
-      "url": "https://github.com/cevr/effra/issues/47"
+      "url": "https://github.com/cevr/ergo/issues/47"
     },
     {
       "assignees": [],
@@ -875,7 +875,7 @@
       "stateReason": null,
       "title": "Measurement ledger against hand-written Go",
       "updatedAt": "2026-10-26T23:11:32Z",
-      "url": "https://github.com/cevr/effra/issues/48"
+      "url": "https://github.com/cevr/ergo/issues/48"
     },
     {
       "assignees": [
@@ -897,7 +897,7 @@
       "stateReason": null,
       "title": "std: `json` and codecs (wire forms by name, limits, round-trip laws)",
       "updatedAt": "2026-10-26T23:20:04Z",
-      "url": "https://github.com/cevr/effra/issues/49"
+      "url": "https://github.com/cevr/ergo/issues/49"
     },
     {
       "assignees": [],
@@ -917,7 +917,7 @@
       "stateReason": null,
       "title": "Direct-Go lowering of the sketch in the main compiler",
       "updatedAt": "2026-10-26T23:19:30Z",
-      "url": "https://github.com/cevr/effra/issues/50"
+      "url": "https://github.com/cevr/ergo/issues/50"
     },
     {
       "assignees": [],
@@ -939,7 +939,7 @@
       "stateReason": null,
       "title": "std: `http` (handlers, routes, client, limits)",
       "updatedAt": "2026-10-26T23:19:17Z",
-      "url": "https://github.com/cevr/effra/issues/51"
+      "url": "https://github.com/cevr/ergo/issues/51"
     },
     {
       "assignees": [],
@@ -958,7 +958,7 @@
       "stateReason": "completed",
       "title": "Bundled interfaces and typed function values",
       "updatedAt": "2026-10-09T15:06:37Z",
-      "url": "https://github.com/cevr/effra/issues/52"
+      "url": "https://github.com/cevr/ergo/issues/52"
     },
     {
       "assignees": [],
@@ -978,7 +978,7 @@
       "stateReason": null,
       "title": "std: `rpc` (typed unary RPC over `http` and `json`)",
       "updatedAt": "2026-10-26T23:12:54Z",
-      "url": "https://github.com/cevr/effra/issues/53"
+      "url": "https://github.com/cevr/ergo/issues/53"
     },
     {
       "assignees": [],
@@ -997,7 +997,7 @@
       "stateReason": "not_planned",
       "title": "Framework and server tool conformance",
       "updatedAt": "2026-10-26T23:19:00Z",
-      "url": "https://github.com/cevr/effra/issues/54"
+      "url": "https://github.com/cevr/ergo/issues/54"
     },
     {
       "assignees": [],
@@ -1015,7 +1015,7 @@
       "stateReason": "not_planned",
       "title": "Native codecs and typed server contracts",
       "updatedAt": "2026-10-26T23:21:58Z",
-      "url": "https://github.com/cevr/effra/issues/55"
+      "url": "https://github.com/cevr/ergo/issues/55"
     },
     {
       "assignees": [
@@ -1033,7 +1033,7 @@
       "stateReason": "completed",
       "title": "General numeric arithmetic and cross-target integer policy",
       "updatedAt": "2026-10-09T15:10:52Z",
-      "url": "https://github.com/cevr/effra/issues/56"
+      "url": "https://github.com/cevr/ergo/issues/56"
     },
     {
       "assignees": [],
@@ -1051,7 +1051,7 @@
       "stateReason": null,
       "title": "std: `actor` package (rollup)",
       "updatedAt": "2026-10-26T23:20:18Z",
-      "url": "https://github.com/cevr/effra/issues/57"
+      "url": "https://github.com/cevr/ergo/issues/57"
     },
     {
       "assignees": [],
@@ -1066,7 +1066,7 @@
       "stateReason": "completed",
       "title": "Which production patterns constrain the next foundation contracts?",
       "updatedAt": "2026-10-08T18:46:38Z",
-      "url": "https://github.com/cevr/effra/issues/58"
+      "url": "https://github.com/cevr/ergo/issues/58"
     },
     {
       "assignees": [],
@@ -1085,7 +1085,7 @@
       "stateReason": "completed",
       "title": "Selectable native runtime source modules",
       "updatedAt": "2026-10-08T18:46:42Z",
-      "url": "https://github.com/cevr/effra/issues/59"
+      "url": "https://github.com/cevr/ergo/issues/59"
     },
     {
       "assignees": [],
@@ -1101,7 +1101,7 @@
       "stateReason": "completed",
       "title": "Shared editor-grade diagnostics through CLI and MCP",
       "updatedAt": "2026-10-08T18:46:46Z",
-      "url": "https://github.com/cevr/effra/issues/60"
+      "url": "https://github.com/cevr/ergo/issues/60"
     },
     {
       "assignees": [],
@@ -1120,7 +1120,7 @@
       "stateReason": "completed",
       "title": "Complete canonical type and binding inspection",
       "updatedAt": "2026-10-09T17:13:06Z",
-      "url": "https://github.com/cevr/effra/issues/61"
+      "url": "https://github.com/cevr/ergo/issues/61"
     },
     {
       "assignees": [],
@@ -1144,7 +1144,7 @@
       "stateReason": null,
       "title": "Matched server performance against optimized Go",
       "updatedAt": "2026-10-26T23:12:35Z",
-      "url": "https://github.com/cevr/effra/issues/62"
+      "url": "https://github.com/cevr/ergo/issues/62"
     },
     {
       "assignees": [],
@@ -1165,7 +1165,7 @@
       "stateReason": null,
       "title": "std: channels, queues, pubsub and streams",
       "updatedAt": "2026-10-26T23:12:58Z",
-      "url": "https://github.com/cevr/effra/issues/64"
+      "url": "https://github.com/cevr/ergo/issues/64"
     },
     {
       "assignees": [],
@@ -1191,7 +1191,7 @@
       "stateReason": null,
       "title": "std: scope and resources (`build.Scope`, linear resources, finalizer causes)",
       "updatedAt": "2026-10-27T00:34:31Z",
-      "url": "https://github.com/cevr/effra/issues/65"
+      "url": "https://github.com/cevr/ergo/issues/65"
     },
     {
       "assignees": [],
@@ -1209,7 +1209,7 @@
       "stateReason": "completed",
       "title": "Bundled standard library capability and language contracts",
       "updatedAt": "2026-10-08T18:46:50Z",
-      "url": "https://github.com/cevr/effra/issues/66"
+      "url": "https://github.com/cevr/ergo/issues/66"
     },
     {
       "assignees": [],
@@ -1230,7 +1230,7 @@
       "stateReason": null,
       "title": "std: `config` and `Redacted`",
       "updatedAt": "2026-10-26T23:13:02Z",
-      "url": "https://github.com/cevr/effra/issues/67"
+      "url": "https://github.com/cevr/ergo/issues/67"
     },
     {
       "assignees": [],
@@ -1251,7 +1251,7 @@
       "stateReason": null,
       "title": "std: `batch`, cache and pool",
       "updatedAt": "2026-10-26T23:13:04Z",
-      "url": "https://github.com/cevr/effra/issues/68"
+      "url": "https://github.com/cevr/ergo/issues/68"
     },
     {
       "assignees": [],
@@ -1274,7 +1274,7 @@
       "stateReason": null,
       "title": "std: `trace`, `log` and `metric`",
       "updatedAt": "2026-10-26T23:13:06Z",
-      "url": "https://github.com/cevr/effra/issues/69"
+      "url": "https://github.com/cevr/ergo/issues/69"
     },
     {
       "assignees": [],
@@ -1290,7 +1290,7 @@
       "stateReason": "completed",
       "title": "Bound shared syntax traversal across developer tools",
       "updatedAt": "2026-10-08T18:46:54Z",
-      "url": "https://github.com/cevr/effra/issues/70"
+      "url": "https://github.com/cevr/ergo/issues/70"
     },
     {
       "assignees": [],
@@ -1309,7 +1309,7 @@
       "stateReason": "not_planned",
       "title": "TypeScript declaration projection and reverse imports (VW3)",
       "updatedAt": "2026-10-26T23:22:01Z",
-      "url": "https://github.com/cevr/effra/issues/71"
+      "url": "https://github.com/cevr/ergo/issues/71"
     },
     {
       "assignees": [],
@@ -1325,7 +1325,7 @@
       "stateReason": "completed",
       "title": "Pinned upstream tests and executable conformance mapping",
       "updatedAt": "2026-10-08T18:46:58Z",
-      "url": "https://github.com/cevr/effra/issues/72"
+      "url": "https://github.com/cevr/ergo/issues/72"
     },
     {
       "assignees": [
@@ -1342,7 +1342,7 @@
       "stateReason": "not_planned",
       "title": "Generalized run sequencing and checked userland binding",
       "updatedAt": "2026-10-26T21:14:47Z",
-      "url": "https://github.com/cevr/effra/issues/73"
+      "url": "https://github.com/cevr/ergo/issues/73"
     },
     {
       "assignees": [
@@ -1363,7 +1363,7 @@
       "stateReason": "completed",
       "title": "Constant-only parameter defaults and explicit call contracts",
       "updatedAt": "2026-10-09T18:01:52Z",
-      "url": "https://github.com/cevr/effra/issues/74"
+      "url": "https://github.com/cevr/ergo/issues/74"
     },
     {
       "assignees": [
@@ -1384,7 +1384,7 @@
       "stateReason": "completed",
       "title": "Direct JavaScript control-flow lowering with preserved effects",
       "updatedAt": "2026-10-09T18:01:50Z",
-      "url": "https://github.com/cevr/effra/issues/75"
+      "url": "https://github.com/cevr/ergo/issues/75"
     },
     {
       "assignees": [],
@@ -1402,7 +1402,7 @@
       "stateReason": "completed",
       "title": "Typed recipe values in generic containers",
       "updatedAt": "2026-10-09T19:22:06Z",
-      "url": "https://github.com/cevr/effra/issues/76"
+      "url": "https://github.com/cevr/ergo/issues/76"
     },
     {
       "assignees": [],
@@ -1418,7 +1418,7 @@
       "stateReason": "completed",
       "title": "Signed-64 multiplication, division, remainder and conversions",
       "updatedAt": "2026-10-09T18:01:32Z",
-      "url": "https://github.com/cevr/effra/issues/77"
+      "url": "https://github.com/cevr/ergo/issues/77"
     },
     {
       "assignees": [],
@@ -1434,7 +1434,7 @@
       "stateReason": "completed",
       "title": "Custom-lint suppression states and cost receipts",
       "updatedAt": "2026-10-09T18:47:15Z",
-      "url": "https://github.com/cevr/effra/issues/78"
+      "url": "https://github.com/cevr/ergo/issues/78"
     },
     {
       "assignees": [],
@@ -1450,7 +1450,7 @@
       "stateReason": null,
       "title": "Diagnostic-code registry covering EF and sketch codes",
       "updatedAt": "2026-10-26T23:14:54Z",
-      "url": "https://github.com/cevr/effra/issues/79"
+      "url": "https://github.com/cevr/ergo/issues/79"
     },
     {
       "assignees": [],
@@ -1466,7 +1466,7 @@
       "stateReason": "completed",
       "title": "JavaScript Scheduler.awaitRegistration hangs after an immediately completed fork",
       "updatedAt": "2026-10-12T07:01:10Z",
-      "url": "https://github.com/cevr/effra/issues/80"
+      "url": "https://github.com/cevr/ergo/issues/80"
     },
     {
       "assignees": [],
@@ -1483,8 +1483,8 @@
       "state": "open",
       "stateReason": null,
       "title": "Go numeric types in the sketch checker (int and uint families, float64, conversions, overflow policy)",
-      "updatedAt": "2026-10-26T23:19:39Z",
-      "url": "https://github.com/cevr/effra/issues/81"
+      "updatedAt": "2026-10-27T16:15:01Z",
+      "url": "https://github.com/cevr/ergo/issues/81"
     },
     {
       "assignees": [],
@@ -1500,7 +1500,7 @@
       "stateReason": null,
       "title": "Gate: compiler edit to green in under 10 s",
       "updatedAt": "2026-10-26T23:14:58Z",
-      "url": "https://github.com/cevr/effra/issues/82"
+      "url": "https://github.com/cevr/ergo/issues/82"
     },
     {
       "assignees": [],
@@ -1516,7 +1516,7 @@
       "stateReason": "not_planned",
       "title": "Execute or retire the 154 unexecuted ownership-matrix entries",
       "updatedAt": "2026-10-26T23:19:05Z",
-      "url": "https://github.com/cevr/effra/issues/83"
+      "url": "https://github.com/cevr/ergo/issues/83"
     },
     {
       "assignees": [],
@@ -1535,7 +1535,7 @@
       "stateReason": null,
       "title": "Hand-written Go size controls for the codec and HTTP rows",
       "updatedAt": "2026-10-26T23:15:00Z",
-      "url": "https://github.com/cevr/effra/issues/84"
+      "url": "https://github.com/cevr/ergo/issues/84"
     },
     {
       "assignees": [],
@@ -1553,7 +1553,7 @@
       "stateReason": null,
       "title": "Per-fixture size budgets against Go baselines",
       "updatedAt": "2026-10-26T23:15:02Z",
-      "url": "https://github.com/cevr/effra/issues/85"
+      "url": "https://github.com/cevr/ergo/issues/85"
     },
     {
       "assignees": [],
@@ -1569,7 +1569,7 @@
       "stateReason": "not_planned",
       "title": "Ordinary-handler and machine-backed actor size rows",
       "updatedAt": "2026-10-26T23:19:11Z",
-      "url": "https://github.com/cevr/effra/issues/86"
+      "url": "https://github.com/cevr/ergo/issues/86"
     },
     {
       "assignees": [],
@@ -1587,7 +1587,7 @@
       "stateReason": null,
       "title": "`rt` split: programs without tasks or timers do not link the scheduler",
       "updatedAt": "2026-10-26T23:15:04Z",
-      "url": "https://github.com/cevr/effra/issues/87"
+      "url": "https://github.com/cevr/ergo/issues/87"
     },
     {
       "assignees": [],
@@ -1602,7 +1602,7 @@
       "stateReason": null,
       "title": "Should MCP build executables and return build receipts?",
       "updatedAt": "2026-10-09T19:44:23Z",
-      "url": "https://github.com/cevr/effra/issues/88"
+      "url": "https://github.com/cevr/ergo/issues/88"
     },
     {
       "assignees": [],
@@ -1618,7 +1618,7 @@
       "stateReason": "not_planned",
       "title": "Constants as value expressions",
       "updatedAt": "2026-10-26T23:22:04Z",
-      "url": "https://github.com/cevr/effra/issues/89"
+      "url": "https://github.com/cevr/ergo/issues/89"
     },
     {
       "assignees": [],
@@ -1633,7 +1633,7 @@
       "stateReason": "completed",
       "title": "Should public data default to the readonly tier?",
       "updatedAt": "2026-10-26T21:14:50Z",
-      "url": "https://github.com/cevr/effra/issues/90"
+      "url": "https://github.com/cevr/ergo/issues/90"
     },
     {
       "assignees": [],
@@ -1648,7 +1648,7 @@
       "stateReason": "completed",
       "title": "Record-update authority on types with private fields",
       "updatedAt": "2026-10-26T21:14:53Z",
-      "url": "https://github.com/cevr/effra/issues/91"
+      "url": "https://github.com/cevr/ergo/issues/91"
     },
     {
       "assignees": [],
@@ -1663,7 +1663,7 @@
       "stateReason": null,
       "title": "Should contification extend to tail-called local join points?",
       "updatedAt": "2026-10-09T19:44:28Z",
-      "url": "https://github.com/cevr/effra/issues/92"
+      "url": "https://github.com/cevr/ergo/issues/92"
     },
     {
       "assignees": [],
@@ -1678,7 +1678,7 @@
       "stateReason": null,
       "title": "Would a textual package interface help agents with sketch packages?",
       "updatedAt": "2026-10-26T23:15:06Z",
-      "url": "https://github.com/cevr/effra/issues/93"
+      "url": "https://github.com/cevr/ergo/issues/93"
     },
     {
       "assignees": [],
@@ -1693,7 +1693,7 @@
       "stateReason": "not_planned",
       "title": "How does Effra's JS output size compare with MoonBit's?",
       "updatedAt": "2026-10-26T21:14:56Z",
-      "url": "https://github.com/cevr/effra/issues/94"
+      "url": "https://github.com/cevr/ergo/issues/94"
     },
     {
       "assignees": [],
@@ -1711,7 +1711,7 @@
       "stateReason": "not_planned",
       "title": "Reserve the postfix construct words catch, provide, timeout, orFail and recover",
       "updatedAt": "2026-10-13T23:08:58Z",
-      "url": "https://github.com/cevr/effra/issues/95"
+      "url": "https://github.com/cevr/ergo/issues/95"
     },
     {
       "assignees": [],
@@ -1727,7 +1727,7 @@
       "stateReason": "not_planned",
       "title": "File and Latch ownership and admission without capability names",
       "updatedAt": "2026-10-26T23:19:15Z",
-      "url": "https://github.com/cevr/effra/issues/96"
+      "url": "https://github.com/cevr/ergo/issues/96"
     },
     {
       "assignees": [],
@@ -1745,7 +1745,7 @@
       "stateReason": "not_planned",
       "title": "Http as an ordinary bundled service without emitter identity knowledge",
       "updatedAt": "2026-10-26T23:19:19Z",
-      "url": "https://github.com/cevr/effra/issues/97"
+      "url": "https://github.com/cevr/ergo/issues/97"
     },
     {
       "assignees": [],
@@ -1763,7 +1763,7 @@
       "stateReason": "not_planned",
       "title": "Declared target capability and the test harness as an ordinary layer",
       "updatedAt": "2026-10-26T23:19:23Z",
-      "url": "https://github.com/cevr/effra/issues/98"
+      "url": "https://github.com/cevr/ergo/issues/98"
     },
     {
       "assignees": [],
@@ -1781,7 +1781,7 @@
       "stateReason": null,
       "title": "Prelude `Option` and Option-returning lookups",
       "updatedAt": "2026-10-26T23:15:07Z",
-      "url": "https://github.com/cevr/effra/issues/99"
+      "url": "https://github.com/cevr/ergo/issues/99"
     },
     {
       "assignees": [],
@@ -1799,7 +1799,7 @@
       "stateReason": "not_planned",
       "title": "Derive profiles owned by the derive construct",
       "updatedAt": "2026-10-26T23:19:28Z",
-      "url": "https://github.com/cevr/effra/issues/100"
+      "url": "https://github.com/cevr/ergo/issues/100"
     },
     {
       "assignees": [],
@@ -1813,8 +1813,8 @@
       "state": "open",
       "stateReason": null,
       "title": "Actor<P> projection: general library mechanism or syntax?",
-      "updatedAt": "2026-10-26T23:15:09Z",
-      "url": "https://github.com/cevr/effra/issues/101"
+      "updatedAt": "2026-10-27T13:12:49Z",
+      "url": "https://github.com/cevr/ergo/issues/101"
     },
     {
       "assignees": [],
@@ -1829,7 +1829,7 @@
       "stateReason": "completed",
       "title": "Specify the predeclared Foreign protocol and reserved names; decide Scheduler with row 15",
       "updatedAt": "2026-10-26T21:15:00Z",
-      "url": "https://github.com/cevr/effra/issues/102"
+      "url": "https://github.com/cevr/ergo/issues/102"
     },
     {
       "assignees": [],
@@ -1844,7 +1844,7 @@
       "stateReason": "not_planned",
       "title": "Zoned IPv6 listen binding: Go and Node resolve interface zones differently",
       "updatedAt": "2026-10-26T23:22:06Z",
-      "url": "https://github.com/cevr/effra/issues/103"
+      "url": "https://github.com/cevr/ergo/issues/103"
     },
     {
       "assignees": [],
@@ -1859,7 +1859,7 @@
       "stateReason": "completed",
       "title": "Spike: //line source attribution in emitted Go (record)",
       "updatedAt": "2026-10-11T16:07:59Z",
-      "url": "https://github.com/cevr/effra/issues/104"
+      "url": "https://github.com/cevr/ergo/issues/104"
     },
     {
       "assignees": [],
@@ -1875,7 +1875,7 @@
       "stateReason": "not_planned",
       "title": "Position-carrying Go printing and a residualChecks receipt",
       "updatedAt": "2026-10-26T23:19:32Z",
-      "url": "https://github.com/cevr/effra/issues/105"
+      "url": "https://github.com/cevr/ergo/issues/105"
     },
     {
       "assignees": [],
@@ -1890,7 +1890,7 @@
       "stateReason": "not_planned",
       "title": "Spike: non-escaping block closures as the first closure profile",
       "updatedAt": "2026-10-26T23:19:37Z",
-      "url": "https://github.com/cevr/effra/issues/106"
+      "url": "https://github.com/cevr/ergo/issues/106"
     },
     {
       "assignees": [],
@@ -1905,7 +1905,7 @@
       "stateReason": null,
       "title": "Spike: classified repair applicability and a safe-fix closure test",
       "updatedAt": "2026-10-11T16:44:59Z",
-      "url": "https://github.com/cevr/effra/issues/107"
+      "url": "https://github.com/cevr/ergo/issues/107"
     },
     {
       "assignees": [],
@@ -1916,11 +1916,11 @@
       ],
       "number": 108,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Spike: cost of checked integer overflow in emitted Go",
-      "updatedAt": "2026-10-26T23:15:11Z",
-      "url": "https://github.com/cevr/effra/issues/108"
+      "updatedAt": "2026-10-27T16:15:03Z",
+      "url": "https://github.com/cevr/ergo/issues/108"
     },
     {
       "assignees": [],
@@ -1936,7 +1936,7 @@
       "stateReason": "completed",
       "title": "Checker time is quadratic in record fields (8.6 s to check a 787 KB program)",
       "updatedAt": "2026-10-11T22:16:33Z",
-      "url": "https://github.com/cevr/effra/issues/109"
+      "url": "https://github.com/cevr/ergo/issues/109"
     },
     {
       "assignees": [],
@@ -1952,7 +1952,7 @@
       "stateReason": null,
       "title": "Gate tool questions: orphan wording, early-exit keys and fixture hardening",
       "updatedAt": "2026-10-11T17:06:33Z",
-      "url": "https://github.com/cevr/effra/issues/110"
+      "url": "https://github.com/cevr/ergo/issues/110"
     },
     {
       "assignees": [],
@@ -1968,7 +1968,7 @@
       "stateReason": null,
       "title": "Lint pack memory limit atomic at spawn and covering descendants",
       "updatedAt": "2026-10-11T16:05:13Z",
-      "url": "https://github.com/cevr/effra/issues/111"
+      "url": "https://github.com/cevr/ergo/issues/111"
     },
     {
       "assignees": [],
@@ -1984,7 +1984,7 @@
       "stateReason": "completed",
       "title": "Port race in the codec finalizer tests (encode-latched flake)",
       "updatedAt": "2026-10-13T20:25:09Z",
-      "url": "https://github.com/cevr/effra/issues/112"
+      "url": "https://github.com/cevr/ergo/issues/112"
     },
     {
       "assignees": [],
@@ -2000,7 +2000,7 @@
       "stateReason": null,
       "title": "Shared source and output location for the test runner and the LSP/MCP loaders; executed case-alias refusal",
       "updatedAt": "2026-10-11T17:06:34Z",
-      "url": "https://github.com/cevr/effra/issues/113"
+      "url": "https://github.com/cevr/ergo/issues/113"
     },
     {
       "assignees": [],
@@ -2015,7 +2015,7 @@
       "stateReason": null,
       "title": "Spike: scope-tied memory reclamation on the Go target",
       "updatedAt": "2026-10-26T01:29:12Z",
-      "url": "https://github.com/cevr/effra/issues/114"
+      "url": "https://github.com/cevr/ergo/issues/114"
     },
     {
       "assignees": [],
@@ -2030,7 +2030,7 @@
       "stateReason": "completed",
       "title": "Spike: row polymorphism so catch, provide and timeout become ordinary library functions",
       "updatedAt": "2026-10-12T02:00:09Z",
-      "url": "https://github.com/cevr/effra/issues/115"
+      "url": "https://github.com/cevr/ergo/issues/115"
     },
     {
       "assignees": [],
@@ -2045,7 +2045,7 @@
       "stateReason": "completed",
       "title": "Spike: Roc-style where-clause dispatch for equality, ordering, hashing and derive",
       "updatedAt": "2026-10-12T03:51:44Z",
-      "url": "https://github.com/cevr/effra/issues/116"
+      "url": "https://github.com/cevr/ergo/issues/116"
     },
     {
       "assignees": [],
@@ -2060,7 +2060,7 @@
       "stateReason": "not_planned",
       "title": "Application language: front-end and real-time rendering on JS",
       "updatedAt": "2026-10-26T23:22:08Z",
-      "url": "https://github.com/cevr/effra/issues/117"
+      "url": "https://github.com/cevr/ergo/issues/117"
     },
     {
       "assignees": [],
@@ -2075,7 +2075,7 @@
       "stateReason": "not_planned",
       "title": "Floating-point numbers (f64) for application code",
       "updatedAt": "2026-10-26T23:19:41Z",
-      "url": "https://github.com/cevr/effra/issues/118"
+      "url": "https://github.com/cevr/ergo/issues/118"
     },
     {
       "assignees": [],
@@ -2090,7 +2090,7 @@
       "stateReason": "not_planned",
       "title": "Loops and local mutation (construct row 39)",
       "updatedAt": "2026-10-26T23:22:11Z",
-      "url": "https://github.com/cevr/effra/issues/119"
+      "url": "https://github.com/cevr/ergo/issues/119"
     },
     {
       "assignees": [],
@@ -2105,7 +2105,7 @@
       "stateReason": "not_planned",
       "title": "Typed numeric buffers for WebGL, canvas and binary data",
       "updatedAt": "2026-10-26T23:19:44Z",
-      "url": "https://github.com/cevr/effra/issues/120"
+      "url": "https://github.com/cevr/ergo/issues/120"
     },
     {
       "assignees": [],
@@ -2120,7 +2120,7 @@
       "stateReason": "not_planned",
       "title": "Spike: real-time three.js/canvas render loop with effects per frame",
       "updatedAt": "2026-10-26T23:22:14Z",
-      "url": "https://github.com/cevr/effra/issues/121"
+      "url": "https://github.com/cevr/ergo/issues/121"
     },
     {
       "assignees": [],
@@ -2136,7 +2136,7 @@
       "stateReason": null,
       "title": "Interface satisfaction is linear in method count (both checkers)",
       "updatedAt": "2026-10-26T23:15:12Z",
-      "url": "https://github.com/cevr/effra/issues/122"
+      "url": "https://github.com/cevr/ergo/issues/122"
     },
     {
       "assignees": [],
@@ -2152,7 +2152,7 @@
       "stateReason": "not_planned",
       "title": "Secondary evidence: run the pinned Effect test suite against providers that claim Effect API compatibility",
       "updatedAt": "2026-10-26T23:22:17Z",
-      "url": "https://github.com/cevr/effra/issues/123"
+      "url": "https://github.com/cevr/ergo/issues/123"
     },
     {
       "assignees": [],
@@ -2172,8 +2172,8 @@
       "state": "open",
       "stateReason": null,
       "title": "Runtime laws R1-R15 for the sketch runtime and the virtual test runtime",
-      "updatedAt": "2026-10-26T23:21:07Z",
-      "url": "https://github.com/cevr/effra/issues/124"
+      "updatedAt": "2026-10-27T05:54:23Z",
+      "url": "https://github.com/cevr/ergo/issues/124"
     },
     {
       "assignees": [],
@@ -2189,7 +2189,7 @@
       "stateReason": "completed",
       "title": "Spike: laws as a language construct (behavioural obligations beyond types, GDP evidence, Bend)",
       "updatedAt": "2026-10-13T22:33:07Z",
-      "url": "https://github.com/cevr/effra/issues/125"
+      "url": "https://github.com/cevr/ergo/issues/125"
     },
     {
       "assignees": [],
@@ -2205,7 +2205,7 @@
       "stateReason": "not_planned",
       "title": "Rows unit 2: presence in inferRows (F3)",
       "updatedAt": "2026-10-26T23:19:49Z",
-      "url": "https://github.com/cevr/effra/issues/126"
+      "url": "https://github.com/cevr/ergo/issues/126"
     },
     {
       "assignees": [],
@@ -2223,7 +2223,7 @@
       "stateReason": "not_planned",
       "title": "Rows unit 3: explicit type arguments and receiver methods (F1)",
       "updatedAt": "2026-10-26T23:22:20Z",
-      "url": "https://github.com/cevr/effra/issues/127"
+      "url": "https://github.com/cevr/ergo/issues/127"
     },
     {
       "assignees": [],
@@ -2241,7 +2241,7 @@
       "stateReason": "not_planned",
       "title": "Rows unit 4a: recipe-parameter edge contract (gate 1, go/no-go)",
       "updatedAt": "2026-10-26T23:19:54Z",
-      "url": "https://github.com/cevr/effra/issues/128"
+      "url": "https://github.com/cevr/ergo/issues/128"
     },
     {
       "assignees": [],
@@ -2259,7 +2259,7 @@
       "stateReason": "not_planned",
       "title": "Rows unit 4b: callback clauses and F6 (gate 2)",
       "updatedAt": "2026-10-26T23:22:22Z",
-      "url": "https://github.com/cevr/effra/issues/129"
+      "url": "https://github.com/cevr/ergo/issues/129"
     },
     {
       "assignees": [],
@@ -2277,7 +2277,7 @@
       "stateReason": "not_planned",
       "title": "Rows unit 4c: D4 and GLOSSARY amendment for declared contracts",
       "updatedAt": "2026-10-26T23:22:26Z",
-      "url": "https://github.com/cevr/effra/issues/130"
+      "url": "https://github.com/cevr/ergo/issues/130"
     },
     {
       "assignees": [],
@@ -2296,7 +2296,7 @@
       "stateReason": "not_planned",
       "title": "Rows unit 5: catch as library (label parameters F2)",
       "updatedAt": "2026-10-26T23:22:29Z",
-      "url": "https://github.com/cevr/effra/issues/131"
+      "url": "https://github.com/cevr/ergo/issues/131"
     },
     {
       "assignees": [],
@@ -2315,7 +2315,7 @@
       "stateReason": "not_planned",
       "title": "Rows unit 6: provide as library (row difference F3b, Provider<S>)",
       "updatedAt": "2026-10-26T23:22:32Z",
-      "url": "https://github.com/cevr/effra/issues/132"
+      "url": "https://github.com/cevr/ergo/issues/132"
     },
     {
       "assignees": [],
@@ -2333,7 +2333,7 @@
       "stateReason": "not_planned",
       "title": "Rows unit 7: recover as library (conditional on gate 2)",
       "updatedAt": "2026-10-26T23:22:34Z",
-      "url": "https://github.com/cevr/effra/issues/133"
+      "url": "https://github.com/cevr/ergo/issues/133"
     },
     {
       "assignees": [],
@@ -2349,7 +2349,7 @@
       "stateReason": "completed",
       "title": "Spike: visually distinct construct syntax (provide block, timeout/deadline, orFail); supersedes postfix reservation",
       "updatedAt": "2026-10-13T23:09:00Z",
-      "url": "https://github.com/cevr/effra/issues/134"
+      "url": "https://github.com/cevr/ergo/issues/134"
     },
     {
       "assignees": [],
@@ -2361,11 +2361,11 @@
       ],
       "number": 135,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Spike: row elision and named constraints in sketch signatures",
-      "updatedAt": "2026-10-26T23:16:30Z",
-      "url": "https://github.com/cevr/effra/issues/135"
+      "updatedAt": "2026-10-27T06:23:06Z",
+      "url": "https://github.com/cevr/ergo/issues/135"
     },
     {
       "assignees": [],
@@ -2384,7 +2384,7 @@
       "stateReason": "not_planned",
       "title": "Where unit W1: where clauses, resolution and conditional methods",
       "updatedAt": "2026-10-26T23:19:58Z",
-      "url": "https://github.com/cevr/effra/issues/136"
+      "url": "https://github.com/cevr/ergo/issues/136"
     },
     {
       "assignees": [],
@@ -2403,7 +2403,7 @@
       "stateReason": "not_planned",
       "title": "Where unit W2: predeclared owner modules for i64, string and bool",
       "updatedAt": "2026-10-26T23:20:01Z",
-      "url": "https://github.com/cevr/effra/issues/137"
+      "url": "https://github.com/cevr/ergo/issues/137"
     },
     {
       "assignees": [],
@@ -2421,7 +2421,7 @@
       "stateReason": "not_planned",
       "title": "Where unit W3: TypeScript projection of method parameters and companions",
       "updatedAt": "2026-10-26T23:22:36Z",
-      "url": "https://github.com/cevr/effra/issues/138"
+      "url": "https://github.com/cevr/ergo/issues/138"
     },
     {
       "assignees": [],
@@ -2440,7 +2440,7 @@
       "stateReason": "not_planned",
       "title": "Where unit W4: derive by field fold",
       "updatedAt": "2026-10-26T23:20:06Z",
-      "url": "https://github.com/cevr/effra/issues/139"
+      "url": "https://github.com/cevr/ergo/issues/139"
     },
     {
       "assignees": [],
@@ -2458,7 +2458,7 @@
       "stateReason": "not_planned",
       "title": "Where unit W5: collections capture methods and pin iteration order",
       "updatedAt": "2026-10-26T23:20:10Z",
-      "url": "https://github.com/cevr/effra/issues/140"
+      "url": "https://github.com/cevr/ergo/issues/140"
     },
     {
       "assignees": [],
@@ -2477,7 +2477,7 @@
       "stateReason": "not_planned",
       "title": "Where unit W6: docs for owner-module dispatch",
       "updatedAt": "2026-10-26T23:22:39Z",
-      "url": "https://github.com/cevr/effra/issues/141"
+      "url": "https://github.com/cevr/ergo/issues/141"
     },
     {
       "assignees": [],
@@ -2493,7 +2493,7 @@
       "stateReason": "completed",
       "title": "Latch handoff order differs between Go and JS",
       "updatedAt": "2026-10-12T09:20:35Z",
-      "url": "https://github.com/cevr/effra/issues/142"
+      "url": "https://github.com/cevr/ergo/issues/142"
     },
     {
       "assignees": [],
@@ -2512,7 +2512,7 @@
       "stateReason": null,
       "title": "Statecharts M2: regions in sketch `machine` (new spelling for `<-` updates)",
       "updatedAt": "2026-10-26T23:16:32Z",
-      "url": "https://github.com/cevr/effra/issues/143"
+      "url": "https://github.com/cevr/ergo/issues/143"
     },
     {
       "assignees": [],
@@ -2534,7 +2534,7 @@
       "stateReason": null,
       "title": "Statecharts M3: region entry lifetimes on sketch tasks",
       "updatedAt": "2026-10-26T23:16:34Z",
-      "url": "https://github.com/cevr/effra/issues/144"
+      "url": "https://github.com/cevr/ergo/issues/144"
     },
     {
       "assignees": [],
@@ -2550,7 +2550,7 @@
       "stateReason": "not_planned",
       "title": "Statecharts M4a: machine law rows and fixtures in the provider contract",
       "updatedAt": "2026-10-26T23:20:16Z",
-      "url": "https://github.com/cevr/effra/issues/145"
+      "url": "https://github.com/cevr/ergo/issues/145"
     },
     {
       "assignees": [],
@@ -2573,7 +2573,7 @@
       "stateReason": null,
       "title": "Statecharts M4b: the sketch machine runtime passes the law fixtures",
       "updatedAt": "2026-10-26T23:16:35Z",
-      "url": "https://github.com/cevr/effra/issues/146"
+      "url": "https://github.com/cevr/ergo/issues/146"
     },
     {
       "assignees": [],
@@ -2591,7 +2591,7 @@
       "stateReason": "not_planned",
       "title": "Statecharts M5: machine evidence and Running identity",
       "updatedAt": "2026-10-26T23:20:20Z",
-      "url": "https://github.com/cevr/effra/issues/147"
+      "url": "https://github.com/cevr/ergo/issues/147"
     },
     {
       "assignees": [],
@@ -2607,7 +2607,7 @@
       "stateReason": "not_planned",
       "title": "Statecharts M6: composition lowering measurements",
       "updatedAt": "2026-10-26T23:20:25Z",
-      "url": "https://github.com/cevr/effra/issues/148"
+      "url": "https://github.com/cevr/ergo/issues/148"
     },
     {
       "assignees": [],
@@ -2627,7 +2627,7 @@
       "stateReason": null,
       "title": "Statecharts M7: guide and examples in sketch syntax",
       "updatedAt": "2026-10-26T23:16:37Z",
-      "url": "https://github.com/cevr/effra/issues/149"
+      "url": "https://github.com/cevr/ergo/issues/149"
     },
     {
       "assignees": [],
@@ -2643,7 +2643,7 @@
       "stateReason": "not_planned",
       "title": "Cross-target ordering contract for timer, interruption and completion observer resumes",
       "updatedAt": "2026-10-26T23:20:31Z",
-      "url": "https://github.com/cevr/effra/issues/150"
+      "url": "https://github.com/cevr/ergo/issues/150"
     },
     {
       "assignees": [],
@@ -2659,7 +2659,7 @@
       "stateReason": "not_planned",
       "title": "JS entry exits 0 while the root fiber is suspended with no host handle; Go blocks",
       "updatedAt": "2026-10-26T23:22:42Z",
-      "url": "https://github.com/cevr/effra/issues/151"
+      "url": "https://github.com/cevr/ergo/issues/151"
     },
     {
       "assignees": [],
@@ -2675,7 +2675,7 @@
       "stateReason": null,
       "title": "receipt.physical races a concurrent dist creation (\"dist exists but cannot be resolved\")",
       "updatedAt": "2026-10-27T00:12:51Z",
-      "url": "https://github.com/cevr/effra/issues/152"
+      "url": "https://github.com/cevr/ergo/issues/152"
     },
     {
       "assignees": [],
@@ -2691,7 +2691,7 @@
       "stateReason": null,
       "title": "`http.Listen` returns a listener with `Addr()`",
       "updatedAt": "2026-10-26T23:16:40Z",
-      "url": "https://github.com/cevr/effra/issues/153"
+      "url": "https://github.com/cevr/ergo/issues/153"
     },
     {
       "assignees": [],
@@ -2706,7 +2706,7 @@
       "stateReason": "completed",
       "title": "Design: supervision of unjoined fork failures",
       "updatedAt": "2026-10-26T21:14:58Z",
-      "url": "https://github.com/cevr/effra/issues/154"
+      "url": "https://github.com/cevr/ergo/issues/154"
     },
     {
       "assignees": [],
@@ -2724,7 +2724,7 @@
       "stateReason": null,
       "title": "Deterministic same-instant order in `testing.VirtualClock`",
       "updatedAt": "2026-10-26T23:20:29Z",
-      "url": "https://github.com/cevr/effra/issues/155"
+      "url": "https://github.com/cevr/ergo/issues/155"
     },
     {
       "assignees": [],
@@ -2740,7 +2740,7 @@
       "stateReason": null,
       "title": "Spike: classifier-ready review evidence from the checker (ef evidence / code.evidence)",
       "updatedAt": "2026-10-26T00:20:40Z",
-      "url": "https://github.com/cevr/effra/issues/156"
+      "url": "https://github.com/cevr/ergo/issues/156"
     },
     {
       "assignees": [],
@@ -2756,7 +2756,7 @@
       "stateReason": "not_planned",
       "title": "Lower a checked machine declaration to a plan value (JS and Go)",
       "updatedAt": "2026-10-26T23:20:35Z",
-      "url": "https://github.com/cevr/effra/issues/157"
+      "url": "https://github.com/cevr/ergo/issues/157"
     },
     {
       "assignees": [],
@@ -2775,7 +2775,7 @@
       "stateReason": "not_planned",
       "title": "Reducer provider: synchronous runtime for pure machine plans",
       "updatedAt": "2026-10-26T23:20:39Z",
-      "url": "https://github.com/cevr/effra/issues/158"
+      "url": "https://github.com/cevr/ergo/issues/158"
     },
     {
       "assignees": [],
@@ -2795,7 +2795,7 @@
       "stateReason": "not_planned",
       "title": "Effectful-step provider without a mailbox",
       "updatedAt": "2026-10-13T22:43:15Z",
-      "url": "https://github.com/cevr/effra/issues/159"
+      "url": "https://github.com/cevr/ergo/issues/159"
     },
     {
       "assignees": [],
@@ -2814,7 +2814,7 @@
       "stateReason": "not_planned",
       "title": "Consume machines from TypeScript UIs",
       "updatedAt": "2026-10-26T23:22:44Z",
-      "url": "https://github.com/cevr/effra/issues/160"
+      "url": "https://github.com/cevr/ergo/issues/160"
     },
     {
       "assignees": [],
@@ -2833,7 +2833,7 @@
       "stateReason": "not_planned",
       "title": "Measure tier-0 emission cost and decision representation",
       "updatedAt": "2026-10-26T23:20:44Z",
-      "url": "https://github.com/cevr/effra/issues/161"
+      "url": "https://github.com/cevr/ergo/issues/161"
     },
     {
       "assignees": [],
@@ -2853,8 +2853,8 @@
       "state": "open",
       "stateReason": null,
       "title": "Laws L1: `func LawX` discovery and the law check",
-      "updatedAt": "2026-10-26T23:16:43Z",
-      "url": "https://github.com/cevr/effra/issues/162"
+      "updatedAt": "2026-10-27T06:23:09Z",
+      "url": "https://github.com/cevr/ergo/issues/162"
     },
     {
       "assignees": [],
@@ -2873,7 +2873,7 @@
       "stateReason": null,
       "title": "Laws L2: Go runner, type-derived generators, shrinker, receipts",
       "updatedAt": "2026-10-26T23:16:45Z",
-      "url": "https://github.com/cevr/effra/issues/163"
+      "url": "https://github.com/cevr/ergo/issues/163"
     },
     {
       "assignees": [],
@@ -2893,7 +2893,7 @@
       "stateReason": null,
       "title": "Laws L3: provider laws through `uses` and wire",
       "updatedAt": "2026-10-26T23:16:47Z",
-      "url": "https://github.com/cevr/effra/issues/164"
+      "url": "https://github.com/cevr/ergo/issues/164"
     },
     {
       "assignees": [],
@@ -2913,7 +2913,7 @@
       "stateReason": null,
       "title": "Laws L4: evidence as named types with private construction",
       "updatedAt": "2026-10-26T23:16:49Z",
-      "url": "https://github.com/cevr/effra/issues/165"
+      "url": "https://github.com/cevr/ergo/issues/165"
     },
     {
       "assignees": [],
@@ -2931,7 +2931,7 @@
       "stateReason": "not_planned",
       "title": "Laws unit L5: Host evidence boundary",
       "updatedAt": "2026-10-26T23:22:47Z",
-      "url": "https://github.com/cevr/effra/issues/166"
+      "url": "https://github.com/cevr/ergo/issues/166"
     },
     {
       "assignees": [],
@@ -2947,7 +2947,7 @@
       "stateReason": null,
       "title": "Laws by name: units L1-L8 (rollup)",
       "updatedAt": "2026-10-26T23:16:51Z",
-      "url": "https://github.com/cevr/effra/issues/167"
+      "url": "https://github.com/cevr/ergo/issues/167"
     },
     {
       "assignees": [],
@@ -2966,7 +2966,7 @@
       "stateReason": null,
       "title": "Laws L6: machine laws on sketch machines",
       "updatedAt": "2026-10-26T23:20:14Z",
-      "url": "https://github.com/cevr/effra/issues/168"
+      "url": "https://github.com/cevr/ergo/issues/168"
     },
     {
       "assignees": [],
@@ -2986,7 +2986,7 @@
       "stateReason": null,
       "title": "Laws L7: satisfaction per generic instantiation",
       "updatedAt": "2026-10-26T23:16:56Z",
-      "url": "https://github.com/cevr/effra/issues/169"
+      "url": "https://github.com/cevr/ergo/issues/169"
     },
     {
       "assignees": [],
@@ -3005,7 +3005,7 @@
       "stateReason": null,
       "title": "Laws L8: docs in sketch spelling",
       "updatedAt": "2026-10-26T23:16:57Z",
-      "url": "https://github.com/cevr/effra/issues/170"
+      "url": "https://github.com/cevr/ergo/issues/170"
     },
     {
       "assignees": [],
@@ -3021,7 +3021,7 @@
       "stateReason": "not_planned",
       "title": "Rename Scheduler.awaitRegistration to awaitIdle, keeping a deprecated alias",
       "updatedAt": "2026-10-26T23:20:48Z",
-      "url": "https://github.com/cevr/effra/issues/171"
+      "url": "https://github.com/cevr/ergo/issues/171"
     },
     {
       "assignees": [],
@@ -3037,7 +3037,7 @@
       "stateReason": "not_planned",
       "title": "Effect primitives (option H): units from spike #134",
       "updatedAt": "2026-10-26T23:22:50Z",
-      "url": "https://github.com/cevr/effra/issues/172"
+      "url": "https://github.com/cevr/ergo/issues/172"
     },
     {
       "assignees": [],
@@ -3053,7 +3053,7 @@
       "stateReason": "completed",
       "title": "Owner decisions for option H (spike #134 O1-O13)",
       "updatedAt": "2026-10-13T23:25:47Z",
-      "url": "https://github.com/cevr/effra/issues/173"
+      "url": "https://github.com/cevr/ergo/issues/173"
     },
     {
       "assignees": [],
@@ -3071,7 +3071,7 @@
       "stateReason": "not_planned",
       "title": "Primitives U1: P13 race kernel",
       "updatedAt": "2026-10-26T23:20:52Z",
-      "url": "https://github.com/cevr/effra/issues/174"
+      "url": "https://github.com/cevr/ergo/issues/174"
     },
     {
       "assignees": [],
@@ -3090,7 +3090,7 @@
       "stateReason": null,
       "title": "Duration literals typed `time.Duration` in the sketch",
       "updatedAt": "2026-10-26T23:17:30Z",
-      "url": "https://github.com/cevr/effra/issues/175"
+      "url": "https://github.com/cevr/ergo/issues/175"
     },
     {
       "assignees": [],
@@ -3108,7 +3108,7 @@
       "stateReason": "not_planned",
       "title": "Primitives U3: Provide block",
       "updatedAt": "2026-10-26T23:22:52Z",
-      "url": "https://github.com/cevr/effra/issues/176"
+      "url": "https://github.com/cevr/ergo/issues/176"
     },
     {
       "assignees": [],
@@ -3127,7 +3127,7 @@
       "stateReason": "not_planned",
       "title": "Primitives U4: Owned fork migration",
       "updatedAt": "2026-10-26T23:20:56Z",
-      "url": "https://github.com/cevr/effra/issues/177"
+      "url": "https://github.com/cevr/ergo/issues/177"
     },
     {
       "assignees": [],
@@ -3146,7 +3146,7 @@
       "stateReason": "not_planned",
       "title": "Primitives U5: Formatter and LSP for the blocks",
       "updatedAt": "2026-10-26T23:21:01Z",
-      "url": "https://github.com/cevr/effra/issues/178"
+      "url": "https://github.com/cevr/ergo/issues/178"
     },
     {
       "assignees": [],
@@ -3170,7 +3170,7 @@
       "stateReason": null,
       "title": "std: `schedule`, `retry` and `timeout`",
       "updatedAt": "2026-10-26T23:17:38Z",
-      "url": "https://github.com/cevr/effra/issues/179"
+      "url": "https://github.com/cevr/ergo/issues/179"
     },
     {
       "assignees": [],
@@ -3189,7 +3189,7 @@
       "stateReason": "not_planned",
       "title": "Primitives U7: `.provideService<S>` as library",
       "updatedAt": "2026-10-26T23:22:55Z",
-      "url": "https://github.com/cevr/effra/issues/180"
+      "url": "https://github.com/cevr/ergo/issues/180"
     },
     {
       "assignees": [],
@@ -3207,7 +3207,7 @@
       "stateReason": "not_planned",
       "title": "Primitives U8: Q11 closed-at-the-edge contract",
       "updatedAt": "2026-10-26T23:22:58Z",
-      "url": "https://github.com/cevr/effra/issues/181"
+      "url": "https://github.com/cevr/ergo/issues/181"
     },
     {
       "assignees": [],
@@ -3223,7 +3223,7 @@
       "stateReason": "not_planned",
       "title": "Primitives U9: Retire keyed `.timeout`",
       "updatedAt": "2026-10-26T23:23:02Z",
-      "url": "https://github.com/cevr/effra/issues/182"
+      "url": "https://github.com/cevr/ergo/issues/182"
     },
     {
       "assignees": [],
@@ -3241,7 +3241,7 @@
       "stateReason": "not_planned",
       "title": "Primitives U10: The `all { }` block (P14)",
       "updatedAt": "2026-10-26T23:21:05Z",
-      "url": "https://github.com/cevr/effra/issues/183"
+      "url": "https://github.com/cevr/ergo/issues/183"
     },
     {
       "assignees": [],
@@ -3259,7 +3259,7 @@
       "stateReason": "not_planned",
       "title": "Primitives U11: Constructs as a provider protocol",
       "updatedAt": "2026-10-26T23:21:09Z",
-      "url": "https://github.com/cevr/effra/issues/184"
+      "url": "https://github.com/cevr/ergo/issues/184"
     },
     {
       "assignees": [],
@@ -3277,7 +3277,7 @@
       "stateReason": "not_planned",
       "title": "Primitives U-workers: provision-lifetime workers for layers (split from #134)",
       "updatedAt": "2026-10-26T23:21:13Z",
-      "url": "https://github.com/cevr/effra/issues/185"
+      "url": "https://github.com/cevr/ergo/issues/185"
     },
     {
       "assignees": [],
@@ -3296,7 +3296,7 @@
       "stateReason": null,
       "title": "Composition laws for sketch constructs (K-laws restated)",
       "updatedAt": "2026-10-26T23:17:33Z",
-      "url": "https://github.com/cevr/effra/issues/186"
+      "url": "https://github.com/cevr/ergo/issues/186"
     },
     {
       "assignees": [],
@@ -3312,7 +3312,7 @@
       "stateReason": "not_planned",
       "title": "Primitives U-AST: in-place AST rewrite contract",
       "updatedAt": "2026-10-26T23:21:17Z",
-      "url": "https://github.com/cevr/effra/issues/187"
+      "url": "https://github.com/cevr/ergo/issues/187"
     },
     {
       "assignees": [],
@@ -3324,11 +3324,11 @@
       ],
       "number": 188,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Spike: traceability by construction for the sketch",
-      "updatedAt": "2026-10-26T23:17:35Z",
-      "url": "https://github.com/cevr/effra/issues/188"
+      "updatedAt": "2026-10-27T12:20:18Z",
+      "url": "https://github.com/cevr/ergo/issues/188"
     },
     {
       "assignees": [],
@@ -3344,7 +3344,7 @@
       "stateReason": null,
       "title": "Spike: proof tier on the capture-checking basis",
       "updatedAt": "2026-10-26T23:17:36Z",
-      "url": "https://github.com/cevr/effra/issues/189"
+      "url": "https://github.com/cevr/ergo/issues/189"
     },
     {
       "assignees": [],
@@ -3360,7 +3360,7 @@
       "stateReason": null,
       "title": "Lowering: zero-cost hot paths (fuse effects, value enums, specialized plans)",
       "updatedAt": "2026-10-26T23:20:42Z",
-      "url": "https://github.com/cevr/effra/issues/190"
+      "url": "https://github.com/cevr/ergo/issues/190"
     },
     {
       "assignees": [],
@@ -3377,7 +3377,7 @@
       "stateReason": "completed",
       "title": "Sketch prototype: check rows and emit direct Go for checkout",
       "updatedAt": "2026-10-26T23:27:38Z",
-      "url": "https://github.com/cevr/effra/issues/191"
+      "url": "https://github.com/cevr/ergo/issues/191"
     },
     {
       "assignees": [],
@@ -3393,7 +3393,7 @@
       "stateReason": null,
       "title": "Sketch compiler: prototype to main compiler (epic)",
       "updatedAt": "2026-10-26T23:06:05Z",
-      "url": "https://github.com/cevr/effra/issues/192"
+      "url": "https://github.com/cevr/ergo/issues/192"
     },
     {
       "assignees": [],
@@ -3408,11 +3408,11 @@
       ],
       "number": 193,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Sketch language specification v0",
-      "updatedAt": "2026-10-27T00:12:21Z",
-      "url": "https://github.com/cevr/effra/issues/193"
+      "updatedAt": "2026-10-27T02:39:46Z",
+      "url": "https://github.com/cevr/ergo/issues/193"
     },
     {
       "assignees": [],
@@ -3427,11 +3427,11 @@
       ],
       "number": 194,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Front-end transition: sketch edition, routing and `.ef` deprecation plan",
-      "updatedAt": "2026-10-26T23:06:08Z",
-      "url": "https://github.com/cevr/effra/issues/194"
+      "updatedAt": "2026-10-27T10:15:42Z",
+      "url": "https://github.com/cevr/ergo/issues/194"
     },
     {
       "assignees": [],
@@ -3447,11 +3447,11 @@
       ],
       "number": 195,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Sketch parser and formatter in the main compiler",
-      "updatedAt": "2026-10-26T23:06:09Z",
-      "url": "https://github.com/cevr/effra/issues/195"
+      "updatedAt": "2026-10-27T14:43:59Z",
+      "url": "https://github.com/cevr/ergo/issues/195"
     },
     {
       "assignees": [],
@@ -3470,8 +3470,8 @@
       "state": "open",
       "stateReason": null,
       "title": "Sketch checker: types, implicit generics, error and uses rows",
-      "updatedAt": "2026-10-26T23:19:52Z",
-      "url": "https://github.com/cevr/effra/issues/196"
+      "updatedAt": "2026-10-27T15:28:57Z",
+      "url": "https://github.com/cevr/ergo/issues/196"
     },
     {
       "assignees": [],
@@ -3489,8 +3489,8 @@
       "state": "open",
       "stateReason": null,
       "title": "Sketch checker: linearity, borrows and captures",
-      "updatedAt": "2026-10-26T23:19:35Z",
-      "url": "https://github.com/cevr/effra/issues/197"
+      "updatedAt": "2026-10-27T02:39:49Z",
+      "url": "https://github.com/cevr/ergo/issues/197"
     },
     {
       "assignees": [],
@@ -3505,11 +3505,11 @@
       ],
       "number": 198,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Sketch runtime package `rt`",
-      "updatedAt": "2026-10-26T23:06:13Z",
-      "url": "https://github.com/cevr/effra/issues/198"
+      "updatedAt": "2026-10-27T05:54:15Z",
+      "url": "https://github.com/cevr/ergo/issues/198"
     },
     {
       "assignees": [],
@@ -3529,7 +3529,7 @@
       "stateReason": null,
       "title": "I1 interruption points and I2 automatic masks in lowering",
       "updatedAt": "2026-10-26T23:06:14Z",
-      "url": "https://github.com/cevr/effra/issues/199"
+      "url": "https://github.com/cevr/ergo/issues/199"
     },
     {
       "assignees": [],
@@ -3549,7 +3549,7 @@
       "stateReason": null,
       "title": "G1 task-local context through `with`, and G2 fork-tree defects",
       "updatedAt": "2026-10-26T23:06:15Z",
-      "url": "https://github.com/cevr/effra/issues/200"
+      "url": "https://github.com/cevr/ergo/issues/200"
     },
     {
       "assignees": [],
@@ -3569,7 +3569,7 @@
       "stateReason": null,
       "title": "G3 `ef ps`: live task tree over a debug endpoint",
       "updatedAt": "2026-10-26T23:06:17Z",
-      "url": "https://github.com/cevr/effra/issues/201"
+      "url": "https://github.com/cevr/ergo/issues/201"
     },
     {
       "assignees": [],
@@ -3589,7 +3589,7 @@
       "stateReason": null,
       "title": "Go interop Level 1 and Level 2",
       "updatedAt": "2026-10-26T23:06:18Z",
-      "url": "https://github.com/cevr/effra/issues/202"
+      "url": "https://github.com/cevr/ergo/issues/202"
     },
     {
       "assignees": [],
@@ -3609,7 +3609,7 @@
       "stateReason": null,
       "title": "Semantic tooling for the sketch: `ef inspect` and MCP",
       "updatedAt": "2026-10-26T23:06:19Z",
-      "url": "https://github.com/cevr/effra/issues/203"
+      "url": "https://github.com/cevr/ergo/issues/203"
     },
     {
       "assignees": [],
@@ -3630,8 +3630,8 @@
       "state": "open",
       "stateReason": null,
       "title": "Migrate examples, the conformance corpus and the docs to the sketch",
-      "updatedAt": "2026-10-27T00:12:20Z",
-      "url": "https://github.com/cevr/effra/issues/204"
+      "updatedAt": "2026-10-27T14:44:16Z",
+      "url": "https://github.com/cevr/ergo/issues/204"
     },
     {
       "assignees": [],
@@ -3650,7 +3650,7 @@
       "stateReason": null,
       "title": "Retire the `.ef` front-end",
       "updatedAt": "2026-10-26T23:06:22Z",
-      "url": "https://github.com/cevr/effra/issues/205"
+      "url": "https://github.com/cevr/ergo/issues/205"
     },
     {
       "assignees": [],
@@ -3666,7 +3666,7 @@
       "stateReason": null,
       "title": "Standard library: Effect for Go (epic)",
       "updatedAt": "2026-10-27T00:34:32Z",
-      "url": "https://github.com/cevr/effra/issues/206"
+      "url": "https://github.com/cevr/ergo/issues/206"
     },
     {
       "assignees": [],
@@ -3690,7 +3690,7 @@
       "stateReason": null,
       "title": "std: `tasks` and supervision",
       "updatedAt": "2026-10-26T23:21:03Z",
-      "url": "https://github.com/cevr/effra/issues/207"
+      "url": "https://github.com/cevr/ergo/issues/207"
     },
     {
       "assignees": [],
@@ -3712,7 +3712,7 @@
       "stateReason": null,
       "title": "std: `sync` and STM",
       "updatedAt": "2026-10-26T23:06:26Z",
-      "url": "https://github.com/cevr/effra/issues/208"
+      "url": "https://github.com/cevr/ergo/issues/208"
     },
     {
       "assignees": [],
@@ -3734,7 +3734,7 @@
       "stateReason": null,
       "title": "Prelude `Clock`, `Random`, `Console`, and the `testing` package",
       "updatedAt": "2026-10-26T23:20:47Z",
-      "url": "https://github.com/cevr/effra/issues/209"
+      "url": "https://github.com/cevr/ergo/issues/209"
     },
     {
       "assignees": [],
@@ -3756,7 +3756,7 @@
       "stateReason": null,
       "title": "std: host packages `os`, `fs`, `net` and `sql`",
       "updatedAt": "2026-10-26T23:19:13Z",
-      "url": "https://github.com/cevr/effra/issues/210"
+      "url": "https://github.com/cevr/ergo/issues/210"
     },
     {
       "assignees": [],
@@ -3778,7 +3778,7 @@
       "stateReason": null,
       "title": "std: core data (`Option`, `slices`, `maps`, `strings`, `cmp`, `math`)",
       "updatedAt": "2026-10-26T23:20:09Z",
-      "url": "https://github.com/cevr/effra/issues/211"
+      "url": "https://github.com/cevr/ergo/issues/211"
     },
     {
       "assignees": [],
@@ -3798,42 +3798,138 @@
       "stateReason": null,
       "title": "std: `html` rendering functions",
       "updatedAt": "2026-10-26T23:27:57Z",
-      "url": "https://github.com/cevr/effra/issues/212"
+      "url": "https://github.com/cevr/ergo/issues/212"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "a67dc6a9255832f2f8e7c3ab5266fa29698467289a8bc9a8942fa77dd1be4708",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 213,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Gate: test-input observer handshake can hang test init for minutes",
+      "updatedAt": "2026-10-27T08:41:41Z",
+      "url": "https://github.com/cevr/ergo/issues/213"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        196
+      ],
+      "bodySha256": "ab6cbdb5a46fd739f0554e220ced6d75c688268c97b33bec6a7e9ad08fbc4fc0",
+      "labels": [
+        "implementation:task",
+        "track:compiler",
+        "wayfinder:task"
+      ],
+      "number": 214,
+      "parent": 192,
+      "state": "open",
+      "stateReason": null,
+      "title": "Sketch checker: infer function-literal parameter types from the expected type",
+      "updatedAt": "2026-10-27T13:12:35Z",
+      "url": "https://github.com/cevr/ergo/issues/214"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "e17268338bdd5751662f6bc9ed86d858c265908a2fc22d6c0ba14c8f3440c2ad",
+      "labels": [
+        "implementation:task",
+        "track:compiler",
+        "wayfinder:task"
+      ],
+      "number": 215,
+      "parent": 192,
+      "state": "open",
+      "stateReason": null,
+      "title": "Sketch parser and formatter limits: early-error scan, deep indentation, corpus fences",
+      "updatedAt": "2026-10-27T14:44:13Z",
+      "url": "https://github.com/cevr/ergo/issues/215"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        31,
+        50,
+        202
+      ],
+      "bodySha256": "a2fcae2ce6b3777c603b28e8e4664852b6250599c844c78842bd4fe6c86b3b41",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 216,
+      "parent": 32,
+      "state": "open",
+      "stateReason": null,
+      "title": "Showcase: a MyGo desktop app written in the sketch",
+      "updatedAt": "2026-10-27T15:18:39Z",
+      "url": "https://github.com/cevr/ergo/issues/216"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "8b23b42656a8f45cd9d2f9d69f0a44d30bd91385c38299f3269b5136f3c2e166",
+      "labels": [
+        "implementation:task",
+        "track:compiler",
+        "wayfinder:task"
+      ],
+      "number": 217,
+      "parent": 192,
+      "state": "open",
+      "stateReason": null,
+      "title": "Rename `uses` to `needs`; add `provides` on wires",
+      "updatedAt": "2026-10-27T15:28:55Z",
+      "url": "https://github.com/cevr/ergo/issues/217"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "fd62289d881fa2c1bc16364321b37f7cb5c66f788f2de753cb7690464f3175ff",
+      "labels": [
+        "implementation:task",
+        "track:compiler",
+        "wayfinder:task"
+      ],
+      "number": 218,
+      "parent": 192,
+      "state": "open",
+      "stateReason": null,
+      "title": "Rename the language from Effra to Ergo",
+      "updatedAt": "2026-10-27T15:32:32Z",
+      "url": "https://github.com/cevr/ergo/issues/218"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "66f557d20e35d98dd818869a83f125b41aae8e6f432dd26ecac40680c95f2491",
+      "labels": [
+        "wayfinder:research"
+      ],
+      "number": 219,
+      "parent": 192,
+      "state": "open",
+      "stateReason": null,
+      "title": "Research: a hot-path profile for renderers, TUIs and games",
+      "updatedAt": "2026-10-27T16:15:54Z",
+      "url": "https://github.com/cevr/ergo/issues/219"
     }
   ],
   "map": 1,
   "mapReferences": [
     2,
-    5,
     12,
     14,
-    17,
-    18,
-    19,
-    20,
-    22,
-    23,
-    25,
-    27,
-    29,
-    30,
     31,
     32,
-    33,
-    35,
     40,
-    41,
-    44,
-    46,
-    49,
-    51,
-    52,
-    56,
-    58,
-    59,
-    66,
-    70,
-    72,
     73,
     76,
     77,
@@ -3849,6 +3945,6 @@
     192,
     206
   ],
-  "repository": "cevr/effra",
-  "schema": "effra-wayfinder-snapshot/1"
+  "repository": "cevr/ergo",
+  "schema": "ergo-wayfinder-snapshot/1"
 }

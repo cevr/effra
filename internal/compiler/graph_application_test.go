@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // Every provenance witness is typed: a requirement's (ViaKind, Via) names a
@@ -75,14 +75,14 @@ func TestGraphViewApplicationProjectsPlanByMode(t *testing.T) {
 		view := applicationView(t, r, public, nil)
 		incoming := map[string]int{}
 		for _, edge := range viewEdges(view, "retains") {
-			if !edge.Data.Effra.FirstWitness {
+			if !edge.Data.Ergo.FirstWitness {
 				t.Fatalf("retains edge %s is not a first witness", edge.ID)
 			}
 			incoming[edge.TargetID]++
 		}
 		for _, requirement := range plan.Requirements {
 			node := retainedNode(view, requirement.Kind, requirement.Identity)
-			if node == nil || node.Data.Effra.Retention == nil || !node.Data.Effra.Retention.Retained || node.Data.Effra.Retention.Reason != requirement.Reason {
+			if node == nil || node.Data.Ergo.Retention == nil || !node.Data.Ergo.Retention.Retained || node.Data.Ergo.Retention.Reason != requirement.Reason {
 				t.Fatalf("%s: requirement %+v is not published", mode, requirement)
 			}
 			want := 1
@@ -100,7 +100,7 @@ func TestGraphViewApplicationProjectsPlanByMode(t *testing.T) {
 				published++
 			}
 		}
-		if len(view.Nodes) != published || view.Data.Effra.Selection.Mode != public {
+		if len(view.Nodes) != published || view.Data.Ergo.Selection.Mode != public {
 			t.Fatalf("%s: view has %d nodes for %d plan facts", mode, len(view.Nodes), published)
 		}
 	}
@@ -129,13 +129,13 @@ func TestGraphViewApplicationShowsHiddenNodesAndReplacements(t *testing.T) {
 	fixture := applicationNodeID(RequiresLayer, layerID("Fixture"))
 	for _, identity := range plan.Identities(RequiresLayerNode) {
 		node := retainedNode(view, RequiresLayerNode, identity)
-		if node == nil || node.Data.Effra.Binding == nil {
+		if node == nil || node.Data.Ergo.Binding == nil {
 			t.Fatalf("layer node %s lacks its binding", identity)
 		}
 		var selection *GraphLayerSelectFacts
 		for _, edge := range viewEdges(view, "selects") {
-			if edge.TargetID == node.ID && edge.SourceID == fixture && edge.Data.Effra.Plan == fixture {
-				selection = edge.Data.Effra.Selection
+			if edge.TargetID == node.ID && edge.SourceID == fixture && edge.Data.Ergo.Plan == fixture {
+				selection = edge.Data.Ergo.Selection
 			}
 		}
 		if selection == nil {
@@ -147,7 +147,7 @@ func TestGraphViewApplicationShowsHiddenNodesAndReplacements(t *testing.T) {
 			hidden, hiddenSelection = node, selection
 		}
 	}
-	if hidden == nil || public == nil || hidden.Data.Effra.Retention.Reason != "hidden-layer-node" {
+	if hidden == nil || public == nil || hidden.Data.Ergo.Retention.Reason != "hidden-layer-node" {
 		t.Fatal("hidden selected layer node is not visible as hidden")
 	}
 	if len(hiddenSelection.Replacements) != 1 || hiddenSelection.Implementation != "FixtureStore" {
@@ -155,7 +155,7 @@ func TestGraphViewApplicationShowsHiddenNodesAndReplacements(t *testing.T) {
 	}
 	replacement := ""
 	for _, edge := range viewEdges(view, "retains") {
-		if edge.SourceID == hidden.ID && edge.Data.Effra.Reason == "layer-replacement" {
+		if edge.SourceID == hidden.ID && edge.Data.Ergo.Reason == "layer-replacement" {
 			replacement = edge.TargetID
 		}
 	}
@@ -174,11 +174,11 @@ func TestGraphViewApplicationShowsHiddenNodesAndReplacements(t *testing.T) {
 	if !found {
 		t.Fatal("runtime catalog closure edge layers -> core is missing")
 	}
-	if len(view.Data.Effra.Facts.Types) == 0 {
+	if len(view.Data.Ergo.Facts.Types) == 0 {
 		t.Fatal("layer node constructor types are not in the fact closure")
 	}
 	for _, edge := range viewEdges(view, "retains") {
-		if source := viewNode(view, edge.SourceID); source.Data.Effra.Kind == string(OriginProviderMethod) {
+		if source := viewNode(view, edge.SourceID); source.Data.Ergo.Kind == string(OriginProviderMethod) {
 			return
 		}
 	}
@@ -208,14 +208,14 @@ func TestGraphViewApplicationQualifiesSelectionsPerPlan(t *testing.T) {
 	view := applicationView(t, r, "build", nil)
 	var binding *GraphViewNode
 	for i := range view.Nodes {
-		if view.Nodes[i].Data.Effra.Kind == string(RequiresLayerNode) {
+		if view.Nodes[i].Data.Ergo.Kind == string(RequiresLayerNode) {
 			if binding != nil {
 				t.Fatal("the shared binding is not one canonical node")
 			}
 			binding = &view.Nodes[i]
 		}
 	}
-	if binding == nil || binding.Data.Effra.Binding == nil || binding.Data.Effra.Binding.Service != "Store" {
+	if binding == nil || binding.Data.Ergo.Binding == nil || binding.Data.Ergo.Binding.Service != "Store" {
 		t.Fatalf("binding node lacks its plan-independent binding facts: %+v", binding)
 	}
 	if encoded, _ := json.Marshal(binding); strings.Contains(string(encoded), `"selection"`) {
@@ -223,10 +223,10 @@ func TestGraphViewApplicationQualifiesSelectionsPerPlan(t *testing.T) {
 	}
 	selections := map[string]*GraphLayerSelectFacts{}
 	for _, edge := range viewEdges(view, "selects") {
-		if edge.TargetID != binding.ID || edge.Data.Effra.Plan != edge.SourceID || edge.Data.Effra.Selection == nil {
+		if edge.TargetID != binding.ID || edge.Data.Ergo.Plan != edge.SourceID || edge.Data.Ergo.Selection == nil {
 			t.Fatalf("selects edge %s is not a plan-qualified selection of the binding", edge.ID)
 		}
-		selections[edge.SourceID] = edge.Data.Effra.Selection
+		selections[edge.SourceID] = edge.Data.Ergo.Selection
 	}
 	shared := selections[applicationNodeID(RequiresLayer, layerID("Shared"))]
 	fixture := selections[applicationNodeID(RequiresLayer, layerID("Fixture"))]
@@ -243,8 +243,8 @@ func TestGraphViewApplicationQualifiesSelectionsPerPlan(t *testing.T) {
 	retained := 0
 	for _, edge := range viewEdges(view, "retains") {
 		target := viewNode(view, edge.TargetID)
-		if edge.SourceID == binding.ID && target.Data.Effra.Kind == string(RequiresProvider) {
-			if !effective[target.Data.Effra.Retention.Identity] {
+		if edge.SourceID == binding.ID && target.Data.Ergo.Kind == string(RequiresProvider) {
+			if !effective[target.Data.Ergo.Retention.Identity] {
 				t.Fatalf("provider %s is retained through the binding without a selection", target.ID)
 			}
 			retained++
@@ -264,7 +264,7 @@ func TestGraphViewApplicationShowsCallbacks(t *testing.T) {
 	r, plan := checkedApplicationPlan(t, applicationStoredCallbackSource, GoGenerationBuild)
 	view := applicationView(t, r, "build", nil)
 	renamed := symbolIdentity(t, r, "renamed")
-	if node := retainedNode(view, RequiresCallableValue, renamed); node == nil || node.Data.Effra.Retention.Reason != "function-value" {
+	if node := retainedNode(view, RequiresCallableValue, renamed); node == nil || node.Data.Ergo.Retention.Reason != "function-value" {
 		t.Fatal("callable value target is not published")
 	}
 	for _, identity := range plan.Identities(RequiresDynamicCall) {
@@ -278,7 +278,7 @@ func TestGraphViewApplicationShowsCallbacks(t *testing.T) {
 	if len(focused.Nodes) != 2 {
 		t.Fatalf("callable focus selects its single first witness, got %d nodes", len(focused.Nodes))
 	}
-	if !slices.Contains(view.Data.Effra.Limitations, "callable-value requirements are the conservative target set of every dynamic call") {
+	if !slices.Contains(view.Data.Ergo.Limitations, "callable-value requirements are the conservative target set of every dynamic call") {
 		t.Fatal("conservative callable limitation is not declared")
 	}
 }
@@ -300,7 +300,7 @@ func TestGraphViewApplicationRefusals(t *testing.T) {
 	}
 	collapsed := applicationView(t, noTests, "build", map[string]any{"collapse": []any{applicationNodeID(RequiresLayer, layerID("Fixture"))}})
 	root := viewNode(collapsed, applicationNodeID(RequiresLayer, layerID("Fixture")))
-	if root == nil || root.Data.Effra.Collapsed == nil {
+	if root == nil || root.Data.Ergo.Collapsed == nil {
 		t.Fatal("application collapse follows the retains forest")
 	}
 }

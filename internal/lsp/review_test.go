@@ -9,7 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"effra.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/compiler"
 )
 
 func TestBoundedOperationalDetailPreservesContext(t *testing.T) {

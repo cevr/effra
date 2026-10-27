@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// legacyGraphFixtures freeze the no-option `ef graph` JSON independently of
+// legacyGraphFixtures freeze the no-option `ergo graph` JSON independently of
 // GraphViewV1 selection. The compiler-level encoding matches the CLI's
 // printProjectionJSON; producer metadata is absent because these results are
 // not qualified by an executing artifact. The goldens have no regeneration
@@ -91,7 +91,7 @@ func TestLegacyGraphPublishesCheckedParameterFactsAndProducerEpoch(t *testing.T)
 	if graph.ProducerIdentity != SemanticProducerIdentity {
 		t.Fatalf("legacy graph producer identity = %q, owner = %q", graph.ProducerIdentity, SemanticProducerIdentity)
 	}
-	if SemanticProducerIdentity != "effra/checker-abi-10/bundled-interface-5" {
+	if SemanticProducerIdentity != "ergo/checker-abi-10/bundled-interface-5" {
 		t.Fatalf("semantic producer identity owner = %q", SemanticProducerIdentity)
 	}
 

@@ -30,7 +30,7 @@ effect fn main() -> string {
 const sessionStepOutput = "active a;reject busy a;stay;active c;closed;reject closed"
 
 // Option/Result pairing plus a generic enum whose alternatives share a binder.
-const absencePairingSource = `import Data "effra/data"
+const absencePairingSource = `import Data "ergo/data"
 record User { name: string }
 record Missing { message: string }
 enum Reply<T: type> { Fresh { value: T }; Stale { value: T }; Gone }

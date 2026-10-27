@@ -48,7 +48,7 @@ func TestLifecycleConformanceAcrossGoAndEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	probe := `package main
-import("testing";"context";"errors";"reflect"; er "effra.generated/runtime")
+import("testing";"context";"errors";"reflect"; er "ergo.generated/runtime")
 func TestLifecycle(t *testing.T){
  started:=make(chan struct{});order:=[]string{}
  provider:=efService_Gate{m_step:func(name string)efEffect[struct{}]{return func(ctx efContext)efExit[struct{}]{

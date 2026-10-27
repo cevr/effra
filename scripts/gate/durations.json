@@ -1,5 +1,5 @@
 {
-  "effra.local/prototype/cmd/ef": {
+  "ergo.local/prototype/cmd/ergo": {
     "TestAbsentSyntaxDiagnosticsAcrossCLIMCPAndLSP": 5.89,
     "TestBindingContractKeyDiagnosticsCLIAndMCPParity": 0.13,
     "TestBundledSmokeGenericDataRefusals": 0.12,
@@ -67,7 +67,7 @@
     "TestVoidContractsAcrossCLIAndMCPProcesses": 0.19,
     "TestVoidContractsAcrossFramedLSPAndBackendProcesses": 0.02
   },
-  "effra.local/prototype/internal/compiler": {
+  "ergo.local/prototype/internal/compiler": {
     "FuzzCompiler": 0,
     "TestAbsentSyntaxCatalogWording": 0,
     "TestAbsentSyntaxDeepLoopHeadersComplete": 0.02,
@@ -198,7 +198,7 @@
     "TestCodecDeriveSynthesizesCheckedDirectionFunctions": 0,
     "TestCodecEmissionIsDeterministic": 0.02,
     "TestCodecJSEncodeConstructsNoOutputBeyondTheBound": 0.04,
-    "TestCodecJSEngineUsesEffraCarriers": 0.04,
+    "TestCodecJSEngineUsesErgoCarriers": 0.04,
     "TestCodecOriginRepairKeepsOrdinaryFunctionNavigation": 0.01,
     "TestCodecPlanDerivationIsLinearInSharedTypes": 0,
     "TestCodecPlanIsAStableSharedDAG": 0,
@@ -593,7 +593,7 @@
     "TestSigned64ProfileEmitsPerOperationNormalizationAndStrictBigInt": 1.38,
     "TestSigned64ProfileGoConstantFailureIsNotPortableSuccess": 0.08,
     "TestSigned64ProfilePreservesOperatorPrecedenceAndFormatting": 0,
-    "TestSigned64ProfileRunsTwoEffraCallersOnBothTargets": 0.98,
+    "TestSigned64ProfileRunsTwoErgoCallersOnBothTargets": 0.98,
     "TestSigned64ProfileTargetNormalizationMutantFailsBehavior": 0.18,
     "TestSourcePositionsInvertTheSharedIndex": 0,
     "TestTailCallArgumentsAreEvaluatedBeforeParametersChange": 3.71,

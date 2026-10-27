@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	lintsdk "effra.local/prototype/lint"
+	lintsdk "ergo.local/prototype/lint"
 )
 
 // builtinFailureIdentity names a compiler-supplied failure. Source failures

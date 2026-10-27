@@ -8,8 +8,8 @@ This directory is the record. A rendered copy, such as a Sideshow post, is a vie
 
 - One file per preview, named `YYYY-MM-DD-<slug>.md`, added to the index below.
 - `.ef` text is authoritative. Every snippet carries one label:
-  - **Checked**: the snippet checks with `ef check` at a recorded commit, and the preview names the command and the commit.
-  - **Checked (prototype)**: the snippet is in the Go-shaped language of [`docs/spec/`](../spec/README.md), which `ef check` does not implement yet, and it checks with the merged prototype compiler (`go run ./cmd/sketchc check <file>` in `prototypes/sketch9`) at a recorded commit. The preview names the command and the commit. The label becomes **Checked** when `ef check` implements the language.
+  - **Checked**: the snippet checks with `ergo check` at a recorded commit, and the preview names the command and the commit.
+  - **Checked (prototype)**: the snippet is in the Go-shaped language of [`docs/spec/`](../spec/README.md), which `ergo check` does not implement yet, and it checks with the merged prototype compiler (`go run ./cmd/sketchc check <file>` in `prototypes/sketch9`) at a recorded commit. The preview names the command and the commit. The label becomes **Checked** when `ergo check` implements the language.
   - **Tested candidate**: the snippet depends on an unmerged branch under review; name the branch and its head commit.
   - **Proposed**: not admitted. Say so, and name the spec, research record or map item that would admit it.
 - Each preview states what it does not claim, such as a benchmark result, framework port or construct that has not been admitted.

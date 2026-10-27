@@ -1,6 +1,6 @@
 // A search box with reload: one checked machine declaration over an
-// ordinary pure step function. `ef inspect examples/machine-search.ef Search`
-// and `ef graph examples/machine-search.ef --kind machine` project its plan
+// ordinary pure step function. `ergo inspect examples/machine-search.ef Search`
+// and `ergo graph examples/machine-search.ef --kind machine` project its plan
 // without running the step.
 enum Query {
     Idle

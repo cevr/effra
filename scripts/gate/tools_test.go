@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"effra.local/prototype/internal/testinputs"
+	"ergo.local/prototype/internal/testinputs"
 )
 
 // TestMain puts a small stand-in for go first on PATH. Go's test cache logs

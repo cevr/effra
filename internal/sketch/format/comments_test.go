@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/sketch/sketchtest"
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/sketchtest"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // nestedChains are small programs that nest every construct with

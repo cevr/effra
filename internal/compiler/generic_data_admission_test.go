@@ -14,8 +14,8 @@ func TestGenericDataBareApplicationsRequireAllArguments(t *testing.T) {
 		}
 	}
 	for _, source := range []string{
-		`import Data "effra/data" record Holder{option:Data.Option}`,
-		`import Data "effra/data" fn inspect(value:Data.Option)->string{"x"}`,
+		`import Data "ergo/data" record Holder{option:Data.Option}`,
+		`import Data "ergo/data" fn inspect(value:Data.Option)->string{"x"}`,
 	} {
 		r := CompileFor(source, "go")
 		if r.Checked || len(r.Diagnostics) == 0 {

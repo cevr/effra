@@ -10,13 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // codecTransformSource composes a pure nominal witness, an effectful witness
 // whose directions need different services, and two parents that share the
 // witnesses under the same and a different `with` scope.
-const codecTransformSource = `import Json "effra/json"
+const codecTransformSource = `import Json "ergo/json"
 
 error Refused
 error Unknown
@@ -215,7 +215,7 @@ func TestCodecTransformationInspectionMatchesObservedSteps(t *testing.T) {
 		code = codecGoInstrument(t, code, witness.transform.encode.goEmissionName(), fmt.Sprintf("trace=append(trace,%q)", "encode:"+witness.Name))
 	}
 	probe := strings.NewReplacer("@DECODE@", team.decode.goEmissionName(), "@ENCODE@", team.encode.goEmissionName()).Replace(`package main
-import("strings";"testing";er "effra.generated/runtime")
+import("strings";"testing";er "ergo.generated/runtime")
 var trace []string
 func TestTrace(t *testing.T){
  decoded:=er.Run(func(fc *er.FiberContext)er.Exit[efType_Team]{return efProvide_Lookup(@DECODE@(` + "`" + `{"lead":{"email":"a"},"contact":"b","backup":"c"}` + "`" + `),efProvider_Known())(efContext{Runtime:fc})})
@@ -402,7 +402,7 @@ func TestCodecTransformationCallersNeedTheDirectionRows(t *testing.T) {
 }
 
 func TestCodecTransformationRefusals(t *testing.T) {
-	header := `import Json "effra/json"
+	header := `import Json "ergo/json"
 record Email { text: string }
 record Box { email: Email }
 fn parseEmail(text: string) -> Email { Email { text: text } }
@@ -431,7 +431,7 @@ derive nameJson = Json.codec<string>(maxBodyBytes: 64, maxDepth: 1, decode: name
 		{"decode returns another type", "derive c = Json.codec<Email>(maxBodyBytes: 64, maxDepth: 1, decode: name, encode: renderEmail)", "EF138", "decode transformation name returns string, not the derived type Email"},
 		{"encode takes another type", "derive c = Json.codec<Email>(maxBodyBytes: 64, maxDepth: 1, decode: parseEmail, encode: name)", "EF138", "encode transformation name takes string, not the derived type Email"},
 		{"encode returns another representation", "derive c = Json.codec<Email>(maxBodyBytes: 64, maxDepth: 1, decode: parseEmail, encode: flag)", "EF138", "encode transformation flag returns bool, not the representation string that parseEmail decodes"},
-		{"unrepresentable representation", "derive c = Json.codec<Email>(maxBodyBytes: 64, maxDepth: 1, decode: bytesEmail, encode: emailBytes)", "EF138", "codec c cannot derive effra/json-structural-1 for Email: bytes at Email is not representable"},
+		{"unrepresentable representation", "derive c = Json.codec<Email>(maxBodyBytes: 64, maxDepth: 1, decode: bytesEmail, encode: emailBytes)", "EF138", "codec c cannot derive ergo/json-structural-1 for Email: bytes at Email is not representable"},
 		{"unknown witness", "derive c = Json.codec<Box>(maxBodyBytes: 64, maxDepth: 2) with missing", "EF102", "unknown codec witness missing in codec c"},
 		{"repeated witness", "derive c = Json.codec<Box>(maxBodyBytes: 64, maxDepth: 2) with emailJson, emailJson", "EF138", "codec c with emailJson: is repeated"},
 		{"self composition", "derive c = Json.codec<Email>(maxBodyBytes: 64, maxDepth: 1, decode: parseEmail, encode: renderEmail) with c", "EF138", "codec c with c: a witness cannot compose itself"},
@@ -481,7 +481,7 @@ derive nameJson = Json.codec<string>(maxBodyBytes: 64, maxDepth: 1, decode: name
 // or a function value; a plain-data transformed value leaves the scope like
 // any other value.
 func TestCodecTransformationDomainsArePlainData(t *testing.T) {
-	header := `import Json "effra/json"
+	header := `import Json "ergo/json"
 effect fn open(path: string) -> File raises { IoError } {
     run Files.openRead(path).provide<Files>(LiveFiles)
 }
@@ -580,14 +580,14 @@ derive emailJson = Json.codec<Email>(maxBodyBytes: 64, maxDepth: 1, decode: pars
 
 // Transformed witnesses format on one line, `with` clause included.
 func TestCodecTransformationDeclarationsFormat(t *testing.T) {
-	source := "import Json \"effra/json\"\nrecord Email { text: string }\nrecord Box { email: Email }\nfn parseEmail(text: string) -> Email { Email { text: text } }\nfn renderEmail(email: Email) -> string { email.text }\nderive emailJson=Json.codec<Email>( maxBodyBytes:64,maxDepth:1,decode:parseEmail , encode : renderEmail )\nderive boxJson = Json.codec<Box>(maxBodyBytes: 64, maxDepth: 2)  with   emailJson\n"
-	want := "import Json \"effra/json\"\nrecord Email {\n    text: string\n}\nrecord Box {\n    email: Email\n}\nfn parseEmail(text: string) -> Email {\n    Email {\n        text: text\n    }\n}\nfn renderEmail(email: Email) -> string {\n    email.text\n}\nderive emailJson = Json.codec<Email>(maxBodyBytes: 64, maxDepth: 1, decode: parseEmail, encode: renderEmail)\nderive boxJson = Json.codec<Box>(maxBodyBytes: 64, maxDepth: 2) with emailJson\n"
+	source := "import Json \"ergo/json\"\nrecord Email { text: string }\nrecord Box { email: Email }\nfn parseEmail(text: string) -> Email { Email { text: text } }\nfn renderEmail(email: Email) -> string { email.text }\nderive emailJson=Json.codec<Email>( maxBodyBytes:64,maxDepth:1,decode:parseEmail , encode : renderEmail )\nderive boxJson = Json.codec<Box>(maxBodyBytes: 64, maxDepth: 2)  with   emailJson\n"
+	want := "import Json \"ergo/json\"\nrecord Email {\n    text: string\n}\nrecord Box {\n    email: Email\n}\nfn parseEmail(text: string) -> Email {\n    Email {\n        text: text\n    }\n}\nfn renderEmail(email: Email) -> string {\n    email.text\n}\nderive emailJson = Json.codec<Email>(maxBodyBytes: 64, maxDepth: 1, decode: parseEmail, encode: renderEmail)\nderive boxJson = Json.codec<Box>(maxBodyBytes: 64, maxDepth: 2) with emailJson\n"
 	assertFormat(t, source, want)
 }
 
 // codecBranchSource puts witnesses on two variants of a union, followed by
 // a field that repeats the first variant's witness.
-const codecBranchSource = `import Json "effra/json"
+const codecBranchSource = `import Json "ergo/json"
 
 record Email {
     text: string
@@ -696,7 +696,7 @@ func TestCodecTransformationInspectionIsStaticPlanOrder(t *testing.T) {
 // fields+2 type occurrences: Wide, its field and Big's fields.
 func codecWideDomainSource(fields int) string {
 	var source strings.Builder
-	source.WriteString("import Json \"effra/json\"\nrecord Big {\n")
+	source.WriteString("import Json \"ergo/json\"\nrecord Big {\n")
 	for i := range fields {
 		fmt.Fprintf(&source, "    f%d: i64\n", i)
 	}

@@ -11,8 +11,8 @@ func TestAbsentSyntaxCatalogWording(t *testing.T) {
 	for _, entry := range absentSyntaxCatalog {
 		switch entry.Status {
 		case constructAbsent:
-			if !strings.HasPrefix(entry.Message, "Effra has no ") {
-				t.Errorf("absent %s/%s does not say Effra has no it: %q", entry.Position, entry.Spelling, entry.Message)
+			if !strings.HasPrefix(entry.Message, "Ergo has no ") {
+				t.Errorf("absent %s/%s does not say Ergo has no it: %q", entry.Position, entry.Spelling, entry.Message)
 			}
 		case constructPlanned:
 			if !strings.HasSuffix(entry.Message, "not yet supported") {
@@ -233,11 +233,11 @@ func TestAbsentSyntaxRecoveryIsBoundedToTheConstruct(t *testing.T) {
 		{"bare-block", "fn f() -> string { { \"a\" } }", "EF002", "expected expression", "{ \"a\"", "{"},
 		{"lexical", "record R { x: string } fn f() -> string { R { x: & } }", "EF001", "unsupported character '&'", "&", "&"},
 		{"body-fault", "fn f(b: bool) -> string { while b { \"a\" }; \"a\" }", "EF003", "`while` loops are not yet supported", "while", "while"},
-		{"body-keeps-ef003", "fn f(b: bool) -> string {\n    while b { x: if b { \"a\" } }\n}", "EF003", "Effra has no `if` without `else`", "if b", "if"},
+		{"body-keeps-ef003", "fn f(b: bool) -> string {\n    while b { x: if b { \"a\" } }\n}", "EF003", "Ergo has no `if` without `else`", "if b", "if"},
 		{"c-family-header", "fn f(n: string) -> string { while (i < n) { i++ }; \"a\" }", "EF003", "`while` loops are not yet supported", "while", "while"},
 		{"go-range", "fn f(xs: string) -> string { for _, x := range xs { x }; \"a\" }", "EF003", "`for` loops are not yet supported", "for", "for"},
 		{"go-for-clause", "fn f(n: string) -> string { for i := 0; i < n; i++ { x }; \"a\" }", "EF003", "`for` loops are not yet supported", "for", "for"},
-		{"catch-clause", "effect fn main() -> void { try { } catch (e) { void } }", "EF003", "Effra has no `try`/`catch` blocks", "catch", "catch"},
+		{"catch-clause", "effect fn main() -> void { try { } catch (e) { void } }", "EF003", "Ergo has no `try`/`catch` blocks", "catch", "catch"},
 		{"after-body", "fn f(b: bool) -> string { while b { x }; let c = = \"d\"; \"a\" }", "EF002", "expected expression", "= \"d\"", "="},
 		{"bound-try", "record try { x: string }\nfn f() -> string {\n    try { x: \"a\" }\n    let b = = \"c\"\n    \"b\"\n}", "EF002", "expected expression", "= \"c\"", "="},
 		{"bound-while", "fn while(x: string) -> string { x }\nfn f() -> string {\n    while(\"a\")\n    let b = = \"c\"\n    \"b\"\n}", "EF002", "expected expression", "= \"c\"", "="},

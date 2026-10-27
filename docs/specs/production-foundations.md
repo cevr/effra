@@ -2,15 +2,15 @@
 
 > **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
 
-Status: finite foundation stage implemented and reviewed through `a9da03a`, with combined race/tool receipts at `8debbc2`, 2026-10-06. See [retained evidence and limits](../receipts/foundations-2026-10-06/README.md). Implementation was authorized by the owner on 2026-10-05 through Wayfinder + implement-spec. Integration branch: `integration/production-foundations`. The [implementation graph](https://github.com/cevr/effra/issues/26) is separate from existing HITL decision tickets; completing code does not close those decisions.
+Status: finite foundation stage implemented and reviewed through `a9da03a`, with combined race/tool receipts at `8debbc2`, 2026-10-06. See [retained evidence and limits](../receipts/foundations-2026-10-06/README.md). Implementation was authorized by the owner on 2026-10-05 through Wayfinder + implement-spec. Integration branch: `integration/production-foundations`. The [implementation graph](https://github.com/cevr/ergo/issues/26) is separate from existing HITL decision tickets; completing code does not close those decisions.
 
-This first complete foundation spec addresses the load-bearing gaps surfaced by generic service, orchestration, lifecycle, lint and testing patterns. Broader host-object, wire-codec, bounded-stream, database and deployment facilities remain subsequent stages in the [map](https://github.com/cevr/effra/issues/1), rather than fabricated guarantees of this stage.
+This first complete foundation spec addresses the load-bearing gaps surfaced by generic service, orchestration, lifecycle, lint and testing patterns. Broader host-object, wire-codec, bounded-stream, database and deployment facilities remain subsequent stages in the [map](https://github.com/cevr/ergo/issues/1), rather than fabricated guarantees of this stage.
 
 ## Standing constraints and acceptance seams
 
 `.ef` source is authoritative. Public effect contracts remain explicit and locally checked; unsupported representations are diagnosed. Go is the only executable target (2026-10-26). The compiler's semantic model owns CLI/MCP facts. Use the already established public seams: admitted `.ef` source, compiler Result/runtime exported APIs, compiled CLI and real stdio MCP. Build meaningful red/green acceptance cases at these seams, never a second analyzer or implementation-shaped snapshots.
 
-Use isolated Rifts from the integration branch, no package install without lock changes, no push, and conventional compiling/gated commits. Implementer agents use the prescribed implementation model and TDD skill; integration/review use the prescribed review model. Root serializes ticket claims and resolutions on the GitHub [map](https://github.com/cevr/effra/issues/1). Do not close HITL decision tickets without owner feedback.
+Use isolated Rifts from the integration branch, no package install without lock changes, no push, and conventional compiling/gated commits. Implementer agents use the prescribed implementation model and TDD skill; integration/review use the prescribed review model. Root serializes ticket claims and resolutions on the GitHub [map](https://github.com/cevr/ergo/issues/1). Do not close HITL decision tickets without owner feedback.
 
 ## Closed data and exhaustive interpretation
 

@@ -18,7 +18,7 @@ import (
 //
 // A pack process reads exactly one request frame from stdin, which the
 // runner then closes, writes exactly one response frame to stdout and exits
-// 0. A frame is the ASCII header "EFFRA-LINT <version> <length>\n" followed
+// 0. A frame is the ASCII header "ERGO-LINT <version> <length>\n" followed
 // by exactly length bytes of JSON. Decimal numbers have no sign or leading
 // zero; the header is at most 64 bytes. stderr is free-form diagnostics.
 // A pack that does not speak the request's version answers with a frame of
@@ -26,7 +26,7 @@ import (
 const ProtocolVersion = 1
 
 const (
-	frameMagic          = "EFFRA-LINT"
+	frameMagic          = "ERGO-LINT"
 	maxFrameHeaderBytes = 64
 	// MaxRequestBytes bounds the request payload a pack accepts.
 	MaxRequestBytes = 256 << 20
@@ -231,9 +231,9 @@ func prepare(configuration *Configuration, namespace string, snapshot *Snapshot)
 // so an answer computed under another executable or environment cannot
 // bind to this request. Packs echo it as an opaque value.
 func (e *execution) bind(execution *ExecutionIdentity) {
-	domain := "effra.lint.request/in-process"
+	domain := "ergo.lint.request/in-process"
 	if execution != nil {
-		domain = "effra.lint.request/process"
+		domain = "ergo.lint.request/process"
 		e.report.Analysis = e.report.Analysis.executed(*execution)
 	} else {
 		e.report.Analysis = e.report.Analysis.inProcess()

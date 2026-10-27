@@ -8,7 +8,7 @@ Effra owns these inputs:
 | --- | --- |
 | `effect-cases.json` | Selected upstream cases mapped to existing Effra acceptance tests, with status and limits. `go run ./scripts/conformance check` validates it. |
 | `codecs/` | Codec policy vectors, with the outputs the pinned Effect runtime produced for them (`effect-*comparator.out.jsonl`), frozen on 2026-10-26 as golden files. The Go codec tests check against them; nothing runs Effect. |
-| `http/` | Shared HTTP wire vectors: exact status/body/content-type exchanges, the limits each program declares, and lifecycle cases (body timeout, disconnect, shutdown with active work). `cmd/ef` `TestHTTPWireVectors` runs every `*-vectors.json` over real sockets on Go. |
+| `http/` | Shared HTTP wire vectors: exact status/body/content-type exchanges, the limits each program declares, and lifecycle cases (body timeout, disconnect, shutdown with active work). `cmd/ergo` `TestHTTPWireVectors` runs every `*-vectors.json` over real sockets on Go. |
 | `upstream/foldkit-d21db423/` | The pinned Foldkit workspace snapshot, a language-design reference corpus; `go run ./scripts/conformance foldkit --self-check` verifies it offline. |
 | `size/` | Size-conformance fixtures, the Go controls, and recorded application receipts; see [size/README.md](size/README.md). |
 

@@ -1,8 +1,8 @@
 package compiler
 
 import (
-	"effra.local/prototype/internal/producer"
 	"encoding/json"
+	"ergo.local/prototype/internal/producer"
 	"fmt"
 	"reflect"
 	"strings"
@@ -17,7 +17,7 @@ func TestProjectionJSONAccountingMatchesActualEncoding(t *testing.T) {
 			if qualified {
 				identity := producer.Identity{Strength: "unavailable", ReuseScope: "process", Qualifier: "process:oracle", Reason: "unavailable"}
 				if declared {
-					identity.Declaration = producer.Declaration{GoVersion: "go1.27.0", Module: "effra.local/prototype", VCSModified: "true"}
+					identity.Declaration = producer.Declaration{GoVersion: "go1.27.0", Module: "ergo.local/prototype", VCSModified: "true"}
 				}
 				if err := r.Qualify(identity); err != nil {
 					t.Fatal(err)

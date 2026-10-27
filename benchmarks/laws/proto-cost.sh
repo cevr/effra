@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Measures the laws prototype's cost (#125, review 1 m5) into
 # benchmarks/laws/runs/cost.txt, with the conditions and every raw sample.
-#   test     `ef test` per target on a law program and on its control, the same
+#   test     `ergo test` per target on a law program and on its control, the same
 #            program with its contract and satisfies blocks blanked; both carry
 #            one trivial test_ function so the control has something to run.
 #            cold = after a source edit (a new revision), warm = repeated.
-#   order    `ef test` per target on examples/laws/order.ef (eight laws).
-#   build    `ef build` per target on the law program and its control: laws
+#   order    `ergo test` per target on examples/laws/order.ef (eight laws).
+#   build    `ergo build` per target on the law program and its control: laws
 #            are erased, so the two should cost the same.
 #   adapter  cost per exported call in ts/proto/lib.mjs, body included, and the
 #            same body with no adapter, whose difference is the adapter (ts/adapter-cost.mjs).
@@ -23,7 +23,7 @@ for tool in go node awk date sort; do command -v "$tool" > /dev/null || { echo "
 mkdir -p "$scratch"
 scratch=$(cd "$scratch" && pwd)
 ef="$scratch/ef"
-(cd "$proto" && go build -o "$ef" ./cmd/ef)
+(cd "$proto" && go build -o "$ef" ./cmd/ergo)
 head=$(git -C "$proto" rev-parse --short HEAD)
 out="$here/runs/cost.txt"
 

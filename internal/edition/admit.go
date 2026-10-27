@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	sourcefile "effra.local/prototype/internal/source"
+	sourcefile "ergo.local/prototype/internal/source"
 )
 
 // Admission turns an open source into a validated snapshot, or refuses it.
@@ -24,7 +24,7 @@ import (
 //     descriptor (descriptorPath), not from the spelling.
 //  2. The directories from P's directory up to the go.mod boundary are
 //     walked. Each directory is opened as an os.Root, and its identity, its
-//     go.mod and its effra.json (identity and bytes, read through a
+//     go.mod and its ergo.json (identity and bytes, read through a
 //     descriptor opened relative to the directory) are recorded.
 //  3. The edition is chosen from that record. Then P is queried again on
 //     the same descriptor, and every recorded directory, go.mod and
@@ -255,7 +255,7 @@ type dirRecord struct {
 	goMod goModRecord
 }
 
-// manifestRecord is one effra.json as the walk found it.
+// manifestRecord is one ergo.json as the walk found it.
 type manifestRecord struct {
 	present bool
 	// entry is the directory entry itself (it may be a link).
@@ -295,7 +295,7 @@ func sameIdentity(before, after os.FileInfo) bool {
 }
 
 // walk records the directories from start upward. At each directory, an
-// effra.json decides; the walk ends after the first directory that holds a
+// ergo.json decides; the walk ends after the first directory that holds a
 // go.mod, or at the file-system root. A missing directory contributes
 // nothing. The caller closes the snapshot.
 func walk(start string) snapshot {
@@ -617,7 +617,7 @@ func sameContent(before, after os.FileInfo) bool {
 // file yet, such as an unsaved buffer, resolves at the path the file system
 // would create (PhysicalPath): its deepest existing directory is opened and
 // admitted the same way, with the walk starting there. The missing suffix
-// below it (each missing directory, the go.mod and effra.json it would
+// below it (each missing directory, the go.mod and ergo.json it would
 // hold, and the document) is part of the snapshot: it must still be missing
 // when the snapshot is validated, or the document is refused with EF146 and
 // resolves afresh at its next admission. Any other failure to admit the
@@ -672,7 +672,7 @@ func ResolveDocument(path string) Resolution {
 
 // missingSuffix lists the paths, relative to existing, that must stay
 // missing for physical to resolve as it did: each missing directory between
-// existing and the document, the go.mod and effra.json that directory would
+// existing and the document, the go.mod and ergo.json that directory would
 // hold, and the document itself.
 func missingSuffix(existing, physical string) ([]string, error) {
 	relative, err := filepath.Rel(existing, physical)

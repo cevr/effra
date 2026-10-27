@@ -2,10 +2,10 @@ package compiler
 
 import "strings"
 
-// The distributed effra/i64 module converts between i64 and decimal text.
+// The distributed ergo/i64 module converts between i64 and decimal text.
 // Its members are ordinary bundled functions with real signatures in
 // bundled/i64/*.ef; only the body is compiler-owned. Each source body is the
-// single marker string "effra:intrinsic <operation>", which the loader and
+// single marker string "ergo:intrinsic <operation>", which the loader and
 // the interface producer replace with an "intrinsic" expression over the
 // function's parameter. Source text cannot spell that expression kind, so
 // the operations exist only behind these signatures.
@@ -17,13 +17,13 @@ import "strings"
 // echoes the input.
 
 const (
-	i64TextModule     = "effra/i64"
+	i64TextModule     = "ergo/i64"
 	i64FormatOp       = "i64.format"
 	i64ParseOp        = "i64.parse"
 	i64ParseFailure   = "I64ParseFailure"
 	i64SyntaxMessage  = "invalid i64 syntax"
 	i64RangeMessage   = "i64 out of range"
-	intrinsicMarkerAt = "effra:intrinsic "
+	intrinsicMarkerAt = "ergo:intrinsic "
 )
 
 // admitBundledIntrinsic replaces a compiler-owned body marker with its

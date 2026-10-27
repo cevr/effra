@@ -29,8 +29,8 @@ import (
 	"reflect"
 	"slices"
 
-	"effra.local/prototype/internal/compiler/machineplan"
-	"effra.local/prototype/internal/compiler/machineplan/shared"
+	"ergo.local/prototype/internal/compiler/machineplan"
+	"ergo.local/prototype/internal/compiler/machineplan/shared"
 )
 
 type machineInput = machineplan.Input[ValueType]

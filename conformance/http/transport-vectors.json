@@ -1,5 +1,5 @@
 {
-  "schema": "effra-http-wire-vectors/1",
+  "schema": "ergo-http-wire-vectors/1",
   "program": "examples/http-transport.ef",
   "profile": "HTTP/1.1 buffered, exact static paths, wrong method 404, shared Content-Type value policy",
   "targets": ["go"],
@@ -14,18 +14,18 @@
     {"name": "failure.unmapped-500", "request": {"method": "GET", "target": "/unavailable"}, "response": {"status": 500}},
     {"name": "header.invalid-content-type-500", "request": {"method": "GET", "target": "/invalid"}, "response": {"status": 500}},
     {"name": "header.invalid-keeps-serving", "request": {"method": "GET", "target": "/health"}, "response": {"status": 200, "body": {"text": "ok"}, "contentType": "text/plain; charset=utf-8"}},
-    {"name": "target.absolute-form-query", "request": {"method": "GET", "target": "http://effra?next=/health"}, "response": {"status": 404}},
-    {"name": "target.absolute-form-path", "request": {"method": "GET", "target": "http://effra/health?next=/echo"}, "response": {"status": 200, "body": {"text": "ok"}, "contentType": "text/plain; charset=utf-8"}},
+    {"name": "target.absolute-form-query", "request": {"method": "GET", "target": "http://ergo?next=/health"}, "response": {"status": 404}},
+    {"name": "target.absolute-form-path", "request": {"method": "GET", "target": "http://ergo/health?next=/echo"}, "response": {"status": 200, "body": {"text": "ok"}, "contentType": "text/plain; charset=utf-8"}},
     {"name": "limit.content-length-at-bound", "request": {"method": "POST", "target": "/echo", "body": {"repeat": "x", "count": 16}, "contentType": "application/octet-stream"}, "response": {"status": 200, "body": {"repeat": "x", "count": 16}, "contentType": "application/octet-stream"}},
     {"name": "limit.content-length-over-413", "request": {"method": "POST", "target": "/echo", "body": {"repeat": "x", "count": 17}, "contentType": "application/octet-stream"}, "response": {"status": 413, "close": true}},
     {"name": "limit.chunked-at-bound", "request": {"method": "POST", "target": "/echo", "body": {"repeat": "y", "count": 16}, "contentType": "application/octet-stream", "chunked": true}, "response": {"status": 200, "body": {"repeat": "y", "count": 16}, "contentType": "application/octet-stream"}},
     {"name": "limit.chunked-over-413", "request": {"method": "POST", "target": "/echo", "body": {"repeat": "y", "count": 17}, "contentType": "application/octet-stream", "chunked": true}, "response": {"status": 413, "close": true}},
-    {"name": "framing.malformed-chunk-400", "request": {"raw": "POST /echo HTTP/1.1\r\nHost: effra\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nab\r\n0\r\n\r\n"}, "response": {"status": 400, "close": true}}
+    {"name": "framing.malformed-chunk-400", "request": {"raw": "POST /echo HTTP/1.1\r\nHost: ergo\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nab\r\n0\r\n\r\n"}, "response": {"status": 400, "close": true}}
   ],
   "lifecycle": [
-    {"name": "limit.read-body-timeout-closes", "kind": "stalled-body", "request": {"raw": "POST /echo HTTP/1.1\r\nHost: effra\r\nContent-Type: application/octet-stream\r\nContent-Length: 4\r\n\r\nx"}, "withinMillis": 3000},
+    {"name": "limit.read-body-timeout-closes", "kind": "stalled-body", "request": {"raw": "POST /echo HTTP/1.1\r\nHost: ergo\r\nContent-Type: application/octet-stream\r\nContent-Length: 4\r\n\r\nx"}, "withinMillis": 3000},
     {"name": "admission.disconnect-releases-slot", "kind": "disconnect-releases-admission", "hold": "/slow", "probe": "/health"},
-    {"name": "framing.malformed-held-open-does-not-block-shutdown", "kind": "malformed-held-open", "request": {"raw": "POST /echo HTTP/1.1\r\nHost: effra\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nab\r\n0\r\n\r\n"}},
+    {"name": "framing.malformed-held-open-does-not-block-shutdown", "kind": "malformed-held-open", "request": {"raw": "POST /echo HTTP/1.1\r\nHost: ergo\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nab\r\n0\r\n\r\n"}},
     {"name": "shutdown.active-work-503-then-interrupt", "kind": "shutdown-with-active-work", "hold": "/slow", "probe": "/health", "response": {"status": 503, "close": true}, "exitCode": 130, "stderr": "interrupt\n", "withinMillis": 5000}
   ]
 }

@@ -1,5 +1,5 @@
-// Package receipt measures built Effra applications. It is the single owner
-// of the measurement policy: `ef build --receipt` and the size-conformance
+// Package receipt measures built Ergo applications. It is the single owner
+// of the measurement policy: `ergo build --receipt` and the size-conformance
 // matrix (conformance/size/matrix) build, measure and summarize through the
 // same functions. A receipt is a raw measurement, never a performance claim.
 package receipt
@@ -23,14 +23,14 @@ import (
 	"strconv"
 	"strings"
 
-	"effra.local/prototype/internal/compiler"
-	rt "effra.local/prototype/runtime/effra"
+	"ergo.local/prototype/internal/compiler"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // Schema versions the application receipt.
-const Schema = "effra.application-receipt/5"
+const Schema = "ergo.application-receipt/5"
 
-// GoBuildFlags are the flags of every native build: ef build, its stripped
+// GoBuildFlags are the flags of every native build: ergo build, its stripped
 // companions and the size-conformance controls. A generated module is
 // identified by its generation, so VCS stamping is off: otherwise a module
 // published inside a repository would embed that repository's revision and
@@ -53,7 +53,7 @@ func GoBuildCommand(directory, output, pkg string, extra ...string) *exec.Cmd {
 }
 
 // Application records what one build retained and what it measured. The
-// compiler distribution (the ef executable and every bundled runtime
+// compiler distribution (the ergo executable and every bundled runtime
 // source) is reported separately from the application.
 type Application struct {
 	Schema     string              `json:"schema"`
@@ -276,7 +276,7 @@ func Native(r *compiler.Result, source Location, application *compiler.GoApplica
 // generationOf reads the published manifest, the generation's own
 // authoritative file inventory.
 func generationOf(generation compiler.GoGeneration) (*Generation, error) {
-	data, err := os.ReadFile(filepath.Join(generation.Directory, ".effra-output.json"))
+	data, err := os.ReadFile(filepath.Join(generation.Directory, ".ergo-output.json"))
 	if err != nil {
 		return nil, err
 	}
@@ -838,7 +838,7 @@ func (d *Destination) equivalentNames(a, b string) (bool, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return false, err
 	}
-	scratch := ".effra-receipt-probe-" + hex.EncodeToString(nonce)
+	scratch := ".ergo-receipt-probe-" + hex.EncodeToString(nonce)
 	if err := d.parent.Mkdir(scratch, 0o700); err != nil {
 		return false, err
 	}

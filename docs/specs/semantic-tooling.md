@@ -16,11 +16,11 @@ Shared syntax traversal visits structural children once, even when named argumen
 
 ## Diagnostics
 
-Add `ef diagnostics FILE [--target go|js] [--strict] [--json]` and MCP `project.diagnostics`. Both use one report that combines compiler diagnostics and semantic lint advice without duplicates. Preserve existing check/lint APIs and their admission semantics.
+Add `ergo diagnostics FILE [--target go|js] [--strict] [--json]` and MCP `project.diagnostics`. Both use one report that combines compiler diagnostics and semantic lint advice without duplicates. Preserve existing check/lint APIs and their admission semantics.
 
 The report includes a schema version, source identity, revision, target, checked state, strict policy, pass/fail policy result and total counts by severity. Each finding has a stable code, origin, plain-text message, optional plain-text help, original byte span and an LSP diagnostic with explicit severity and range; the LSP message appends the help as a `help:` line so every surface carries the same text. Mapping: compiler and lint errors are Error (1), warnings Warning (2), information Information (3), existing suggestions Hint (4). Supporting information does not require inventing informational rules. `--strict` changes failure policy for warnings, not their severity. Suppression remains limited to eligible lint advice; compiler diagnostics cannot be suppressed. Advice requiring checked semantics is unavailable on invalid source, not a claim of zero possible advice.
 
-A compiler diagnostic may carry `suggestions`: labelled source repairs `{message, edits: [{span, newText}]}`, the same wire shape as lint finding suggestions. An edit replaces the UTF-8 byte span with `newText`; a zero-length span inserts, and edits of one suggestion neither overlap nor share a start. `ef check`, `project.check`, `ef diagnostics --json` and `project.diagnostics` report the same proposal; the diagnostic report adds each edit's UTF-16 `range`. A suggestion is a preview bound to the report's revision, producer and target. No query applies it, and the edited source must be checked again; a request with a stale `expectedRevision` is refused. The LSP advertises no code action for it yet. The first compiler suggestion is EF105 "Execute this recipe inside the scope" for a recipe in the final position of a `scope`.
+A compiler diagnostic may carry `suggestions`: labelled source repairs `{message, edits: [{span, newText}]}`, the same wire shape as lint finding suggestions. An edit replaces the UTF-8 byte span with `newText`; a zero-length span inserts, and edits of one suggestion neither overlap nor share a start. `ergo check`, `project.check`, `ergo diagnostics --json` and `project.diagnostics` report the same proposal; the diagnostic report adds each edit's UTF-16 `range`. A suggestion is a preview bound to the report's revision, producer and target. No query applies it, and the edited source must be checked again; a request with a stale `expectedRevision` is refused. The LSP advertises no code action for it yet. The first compiler suggestion is EF105 "Execute this recipe inside the scope" for a recipe in the final position of a `scope`.
 
 Ranges are zero-based and end-exclusive, with UTF-16 character offsets explicitly identified. Preserve existing UTF-8 byte-offset APIs. Use a shared source-position index rather than rescanning the prefix for every finding. Handle CRLF, astral characters, combining marks, empty spans and EOF. Do not attach out-of-file internal spans to fabricated source locations; represent unavailable locations explicitly in the report and project only valid locations into LSP.
 
@@ -52,7 +52,7 @@ Extend the shared syntax seam with full node extents and binding-name spans whil
 
 The same once-computed producer identity qualifies formatter results and custom-lint analyses. Formatter style/schema version is additional metadata, not a substitute for identifying the actual producer. Distinct development builds must not claim an identical exact identity merely because their version string or Git tip matches; explicitly unavailable identity is preferable to fabricated precision.
 
-Expose a focused `ef type FILE` query with an explicit symbol or byte offset, and the equivalent MCP `code.type`; retain existing `code.typeAt` behavior for compatibility. Full inspect output shares these definitions. Allow a named type-definition query by revision-scoped identity, so a consumer can expand a reference without fetching an entire project. Specify finite node/edge/byte budgets and clear exhaustion behavior. Do not cap fields while describing the omitted part as complete. Include deterministic ordering and an additive/versioned wire migration.
+Expose a focused `ergo type FILE` query with an explicit symbol or byte offset, and the equivalent MCP `code.type`; retain existing `code.typeAt` behavior for compatibility. Full inspect output shares these definitions. Allow a named type-definition query by revision-scoped identity, so a consumer can expand a reference without fetching an entire project. Specify finite node/edge/byte budgets and clear exhaustion behavior. Do not cap fields while describing the omitted part as complete. Include deterministic ordering and an additive/versioned wire migration.
 
 ### Implemented producer-qualified semantic and selected-type queries
 
@@ -94,7 +94,7 @@ controlled-opener single-acquisition test are retained producer controls.
 Producer hashing cost measurement remains deferred; no performance claim follows
 from these correctness checks.
 
-The selected-type adapters add `ef type FILE --symbol NAME`, `--offset BYTE`,
+The selected-type adapters add `ergo type FILE --symbol NAME`, `--offset BYTE`,
 or `--definition TYPE_ID --revision REVISION`; `--target go|js` is supported.
 MCP `code.type` accepts exactly one `symbol`, `offset`, or `definition`; a
 definition requires `expectedRevision`. `expectedProducer` is an independent
@@ -110,7 +110,7 @@ resolve through checker binding identities. Shorthand fields retain their name
 token extent, and Fiber operation receivers use the same observed local-read
 owner as other checked uses. The query adds `querySchemaVersion: 4` beside the
 shared semantic schema and producer-qualified snapshot; the existing
-`ef query`/`code.typeAt` diagnostic-anchor behavior remains unchanged.
+`ergo query`/`code.typeAt` diagnostic-anchor behavior remains unchanged.
 
 Query schema 2 added a selection `target` and a `presentation`; schema 3 adds
 caller-choice parameter facts (`requiredChoice` and a checked scalar
@@ -200,7 +200,7 @@ binding-consumer migration remain separate unfinished units.
 
 ## LSP adapter
 
-Ship `ef lsp` over stdio after shared diagnostics and types. Implement initialization, shutdown/exit, full-document open/change/close synchronization, versioned publishDiagnostics, hover and definition using the shared model. Advertise only implemented capabilities. Select UTF-16 positions initially; do not claim negotiated UTF-8/UTF-32 support without conversion tests. Plain messages and plaintext hover remain compatible without optional markup capabilities.
+Ship `ergo lsp` over stdio after shared diagnostics and types. Implement initialization, shutdown/exit, full-document open/change/close synchronization, versioned publishDiagnostics, hover and definition using the shared model. Advertise only implemented capabilities. Select UTF-16 positions initially; do not claim negotiated UTF-8/UTF-32 support without conversion tests. Plain messages and plaintext hover remain compatible without optional markup capabilities.
 
 For independent delivery, the diagnostics/document-lifecycle subset landed first, after shared diagnostics and while canonical full types were being built. It used the same compiler report and preserved buffer/import identity, with public framed-process tests, and introduced no duplicate semantic snapshot representation.
 

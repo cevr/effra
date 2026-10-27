@@ -17,7 +17,7 @@ import (
 
 const (
 	goGenerationSchemaVersion       = 1
-	goGenerationManifestName        = ".effra-output.json"
+	goGenerationManifestName        = ".ergo-output.json"
 	goGenerationCommitDirectory     = "commits"
 	goGenerationDataDirectory       = "generations"
 	goGenerationMaxDirectoryEntries = 4096

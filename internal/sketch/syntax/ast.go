@@ -2,7 +2,7 @@ package syntax
 
 // The AST follows go/ast: types are expressions, every node has Pos and End,
 // and comments live in File.Comments in source order with a Doc group on the
-// nodes that carry documentation. Effra's constructs have dedicated nodes
+// nodes that carry documentation. Ergo's constructs have dedicated nodes
 // (ErrorRow, NeedsClause, ProvidesClause, TryExpr, CatchExpr,
 // TypeSwitchStmt, MachineType, WireDecl, WireLit, GoExpr,
 // CallExpr.Trailing). The parser resolves no names: with(…) and

@@ -102,7 +102,7 @@ func TestResolveFileBindsTheOpenFile(t *testing.T) {
 	}
 }
 
-// snapshotWorkspace is a module root R with R/pkg/effra.json selecting
+// snapshotWorkspace is a module root R with R/pkg/ergo.json selecting
 // 2026 and the source R/pkg/nested/main.ef, plus a legacy module R/old and
 // a link R/src.ef to the source.
 func snapshotWorkspace(t *testing.T) (root, source, link string) {
@@ -124,7 +124,7 @@ func snapshotWorkspace(t *testing.T) (root, source, link string) {
 // moveDirectoryKeepingInode renames R/pkg to R/moved, moves nested to
 // R/moved/prefix/nested and links R/pkg to R/moved/prefix: the source keeps
 // its inode, its old spelling still reaches it, and its physical manifest
-// is still the 2026 one, now at R/moved/effra.json (the reviewer's case).
+// is still the 2026 one, now at R/moved/ergo.json (the reviewer's case).
 func moveDirectoryKeepingInode(t *testing.T, root string) (physical string) {
 	t.Helper()
 	pkg, moved := filepath.Join(root, "pkg"), filepath.Join(root, "moved")
@@ -489,7 +489,7 @@ func restrict(t *testing.T, path string, mode os.FileMode, directory bool) {
 	}
 }
 
-// linkedBoundaryWorkspace is R/effra.json selecting 2026 above a module
+// linkedBoundaryWorkspace is R/ergo.json selecting 2026 above a module
 // R/pkg whose go.mod is a link to R/private/inner.mod, and the source
 // R/pkg/main.ef. With the boundary, the edition is the default legacy one.
 func linkedBoundaryWorkspace(t *testing.T) (root, source, private string) {

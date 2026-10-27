@@ -1,4 +1,4 @@
-// Command conformance verifies Effra's reference-only Effect and Foldkit
+// Command conformance verifies Ergo's reference-only Effect and Foldkit
 // conformance data.
 //
 //	go run ./scripts/conformance check [--mapping FILE] [--run]
@@ -134,7 +134,7 @@ func runFoldkit(args []string, stdout, stderr io.Writer) int {
 	captureMode := flags.Bool("capture", false, "capture the pinned source into this worktree")
 	checkMode := flags.Bool("check", false, "verify capture against the pinned source checkout")
 	selfCheckMode := flags.Bool("self-check", false, "verify the committed snapshot offline")
-	rootFlag := flags.String("root", "", "Effra repository root (default: the enclosing Go module)")
+	rootFlag := flags.String("root", "", "Ergo repository root (default: the enclosing Go module)")
 	flags.SetOutput(stderr)
 	flags.Usage = func() {
 		fmt.Fprint(stderr, foldkitUsage)

@@ -138,7 +138,7 @@ func TestDiagnosticReportMarksUnavailableLintAndLocations(t *testing.T) {
 }
 
 func TestDiagnosticReportProjectsCRLFCommentSpans(t *testing.T) {
-	source := "// effra-lint-disable-next-line unknown -- explain\r\n" +
+	source := "// ergo-lint-disable-next-line unknown -- explain\r\n" +
 		"effect fn main() -> void { void }\r\n"
 	r := Compile(source)
 	if !r.Checked {

@@ -22,7 +22,7 @@ type GraphRendering struct {
 }
 
 var graphRenderingLosses = []string{
-	"data.effra facts (contracts, rows, spans, selections, frontier and limits) are not rendered; use format json",
+	"data.ergo facts (contracts, rows, spans, selections, frontier and limits) are not rendered; use format json",
 	"node and edge IDs appear as comments or id attributes; renderer IDs n0..nN and e0..eN are positional",
 	"collapsed members are omitted; their counts appear in the collapse root label",
 	"closure nodes are references published without traversal; they carry the closure class (dashed), not a label marker, and have no relations of their own",
@@ -55,13 +55,13 @@ func GraphViewPayload(view *GraphView, format GraphFormat) (any, *GraphRendering
 		rendering = rendered
 		payload = GraphViewRendered{View: view, Rendering: rendered}
 	}
-	limit := view.Data.Effra.Limits.ResponseBytes
+	limit := view.Data.Ergo.Limits.ResponseBytes
 	raw, err := encodedSize(payload, limit)
 	if err == nil {
 		_, err = encodedSizeMode(payload, limit-raw, true)
 	}
 	if err != nil {
-		return nil, nil, graphRefusal(GraphRefusalResponseLimit, "graph %s response exceeds %d bytes; select with focus, depth or edge kinds", format, view.Data.Effra.Limits.ResponseBytes)
+		return nil, nil, graphRefusal(GraphRefusalResponseLimit, "graph %s response exceeds %d bytes; select with focus, depth or edge kinds", format, view.Data.Ergo.Limits.ResponseBytes)
 	}
 	return payload, rendering, nil
 }
@@ -84,7 +84,7 @@ func RenderGraphView(view *GraphView, format GraphFormat) (*GraphRendering, erro
 	default:
 		return nil, graphRefusal(GraphRefusalFormat, "graph format %q has no renderer; use mermaid or dot", format)
 	}
-	if limit := view.Data.Effra.Limits.RenderBytes; len(text) > limit {
+	if limit := view.Data.Ergo.Limits.RenderBytes; len(text) > limit {
 		return nil, graphRefusal(GraphRefusalRenderLimit, "%s rendering is %d bytes; limit is %d; select with focus, depth or edge kinds", format, len(text), limit)
 	}
 	return &GraphRendering{Format: format, MediaType: mediaType, RendererVersion: GraphRendererVersion, Text: text, Losses: append([]string{}, graphRenderingLosses...)}, nil
@@ -111,7 +111,7 @@ func newGraphRenderLayout(view *GraphView) *graphRenderLayout {
 	slices.SortFunc(layout.nodes, func(a, b *GraphViewNode) int { return strings.Compare(a.ID, b.ID) })
 	for i, node := range layout.nodes {
 		layout.ids[node.ID] = fmt.Sprintf("n%d", i)
-		if node.Data.Effra.Closure {
+		if node.Data.Ergo.Closure {
 			layout.closure = append(layout.closure, layout.ids[node.ID])
 		}
 		if node.ParentID == "" {
@@ -130,16 +130,16 @@ func newGraphRenderLayout(view *GraphView) *graphRenderLayout {
 // graphNodeLabel is the display text of one node: its kind and label, or the
 // kind at its source position when the fact is anonymous.
 func graphNodeLabel(node *GraphViewNode) string {
-	kind, label := node.Data.Effra.Kind, node.Label
+	kind, label := node.Data.Ergo.Kind, node.Label
 	switch {
-	case label == "" && node.Data.Effra.Span != nil && node.Data.Effra.Span.Line > 0:
-		label = fmt.Sprintf("%s @ %d:%d", kind, node.Data.Effra.Span.Line, node.Data.Effra.Span.Column)
+	case label == "" && node.Data.Ergo.Span != nil && node.Data.Ergo.Span.Line > 0:
+		label = fmt.Sprintf("%s @ %d:%d", kind, node.Data.Ergo.Span.Line, node.Data.Ergo.Span.Column)
 	case label == "":
 		label = kind
 	case kind != "" && kind != label:
 		label = kind + ": " + label
 	}
-	if collapsed := node.Data.Effra.Collapsed; collapsed != nil {
+	if collapsed := node.Data.Ergo.Collapsed; collapsed != nil {
 		label += fmt.Sprintf(" (+%d hidden members, %d hidden edges)", len(collapsed.HiddenMembers), collapsed.HiddenEdges)
 	}
 	return label
@@ -149,7 +149,7 @@ func graphEdgeLabel(edge *GraphViewEdge) string {
 	if edge.Label != "" {
 		return edge.Label
 	}
-	return edge.Data.Effra.Relation
+	return edge.Data.Ergo.Relation
 }
 
 // mermaidText escapes text for a quoted Mermaid label or a comment. Only
@@ -173,7 +173,7 @@ func mermaidText(text string) string {
 func (layout *graphRenderLayout) mermaid() string {
 	var b strings.Builder
 	b.WriteString("flowchart LR\n")
-	fmt.Fprintf(&b, "%%%% effra graph view %s\n", mermaidText(layout.view.ID))
+	fmt.Fprintf(&b, "%%%% ergo graph view %s\n", mermaidText(layout.view.ID))
 	for _, node := range layout.nodes {
 		fmt.Fprintf(&b, "%%%% %s: %s\n", layout.ids[node.ID], mermaidText(node.ID))
 	}
@@ -239,7 +239,7 @@ func (layout *graphRenderLayout) dot() string {
 	emit = func(node *GraphViewNode, indent string) {
 		id := layout.ids[node.ID]
 		attributes := fmt.Sprintf("label=\"%s\", id=\"%s\"", dotText(graphNodeLabel(node)), dotText(node.ID))
-		if node.Data.Effra.Closure {
+		if node.Data.Ergo.Closure {
 			attributes += fmt.Sprintf(", style=dashed, class=\"%s\"", graphClosureClass)
 		}
 		attributes = "[" + attributes + "]"

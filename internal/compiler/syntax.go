@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // Span offsets and columns are UTF-8 byte based, scoped to a semantic revision.
@@ -1368,7 +1368,7 @@ func (p *parser) function(body bool) *Function {
 		f.Errors, f.ErrorLabels = p.row(), p.lastRow
 	} else if p.peek().text == "throws" {
 		old := p.take()
-		p.fail(old, "the Effra failure-row keyword `throws` was replaced by `raises`; use `raises`")
+		p.fail(old, "the Ergo failure-row keyword `throws` was replaced by `raises`; use `raises`")
 	}
 	if p.accept("uses") {
 		f.Services, f.ServiceLabels = p.row(), p.lastRow
@@ -1416,7 +1416,7 @@ func (p *parser) block() *Block {
 	defer func() { p.noConstruct, p.subjectList = protected, subjectList }()
 	// construct is the latest statement in this block recognized as an
 	// absent braced construct such as `while c { ... }`. Its tokens are no
-	// Effra syntax, so a syntax fault inside them reports that construct at
+	// Ergo syntax, so a syntax fault inside them reports that construct at
 	// its keyword rather than at whichever token the misparse reached.
 	var construct absentConstruct
 	defer p.recoverAbsentConstruct(&construct)

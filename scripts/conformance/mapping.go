@@ -2,7 +2,7 @@ package main
 
 // Validate the selected Effect behavior mapping. Each case records where its
 // behavior is specified upstream (file, line and test label at the pinned
-// commit) as provenance text; Effra keeps no copy of the upstream corpus, so
+// commit) as provenance text; Ergo keeps no copy of the upstream corpus, so
 // the record is checked for shape, and its evidence must be an existing Go
 // test in internal/compiler.
 

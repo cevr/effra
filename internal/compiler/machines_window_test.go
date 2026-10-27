@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/compiler/machineplan"
+	"ergo.local/prototype/internal/compiler/machineplan"
 )
 
 // Round-3 review M1: the analysis window must not depend on checker state

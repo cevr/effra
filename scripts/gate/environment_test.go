@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/testinputs/testenv"
+	"ergo.local/prototype/internal/testinputs/testenv"
 )
 
 // GODEBUG=inittrace=1 leaves a Go program's bytes unchanged but adds lines to
@@ -92,13 +92,13 @@ import (
 )
 
 func TestProbe(t *testing.T) {
-	t.Logf("unknown=%s path=%t", os.Getenv("EFFRA_GATE_UNKEYED_PROBE"), os.Getenv("PATH") != "")
+	t.Logf("unknown=%s path=%t", os.Getenv("ERGO_GATE_UNKEYED_PROBE"), os.Getenv("PATH") != "")
 }
 `)
-	t.Setenv("EFFRA_GATE_UNKEYED_PROBE", "leaked")
+	t.Setenv("ERGO_GATE_UNKEYED_PROBE", "leaked")
 	steps := []*Step{
 		{Name: "go test probe", Argv: []string{"go", "test", "-C", "probe", "-count=1", "-v", "."}, ToolEnv: []string{"sh"}},
-		{Name: "plain step", Argv: []string{"sh", "-c", `echo "plain=${EFFRA_GATE_UNKEYED_PROBE-unset}"`}},
+		{Name: "plain step", Argv: []string{"sh", "-c", `echo "plain=${ERGO_GATE_UNKEYED_PROBE-unset}"`}},
 	}
 	code, out := runGate(t, root, t.TempDir(), steps)
 	if code != 0 || !strings.Contains(out, "unknown= path=true") {

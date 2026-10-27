@@ -5,7 +5,7 @@ import (
 	"errors"
 )
 
-// Lookup is an ordinary context-aware Go SDK function, independent of Effra.
+// Lookup is an ordinary context-aware Go SDK function, independent of Ergo.
 func Lookup(ctx context.Context, id string) (string, error) {
 	if id == "slow" {
 		<-ctx.Done()

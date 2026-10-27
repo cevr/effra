@@ -1,4 +1,4 @@
-// Package format is the 2026 edition's formatter (`ef fmt`): one canonical
+// Package format is the 2026 edition's formatter (`ergo fmt`): one canonical
 // layout with no options, printed from the internal/sketch/syntax AST. It is
 // apart from the parser so no checker or lowering code depends on layout
 // (docs/specs/formatting.md).
@@ -29,18 +29,18 @@
 //     98); --check-formatted for CI.
 //   - MoonBit (moon fmt): one built-in style with no layout options and a
 //     --check mode for CI.
-//   - Effra takes gofmt's model (no width, author line breaks kept), as the
+//   - Ergo takes gofmt's model (no width, author line breaks kept), as the
 //     legacy formatter does, and places comments by structure as Gleam,
 //     ReScript and Elixir do. It aligns with its own column pass instead of
 //     text/tabwriter, because a 2026 string literal may hold any byte,
 //     including tabwriter's escape byte.
 package format
 
-import "effra.local/prototype/internal/sketch/syntax"
+import "ergo.local/prototype/internal/sketch/syntax"
 
 // Identity names this formatter on every surface (MCP formatterVersion,
-// the per-file formatterVersion of `ef fmt --json`).
-const Identity = "effra-2026/formatter-1"
+// the per-file formatterVersion of `ergo fmt --json`).
+const Identity = "ergo-2026/formatter-1"
 
 // Source formats a 2026 source file. A syntax error is returned as the
 // parser's *syntax.Error, and no text.

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/compiler"
-	"effra.local/prototype/internal/edition"
+	"ergo.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/edition"
 )
 
 // liveSession drives Serve one message at a time, so the test can change
@@ -81,7 +81,7 @@ func (s *liveSession) diagnosticCodes() []string {
 }
 
 func editionCall(uri string, id int) any {
-	return call("effra/edition", map[string]any{"textDocument": map[string]any{"uri": uri}}, id)
+	return call("ergo/edition", map[string]any{"textDocument": map[string]any{"uri": uri}}, id)
 }
 
 func TestEditionRequest(t *testing.T) {
@@ -107,7 +107,7 @@ func TestEditionRequest(t *testing.T) {
 	// Refused before initialized.
 	s.send(editionCall(uri, 10))
 	if refused := s.receive(); !strings.Contains(string(refused["error"]), "-32002") {
-		t.Fatalf("effra/edition before initialized answered %s", refused["result"])
+		t.Fatalf("ergo/edition before initialized answered %s", refused["result"])
 	}
 	s.send(initialized())
 
@@ -118,7 +118,7 @@ func TestEditionRequest(t *testing.T) {
 		path, _ := documentPath(target)
 		want := edition.ResolveDocument(path).JSON()
 		if string(response["result"]) != string(want) {
-			t.Fatalf("effra/edition %d = %s (error %s), want %s", id, response["result"], response["error"], want)
+			t.Fatalf("ergo/edition %d = %s (error %s), want %s", id, response["result"], response["error"], want)
 		}
 	}
 	// An unopened file URI is answered; the file need not exist.

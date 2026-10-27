@@ -3,8 +3,8 @@
 package main
 
 import (
-	"effra.local/prototype/examples/lintpack"
-	"effra.local/prototype/lint"
+	"ergo.local/prototype/examples/lintpack"
+	"ergo.local/prototype/lint"
 )
 
 func main() { lint.Main(lintpack.Pack) }

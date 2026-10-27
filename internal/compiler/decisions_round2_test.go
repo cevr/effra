@@ -106,7 +106,7 @@ fn step(state: S, event: E) -> decision<S, void> {
 // M3: the decision words are explicit field labels, so a derived codec carries
 // the wire key "done". Shorthand, which reads or binds a local, is refused.
 func TestDecisionWordsAreExplicitFieldLabels(t *testing.T) {
-	source := `import Json "effra/json"
+	source := `import Json "ergo/json"
 
 record Todo { title: string  done: bool  enter: i64 }
 enum Step { Finished { done: bool } }

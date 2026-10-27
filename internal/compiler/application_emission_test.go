@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // emitGoApplication lowers one native entry mode and returns its generated
@@ -156,7 +156,7 @@ func TestGoApplicationEmitsExactlyPlannedDeclarations(t *testing.T) {
 	if !slices.Equal(names, want) {
 		t.Fatalf("emitted declarations =\n%v\nwant\n%v", names, want)
 	}
-	if want := []string{"context", "effra.generated/runtime", "fmt", "os", "os/signal", "strconv", "strings", "syscall"}; !slices.Equal(imports, want) {
+	if want := []string{"context", "ergo.generated/runtime", "fmt", "os", "os/signal", "strconv", "strings", "syscall"}; !slices.Equal(imports, want) {
 		t.Fatalf("emitted imports = %v, want %v", imports, want)
 	}
 	// The unreachable strings caller is pruned, but its declared package

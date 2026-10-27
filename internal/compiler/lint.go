@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	lintsdk "effra.local/prototype/lint"
+	lintsdk "ergo.local/prototype/lint"
 )
 
 // Lint is deliberately separate from admission: optional advice cannot weaken
@@ -170,7 +170,7 @@ type suppressionKey struct {
 }
 
 const (
-	suppressionPrefix = "effra-lint-disable-next-line"
+	suppressionPrefix = "ergo-lint-disable-next-line"
 	suppressionCode   = "EFL004"
 	suppressionRule   = "invalid-suppression"
 )

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // maxApplicationPlanWork bounds one application closure. Every admitted

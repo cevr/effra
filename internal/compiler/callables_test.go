@@ -35,7 +35,7 @@ effect fn main() -> string {
 	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
-	for name, content := range map[string]string{"go.mod": "module effra.generated\n\ngo 1.27\n", "main.go": generated} {
+	for name, content := range map[string]string{"go.mod": "module ergo.generated\n\ngo 1.27\n", "main.go": generated} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
 			t.Fatal(err)
 		}

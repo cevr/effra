@@ -82,7 +82,7 @@ The callback type carries `needs R`, so the requirements of the block appear in 
 
 ## Observability and supervision
 
-Status: **designed, not yet implemented** ([#69](https://github.com/cevr/effra/issues/69), [#200](https://github.com/cevr/effra/issues/200), [#207](https://github.com/cevr/effra/issues/207)).
+Status: **designed, not yet implemented** ([#69](https://github.com/cevr/ergo/issues/69), [#200](https://github.com/cevr/ergo/issues/200), [#207](https://github.com/cevr/ergo/issues/207)).
 
 ### G1. Context through `with`
 
@@ -105,11 +105,11 @@ Status: **designed, not yet implemented** ([#69](https://github.com/cevr/effra/i
 
 3. Ancestry retention is bounded.
 
-### G3. `ef ps <pid>`
+### G3. `ergo ps <pid>`
 
-1. `ef ps <pid>` shows the live task tree of a running program: each task's state, what it waits on, its span and its restarts.
+1. `ergo ps <pid>` shows the live task tree of a running program: each task's state, what it waits on, its span and its restarts.
 2. It is served over a debug endpoint, for people and agents, with the same schema in CLI and MCP.
-3. Spans are keyed to checked definition identities ([#188](https://github.com/cevr/effra/issues/188)), so a trace line links to the source definition and to `ef inspect`.
+3. Spans are keyed to checked definition identities ([#188](https://github.com/cevr/ergo/issues/188)), so a trace line links to the source definition and to `ergo inspect`.
 
 ### G4. `tasks.Set`
 
@@ -121,7 +121,7 @@ Status: **designed, not yet implemented** ([#69](https://github.com/cevr/effra/i
 
 ## Channels
 
-Status: **designed, not yet implemented** ([#64](https://github.com/cevr/effra/issues/64)).
+Status: **designed, not yet implemented** ([#64](https://github.com/cevr/ergo/issues/64)).
 
 1. `chan T` is Go's channel. There are no nil channels and no direction types.
 2. Values copy into a channel. A channel whose element type is a resource is an error in v0 ([resources.md](resources.md#channels); README Gap 30).
@@ -131,7 +131,7 @@ Status: **designed, not yet implemented** ([#64](https://github.com/cevr/effra/i
 
 ## Machines and actors
 
-Status: **designed, not yet implemented** ([#57](https://github.com/cevr/effra/issues/57)).
+Status: **designed, not yet implemented** ([#57](https://github.com/cevr/ergo/issues/57)).
 
 ```go
 type State interface{ Closed | Open | HalfOpen }
@@ -157,7 +157,7 @@ type Breaker machine[State, Signal] {
 1. **Machine.** `type X machine[S, E] { initial v; step f }` declares a state machine. `S` and `E` are unions. `initial` is a value of `S`; `step` names a function from `S` and `E` to `Decision[S, O]`, with any error and `needs` rows.
 2. **Decision.** A step returns `Enter{next}` (re-enter, even with the same variant), `Stay{next}` (keep the entry), `Ignore{}`, `Reject{}` (observable, state unchanged) or `Done{output}` (terminal).
 3. **Totality.** The step's switch is total over `S × E` (README Gap 12).
-4. **Inspection.** `ef inspect` draws the machine's graph from the step's cases. A helper the step calls is static in the graph only when its footprint is empty, not its row ([rows.md](rows.md#footprints)).
+4. **Inspection.** `ergo inspect` draws the machine's graph from the step's cases. A helper the step calls is static in the graph only when its footprint is empty, not its row ([rows.md](rows.md#footprints)).
 5. **Protocol.** A machine is a plan that any lawful provider can run; the actor below is the standard library's provider. *Prior art:* XState machines with interpreters; Erlang `gen_statem`.
 6. **Actor.** `actor.Start(machine, capacity)` returns a resource handle with `Send`, `Ask`, `State` and `Stop`. `Send` blocks only when the mailbox is full. `Ask` waits for that message's decision. `State` returns a snapshot, never a shared reference. `actor.Run` runs a machine under a `tasks.Set` for supervision; a restart starts from `initial`.
 7. Open item: splitting an actor's ownership (`Stop`) from shareable `Send`/`Ask` addresses.

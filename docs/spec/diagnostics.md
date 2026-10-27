@@ -1,6 +1,6 @@
 # Diagnostics
 
-Status: S001 is **implemented** by the parser `internal/sketch/syntax` ([#195](https://github.com/cevr/effra/issues/195)); the other codes are **implemented in prototype** (the prototype checker, `internal/sketch/proto/check.go`, copied from `prototypes/sketch9/sketch/check.go`), and the bridge `internal/sketch/proto/convert.go` adds the S109 refusals of parsed forms the checker lacks. Each fixture's first line is `// want CODE`; `TestProbes` and `accept.sh` run them. The main compiler maps each rule to a code in its EF registry ([#79](https://github.com/cevr/effra/issues/79); README Gap 18).
+Status: S001 is **implemented** by the parser `internal/sketch/syntax` ([#195](https://github.com/cevr/ergo/issues/195)); the other codes are **implemented in prototype** (the prototype checker, `internal/sketch/proto/check.go`, copied from `prototypes/sketch9/sketch/check.go`), and the bridge `internal/sketch/proto/convert.go` adds the S109 refusals of parsed forms the checker lacks. Each fixture's first line is `// want CODE`; `TestProbes` and `accept.sh` run them. The main compiler maps each rule to a code in its EF registry ([#79](https://github.com/cevr/ergo/issues/79); README Gap 18).
 
 A diagnostic has a position, a code and a message: `file:line:col: CODE message`. A file with any diagnostic does not build. Fixture paths are relative to [`prototypes/sketch9/testdata`](../../prototypes/sketch9/testdata).
 
@@ -22,7 +22,7 @@ A diagnostic has a position, a code and a message: `file:line:col: CODE message`
 | S111 (designed) | A wire must not have two entries for one capability, except a `replace` of an embedded entry. | [rows: wire](rows.md#wire), README Gap 28 | none yet: the prototype accepts the program, and the later entry wins |
 | S112 (designed) | A map's key type must not be a resource in v0. | [resources: containers](resources.md#containers), README Gap 32 | none yet: the prototype has no maps; negative example `map[Key]string{openKey(): "v"}` in resources.md |
 
-Designed codes are not in the prototype. Other designed errors in `docs/spec/` (resources, visibility, capability values, channels of resources) get codes when [#196](https://github.com/cevr/effra/issues/196) and [#197](https://github.com/cevr/effra/issues/197) implement them.
+Designed codes are not in the prototype. Other designed errors in `docs/spec/` (resources, visibility, capability values, channels of resources) get codes when [#196](https://github.com/cevr/ergo/issues/196) and [#197](https://github.com/cevr/ergo/issues/197) implement them.
 
 ## Rules by code
 
@@ -30,7 +30,7 @@ Each rule names a fixture where one exists.
 
 ### S001: syntax
 
-The parser `internal/sketch/syntax` ([#195](https://github.com/cevr/effra/issues/195)) reports S001 with a specific message ("expected X, found Y"), a byte offset and length, a line and a byte column. It reports the first error only. The 2026 formatter refuses a file with S001 on every surface, naming the code and position.
+The parser `internal/sketch/syntax` ([#195](https://github.com/cevr/ergo/issues/195)) reports S001 with a specific message ("expected X, found Y"), a byte offset and length, a line and a byte column. It reports the first error only. The 2026 formatter refuses a file with S001 on every surface, naming the code and position.
 
 - An identifier is tested on decoded code points; a code point that cannot start or continue it, or invalid UTF-8, is S001 (`probes/nonletter-name.sketch`).
 - A composite literal mixes keyed and positional elements (`probes/mixed-fields.sketch`).

@@ -14,16 +14,16 @@ import (
 	"testing"
 )
 
-const initProbePackage = "effra.fixture/initprobe/registry"
+const initProbePackage = "ergo.fixture/initprobe/registry"
 
 // writeInitProbeModule writes a local Go module whose registry package and
 // its transitive dependency report their package initialization on stdout.
-// Effra sources compiled against this directory resolve it as the main
+// Ergo sources compiled against this directory resolve it as the main
 // module, so the generated module replaces it by directory.
 func writeInitProbeModule(t *testing.T) string {
 	t.Helper()
 	return writeGoModule(t, map[string]string{
-		"go.mod": "module effra.fixture/initprobe\n\ngo 1.27\n",
+		"go.mod": "module ergo.fixture/initprobe\n\ngo 1.27\n",
 		"dependency/dependency.go": `package dependency
 
 import "fmt"
@@ -37,7 +37,7 @@ func announce(text string) bool { fmt.Println(text); return true }
 import (
 	"fmt"
 
-	"effra.fixture/initprobe/dependency"
+	"ergo.fixture/initprobe/dependency"
 )
 
 func init() {
@@ -145,7 +145,7 @@ func buildAndRunInitProbe(t *testing.T, module, source string, mode GoGeneration
 	return r, application, string(output)
 }
 
-const unreachableForeignCaller = `import go registry "effra.fixture/initprobe/registry"
+const unreachableForeignCaller = `import go registry "ergo.fixture/initprobe/registry"
 effect fn unused() -> i64 uses { Foreign } {
     run registry.Value()
 }
@@ -158,7 +158,7 @@ func TestDeclaredForeignImportInitializesWithoutReachableCaller(t *testing.T) {
 	module := writeInitProbeModule(t)
 	for name, source := range map[string]string{
 		"unreachable caller": unreachableForeignCaller,
-		"no caller": `import go registry "effra.fixture/initprobe/registry"
+		"no caller": `import go registry "ergo.fixture/initprobe/registry"
 effect fn main() -> void {
     void
 }
@@ -228,8 +228,8 @@ func requireGoInitialization(t *testing.T, r *Result, want ...GoInitializationIn
 
 func TestAliasedForeignImportsInitializeTheirPackageOnce(t *testing.T) {
 	module := writeInitProbeModule(t)
-	twoAliases := `import go first "effra.fixture/initprobe/registry"
-import go second "effra.fixture/initprobe/registry"
+	twoAliases := `import go first "ergo.fixture/initprobe/registry"
+import go second "ergo.fixture/initprobe/registry"
 effect fn viaSecond() -> i64 uses { Foreign } {
     run second.Value()
 }
@@ -282,7 +282,7 @@ func TestRemovedForeignImportLosesItsInitializationRoot(t *testing.T) {
 
 func TestDeclaredForeignImportInitializesBeforeTestCases(t *testing.T) {
 	module := writeInitProbeModule(t)
-	source := `import go registry "effra.fixture/initprobe/registry"
+	source := `import go registry "ergo.fixture/initprobe/registry"
 effect fn unused() -> i64 uses { Foreign } {
     run registry.Value()
 }
@@ -312,7 +312,7 @@ effect fn test_runs() -> void raises { AssertionFailed } uses { Assert } {
 
 func TestUnresolvedUncalledForeignImportIsRefused(t *testing.T) {
 	module := writeInitProbeModule(t)
-	r := CompileAt("import go missing \"effra.fixture/initprobe/missing\"\neffect fn main() -> void {\n    void\n}\n", "go", module)
+	r := CompileAt("import go missing \"ergo.fixture/initprobe/missing\"\neffect fn main() -> void {\n    void\n}\n", "go", module)
 	if r.Checked || !hasCode(r, "EF111") {
 		t.Fatalf("an unresolved uncalled import must not be admitted: %v", r.Diagnostics)
 	}
@@ -341,8 +341,8 @@ func TestDeclaredForeignImportsMustBeImportableByTheGeneratedProgram(t *testing.
 		"reachable caller": "effect fn main() -> i64 {\n    run probe.Value().provide<Foreign>(Host)\n}\n",
 	}
 	for _, refused := range []struct{ name, module, path string }{
-		{"program package", module, "effra.fixture/initprobe/cmd/tool"},
-		{"internal package of the source module", module, "effra.fixture/initprobe/internal/hidden"},
+		{"program package", module, "ergo.fixture/initprobe/cmd/tool"},
+		{"internal package of the source module", module, "ergo.fixture/initprobe/internal/hidden"},
 		{"final internal element", visible, "internal/initprobe/internal/hidden"},
 		{"vendored module package", visible, "internal/initprobe/sub/vendor/inner"},
 	} {
@@ -396,7 +396,7 @@ func TestDeclaredForeignImportsMustBeImportableByTheGeneratedProgram(t *testing.
 // costs one unit of plan work, and another alias of a package costs none.
 func TestInitializationRootsAreChargedToThePlanBudget(t *testing.T) {
 	module := writeInitProbeModule(t)
-	const registry = "import go registry \"effra.fixture/initprobe/registry\"\n"
+	const registry = "import go registry \"ergo.fixture/initprobe/registry\"\n"
 	plan := func(imports string) (*Result, int) {
 		t.Helper()
 		r := CompileAt(imports+"effect fn main() -> void {\n    void\n}\n", "go", module)
@@ -415,8 +415,8 @@ func TestInitializationRootsAreChargedToThePlanBudget(t *testing.T) {
 		delta   int
 	}{
 		"one package":                {registry, 1},
-		"two aliases of one package": {registry + "import go again \"effra.fixture/initprobe/registry\"\n", 1},
-		"two packages":               {registry + "import go dependency \"effra.fixture/initprobe/dependency\"\n", 2},
+		"two aliases of one package": {registry + "import go again \"ergo.fixture/initprobe/registry\"\n", 1},
+		"two packages":               {registry + "import go dependency \"ergo.fixture/initprobe/dependency\"\n", 2},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r, work := plan(tc.imports)

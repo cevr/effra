@@ -80,11 +80,11 @@ Status: **implemented in prototype**.
 
 Status: **designed, not yet implemented**.
 
-1. A function's footprint is every capability its body exercises, including those its own `with` provides, plus `go`. The compiler infers it and never asks for it. `ef inspect` shows it.
+1. A function's footprint is every capability its body exercises, including those its own `with` provides, plus `go`. The compiler infers it and never asks for it. `ergo inspect` shows it.
 2. A function is pure when its footprint is empty, not when its `needs` row is empty. `with(wire{ Console = Stdout{} }) { Console.Println("x") }` has an empty row and a non-empty footprint.
 3. A function type carries requirements only (README Gap 24). A call through an unknown function value counts as impure. A call is pure only when the compiler specialises it to a known function with an empty footprint.
 4. **Capability safety.** Only providers in host packages call Go. Ordinary code reaches the operating system only through a capability, so every effect appears in some footprint ([stdlib.md](stdlib.md#host-packages)).
-5. A function value whose row names a capability bound by `with` cannot escape that `with`. *Prior art:* Scala 3 capture checking and scoped capabilities; Effekt second-class blocks. A purity-carrying function type stays a candidate for [#189](https://github.com/cevr/effra/issues/189).
+5. A function value whose row names a capability bound by `with` cannot escape that `with`. *Prior art:* Scala 3 capture checking and scoped capabilities; Effekt second-class blocks. A purity-carrying function type stays a candidate for [#189](https://github.com/cevr/ergo/issues/189).
 
 ## Wire
 

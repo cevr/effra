@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"effra.local/prototype/internal/edition"
+	"ergo.local/prototype/internal/edition"
 )
 
 // TestFormattingRefusesAnEditionChangedWhileFormatting (review M10): the

@@ -1,6 +1,6 @@
 # Managed Go runtime
 
-The prototype uses `runtime/effra`, a Go-standard-library runtime with typed lazy closures and managed goroutines. Go is the only target (owner, 2026-10-26); the JavaScript target on pinned Effect was removed. Conformance tests establish child-before-parent cleanup, unobserved failure propagation, and timeout cleanup-defect preservation. This is a tested lifecycle subset, not a complete provider contract.
+The prototype uses `runtime/ergo`, a Go-standard-library runtime with typed lazy closures and managed goroutines. Go is the only target (owner, 2026-10-26); the JavaScript target on pinned Effect was removed. Conformance tests establish child-before-parent cleanup, unobserved failure propagation, and timeout cleanup-defect preservation. This is a tested lifecycle subset, not a complete provider contract.
 
 ## Lifecycle contract
 
@@ -22,7 +22,7 @@ At the transition from Open to Closing, an owner is cancellation-aborted if its 
 
 `Sync.latch()` creates an opaque, one-shot `Latch`. `Sync.signal(latch)` is idempotent, and `Sync.await(latch)` scopes cancellation to the waiting fiber. A nil handle is an invalid-latch defect.
 
-Latch handoff has one meaning wherever execution is serialized into turns: Go under the managed test scheduler (`ef test`, the Go `TestScheduler`). `Sync.signal` completes the latch, makes every parked waiter runnable and returns. It never runs a waiter. The signaller keeps its turn until it next suspends or exits, and each waiter resumes later, on a turn of its own. Four rules follow:
+Latch handoff has one meaning wherever execution is serialized into turns: Go under the managed test scheduler (`ergo test`, the Go `TestScheduler`). `Sync.signal` completes the latch, makes every parked waiter runnable and returns. It never runs a waiter. The signaller keeps its turn until it next suspends or exits, and each waiter resumes later, on a turn of its own. Four rules follow:
 
 1. A waiter never runs inside its signaller's turn. The order among several woken waiters, and between them and other runnable fibers, is unspecified.
 2. The signal is complete when `signal` returns. Interrupting the signaller afterwards, directly or by closing its scope, cannot undo the signal or reach a waiter it does not own. A waiter the signaller or the closing scope owns is cancelled by ownership, like any owned fiber, and rule 4 then applies to it. Otherwise the interrupt reaches only the signaller's own later work.
@@ -31,7 +31,7 @@ Latch handoff has one meaning wherever execution is serialized into turns: Go un
 
 Live Go, with no test scheduler, has no turns: a managed latch wait is a plain select on the latch and the fiber's context, and fibers run on their own goroutines in parallel. There, rule 2 holds, a waiter never runs inside its signaller's call, and a waiter whose context is cancelled before its next checkpoint ends interrupted there. But the signaller does not keep a turn, so a waiter can run alongside the signaller, and an interrupt sent after `signal` races with the waiter. The waiter may already have acted. A program that needs rule 4 in live Go must order the interrupt before the signal. Rule 3 does not apply: quiescence exists only under the test scheduler.
 
-Under the test scheduler, the Go managed signal reserves one wake per waiter and closes its handoff channel. The waiter's goroutine takes the turn only after the signaller releases it. A direct interrupt cancels the target before the interrupter hands off its turn. A scope close moves the scope to Closing, fixes its abort classification and cancels the scope and its children while the closer still holds the turn, and it hands the turn off only for the shutdown waits and cleanup. This covers a `scope` block, a fiber's exit and layer shutdown. A woken waiter therefore finds its context cancelled when it takes the turn, and ends interrupted at its next checkpoint, at the latest when the fiber exits (`Invoke`). Effect's `openUnsafe` and `Deferred` completion resume their waiters inline, inside the completer's turn; Effect's effectful `Latch.open` instead moves them onto a dispatcher task, and Effra follows that choice. Go channels and `sync.Cond`, Trio's `Event.set`, Kotlin's `CompletableDeferred` under a dispatcher, and BEAM message send make the same choice: waking makes the waiter runnable, and it runs on its own schedule. [latch-handoff.ef](../examples/latch-handoff.ef) pins the four rules under `ef test`.
+Under the test scheduler, the Go managed signal reserves one wake per waiter and closes its handoff channel. The waiter's goroutine takes the turn only after the signaller releases it. A direct interrupt cancels the target before the interrupter hands off its turn. A scope close moves the scope to Closing, fixes its abort classification and cancels the scope and its children while the closer still holds the turn, and it hands the turn off only for the shutdown waits and cleanup. This covers a `scope` block, a fiber's exit and layer shutdown. A woken waiter therefore finds its context cancelled when it takes the turn, and ends interrupted at its next checkpoint, at the latest when the fiber exits (`Invoke`). Effect's `openUnsafe` and `Deferred` completion resume their waiters inline, inside the completer's turn; Effect's effectful `Latch.open` instead moves them onto a dispatcher task, and Effra follows that choice. Go channels and `sync.Cond`, Trio's `Event.set`, Kotlin's `CompletableDeferred` under a dispatcher, and BEAM message send make the same choice: waking makes the waiter runnable, and it runs on its own schedule. [latch-handoff.ef](../examples/latch-handoff.ef) pins the four rules under `ergo test`.
 
 The Go `TestScheduler` exposes `AwaitNextRegistration` and strong `Adjust` operations: each deadline selection and target commit observes activity, wake reservations and runnable cleanup/publication continuations atomically. A runnable managed continuation blocks advancement; a continuation parked on a registered virtual timer or managed signal may remain pending, so a partial adjustment can return at its target before cleanup completes. A later adjustment or signal resumes that cleanup, while one adjustment drains every reachable intermediate deadline. Only managed waits participate in this observation; unmanaged goroutines and foreign blocking calls remain outside the virtual scheduler and can delay completion. `Advance` remains a compatibility alias for `Adjust`.
 
@@ -66,7 +66,7 @@ Files use synchronized managed handles; using a handle after its owner closes pr
 
 Runtime snapshots report scope ID/state, acquisition count, cancellation request, resource count/labels, and child states Running/Cancelling/Done. Child completion means its cleanup completed. Lists are limited to 100 entries, labels to 256 bytes, and truncation is reported. Closed scopes clear owned references. Snapshots are observational, not an atomic freeze of all tasks; labels may identify application resources. No payload dump, process-wide task traversal, wait-reason tracing, or MCP runtime control is exposed.
 
-Try `./bin/ef run examples/lifecycle.ef`. Each provider remains explicit and replaceable through the same nominal service interface used by user implementations.
+Try `./bin/ergo run examples/lifecycle.ef`. Each provider remains explicit and replaceable through the same nominal service interface used by user implementations.
 
 ## Go interop seam
 
@@ -89,7 +89,7 @@ Automatic source imports now consume Go export data for primitive package functi
 
 `Http.listen(address, limits, handler)` is the only builtin HTTP server operation; every header-read, body-read, idle, body-size and active-exchange limit is explicit and no raw operation bypasses them. Handler service requirements flow into the server recipe, the transport records its absorbed typed failures, and listener/startup failures remain `IoError`.
 
-Listen addresses and listener failures are Effra-owned text (`parseHTTPAddress` and `httpListenError` in `runtime/effra/http.go`). An address is `host:port`:
+Listen addresses and listener failures are Effra-owned text (`parseHTTPAddress` and `httpListenError` in `runtime/ergo/http.go`). An address is `host:port`:
 
 - The port is 0 to 65535 in decimal. Port 0 lets the OS choose. A service name such as `http` or an empty port is refused.
 - The host is empty (every interface), a name or IPv4 address without a colon, or an IPv6 address in brackets, such as `[::1]:8080`.
@@ -105,7 +105,7 @@ Binding a genuine IPv6 address with a zone, such as a link-local `fe80::1%eth0`,
 
 Any other listener failure keeps the host's text after the prefix, and is the one host-specific entry failure report. Go wraps errors in `net.OpError` with its own text (`listen tcp ...: bind: address already in use`), so the classes key on errno and lookup errors rather than on text. Erlang's `:gen_tcp.listen` returns POSIX atoms such as `{:error, :eaddrinuse}` and formats them separately (`:inet.format_error/1`), which is the model followed here. The WASI sockets interface used by MoonBit's WASI examples has the same small set (`address-in-use`, `address-not-bindable`, `access-denied`, `name-unresolvable`, `unknown`). Before 2026-10-09, Go passed `net.Listen` text through.
 
-Run `./bin/ef run examples/http.ef` from the repository. It prints `listening http://127.0.0.1:PORT`; port zero lets the OS select an available port. Use that URL with `/health`, `/users/42`, `/users/slow`, `/users/missing`, or `/file`. Its handler answers each route with a `text/plain; charset=utf-8` `HttpReply.Respond` under literal limits for its workload (no request bodies, five-second reads); a declared `GoError` becomes an empty 500.
+Run `./bin/ergo run examples/http.ef` from the repository. It prints `listening http://127.0.0.1:PORT`; port zero lets the OS select an available port. Use that URL with `/health`, `/users/42`, `/users/slow`, `/users/missing`, or `/file`. Its handler answers each route with a `text/plain; charset=utf-8` `HttpReply.Respond` under literal limits for its workload (no request bodies, five-second reads); a declared `GoError` becomes an empty 500.
 
 Each request executes inside a fresh managed scope, with cancellation linked to its connection and server lifetime. SIGTERM stops admission, cancels requests, and waits for handlers and their cleanup before returning. A foreign call ignoring cancellation can delay shutdown; there is no detached timeout escape. An interrupted program writes the entry failure report `interrupt` and exits with status 130 (see [the design](design.md#entry-failure-report)).
 
@@ -115,7 +115,7 @@ Breaking change (2026-10-07): the raw path-to-text `Http.serve(address, handler)
 
 `Http.listen(address, limits, handler)` is the bounded buffered HTTP/1.1 transport; [examples/http-transport.ef](../examples/http-transport.ef) is the public program. A reference to the global `Http` or `LiveHttp` (a service row, `provide<Http>`, an operation call or the provider value), as resolved by the checker's single binding phase before builtin data is registered, admits these builtin records. A local value or row parameter of either name is not a reference anywhere in its scope, including explicit constructor types. Only checked uses of `LiveHttp` emit the transport implementation:
 
-```effra
+```ergo
 record HttpRequest { method: string, path: string, contentType: string, body: bytes }
 record HttpResponse { status: i64, contentType: string, body: bytes }
 enum HttpReply { Respond { response: HttpResponse }, BadRequest, NotFound, UnsupportedMediaType }

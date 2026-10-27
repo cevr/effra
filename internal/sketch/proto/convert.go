@@ -3,7 +3,7 @@ package proto
 import (
 	"strings"
 
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // codeOutside is the prototype's rule for a program outside the implemented

@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/testinputs"
+	"ergo.local/prototype/internal/testinputs"
 )
 
 // cliEnv makes the test binary act as the conformance command, so process
 // tests drive the real CLI without building a separate binary.
-const cliEnv = "EFFRA_CONFORMANCE_TEST_CLI"
+const cliEnv = "ERGO_CONFORMANCE_TEST_CLI"
 
 func TestMain(m *testing.M) {
 	if os.Getenv(cliEnv) == "1" {
@@ -27,7 +27,7 @@ func TestMain(m *testing.M) {
 	os.Exit(testinputs.Main(m))
 }
 
-// repoRoot is the Effra repository holding this package.
+// repoRoot is the Ergo repository holding this package.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", ".."))

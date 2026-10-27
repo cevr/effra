@@ -4,7 +4,7 @@
 // encoding can raise; a route table composes them into the one handler
 // Http.listen serves. The witnesses are the same transformed codecs a
 // stored-data caller uses outside HTTP.
-import Json "effra/json"
+import Json "ergo/json"
 
 error UnknownMember {
     id: string

@@ -250,7 +250,7 @@ type Malformed struct {
 
 // MalformedTable: each input must give a located, registered syntax
 // diagnostic (S0xx in docs/spec/diagnostics.md) on one of the listed lines;
-// ef fmt must exit 2, name the code and leave the file unchanged.
+// ergo fmt must exit 2, name the code and leave the file unchanged.
 var MalformedTable = []Malformed{
 	{Name: "enum-type", Src: "package p\n\ntype Payment enum {\n\tPending\n}\n", Lines: []int{3}},
 	{Name: "const-removed", Src: "package p\n\nconst limit = 3\n", Lines: []int{3}},

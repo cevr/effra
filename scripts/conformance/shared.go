@@ -17,7 +17,7 @@ import (
 )
 
 // pinnedCommit is the Effect 4.0.1 commit whose tests the mapping's upstream
-// file, line and label records point at. Effra keeps no copy of that corpus;
+// file, line and label records point at. Ergo keeps no copy of that corpus;
 // the commit is provenance for those records.
 const pinnedCommit = "460272d30457f4697d8b8c52cad41caccbcace08"
 

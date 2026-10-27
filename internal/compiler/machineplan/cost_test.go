@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/compiler/machineplan/shared"
+	"ergo.local/prototype/internal/compiler/machineplan/shared"
 )
 
 // costTypes is a hand-built type table: Outer<R>, where

@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-const bundledGreeting = `import Fns "effra/functions"
+const bundledGreeting = `import Fns "ergo/functions"
 error MissingUser
 service Users { effect fn name(id: string) -> string raises {MissingUser} }
 impl Memory for Users {
@@ -20,7 +20,7 @@ effect fn greeting(id: string) -> string raises {MissingUser} uses {Users} { "He
 effect fn main() -> string { run greeting("42").provide<Users>(Memory).catch<MissingUser>("missing") }
 `
 
-const bundledConfiguration = `import Fns "effra/functions"
+const bundledConfiguration = `import Fns "ergo/functions"
 error MissingSetting
 service Settings { effect fn read(key: string) -> string raises {MissingSetting} }
 impl Fixture for Settings {
@@ -44,7 +44,7 @@ func TestBundledForwardingContracts(t *testing.T) {
 		t.Fatal("unused sibling loaded", r.BundledBindings)
 	}
 	f := r.Find("Fns.call")
-	if f == nil || f.Source != "source:effra/functions/call" || !strings.Contains(f.Identity, "effra/functions") {
+	if f == nil || f.Source != "source:ergo/functions/call" || !strings.Contains(f.Identity, "ergo/functions") {
 		t.Fatal("missing qualified source", f)
 	}
 	if f.Span.Offset != strings.Index("effect fn call", "call") {
@@ -68,7 +68,7 @@ func TestBundledForwardingContracts(t *testing.T) {
 	}
 	found := false
 	for _, edge := range graph.Edges {
-		found = found || edge.To == "function:effra/functions.call" && edge.Kind == "calls"
+		found = found || edge.To == "function:ergo/functions.call" && edge.Kind == "calls"
 	}
 	if !found {
 		t.Fatal("imported dependency missing", graph.Edges)
@@ -81,7 +81,7 @@ func TestBundledAliasIdentityAndSourceIsolation(t *testing.T) {
 	if !a.Checked || !b.Checked || a.Find("Fns.call").Identity != b.Find("Other.call").Identity || a.Find("Fns.call").Contract.Contract.ID != b.Find("Other.call").Contract.Contract.ID {
 		t.Fatal(a.Diagnostics, b.Diagnostics)
 	}
-	source := `import A "effra/functions" import B "effra/functions"
+	source := `import A "ergo/functions" import B "ergo/functions"
 fn call(value: string) -> string { "local:" + value }
 effect fn echo(value: string) -> string { value }
 effect fn main() -> string { let identity = B.identity; identity(run A.call(echo, call("ok"))) }`
@@ -103,10 +103,10 @@ func TestBundledRefusesMissingRowsAndUnsupportedImports(t *testing.T) {
 	for _, mutation := range []struct{ before, after, code string }{
 		{`effect fn greeting(id: string) -> string raises {MissingUser} uses {Users}`, `effect fn greeting(id: string) -> string uses {Users}`, "EF107"},
 		{`effect fn greeting(id: string) -> string raises {MissingUser} uses {Users}`, `effect fn greeting(id: string) -> string raises {MissingUser}`, "EF108"},
-		{`"effra/functions"`, `"./functions"`, "EF126"},
-		{`"effra/functions"`, `"effra/functions@2"`, "EF126"},
+		{`"ergo/functions"`, `"./functions"`, "EF126"},
+		{`"ergo/functions"`, `"ergo/functions@2"`, "EF126"},
 		{`Fns.call(loadName, id)`, `Fns.missing(loadName, id)`, "EF126"},
-		{`import Fns "effra/functions"`, `import Fns "effra/functions" fn Fns() -> void { void }`, "EF101"},
+		{`import Fns "ergo/functions"`, `import Fns "ergo/functions" fn Fns() -> void { void }`, "EF101"},
 	} {
 		r := CompileFor(strings.Replace(bundledGreeting, mutation.before, mutation.after, 1), "go")
 		found := false
@@ -117,11 +117,11 @@ func TestBundledRefusesMissingRowsAndUnsupportedImports(t *testing.T) {
 			t.Fatalf("go %s: %v", mutation.code, r.Diagnostics)
 		}
 	}
-	unused := Compile(`import Fns "effra/functions" effect fn main() -> string { "ok" }`)
+	unused := Compile(`import Fns "ergo/functions" effect fn main() -> string { "ok" }`)
 	if !unused.Checked || len(unused.BundledBindings) != 0 || len(unused.Program.BundledFunctions) != 0 {
 		t.Fatal(unused.Diagnostics)
 	}
-	shadow := Compile(`import Fns "effra/functions" record Local { identity: fn(string) -> string } fn plain(input: string) -> string { input } effect fn main() -> string { let Fns = Local(identity: plain); Fns.identity("local") }`)
+	shadow := Compile(`import Fns "ergo/functions" record Local { identity: fn(string) -> string } fn plain(input: string) -> string { input } effect fn main() -> string { let Fns = Local(identity: plain); Fns.identity("local") }`)
 	if !shadow.Checked || len(shadow.BundledBindings) != 0 {
 		t.Fatal(shadow.Diagnostics, shadow.BundledBindings)
 	}
@@ -144,7 +144,7 @@ func TestBundledEmissionNamespaceCannotCollideWithUserNames(t *testing.T) {
 }
 
 func TestBundledNativeExecution(t *testing.T) {
-	for _, fixture := range []struct{ source, output string }{{bundledGreeting, "Hello, Ada\n"}, {bundledConfiguration, "configured:port\n"}, {`import Fns "effra/functions"
+	for _, fixture := range []struct{ source, output string }{{bundledGreeting, "Hello, Ada\n"}, {bundledConfiguration, "configured:port\n"}, {`import Fns "ergo/functions"
 effect fn keep(file: File) -> File { file }
 effect fn outer(file: File) -> File { scope { run Fns.forwardFile(keep, file) } }
 effect fn main() -> string raises {IoError} {
@@ -166,7 +166,7 @@ effect fn main() -> string raises {IoError} {
 		if err = application.WriteRuntime(dir); err != nil {
 			t.Fatal(err)
 		}
-		if err = os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0644); err != nil {
+		if err = os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module ergo.generated\n\ngo 1.27\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
 		if err = os.WriteFile(filepath.Join(dir, "main.go"), []byte(source), 0644); err != nil {

@@ -111,16 +111,16 @@ func declareSteps(root string, packages []string) ([]*Step, error) {
 	add(&Step{Name: "go test (other packages)", Needs: []string{"go test build"}, Argv: append([]string{"go", "test", testTimeout}, unsharded...), ToolEnv: testTools})
 	// Without a VCS stamp the binary depends only on its sources, so a commit
 	// that changes none of them reuses the link instead of relinking for a
-	// new revision. The gate's bin/ef therefore declares no vcs.revision in
+	// new revision. The gate's bin/ergo therefore declares no vcs.revision in
 	// its producer identity, while its artifact digest still identifies the
 	// executing bytes.
-	add(&Step{Name: "build bin/ef", Needs: []string{"go test build"}, Argv: stagedBuild(root, "bin/ef", "./cmd/ef")})
+	add(&Step{Name: "build bin/ergo", Needs: []string{"go test build"}, Argv: stagedBuild(root, "bin/ergo", "./cmd/ergo")})
 
 	examples, err := authoredExamples(root)
 	if err != nil {
 		return nil, err
 	}
-	add(&Step{Name: "ef fmt --check", Needs: []string{"build bin/ef"}, Argv: append([]string{"./bin/ef", "fmt", "--check"}, examples...)})
+	add(&Step{Name: "ergo fmt --check", Needs: []string{"build bin/ergo"}, Argv: append([]string{"./bin/ergo", "fmt", "--check"}, examples...)})
 
 	return steps, nil
 }
@@ -129,7 +129,7 @@ func declareSteps(root string, packages []string) ([]*Step, error) {
 // staging file beside the gate's cache and renames it onto out only when its
 // bytes differ. go build touches its output even when it relinks nothing,
 // and Go's test cache keys a test that listed a directory on every entry's
-// modification time, so rewriting an unchanged bin/ef would rerun every test
+// modification time, so rewriting an unchanged bin/ergo would rerun every test
 // that lists bin/. Without a cache directory it builds in place.
 func stagedBuild(root, out, pkg string) []string {
 	cache := cacheDirectory()
@@ -223,7 +223,7 @@ func authoredExamples(root string) ([]string, error) {
 }
 
 // slowPackages are measured by -record-durations and sharded by the gate.
-var slowPackages = []string{"./internal/compiler", "./cmd/ef"}
+var slowPackages = []string{"./internal/compiler", "./cmd/ergo"}
 
 // writeDurations measures each slow package's tests serially (as a single
 // process runs them) and rewrites the durations file.

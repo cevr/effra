@@ -12,7 +12,7 @@ Status: **implemented in prototype** for `string`, `int64` and `bool`; **partly 
 2. `int64` is the only integer type with checked meaning in v0 (README Gap 9). Non-constant arithmetic wraps; constant overflow is an error.
 3. `bool` is the type of comparisons and `if` conditions.
 4. `duration` is the type of duration literals. It is a basic type, usable in every type position: parameters, results, fields and type arguments. Its name is predeclared. Prototype: `duration` as a type name is S104, and the name is reserved as a source name (S109).
-5. Designed, with [#81](https://github.com/cevr/effra/issues/81) and [#211](https://github.com/cevr/effra/issues/211): Go's other numeric types, `byte`, `rune`, floating point, slices `[]T`, maps `map[K]V`, channels `chan T`, function types and the prelude `Option[T]`.
+5. Designed, with [#81](https://github.com/cevr/ergo/issues/81) and [#211](https://github.com/cevr/ergo/issues/211): Go's other numeric types, `byte`, `rune`, floating point, slices `[]T`, maps `map[K]V`, channels `chan T`, function types and the prelude `Option[T]`.
 
 ## Zero values and definite initialisation
 
@@ -149,7 +149,7 @@ Status: **partly implemented in prototype**.
 
 1. `==` compares two values of one basic type: `string`, `int64`, `bool` or `duration` (S108 for mismatched types). Prototype: `==` on `duration` and on any non-basic type is S109 (README Gap 26).
 2. `+` adds two `int64` values or concatenates two `string` values (S108 otherwise).
-3. Prototype: every other operator, including `!=`, `<`, `-`, `&&` and `||`, is S109. Designed: Go's operators on Go's operand types; `&&` and `||` short-circuit (README Gap 10); equality on comparable structs, with `comparable` and `cmp.Ordered` as constraints ([#211](https://github.com/cevr/effra/issues/211)).
+3. Prototype: every other operator, including `!=`, `<`, `-`, `&&` and `||`, is S109. Designed: Go's operators on Go's operand types; `&&` and `||` short-circuit (README Gap 10); equality on comparable structs, with `comparable` and `cmp.Ordered` as constraints ([#211](https://github.com/cevr/ergo/issues/211)).
 
 ## Function values
 
@@ -172,7 +172,7 @@ Status: **designed, not yet implemented**.
 
 ## Generics
 
-Status: **designed, not yet implemented**. The spelling is provisional until [#135](https://github.com/cevr/effra/issues/135) decides it (README Gap 23).
+Status: **designed, not yet implemented**. The spelling is provisional until [#135](https://github.com/cevr/ergo/issues/135) decides it (README Gap 23).
 
 ```go
 func Map(xs []A, limit int64, f func(A) (B, error[E]) needs R) ([]B, error[E]) needs R
@@ -182,20 +182,20 @@ func Map(xs []A, limit int64, f func(A) (B, error[E]) needs R) ([]B, error[E]) n
 2. Constraints are named interfaces such as `comparable` and `cmp.Ordered`, or interfaces with methods. Method constraints resolve through the type's owner package, with one answer per type.
 3. Rows in a generic signature may be elided only where they pass through unchanged. A declared requirement is never elided.
 4. Exported signatures spell their rows and type parameters, so clients check against interface summaries, Go's export-data model.
-5. **Lowering.** Generics emit as Go generics, which Go compiles by GC shape. Specialised copies need a measured win under [#190](https://github.com/cevr/effra/issues/190). *Prior art:* Go GC-shape stenciling; MoonBit and Rust monomorphise; Effra's earlier measurements refused frontend monomorphisation ([design.md](../design.md#compile-speed-is-a-language-constraint)).
+5. **Lowering.** Generics emit as Go generics, which Go compiles by GC shape. Specialised copies need a measured win under [#190](https://github.com/cevr/ergo/issues/190). *Prior art:* Go GC-shape stenciling; MoonBit and Rust monomorphise; Effra's earlier measurements refused frontend monomorphisation ([design.md](../design.md#compile-speed-is-a-language-constraint)).
 
 ## Prelude types
 
 Status: **designed, not yet implemented**, except the timeout result `timeout.Expired`.
 
-- `Option[T]` with `Some` and `None` ([#99](https://github.com/cevr/effra/issues/99)).
+- `Option[T]` with `Some` and `None` ([#99](https://github.com/cevr/ergo/issues/99)).
 - `Task[T, E]`, a resource ([runtime.md](runtime.md#tasks)).
 - `Decision[S, O]` with `Enter`, `Stay`, `Ignore`, `Reject` and `Done` ([runtime.md](runtime.md#machines-and-actors)).
 - The capabilities `Clock`, `Scheduler`, `Random` and `Console`.
 
 ## Laws
 
-Status: **designed, not yet implemented** ([#125](https://github.com/cevr/effra/issues/125), [#170](https://github.com/cevr/effra/issues/170)).
+Status: **designed, not yet implemented** ([#125](https://github.com/cevr/ergo/issues/125), [#170](https://github.com/cevr/ergo/issues/170)).
 
 ```go
 func LawRoundTrip(q Quantity) bool {
@@ -208,14 +208,14 @@ func LawFindAfterPut(id string, v Order) bool needs Store {
 }
 ```
 
-1. A function named `LawX` that returns `bool` is a law. `ef test` checks it like a fuzz target, with generated arguments.
-2. A law with a `needs` clause is a provider law: `ef test` checks it against every provider wired for that capability.
+1. A function named `LawX` that returns `bool` is a law. `ergo test` checks it like a fuzz target, with generated arguments.
+2. A law with a `needs` clause is a provider law: `ergo test` checks it against every provider wired for that capability.
 3. A refuted law refuses the build. A law that passes a finite suite is reported as tested, never as proved (NORTH_STAR pillar 4).
 4. Laws are found by name, as Go finds `TestX`. The same rule serves every client: codecs, providers, schedules and machines. *Prior art:* Go `TestX`/`FuzzX` discovery; Haskell QuickCheck properties; Elixir `StreamData` properties.
 
 ## Codecs
 
-Status: **designed, not yet implemented** ([#49](https://github.com/cevr/effra/issues/49)).
+Status: **designed, not yet implemented** ([#49](https://github.com/cevr/ergo/issues/49)).
 
 1. A type's wire form is found by name: `ParseX` decodes into `X`, and `x.Wire()` encodes. Go's `netip.ParseAddr` and `String` pair is the model.
 2. A derived codec's rows are the union of its fields' rows. `json.Decode[Order]` has the error and `needs` rows of every `ParseX` it reaches.

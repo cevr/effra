@@ -104,7 +104,7 @@ func TestConcreteVoidGoDeclarationsAndGenericCarrierBridge(t *testing.T) {
 	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module ergo.generated\n\ngo 1.27\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(generated), 0644); err != nil {
@@ -224,7 +224,7 @@ fn finish() -> void { void }
 fn make() -> Envelope<void> { Envelope<void> { call: Call<fn() -> void, void> { operation: finish } } }
 fn unwrap(e: Envelope<void>) -> Call<fn() -> void, void> { e.call }
 effect fn main() -> void { let e = make(); e.call.operation(); let c = unwrap(e); c.operation(); void }`},
-	{"nested-application-option-result-transport", `import Data "effra/data"
+	{"nested-application-option-result-transport", `import Data "ergo/data"
 enum Action<F: callable fn() -> A, A: type> { Some { operation: F } }
 record Envelope<T: type> { action: Action<fn() -> T, T> }
 fn finish() -> void { void }
@@ -366,7 +366,7 @@ func TestVoidGoCallableLayoutAdaptersCaptureOnceAndInvokeLazily(t *testing.T) {
 	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
-	for name, content := range map[string]string{"go.mod": "module effra.generated\n\ngo 1.27\n", "main.go": generated, "main_test.go": voidGoAdapterProbe} {
+	for name, content := range map[string]string{"go.mod": "module ergo.generated\n\ngo 1.27\n", "main.go": generated, "main_test.go": voidGoAdapterProbe} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -451,7 +451,7 @@ func TestVoidGoNestedApplicationAdaptersPreserveIdentityAndCounts(t *testing.T) 
 	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
-	for name, content := range map[string]string{"go.mod": "module effra.generated\n\ngo 1.27\n", "main.go": generated, "main_test.go": voidGoNestedApplicationProbe} {
+	for name, content := range map[string]string{"go.mod": "module ergo.generated\n\ngo 1.27\n", "main.go": generated, "main_test.go": voidGoNestedApplicationProbe} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
 			t.Fatal(err)
 		}

@@ -1,4 +1,4 @@
-// Package lintpack is an example Effra rule pack written against the public
+// Package lintpack is an example Ergo rule pack written against the public
 // lint SDK. Its two unrelated project policies read resolved facts only:
 // provider and failure identities, provision edges and checked rows. Neither
 // policy is a language restriction; configuration names the boundaries.
@@ -8,14 +8,14 @@ import (
 	"fmt"
 	"slices"
 
-	"effra.local/prototype/lint"
+	"ergo.local/prototype/lint"
 )
 
 // Pack is the example pack. Its manifest is derived with Pack.Manifest.
 var Pack = &lint.Pack{
 	Namespace:    "policy",
 	Version:      "0.1.0",
-	Description:  "Example project policies over resolved Effra facts.",
+	Description:  "Example project policies over resolved Ergo facts.",
 	FactVersions: []int{lint.FactSchemaVersion},
 	Rules:        []*lint.Rule{ProviderBoundary, ForbiddenFailure},
 }

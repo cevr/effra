@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"effra.local/prototype/runtime/rt"
-	"effra.local/prototype/runtime/rt/rttrace"
+	"ergo.local/prototype/runtime/rt"
+	"ergo.local/prototype/runtime/rt/rttrace"
 )
 
 // records returns every event a finished traced tree recorded, failing the

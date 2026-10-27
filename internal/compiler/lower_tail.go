@@ -2,7 +2,7 @@ package compiler
 
 // Post-check lowering for the Go emitter.
 //
-// Effra has no loop construct, so a self-recursive function is the only way to
+// Ergo has no loop construct, so a self-recursive function is the only way to
 // iterate. The pass finds the self tail calls of a pure function so the
 // emitter can turn them into a Go `for` loop that runs in constant stack.
 //

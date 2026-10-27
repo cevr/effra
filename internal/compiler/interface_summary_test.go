@@ -28,7 +28,7 @@ func TestBundledTransportConcurrentCacheConsumers(t *testing.T) {
 }
 
 func TestBundledTransportUsesFreshArenasAndCompleteOperationalFacts(t *testing.T) {
-	source := `import Fns "effra/functions"
+	source := `import Fns "ergo/functions"
 effect fn keep(file: File) -> File { file }
 effect fn outer(file: File) -> File { scope { run Fns.forwardFile(keep, file) } }
 effect fn main() -> void { void }`
@@ -38,7 +38,7 @@ effect fn main() -> void { void }`
 		t.Fatal(first.Diagnostics, second.Diagnostics)
 	}
 	a, b := first.projector, second.projector
-	da, db := a.admittedSummaries["effra/functions"], b.admittedSummaries["effra/functions"]
+	da, db := a.admittedSummaries["ergo/functions"], b.admittedSummaries["ergo/functions"]
 	if !reflect.DeepEqual(da, db) {
 		t.Fatal("alias/order/caller changed immutable transport")
 	}
@@ -124,7 +124,7 @@ func TestLocalAndDistributedSummarySourceVersionsStayDistinct(t *testing.T) {
 	if !distributed.Checked {
 		t.Fatal(distributed.Diagnostics)
 	}
-	dto, ok := distributed.projector.admittedSummaries["effra/functions"]
+	dto, ok := distributed.projector.admittedSummaries["ergo/functions"]
 	if !ok || len(dto.Sources) == 0 {
 		t.Fatalf("distributed summary source manifest missing: %+v", dto.Sources)
 	}
@@ -186,9 +186,9 @@ func TestBundledManagedCallbackControlsAcrossOrders(t *testing.T) {
 			caller := `effect fn relay(file:File)->File raises {IoError}{run ` + alias + `.forwardFile(chosen,file)}
 effect fn outer(file:File)->File raises {IoError}{scope {run relay(file)}}`
 			for _, reverse := range []bool{false, true} {
-				source := `import ` + alias + ` "effra/functions" ` + callback + caller
+				source := `import ` + alias + ` "ergo/functions" ` + callback + caller
 				if reverse {
-					source = `import ` + alias + ` "effra/functions" ` + caller + callback
+					source = `import ` + alias + ` "ergo/functions" ` + caller + callback
 				}
 				source += ` effect fn main()->void{void}`
 				r := CompileFor(source, "go")
@@ -205,7 +205,7 @@ func TestBundledTransportRejectsMalformedAndStaleData(t *testing.T) {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	dto := r.projector.admittedSummaries["effra/functions"]
+	dto := r.projector.admittedSummaries["ergo/functions"]
 	data, err := json.Marshal(dto)
 	if err != nil {
 		t.Fatal(err)
@@ -246,14 +246,14 @@ func TestBundledTransportRejectsPreRecoveryProducers(t *testing.T) {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	if SemanticProducerIdentity != "effra/checker-abi-10/bundled-interface-5" || interfaceSummarySchema != 5 || ownershipSummarySchema != 4 {
+	if SemanticProducerIdentity != "ergo/checker-abi-10/bundled-interface-5" || interfaceSummarySchema != 5 || ownershipSummarySchema != 4 {
 		t.Fatalf("producer epoch = %s interface=%d ownership=%d", SemanticProducerIdentity, interfaceSummarySchema, ownershipSummarySchema)
 	}
-	current, encoded := rehashInterfaceSummaryForTest(t, r.projector.admittedSummaries["effra/functions"])
+	current, encoded := rehashInterfaceSummaryForTest(t, r.projector.admittedSummaries["ergo/functions"])
 	if _, err := decodeInterfaceSummary(encoded, current.ContentHash, current.SourceInput); err != nil {
 		t.Fatalf("current producer summary refused: %v", err)
 	}
-	const previous = "effra/checker-abi-9/bundled-interface-4"
+	const previous = "ergo/checker-abi-9/bundled-interface-4"
 	for name, edit := range map[string]func(*interfaceSummary){
 		"previous producer":         func(s *interfaceSummary) { s.SemanticABI, s.Producer = previous, previous },
 		"previous interface schema": func(s *interfaceSummary) { s.InterfaceSchema = 4 },
@@ -278,7 +278,7 @@ func TestResolvedDefaultWireRoundTripUsesVersionedProducerSummary(t *testing.T) 
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	dto, ok := r.projector.admittedSummaries["effra/functions"]
+	dto, ok := r.projector.admittedSummaries["ergo/functions"]
 	if !ok || len(dto.Sources) == 0 {
 		t.Fatalf("versioned producer summary missing: %+v", dto.Sources)
 	}
@@ -325,12 +325,12 @@ func TestResolvedDefaultWireRoundTripUsesVersionedProducerSummary(t *testing.T) 
 }
 
 func TestBundledTransportRejectsOwnerAndGraphCorruption(t *testing.T) {
-	source := `import Fns "effra/functions" effect fn keep(file:File)->File{file} effect fn outer(file:File)->File{run Fns.forwardFile(keep,file)} effect fn main()->void{void}`
+	source := `import Fns "ergo/functions" effect fn keep(file:File)->File{file} effect fn outer(file:File)->File{run Fns.forwardFile(keep,file)} effect fn main()->void{void}`
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	dto := r.projector.admittedSummaries["effra/functions"]
+	dto := r.projector.admittedSummaries["ergo/functions"]
 	for _, test := range []struct {
 		name   string
 		mutate func(*interfaceSummary)

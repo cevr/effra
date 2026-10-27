@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // The structural ceilings every derived plan must respect. They equal the

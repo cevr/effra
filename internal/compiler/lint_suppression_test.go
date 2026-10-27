@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	lintsdk "effra.local/prototype/lint"
+	lintsdk "ergo.local/prototype/lint"
 )
 
 func suppressionManifest(namespace string, rules ...string) lintsdk.Manifest {
@@ -28,37 +28,37 @@ func TestLintSuppressionStatesFollowRuleExecution(t *testing.T) {
 	source := strings.Join([]string{
 		`effect fn task() -> string { "ok" }`,
 		`effect fn main() -> void {`,
-		`// effra-lint-disable-next-line unused-recipe -- applied`,
+		`// ergo-lint-disable-next-line unused-recipe -- applied`,
 		`let forgotten = task()`,
-		`// effra-lint-disable-next-line redundant-provision -- nothing to suppress`,
+		`// ergo-lint-disable-next-line redundant-provision -- nothing to suppress`,
 		`void`,
-		`// effra-lint-disable-next-line unused-go-import -- configured off`,
+		`// ergo-lint-disable-next-line unused-go-import -- configured off`,
 		`void`,
-		`// effra-lint-disable-next-line acme/applied -- applied`,
+		`// ergo-lint-disable-next-line acme/applied -- applied`,
 		`void`,
-		`// effra-lint-disable-next-line acme/unused -- the finding is elsewhere`,
+		`// ergo-lint-disable-next-line acme/unused -- the finding is elsewhere`,
 		`void`,
 		`void`,
-		`// effra-lint-disable-next-line acme/off -- off`,
+		`// ergo-lint-disable-next-line acme/off -- off`,
 		`void`,
-		`// effra-lint-disable-next-line acme/failed -- failed`,
+		`// ergo-lint-disable-next-line acme/failed -- failed`,
 		`void`,
-		`// effra-lint-disable-next-line acme/facts -- facts`,
+		`// ergo-lint-disable-next-line acme/facts -- facts`,
 		`void`,
-		`// effra-lint-disable-next-line acme/target -- target`,
+		`// ergo-lint-disable-next-line acme/target -- target`,
 		`void`,
-		`// effra-lint-disable-next-line crash/rule -- crashed pack`,
+		`// ergo-lint-disable-next-line crash/rule -- crashed pack`,
 		`void`,
-		`// effra-lint-disable-next-line other/rule -- not selected`,
+		`// ergo-lint-disable-next-line other/rule -- not selected`,
 		`void`,
-		`// effra-lint-disable-next-line acme/missing -- unknown rule of a selected pack`,
-		`// effra-lint-disable-next-line effra/rule -- reserved namespace`,
-		`// effra-lint-disable-next-line invalid-suppression -- fixed rule`,
-		`// effra-lint-disable-next-line lint-runner -- runner`,
-		`// effra-lint-disable-next-line EF108 -- compiler code`,
-		`// effra-lint-disable-next-line Acme/rule -- not an identifier`,
-		`// effra-lint-disable-next-line acme/a/b -- two separators`,
-		`// effra-lint-disable-next-line acme/ -- empty rule`,
+		`// ergo-lint-disable-next-line acme/missing -- unknown rule of a selected pack`,
+		`// ergo-lint-disable-next-line ergo/rule -- reserved namespace`,
+		`// ergo-lint-disable-next-line invalid-suppression -- fixed rule`,
+		`// ergo-lint-disable-next-line lint-runner -- runner`,
+		`// ergo-lint-disable-next-line EF108 -- compiler code`,
+		`// ergo-lint-disable-next-line Acme/rule -- not an identifier`,
+		`// ergo-lint-disable-next-line acme/a/b -- two separators`,
+		`// ergo-lint-disable-next-line acme/ -- empty rule`,
 		`void`,
 		`}`,
 	}, "\n")
@@ -128,7 +128,7 @@ func TestLintSuppressionStatesFollowRuleExecution(t *testing.T) {
 	}
 	wantInvalid := []string{
 		"unknown lint rule acme/missing",
-		"unknown lint rule effra/rule",
+		"unknown lint rule ergo/rule",
 		"unknown lint rule invalid-suppression",
 		"unknown lint rule lint-runner",
 		"unknown lint rule EF108",
@@ -157,7 +157,7 @@ func TestLintSuppressionStatesFollowRuleExecution(t *testing.T) {
 // not-evaluated suppression alone does not fail policy.
 func TestLintSuppressionNeverHidesCompilerErrors(t *testing.T) {
 	for _, rule := range []string{"unused-recipe", "EF108", "acme/rule"} {
-		source := "effect fn main() -> void {\n// effra-lint-disable-next-line " + rule + " -- hide it\nrun Console.log(\"x\")\n}"
+		source := "effect fn main() -> void {\n// ergo-lint-disable-next-line " + rule + " -- hide it\nrun Console.log(\"x\")\n}"
 		result := CompileAt(source, "go", ".")
 		if result.Checked || !hasCode(result, "EF108") {
 			t.Fatalf("%s: compiler diagnostic was suppressed: %+v", rule, result.Diagnostics)
@@ -169,7 +169,7 @@ func TestLintSuppressionNeverHidesCompilerErrors(t *testing.T) {
 	}
 	// Control: checked source whose only directive names an unselected
 	// pack passes with that directive not evaluated.
-	source := "effect fn main() -> void {\n// effra-lint-disable-next-line acme/rule -- pack runs in CI\nvoid\n}"
+	source := "effect fn main() -> void {\n// ergo-lint-disable-next-line acme/rule -- pack runs in CI\nvoid\n}"
 	lint := CompileAt(source, "go", ".").Lint(true)
 	if !lint.LintPassed || len(lint.LintDiagnostics) != 0 || len(lint.Suppressions) != 1 || lint.Suppressions[0].Reason != NotEvaluatedPackNotSelected {
 		t.Fatalf("control: %+v", lint)
@@ -181,7 +181,7 @@ func TestLintSuppressionNeverHidesCompilerErrors(t *testing.T) {
 // parser recovery. A malformed name still diagnoses, and the syntax
 // diagnostic is never hidden.
 func TestLintSuppressionSurvivesSyntaxFaults(t *testing.T) {
-	const directives = "// effra-lint-disable-next-line acme/rule -- pack runs in CI\n// effra-lint-disable-next-line unused-recipe -- kept\n"
+	const directives = "// ergo-lint-disable-next-line acme/rule -- pack runs in CI\n// ergo-lint-disable-next-line unused-recipe -- kept\n"
 	for code, body := range map[string]string{
 		"EF001": "effect fn main() -> void { run Console.log(\"x) }\n",
 		"EF002": "effect fn main( -> void { void }\n",
@@ -204,7 +204,7 @@ func TestLintSuppressionSurvivesSyntaxFaults(t *testing.T) {
 		if report.PolicyPassed || len(report.Diagnostics) != 1 || report.Diagnostics[0].Code != code || len(report.Suppressions) != 2 {
 			t.Fatalf("%s: %+v", code, report)
 		}
-		malformed := CompileAt("// effra-lint-disable-next-line acme/1rule -- bad\n"+body, "go", ".").Lint(true)
+		malformed := CompileAt("// ergo-lint-disable-next-line acme/1rule -- bad\n"+body, "go", ".").Lint(true)
 		if len(malformed.Suppressions) != 0 || len(malformed.LintDiagnostics) != 1 || malformed.LintDiagnostics[0].Code != "EFL004" {
 			t.Fatalf("%s malformed: %+v", code, malformed)
 		}

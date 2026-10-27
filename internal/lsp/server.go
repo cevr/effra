@@ -18,11 +18,11 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"effra.local/prototype/internal/compiler"
-	"effra.local/prototype/internal/edition"
-	"effra.local/prototype/internal/lintpacks"
-	"effra.local/prototype/internal/producer"
-	"effra.local/prototype/internal/sketchfront"
+	"ergo.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/edition"
+	"ergo.local/prototype/internal/lintpacks"
+	"ergo.local/prototype/internal/producer"
+	"ergo.local/prototype/internal/sketchfront"
 )
 
 const MaxDocuments = 32
@@ -63,8 +63,8 @@ type session struct {
 	phase     int
 	documents map[string]document
 	bytes     int
-	// lintStatus is set when the client opted into effra/lintStatus with
-	// the experimental client capability effraLintStatus.
+	// lintStatus is set when the client opted into ergo/lintStatus with
+	// the experimental client capability ergoLintStatus.
 	lintStatus bool
 }
 
@@ -205,14 +205,14 @@ func (s *session) handle(req request) error {
 		s.phase = 1
 		var capabilities struct {
 			Experimental struct {
-				EffraLintStatus bool `json:"effraLintStatus"`
+				ErgoLintStatus bool `json:"ergoLintStatus"`
 			} `json:"experimental"`
 		}
 		// Malformed or absent capabilities leave the opt-in off.
 		if objectParams(params["capabilities"], &capabilities) {
-			s.lintStatus = capabilities.Experimental.EffraLintStatus
+			s.lintStatus = capabilities.Experimental.ErgoLintStatus
 		}
-		return s.result(req.ID, map[string]any{"capabilities": map[string]any{"positionEncoding": "utf-16", "textDocumentSync": map[string]any{"openClose": true, "change": 1}, "hoverProvider": true, "definitionProvider": true, "documentFormattingProvider": true}, "serverInfo": map[string]any{"name": "effra", "version": "0.0.1-prototype"}})
+		return s.result(req.ID, map[string]any{"capabilities": map[string]any{"positionEncoding": "utf-16", "textDocumentSync": map[string]any{"openClose": true, "change": 1}, "hoverProvider": true, "definitionProvider": true, "documentFormattingProvider": true}, "serverInfo": map[string]any{"name": "ergo", "version": "0.0.1-prototype"}})
 	}
 	if s.phase == 0 {
 		if req.ID == nil {
@@ -266,9 +266,9 @@ func (s *session) handle(req request) error {
 			return s.reject(req, -32600, "formatting must be a request")
 		}
 		return s.formatDocument(req)
-	case "effra/edition":
+	case "ergo/edition":
 		if req.ID == nil {
-			return s.reject(req, -32600, "effra/edition must be a request")
+			return s.reject(req, -32600, "ergo/edition must be a request")
 		}
 		return s.editionRequest(req)
 	default:
@@ -346,7 +346,7 @@ func (s *session) synchronize(req request) error {
 	}
 	var text string
 	if req.Method == "textDocument/didOpen" {
-		if exists || len(s.documents) >= MaxDocuments || p.TextDocument.LanguageID != "effra" || p.TextDocument.Text == nil {
+		if exists || len(s.documents) >= MaxDocuments || p.TextDocument.LanguageID != "ergo" || p.TextDocument.Text == nil {
 			return reject(-32602, "invalid, duplicate or over-limit document open")
 		}
 		text = *p.TextDocument.Text
@@ -425,12 +425,12 @@ func (s *session) synchronize(req request) error {
 	return writeFrame(s.out, frame)
 }
 
-// lintStatus is the effra/lintStatus notification that follows a
+// lintStatus is the ergo/lintStatus notification that follows a
 // publication for a client that opted in: the structured lint state of the
 // same report, which publishDiagnostics cannot carry. Its suppressions are
 // the report's, so CLI, MCP and LSP report identical statuses and ranges.
 func lintStatus(uri string, version int32, report compiler.DiagnosticReport) any {
-	return map[string]any{"jsonrpc": "2.0", "method": "effra/lintStatus", "params": map[string]any{
+	return map[string]any{"jsonrpc": "2.0", "method": "ergo/lintStatus", "params": map[string]any{
 		"uri":           uri,
 		"version":       version,
 		"revision":      report.Revision,
@@ -521,7 +521,7 @@ func (s *session) navigate(req request) error {
 }
 
 // formatDocument formats the current accepted snapshot with the syntax-only
-// formatter of `ef fmt` and MCP code.format. Editor options are ignored: the
+// formatter of `ergo fmt` and MCP code.format. Editor options are ignored: the
 // style is canonical.
 func (s *session) formatDocument(req request) error {
 	var p struct {
@@ -599,7 +599,7 @@ func formattingRefusal(doc document, current edition.Resolution) *edition.Diagno
 	return &refusal
 }
 
-// editionRequest answers effra/edition with the canonical edition JSON of
+// editionRequest answers ergo/edition with the canonical edition JSON of
 // one file URI, open or not. The file is never read, so its size does not
 // matter; a file on disk resolves through edition.ResolveFile as on the CLI
 // and MCP.
@@ -610,7 +610,7 @@ func (s *session) editionRequest(req request) error {
 		} `json:"textDocument"`
 	}
 	if !objectParams(req.Params, &p) {
-		return s.failure(req.ID, -32602, "invalid effra/edition parameters")
+		return s.failure(req.ID, -32602, "invalid ergo/edition parameters")
 	}
 	path, err := documentPath(p.TextDocument.URI)
 	if err != nil {

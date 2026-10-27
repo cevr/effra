@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"testing"
 
-	"effra.local/prototype/internal/sketch/sketchtest"
+	"ergo.local/prototype/internal/sketch/sketchtest"
 )
 
 // TestPositiveInputsParse: the v0 corpus, the migrated examples, the 2026

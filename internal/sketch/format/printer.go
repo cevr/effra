@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // outLine is one output line: its indentation (tabs) and its cells. Every

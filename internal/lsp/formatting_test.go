@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/compiler"
 )
 
 func formatting(uri string, id any, options map[string]any) any {
@@ -46,7 +46,7 @@ func noEdits(t *testing.T, label string, m map[string]any) {
 }
 
 func TestFormattingReadsTheCurrentVersionedBuffer(t *testing.T) {
-	uri := "file:///tmp/effra-formatting.ef"
+	uri := "file:///tmp/ergo-formatting.ef"
 	first := "fn first() -> string {   \"a\" }"
 	// Formatting is syntax-only: an ill-typed buffer is still formatted.
 	second := "fn second() -> string {\n  true }\n"
@@ -82,7 +82,7 @@ func TestFormattingReadsTheCurrentVersionedBuffer(t *testing.T) {
 }
 
 func TestFormattingEditCoversTheWholeDocumentInUTF16(t *testing.T) {
-	uri := "file:///tmp/effra-formatting-unicode.ef"
+	uri := "file:///tmp/ergo-formatting-unicode.ef"
 	cases := map[string]string{
 		"astral last line": "// 𐐀 note\r\nfn mark() -> string {   \"𐐀é\" }  // 𐐀𐐀 end",
 		"trailing CRLF":    "fn mark() -> string {\r\n\"𐐀\" }\r\n\r\n\r\n",
@@ -101,7 +101,7 @@ func TestFormattingEditCoversTheWholeDocumentInUTF16(t *testing.T) {
 }
 
 func TestFormattingRefusesUnformattableSyntax(t *testing.T) {
-	uri := "file:///tmp/effra-formatting-invalid.ef"
+	uri := "file:///tmp/ergo-formatting-invalid.ef"
 	cases := map[string]string{
 		"EF001": "fn a() -> void {\r void }",
 		"EF002": "fn a() -> () { () }",
@@ -153,7 +153,7 @@ func readMessages(t *testing.T, out *bytes.Buffer) []map[string]any {
 // captures the accepted snapshot, formats it with the shared formatter, applies
 // a real document change and then completes the result.
 func TestFormattingRefusesAResultForAChangedSnapshot(t *testing.T) {
-	uri := "file:///tmp/effra-formatting-stale.ef"
+	uri := "file:///tmp/ergo-formatting-stale.ef"
 	path, err := documentPath(uri)
 	if err != nil {
 		t.Fatal(err)

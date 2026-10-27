@@ -3,7 +3,7 @@
 // whose decode and encode directions need different services. Two unrelated
 // callers share the same witnesses: stored order records and a settings
 // value read through Env.
-import Json "effra/json"
+import Json "ergo/json"
 
 error InvalidQuantity {
     units: i64

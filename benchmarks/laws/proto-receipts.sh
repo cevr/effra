@@ -18,7 +18,7 @@ for tool in go jq awk diff; do command -v "$tool" > /dev/null || { echo "missing
 [ -f "$proto/examples/laws/order-broken.ef" ] || { echo "$proto is not a wf10/spike-laws-proto checkout" >&2; exit 2; }
 mkdir -p "$scratch"
 ef="$scratch/ef"
-(cd "$proto" && go build -o "$ef" ./cmd/ef)
+(cd "$proto" && go build -o "$ef" ./cmd/ergo)
 head=$(git -C "$proto" rev-parse --short HEAD)
 fail=0
 
@@ -34,7 +34,7 @@ for name in codec order-broken; do
   if grep -q 'satisfies\|^contract ' "$work/without/$name.ef"; then echo "FAIL strip left law syntax in $name"; fail=1; fi
   for side in with without; do
     (cd "$work/$side" && "$ef" build "$name.ef" > /dev/null 2>&1 && "$ef" build --target js "$name.ef" > /dev/null 2>&1)
-    manifest=$(grep -l "/$name.ef\"" "$work/$side"/dist/go/apps/*/generations/.stage-*/.effra-output.json | head -1)
+    manifest=$(grep -l "/$name.ef\"" "$work/$side"/dist/go/apps/*/generations/.stage-*/.ergo-output.json | head -1)
     cp "$(dirname "$manifest")/main.go" "$work/$side/$name.main.go"
   done
   for pair in "Go main.go:$name.main.go" "JavaScript mjs:dist/$name.mjs" "JavaScript d.mts:dist/$name.d.mts"; do
@@ -53,7 +53,7 @@ rm -rf "$runs"
 mkdir -p "$runs"
 cp "$proto/examples/laws/order-broken.ef" "$proto/examples/laws/probes/near.ef" "$runs/"
 out="$here/runs/seed-survey.txt"
-echo "# ef test --target both <program> per EFFRA_LAW_SEED (proto $head); cases = cases run before the verdict (budget 200)." > "$out"
+echo "# ergo test --target both <program> per ERGO_LAW_SEED (proto $head); cases = cases run before the verdict (budget 200)." > "$out"
 echo "# The default run writes the gating receipt dist/<name>.laws.<target>.json; an exploration seed writes dist/<name>.laws.<target>.seed-N.json and never gates." >> "$out"
 survey() {
   local name=$1 seed receipt
@@ -64,7 +64,7 @@ survey() {
       (cd "$runs" && "$ef" test --target both "$name.ef" > seed.out 2> /dev/null) || true
       receipt="$runs/dist/$name.laws.go.json"
     else
-      (cd "$runs" && EFFRA_LAW_SEED=$seed "$ef" test --target both "$name.ef" > seed.out 2> /dev/null) || true
+      (cd "$runs" && ERGO_LAW_SEED=$seed "$ef" test --target both "$name.ef" > seed.out 2> /dev/null) || true
       receipt="$runs/dist/$name.laws.go.seed-$seed.json"
     fi
     [ -f "$receipt" ] || { echo "FAIL $name seed $seed: no receipt at $receipt"; fail=1; continue; }

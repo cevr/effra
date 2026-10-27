@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// Host types are the admitted Effra view of native Go declarations. go/types
+// Host types are the admitted Ergo view of native Go declarations. go/types
 // remains the identity authority: a host node's declaration is the
 // package-path-qualified native type, and the checker never rebuilds a native
 // type from its display spelling. Native values have no nil/null source value;
@@ -20,7 +20,7 @@ import (
 // native parameter receives only a present value.
 
 const (
-	hostOptionModule   = "effra/data"
+	hostOptionModule   = "ergo/data"
 	hostOptionMember   = "Option"
 	hostOptionTemplate = "template:" + hostOptionModule + ":module:" + hostOptionMember
 )
@@ -40,7 +40,7 @@ const (
 
 // HostComponent is one native parameter or result of a binding with its
 // explicit adaptation. Native is the package-path-qualified go/types spelling;
-// Type is the adapted Effra display.
+// Type is the adapted Ergo display.
 type HostComponent struct {
 	Native     string `json:"native"`
 	Type       string `json:"type"`
@@ -57,7 +57,7 @@ type hostImports struct {
 	types map[string]*types.TypeName
 	// unsupported records why an exported function has no binding.
 	unsupported map[string]string
-	// contracts are the reviewed effra.bindings.json behavior assertions,
+	// contracts are the reviewed ergo.bindings.json behavior assertions,
 	// keyed by go/types full name: example.com/sdk.Lookup for a function,
 	// (*example.com/sdk.Client).Lookup for a method.
 	contracts map[string]behavior
@@ -65,7 +65,7 @@ type hostImports struct {
 
 // hostType is one admitted native type. native is normalized: aliases are
 // removed at every level, so its go/types spelling names only declared types.
-// primitive is the Effra primitive with exactly the native representation.
+// primitive is the Ergo primitive with exactly the native representation.
 type hostType struct {
 	native    types.Type
 	primitive string
@@ -100,7 +100,7 @@ func admitHostType(t types.Type) (hostType, error) {
 			// Native-width scalars keep their own identity rather than becoming i64.
 			return hostType{native: t}, nil
 		}
-		return hostType{}, fmt.Errorf("native scalar %s has no admitted Effra width (supported: string, bool, int64, int, uintptr)", t.Name())
+		return hostType{}, fmt.Errorf("native scalar %s has no admitted Ergo width (supported: string, bool, int64, int, uintptr)", t.Name())
 	case *types.Named:
 		obj := t.Obj()
 		name := types.TypeString(t, hostPathQualifier)
@@ -128,7 +128,7 @@ func admitHostType(t types.Type) (hostType, error) {
 		return hostType{native: types.NewPointer(element.native), nullable: true}, nil
 	case *types.Slice:
 		if basic, ok := types.Unalias(t.Elem()).(*types.Basic); ok && basic.Kind() == types.Uint8 {
-			// A present byte slice is exactly an Effra bytes value, but the
+			// A present byte slice is exactly an Ergo bytes value, but the
 			// native slice can still be nil: it adapts like every other slice.
 			return hostType{native: types.NewSlice(types.Typ[types.Uint8]), primitive: "bytes", nullable: true}, nil
 		}
@@ -238,7 +238,7 @@ func hostNullable(underlying types.Type) bool {
 	return false
 }
 
-// hostPackageImportable reports whether the generated effra.generated module
+// hostPackageImportable reports whether the generated ergo.generated module
 // may import the package, so an admitted type always has a native spelling. It
 // is goImportRefusal's rule, the same one that refuses a declared import of
 // such a package; only the listing facts differ. A standard package has a
@@ -410,7 +410,7 @@ var hostUniverseAnnotations = map[string]types.Type{
 }
 
 // hostAssignable applies Go's assignment rule at a native call boundary. An
-// Effra value keeps its own identity rules everywhere else; only a value
+// Ergo value keeps its own identity rules everywhere else; only a value
 // passed to Go may be assigned to a native interface its method set
 // satisfies, which Go then converts implicitly without a wrapper.
 func (c *checker) hostAssignable(actual, expected TypeID) bool {
@@ -449,7 +449,7 @@ func (c *checker) hostSelection(e *Expr, inner checkedExpression) (checkedExpres
 }
 
 // hostMethodCall checks a native method call on an executed host receiver.
-// Go's method set is the authority. Effra values are not addressable, so a
+// Go's method set is the authority. Ergo values are not addressable, so a
 // pointer-receiver method needs a pointer value: no copy is made to take an
 // address, and a value-receiver method on a pointer is Go's own selection.
 // Any receiver expression is evaluated once, when the recipe is constructed.
@@ -529,7 +529,7 @@ type hostIOProtocol struct {
 
 // hostIOProtocols are identified by Go's interface satisfaction, as io.Copy
 // identifies them: a receiver whose method set implements io.Reader follows
-// io.Reader's documented contract for Read. Effra bytes are immutable, so a
+// io.Reader's documented contract for Read. Ergo bytes are immutable, so a
 // read takes the buffer length and Go fills a fresh native buffer whose filled
 // prefix is the result; data returned with io.EOF or another error is kept
 // beside that error. A write checks its count: fewer bytes with a nil error
@@ -673,7 +673,7 @@ func (c *checker) hostAnnotation(name string) TypeID {
 }
 
 // hostNative returns the native Go type an admitted value has at a Go call
-// boundary: a host node's own type, or the exact representation of an Effra
+// boundary: a host node's own type, or the exact representation of an Ergo
 // primitive.
 func (c *checker) hostNative(id TypeID) (types.Type, bool) {
 	if c.host != nil {

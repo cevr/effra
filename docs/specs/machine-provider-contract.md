@@ -34,7 +34,7 @@ Status: draft. Nothing in this section is implemented, and no runtime exists. It
 
 A provider receives two layers. Neither layer gives access to the compiler.
 
-1. **Plan facts.** These are compiler-proved data, identical to the `machines` entry of `project.check` and `ef inspect`, and they are portable values:
+1. **Plan facts.** These are compiler-proved data, identical to the `machines` entry of `project.check` and `ergo inspect`, and they are portable values:
    - `id` and `revision`;
    - the `state`, `event` and `output` identities and their variants;
    - `initial`;

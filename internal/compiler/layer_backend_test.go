@@ -36,7 +36,7 @@ func TestLayerSourceProvisionExecutesSharedReplacementAndBorrowedInputAcrossTarg
 		t.Fatal(err)
 	}
 	probe := `package main
-import("testing";"context";"errors";"reflect"; er "effra.generated/runtime")
+import("testing";"context";"errors";"reflect"; er "ergo.generated/runtime")
 func TestLayerSource(t *testing.T){
  for range 2 {
   out:=er.Run(func(fc *er.FiberContext)er.Exit[string]{return efFunction_main()(efContext{Runtime:fc})})

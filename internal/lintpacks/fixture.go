@@ -13,9 +13,9 @@ import (
 	"slices"
 	"strings"
 
-	"effra.local/prototype/internal/compiler"
-	sourcefile "effra.local/prototype/internal/source"
-	"effra.local/prototype/lint"
+	"ergo.local/prototype/internal/compiler"
+	sourcefile "ergo.local/prototype/internal/source"
+	"ergo.local/prototype/lint"
 )
 
 // Expectation is what a source fixture expects of the selected packs: the
@@ -56,7 +56,7 @@ func (p pathReader) Read(maxBytes int) ([]byte, error) {
 }
 
 // Fixture lints one fixture file with the selected packs through the same
-// path as ef lint: compile, run every pack as a process over the protocol,
+// path as ergo lint: compile, run every pack as a process over the protocol,
 // merge. The fixture is only read.
 func (s *Session) Fixture(ctx context.Context, path, target string) (Expectation, error) {
 	absolute, err := filepath.Abs(path)

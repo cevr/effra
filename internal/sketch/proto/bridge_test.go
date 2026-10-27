@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // Parse parses src with the promoted parser and converts it through the

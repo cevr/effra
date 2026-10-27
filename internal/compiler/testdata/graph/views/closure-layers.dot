@@ -1,4 +1,4 @@
-digraph "effra-graph:layers:61184b8bdff1a591004029d114224102" {
+digraph "ergo-graph:layers:3b23ec7e6ed69188a794dc0c5be1869a" {
   rankdir=LR;
   n0 [label="layer-binding: Account", id="layer:module:file:Accounts:binding:Account:288"];
   n1 [label="layer: App", id="layer:module:file:App"];

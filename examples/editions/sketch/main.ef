@@ -1,4 +1,4 @@
-// A module of the 2026 edition (docs/spec/ v0): the effra.json beside this
+// A module of the 2026 edition (docs/spec/ v0): the ergo.json beside this
 // file selects the Go-shaped front-end. The same workspace builds the
 // earlier edition's module in ../legacy.
 package editions

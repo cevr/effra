@@ -41,9 +41,9 @@ func templateInScope(c *checker, module, name string) *Record {
 }
 
 // A local generic Codec beside the bundled witness, whose body names Codec
-// unqualified inside effra/conversions.
-const templateAliasAgainstLocal = `import Convert "effra/conversions"
-import Data "effra/data"
+// unqualified inside ergo/conversions.
+const templateAliasAgainstLocal = `import Convert "ergo/conversions"
+import Data "ergo/data"
 record Codec<T: type> { local: T }
 enum Option<T: type> { Missing, Present { value: T } }
 record User { name: string }
@@ -81,12 +81,12 @@ func TestTemplateLookupPrecedence(t *testing.T) {
 	}{
 		{"", "Codec", currentModuleIdentity, ""},
 		{currentModuleIdentity, "Codec", currentModuleIdentity, ""},
-		{"effra/conversions", "Codec", "effra/conversions", ""},
-		{"", "Convert.Codec", "effra/conversions", ""},
-		{"effra/conversions", "Convert.Codec", "effra/conversions", ""},
+		{"ergo/conversions", "Codec", "ergo/conversions", ""},
+		{"", "Convert.Codec", "ergo/conversions", ""},
+		{"ergo/conversions", "Convert.Codec", "ergo/conversions", ""},
 		{currentModuleIdentity, "Option", currentModuleIdentity, "Missing"},
-		{"effra/data", "Option", "effra/data", "None"},
-		{currentModuleIdentity, "Data.Option", "effra/data", "None"},
+		{"ergo/data", "Option", "ergo/data", "None"},
+		{currentModuleIdentity, "Data.Option", "ergo/data", "None"},
 	} {
 		r := templateInScope(c, want.module, want.name)
 		if r == nil || r.Module != want.owner || want.variant != "" && (len(r.Variants) == 0 || r.Variants[0].Name != want.variant) {
@@ -95,9 +95,9 @@ func TestTemplateLookupPrecedence(t *testing.T) {
 	}
 	for _, missing := range []struct{ module, name string }{
 		{currentModuleIdentity, "User"},
-		{"effra/conversions", "Option"},
-		{"effra/data", "Codec"},
-		{"effra/missing", "Codec"},
+		{"ergo/conversions", "Option"},
+		{"ergo/data", "Codec"},
+		{"ergo/missing", "Codec"},
 		{currentModuleIdentity, "Data.Option.Some"},
 		{currentModuleIdentity, "Unknown.Codec"},
 	} {
@@ -114,7 +114,7 @@ func TestTemplateLookupPrecedence(t *testing.T) {
 	for _, r := range []*Result{alias, shadow} {
 		p := r.Program
 		names := []string{"Missing", "Data.Option", "Convert.Codec", "Data.Option.Some", "Unknown.Codec"}
-		modules := []string{"", currentModuleIdentity, "effra/missing"}
+		modules := []string{"", currentModuleIdentity, "ergo/missing"}
 		for _, list := range [][]*DataDeclaration{p.Records, p.Enums, p.BundledTemplates} {
 			for _, d := range list {
 				names = append(names, d.Name)
@@ -139,7 +139,7 @@ func TestTemplateLookupFollowsGrowingDeclarations(t *testing.T) {
 	p, c := r.Program, r.Program.semantic
 	parameters := []TemplateParameter{{Name: "T", Kind: "type"}}
 	for _, name := range []string{"LateEnum", "LateBundled", "Late"} {
-		if templateInScope(c, "", name) != nil || templateInScope(c, "effra/late", name) != nil {
+		if templateInScope(c, "", name) != nil || templateInScope(c, "ergo/late", name) != nil {
 			t.Fatalf("undeclared template %s resolved", name)
 		}
 	}
@@ -152,9 +152,9 @@ func TestTemplateLookupFollowsGrowingDeclarations(t *testing.T) {
 	}
 
 	// BundledTemplates alone grow.
-	lateBundled := &DataDeclaration{Kind: "record", Name: "LateBundled", Module: "effra/late", Parameters: parameters}
+	lateBundled := &DataDeclaration{Kind: "record", Name: "LateBundled", Module: "ergo/late", Parameters: parameters}
 	p.BundledTemplates = append(p.BundledTemplates, lateBundled)
-	if got := templateInScope(c, "effra/late", "LateBundled"); got != lateBundled {
+	if got := templateInScope(c, "ergo/late", "LateBundled"); got != lateBundled {
 		t.Fatalf("index missed a bundled template appended after it was built: %+v", got)
 	}
 	if got := templateInScope(c, "", "LateBundled"); got != nil {
@@ -172,7 +172,7 @@ func TestTemplateLookupFollowsGrowingDeclarations(t *testing.T) {
 	if got := templateInScope(c, "", "Late"); got != late {
 		t.Fatalf("index missed a record appended after it was built: %+v", got)
 	}
-	if got := templateInScope(c, "effra/data", "Late"); got != nil {
+	if got := templateInScope(c, "ergo/data", "Late"); got != nil {
 		t.Fatalf("a local template leaked into a bundled scope: %+v", got)
 	}
 }
@@ -180,7 +180,7 @@ func TestTemplateLookupFollowsGrowingDeclarations(t *testing.T) {
 // Every published template declaration carries its resolved layout, including
 // fields whose type is not a template parameter.
 func TestTemplateLayoutsReachEveryPublishedDeclaration(t *testing.T) {
-	r := Compile(`import Data "effra/data"
+	r := Compile(`import Data "ergo/data"
 record A { x: i64 }
 record Box<T: type> { value: T, count: i64 }
 enum Choice<T: type> { Neither, Left { value: T, tag: string } }

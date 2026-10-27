@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/sketch/sketchtest"
+	"ergo.local/prototype/internal/sketch/sketchtest"
 )
 
 // TestMalformed: every malformed input is a located S001 on its line, never

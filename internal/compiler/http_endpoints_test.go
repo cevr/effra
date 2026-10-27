@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 func endpointInspection(t *testing.T, r *Result, name string) EndpointInspection {
@@ -84,7 +84,7 @@ func TestEndpointRowsAndInspection(t *testing.T) {
 // the endpoint helpers only when it is reachable; the HTTP transport module
 // is retained only through its provider.
 func TestEndpointRetention(t *testing.T) {
-	source := `import Json "effra/json"
+	source := `import Json "ergo/json"
 error Missing {
     id: string
 }
@@ -110,7 +110,7 @@ derive lookup = Http.endpoint(method: "POST", path: "/find", input: textJson, ha
 }
 
 func TestEndpointRefusals(t *testing.T) {
-	header := `import Json "effra/json"
+	header := `import Json "ergo/json"
 error Unknown {
     id: string
 }
@@ -251,7 +251,7 @@ func TestEndpointDeclarationsFormat(t *testing.T) {
 	// Endpoint and route-table declarations are a syntax admission (from
 	// formatter-14); the current identity, formatter-16, also admits machine
 	// declarations.
-	if FormatterIdentity != "effra/formatter-16" {
+	if FormatterIdentity != "ergo/formatter-16" {
 		t.Fatalf("formatter identity %s does not name the endpoint admission", FormatterIdentity)
 	}
 }
@@ -294,7 +294,7 @@ func TestEndpointDirectInvocationKeepsCompoundCauses(t *testing.T) {
 		t.Fatal(err)
 	}
 	probe := `package main
-import("testing"; er "effra.generated/runtime")
+import("testing"; er "ergo.generated/runtime")
 func call(cause er.Cause)efExit[efType_HttpReply]{
  work:=efService_Work{m_perform:func()efEffect[struct{}]{return func(efContext)efExit[struct{}]{return er.FromCause[struct{}](cause)}}}
  request:=efType_HttpRequest{EfField_6_method:"POST",EfField_4_path:"/work"}

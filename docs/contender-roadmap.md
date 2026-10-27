@@ -99,6 +99,6 @@ The next concrete compiler unit is external codec support for records/closed ADT
 
 ## Implemented first tooling and testing slice
 
-Native lint, a rule catalog, byte-anchor type queries, static dependency graphs and checked test discovery now share the compiler model through CLI/MCP. `ef test` supplies assertions and executes each case with a fresh owning scope. The process watchdog reports unconfirmed cleanup honestly. See [tooling](tooling.md) and [testing](testing.md).
+Native lint, a rule catalog, byte-anchor type queries, static dependency graphs and checked test discovery now share the compiler model through CLI/MCP. `ergo test` supplies assertions and executes each case with a fresh owning scope. The process watchdog reports unconfirmed cleanup honestly. See [tooling](tooling.md) and [testing](testing.md).
 
 The next testing slice needs causal latches, scheduler-backed virtual time and scoped scratch fixtures. The next ownership slice needs source-level provenance for handles: runtime rejection of a closed File/Fiber is currently stronger than static escape checking. Neither is replaced by more lint rules.

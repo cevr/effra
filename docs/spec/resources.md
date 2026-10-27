@@ -1,6 +1,6 @@
 # Resources and automatic release
 
-Status: **designed, not yet implemented**. The prototype has no resources. This file follows the owner's direction of 2026-10-26 ("How can we make it simpler so that defers are automatic … Kind of like acquire release"), adopted in the body of [#65](https://github.com/cevr/effra/issues/65). It replaces the earlier rules that made a resource linear with a checked `defer` and registered constructor resources with `build.Scope` (README Gap 13). Definitions of resource, owner scope, move, lend and consume are in the [glossary](../../GLOSSARY.md).
+Status: **designed, not yet implemented**. The prototype has no resources. This file follows the owner's direction of 2026-10-26 ("How can we make it simpler so that defers are automatic … Kind of like acquire release"), adopted in the body of [#65](https://github.com/cevr/ergo/issues/65). It replaces the earlier rules that made a resource linear with a checked `defer` and registered constructor resources with `build.Scope` (README Gap 13). Definitions of resource, owner scope, move, lend and consume are in the [glossary](../../GLOSSARY.md).
 
 The guarantee is Effect's `acquireRelease`: if an acquisition succeeds, its release runs, once, on every exit. The spelling is Go's: no `defer` to write and none to forget.
 
@@ -225,11 +225,11 @@ func keys() map[Key]string {
 ## Visibility
 
 1. The language server shows an inlay hint `closes: out, in` at each block end that releases resources.
-2. `ef inspect` lists every inserted release with its source position, and every move and consume.
+2. `ergo inspect` lists every inserted release with its source position, and every move and consume.
 
 ## Lowering
 
-The emitted Go is the `defer` a careful Go programmer writes, with an exit accumulator so that a release defect is not lost. A loop body becomes its own Go function, or gets an explicit close on each exit edge; both shapes are measured before one is chosen ([#190](https://github.com/cevr/effra/issues/190)).
+The emitted Go is the `defer` a careful Go programmer writes, with an exit accumulator so that a release defect is not lost. A loop body becomes its own Go function, or gets an explicit close on each exit edge; both shapes are measured before one is chosen ([#190](https://github.com/cevr/ergo/issues/190)).
 
 ## Prior art
 

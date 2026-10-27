@@ -6,7 +6,7 @@ import (
 )
 
 func TestI64TextRefusesImplicitAndMisusedConversions(t *testing.T) {
-	const header = "import I64 \"effra/i64\"\n"
+	const header = "import I64 \"ergo/i64\"\n"
 	for _, test := range []struct {
 		name, source, code string
 	}{
@@ -29,13 +29,13 @@ func TestI64TextRefusesImplicitAndMisusedConversions(t *testing.T) {
 		})
 	}
 	if r := CompileFor(`effect fn main() -> i64 raises { I64ParseFailure } { 1 }`, "go"); r.Checked || !hasCode(r, "EF107") && !hasCode(r, "EF102") {
-		t.Fatalf("I64ParseFailure must not exist without importing effra/i64: %+v", r.Diagnostics)
+		t.Fatalf("I64ParseFailure must not exist without importing ergo/i64: %+v", r.Diagnostics)
 	}
 }
 
 func TestI64TextRetainsOnlyReachedOperations(t *testing.T) {
-	formatOnly := "import I64 \"effra/i64\"\neffect fn main() -> string { I64.format(-9223372036854775808) }\n"
-	unused := "import I64 \"effra/i64\"\neffect fn main() -> string { \"x\" }\n"
+	formatOnly := "import I64 \"ergo/i64\"\neffect fn main() -> string { I64.format(-9223372036854775808) }\n"
+	unused := "import I64 \"ergo/i64\"\neffect fn main() -> string { \"x\" }\n"
 	for _, test := range []struct {
 		source                 string
 		strconv, format, parse bool
@@ -62,7 +62,7 @@ func TestI64TextRetainsOnlyReachedOperations(t *testing.T) {
 }
 
 func TestI64TextParseGrammarRefusesLeadingSpace(t *testing.T) {
-	source := `import I64 "effra/i64"
+	source := `import I64 "ergo/i64"
 fn label(count: i64) -> string {
     I64.format(count)
 }
@@ -81,7 +81,7 @@ effect fn main() -> string {
 }
 
 func TestI64TextMarkerMustMatchItsIndexedOperation(t *testing.T) {
-	parsed, diagnostics := parse("fn format(value: i64) -> string {\n    \"effra:intrinsic i64.parse\"\n}\n")
+	parsed, diagnostics := parse("fn format(value: i64) -> string {\n    \"ergo:intrinsic i64.parse\"\n}\n")
 	if len(diagnostics) != 0 {
 		t.Fatal(diagnostics)
 	}
@@ -92,11 +92,11 @@ func TestI64TextMarkerMustMatchItsIndexedOperation(t *testing.T) {
 	if admitBundledIntrinsic(i64FormatOp, plain.Functions[0]) {
 		t.Fatal("an ordinary body was admitted as compiler-owned")
 	}
-	user := CompileFor("fn format(value: i64) -> string {\n    \"effra:intrinsic i64.format\"\n}\neffect fn main() -> string { format(1) }\n", "go")
+	user := CompileFor("fn format(value: i64) -> string {\n    \"ergo:intrinsic i64.format\"\n}\neffect fn main() -> string { format(1) }\n", "go")
 	if !user.Checked {
 		t.Fatal(user.Diagnostics)
 	}
-	if output := runGeneratedGo(t, user); output != "effra:intrinsic i64.format\n" {
+	if output := runGeneratedGo(t, user); output != "ergo:intrinsic i64.format\n" {
 		t.Fatalf("user source spelled the compiler-owned operation: %q", output)
 	}
 }

@@ -3,7 +3,7 @@ package format
 import (
 	"strings"
 
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // ---------------------------------------------------------------- file and declarations

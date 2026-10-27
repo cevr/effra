@@ -194,11 +194,11 @@ machine M { initial S.Idle {}; step step }
 // The stale bundled import is the ordinary unknown-module diagnostic, and its
 // help names the decision forms that replace Step.
 func TestDecisionStaleStepImportHasAMigrationHint(t *testing.T) {
-	r := Compile(`import Machines "effra/machines"
+	r := Compile(`import Machines "ergo/machines"
 ` + decisionPrelude + `fn step(state: S, event: E) -> decision<S, void> { ignore }
 `)
 	d, ok := findDecisionDiagnostic(r, "EF126")
-	if !ok || !strings.Contains(d.Message, "unsupported bundled module effra/machines") {
+	if !ok || !strings.Contains(d.Message, "unsupported bundled module ergo/machines") {
 		t.Fatalf("diagnostics = %+v", r.Diagnostics)
 	}
 	for _, want := range []string{"decision<S, O>", "`enter e`", "Go -> enter", "Done -> done"} {
@@ -385,7 +385,7 @@ func TestDecisionFormatting(t *testing.T) {
 	if err != nil || again.Text != formatted.Text {
 		t.Fatalf("second pass differs: %v\n%s", err, again.Text)
 	}
-	if FormatterIdentity != "effra/formatter-16" {
+	if FormatterIdentity != "ergo/formatter-16" {
 		t.Fatalf("formatter identity %s", FormatterIdentity)
 	}
 }

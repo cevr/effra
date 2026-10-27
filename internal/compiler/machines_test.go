@@ -29,7 +29,7 @@ func TestMachineStaySameTagRule(t *testing.T) {
 		"stay-a05-accept-helper-normalize.ef": {},
 		"stay-a06-accept-dynamic-payload.ef":  {},
 		"stay-a07-reject-step-helper.ef":      {"EF139"},
-		// A stale import of the removed effra/machines module is the ordinary
+		// A stale import of the removed ergo/machines module is the ordinary
 		// unknown-module diagnostic (with a migration hint); the decision-syntax
 		// body is still checked.
 		"stay-a08-refuse-stale-step-import.ef":   {"EF126", "EF139"},
@@ -377,8 +377,8 @@ func TestMachineInspectionAndGraphView(t *testing.T) {
 	}
 	relations := map[string]int{}
 	for _, edge := range view.Edges {
-		relations[edge.Data.Effra.Relation]++
-		if edge.Data.Effra.Relation != "contains" && edge.Data.Effra.Relation != "initial" && edge.Data.Effra.Transition == nil {
+		relations[edge.Data.Ergo.Relation]++
+		if edge.Data.Ergo.Relation != "contains" && edge.Data.Ergo.Relation != "initial" && edge.Data.Ergo.Transition == nil {
 			t.Fatalf("transition edge without transition facts: %+v", edge)
 		}
 	}
@@ -390,8 +390,8 @@ func TestMachineInspectionAndGraphView(t *testing.T) {
 	if string(encodedWant) != string(encodedGot) {
 		t.Fatalf("relations = %s, want %s", encodedGot, encodedWant)
 	}
-	if view.Data.Effra.Completeness.Semantics != machinePlanEvidence || len(view.Nodes) != 6 {
-		t.Fatalf("view = %+v nodes=%d", view.Data.Effra.Completeness, len(view.Nodes))
+	if view.Data.Ergo.Completeness.Semantics != machinePlanEvidence || len(view.Nodes) != 6 {
+		t.Fatalf("view = %+v nodes=%d", view.Data.Ergo.Completeness, len(view.Nodes))
 	}
 	focused, err := ParseGraphRequest(map[string]any{"kind": "machine", "focus": graphTupleID("machine-state", r.FindMachine("Search").ID, "Ready"), "edgeKinds": []any{"enter"}})
 	if err != nil {
@@ -428,7 +428,7 @@ func TestMachineFormattingIsCanonical(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if FormatterIdentity != "effra/formatter-16" || !strings.Contains(first.Text, "machine Lights {\n    initial Light.Green {\n        cars: 1\n    }\n    step lightStep\n}") {
+	if FormatterIdentity != "ergo/formatter-16" || !strings.Contains(first.Text, "machine Lights {\n    initial Light.Green {\n        cars: 1\n    }\n    step lightStep\n}") {
 		t.Fatalf("formatted:\n%s", first.Text)
 	}
 	second, err := FormatSource(first.Text)

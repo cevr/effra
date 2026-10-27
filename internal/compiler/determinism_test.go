@@ -105,8 +105,8 @@ func TestGenericNativeGenerationIsDeterministic(t *testing.T) {
 // mixedBundledConsumer uses two bundled modules whose declarations carry
 // distinct callable contracts, so their summaries both intern callables into
 // the receiving arena.
-const mixedBundledConsumer = `import Convert "effra/conversions"
-import Fns "effra/functions"
+const mixedBundledConsumer = `import Convert "ergo/conversions"
+import Fns "ergo/functions"
 record User { name: string }
 effect fn decode(input: string) -> User { User { name: input } }
 effect fn encode(user: User) -> string { user.name }

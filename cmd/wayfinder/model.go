@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	defaultRepo = "cevr/effra"
-	schemaID    = "effra-wayfinder-snapshot/1"
+	defaultRepo = "cevr/ergo"
+	schemaID    = "ergo-wayfinder-snapshot/1"
 	mapLabel    = "wayfinder:map"
 )
 

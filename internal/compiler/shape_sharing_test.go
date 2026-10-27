@@ -20,7 +20,7 @@ const shapeFixtureTypes = 64
 // is stenciled once per record unless the option's own representation is shared.
 func shapeSharingSource(n int) string {
 	var out strings.Builder
-	out.WriteString("import Data \"effra/data\"\n\n")
+	out.WriteString("import Data \"ergo/data\"\n\n")
 	for k := 1; k <= n; k++ {
 		fmt.Fprintf(&out, "record R%d {\n    name: string;\n    f%d: i64\n}\n", k, k)
 		fmt.Fprintf(&out, "effect fn get%d(id: string) -> Data.Option<R%d> {\n    if id == \"x\" {\n        Data.Option.Some { value: R%d { name: \"r%d\"; f%d: %d } }\n    } else {\n        Data.Option<R%d>.None {}\n    }\n}\n", k, k, k, k, k, k, k)
@@ -97,7 +97,7 @@ func goOnPathVersion(t *testing.T) string {
 }
 
 // buildShapeFixture compiles the fixture to a native binary with the same go
-// build flags as `ef build` (trimpath, readonly modules, debug info kept).
+// build flags as `ergo build` (trimpath, readonly modules, debug info kept).
 func buildShapeFixture(t *testing.T, source string) (binary string) {
 	t.Helper()
 	r := CompileFor(source, "go")
@@ -112,7 +112,7 @@ func buildShapeFixture(t *testing.T, source string) (binary string) {
 	if err = application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
-	if err = os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0644); err != nil {
+	if err = os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module ergo.generated\n\ngo 1.27\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err = os.WriteFile(filepath.Join(dir, "main.go"), application.Main, 0644); err != nil {
@@ -155,7 +155,7 @@ func TestVariantMarkersShareShapes(t *testing.T) {
 	}
 }
 
-const optionMismatchSource = `import Data "effra/data"
+const optionMismatchSource = `import Data "ergo/data"
 
 record R1 {
     name: string
@@ -174,9 +174,9 @@ effect fn main() -> string {
 }
 `
 
-// TestCheckerRefusesMismatchedOptionPayload pins the Effra checker as the type
+// TestCheckerRefusesMismatchedOptionPayload pins the Ergo checker as the type
 // authority. Type-argument-free markers make the generated Go accept Some[R2]
-// where Option[R1] is expected, so the refusal must come from Effra on both
+// where Option[R1] is expected, so the refusal must come from Ergo on both
 // targets before any Go is emitted.
 func TestCheckerRefusesMismatchedOptionPayload(t *testing.T) {
 	r := CompileFor(optionMismatchSource, "go")
@@ -192,7 +192,7 @@ func TestCheckerRefusesMismatchedOptionPayload(t *testing.T) {
 	}
 }
 
-const optionTwoInstantiationsSource = `import Data "effra/data"
+const optionTwoInstantiationsSource = `import Data "ergo/data"
 
 record R1 {
     name: string
@@ -240,7 +240,7 @@ func TestOptionInstantiationsSelectTheirOwnArms(t *testing.T) {
 // TestUnmatchedDynamicVariantPanics pins the backstop the Go type system no
 // longer provides once markers carry no type arguments: a dynamic value that
 // implements the marker but is none of the enum's variants must not silently
-// select the first arm. The value is unreachable from checked Effra, so it is
+// select the first arm. The value is unreachable from checked Ergo, so it is
 // injected at the Go level as an extra file of the generated main package.
 func TestUnmatchedDynamicVariantPanics(t *testing.T) {
 	if testing.Short() {
@@ -263,7 +263,7 @@ func TestUnmatchedDynamicVariantPanics(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := map[string]string{
-		"go.mod":   "module effra.generated\n\ngo 1.27\n",
+		"go.mod":   "module ergo.generated\n\ngo 1.27\n",
 		"main.go":  string(application.Main),
 		"rogue.go": "package main\n\ntype efRogue struct{}\n\nfunc (efRogue) " + string(marker[1]) + "() {}\n\nfunc init() { efFunction_first(efRogue{}) }\n",
 	}

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // codecLoweringHelper names the lowering helpers that execute a derived
@@ -185,7 +185,7 @@ func (g *goEmitter) codecAdapters(node CodecPlanNode) string {
 	for index, variant := range node.Variants {
 		out.WriteString("case " + strconv.Itoa(index) + ":return " + typeName + "(" + goVariantType(node.data.Name, variant.Tag) + "{" + strings.Join(construct(variant.Fields), ",") + "})\n")
 	}
-	out.WriteString("};panic(" + strconv.Quote("effra codec: unknown variant of "+node.data.Name) + ")}\n")
+	out.WriteString("};panic(" + strconv.Quote("ergo codec: unknown variant of "+node.data.Name) + ")}\n")
 	return out.String()
 }
 
@@ -307,7 +307,7 @@ type goCodecWriterStep struct {
 // compiler supplies one function per step, and a union carrier holds one of
 // its declared variants. Trusted Go can still build a nil or foreign enum
 // interface; the writer panics on it as a defect rather than reporting a
-// codec failure, since no checked Effra value or decode result is one.
+// codec failure, since no checked Ergo value or decode result is one.
 func goCodecWriters(planName, suffix string, root int, nodes []goCodecWriterNode, steps []goCodecWriterStep) string {
 	// subtree reports, memoized per node, whether any transform node below
 	// index (inclusive) satisfies holds.
@@ -430,7 +430,7 @@ func goCodecWriters(planName, suffix string, root int, nodes []goCodecWriterNode
 				out.WriteString("case " + held + ":\n")
 				out.WriteString(object("{"+rt.CodecSpelling(rt.CodecTagKey)+":"+rt.CodecSpelling(variant.Tag), ",", variant.Fields, "x"))
 			}
-			out.WriteString("default:panic(" + strconv.Quote("effra codec: "+node.GoType+" carrier holds no declared variant") + ")\n}\n")
+			out.WriteString("default:panic(" + strconv.Quote("ergo codec: "+node.GoType+" carrier holds no declared variant") + ")\n}\n")
 		case rt.CodecTransform:
 			step := steps[node.Step]
 			represented := "r"

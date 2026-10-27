@@ -98,7 +98,7 @@ func TestManifestValidationRefusals(t *testing.T) {
 		{"duplicate key", strings.Replace(base, `"namespace":"acme"`, `"namespace":"acme","namespace":"other"`, 1), "duplicate key"},
 		{"trailing data", base + "{}", "after JSON value"},
 		{"version", strings.Replace(base, `"manifestVersion":1`, `"manifestVersion":2`, 1), "manifestVersion"},
-		{"reserved namespace", strings.Replace(base, `"namespace":"acme"`, `"namespace":"effra"`, 1), "reserved"},
+		{"reserved namespace", strings.Replace(base, `"namespace":"acme"`, `"namespace":"ergo"`, 1), "reserved"},
 		{"bad namespace", strings.Replace(base, `"namespace":"acme"`, `"namespace":"Acme"`, 1), "kebab-case"},
 		{"bad severity", strings.Replace(base, `"defaultSeverity":"warning"`, `"defaultSeverity":"fatal"`, 1), "invalid default severity"},
 		{"off is not a default", strings.Replace(base, `"defaultSeverity":"warning"`, `"defaultSeverity":"off"`, 1), "invalid default severity"},

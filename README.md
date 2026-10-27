@@ -2,7 +2,7 @@
 
 **Go's directness and native binaries. Effect's typed failures, explicit dependencies and owned lifetimes. Algebraic data types with exhaustive matching. One small language.**
 
-Effra is an experimental application language. You write `.ef` files and `ef` compiles them to a single static Go executable. Go is the only target; [Effect](https://effect.website) is the model for the guarantees, not a runtime. Every function signature states what it returns, every way it can fail and every service it needs, and the compiler checks all three.
+Effra is an experimental application language. You write `.ef` files and `ergo` compiles them to a single static Go executable. Go is the only target; [Effect](https://effect.website) is the model for the guarantees, not a runtime. Every function signature states what it returns, every way it can fail and every service it needs, and the compiler checks all three.
 
 The aim is Effect for Go: application code with Go's simplicity, Effect's guarantees and a standard library covering what Effect does, in Effra's own idioms ([north star](NORTH_STAR.md)). What runs today is server-focused.
 
@@ -172,7 +172,7 @@ Go's version is the most direct to read, and Effra keeps that directness: plain 
 
 ### Same mistakes, three compilers
 
-Each row makes one mistake in the program above and records what happens. The Effra column is the actual `ef diagnostics` output, verified by the gate ([`TestReadmeSmoke`](cmd/ef/readme_smoke_test.go)).
+Each row makes one mistake in the program above and records what happens. The Effra column is the actual `ergo diagnostics` output, verified by the gate ([`TestReadmeSmoke`](cmd/ergo/readme_smoke_test.go)).
 
 | Mistake | Go | TypeScript + Effect | Effra |
 | --- | --- | --- | --- |
@@ -203,7 +203,7 @@ Each row makes one mistake in the program above and records what happens. The Ef
 Records, enums with payloads and generic types compose, and nothing is ever `nil`. The bundled `Data` module supplies `Option` and `Result`:
 
 ```rust
-import Data "effra/data"
+import Data "ergo/data"
 
 record User {
     name: string
@@ -304,7 +304,7 @@ layer Fixture {
 }
 ```
 
-`provides` hides `Store` from callers. `replace` happens before anything is constructed, and `ef graph` shows the selected graph.
+`provides` hides `Store` from callers. `replace` happens before anything is constructed, and `ergo graph` shows the selected graph.
 
 ### Structured concurrency
 
@@ -336,7 +336,7 @@ effect fn parse(text: string) -> bool raises { GoError } uses { Foreign } {
 
 ### Tests are ordinary effects
 
-Tests are effect functions whose names start with `test_`. A fixture is just another provider, and each test gets a fresh owning scope. `ef test` runs them:
+Tests are effect functions whose names start with `test_`. A fixture is just another provider, and each test gets a fresh owning scope. `ergo test` runs them:
 
 ```rust
 // From examples/testing.ef
@@ -350,17 +350,17 @@ effect fn test_recovery() -> void raises { AssertionFailed } uses { Assert } {
 
 ### One compiler model for people, editors and agents
 
-`ef check`, `inspect`, `explain`, `graph`, `diagnostics`, `lint`, `lsp` and `mcp` all read the same checked model. `ef fmt` works from syntax alone, so it also formats code that does not type-check yet. Ask why `checkout` needs what it needs:
+`ergo check`, `inspect`, `explain`, `graph`, `diagnostics`, `lint`, `lsp` and `mcp` all read the same checked model. `ergo fmt` works from syntax alone, so it also formats code that does not type-check yet. Ask why `checkout` needs what it needs:
 
 ```sh
-$ ef explain examples/checkout.ef checkout | jq -c '.symbol.contributions[] | {line: .span.line, kind, names}'
+$ ergo explain examples/checkout.ef checkout | jq -c '.symbol.contributions[] | {line: .span.line, kind, names}'
 {"line":33,"kind":"failure","names":["OrderNotFound"]}
 {"line":33,"kind":"requirement","names":["Orders"]}
 {"line":34,"kind":"failure","names":["GatewayDown","Timeout"]}
 {"line":34,"kind":"requirement","names":["Gateway","Scheduler"]}
 ```
 
-Line 33 is `run Orders.find(id)`; line 34 is the gateway call with its timeout. The MCP server exposes the same facts to coding agents. Its semantic answers carry the source revision they were computed from, and a request that passes `expectedRevision` is refused if the source has changed since. Without it, the server answers from the current source, except that a type lookup by definition ID requires `expectedRevision` (an ID is only meaningful for the source it came from). Editors get the same model through `ef lsp`: diagnostics, hover and go-to-definition answer from the query behind `ef type --offset`, and document formatting is the `ef fmt` formatter. Range formatting, references and rename are not implemented yet.
+Line 33 is `run Orders.find(id)`; line 34 is the gateway call with its timeout. The MCP server exposes the same facts to coding agents. Its semantic answers carry the source revision they were computed from, and a request that passes `expectedRevision` is refused if the source has changed since. Without it, the server answers from the current source, except that a type lookup by definition ID requires `expectedRevision` (an ID is only meaningful for the source it came from). Editors get the same model through `ergo lsp`: diagnostics, hover and go-to-definition answer from the query behind `ergo type --offset`, and document formatting is the `ergo fmt` formatter. Range formatting, references and rename are not implemented yet.
 
 ## Where it's going
 
@@ -370,17 +370,17 @@ Each row states what has landed on this branch, what is in flight and what is on
 | --- | --- |
 | Payload-aware recovery: `.recover<E>(handler)` passes the error's fields to an effectful handler | Landed ([`recovery-outcome.ef`](examples/recovery-outcome.ef), [`recovery-codec.ef`](examples/recovery-codec.ef)); reified `Exit` is not exposed |
 | Layer runtime: concurrent shared acquisition, rollback and cleanup in reverse order | Shared build-owned acquisition with individually cancellable waiters landed; the remaining units are in progress |
-| Codecs derived from records and enums, with explicit wire ↔ domain transformations | Structural JSON derivation through [`effra/json`](docs/bundled-modules.md) and explicit transformed witnesses composed with `with` run, including at typed HTTP endpoints |
-| Graph views: `ef graph --kind layers\|machine --format mermaid\|dot`, plus MCP and editor views | In progress |
+| Codecs derived from records and enums, with explicit wire ↔ domain transformations | Structural JSON derivation through [`ergo/json`](docs/bundled-modules.md) and explicit transformed witnesses composed with `with` run, including at typed HTTP endpoints |
+| Graph views: `ergo graph --kind layers\|machine --format mermaid\|dot`, plus MCP and editor views | In progress |
 | HTTP server with bounded, owned shutdown (`Http.listen`) | Landed with typed endpoints and route tables ([`http-transport.ef`](examples/http-transport.ef), [`http-endpoints.ef`](examples/http-endpoints.ef)) and a shared wire corpus; streaming bodies are not built |
 | Rich Go interop: host types, methods, `io.Reader`/`io.Writer`, `context` | Host types, methods, interface assignment, checked I/O and `context` forwarding landed; owned resources and callbacks in progress |
 | Library modules: `pub` exports and module-qualified identity | Designed |
 | State machines: ordinary step functions run by an owned runtime | The `machine` declaration, decision syntax (`enter`, `stay`, `ignore`, `reject`, `done`), its static `stay` check and inspectable plans landed ([`machine-search.ef`](examples/machine-search.ef)); the runtime is specified, not built |
 | Actors with explicit mailbox budgets and owned behavior | [Specified](docs/specs/actors.md); not built |
 | Evidence and proofs: values that carry what was checked | [Designed](docs/research/opaque-values-and-evidence.md) |
-| Numeric application code: floating point, loops and numeric buffers | Direction; not built ([#117](https://github.com/cevr/effra/issues/117)) |
-| Swappable effect runtimes: a userland provider admitted by the runtime laws, beside Effra's own Go runtime | [Specified research](docs/research/lawful-runtime-contract.md); neither the RS1 law suite ([#124](https://github.com/cevr/effra/issues/124)) nor the Effect-suite harness ([#123](https://github.com/cevr/effra/issues/123)) runs yet |
-| Laws as a general construct for behavior types can't state | Admitted, not built; shape open ([#125](https://github.com/cevr/effra/issues/125)) |
+| Numeric application code: floating point, loops and numeric buffers | Direction; not built ([#117](https://github.com/cevr/ergo/issues/117)) |
+| Swappable effect runtimes: a userland provider admitted by the runtime laws, beside Effra's own Go runtime | [Specified research](docs/research/lawful-runtime-contract.md); neither the RS1 law suite ([#124](https://github.com/cevr/ergo/issues/124)) nor the Effect-suite harness ([#123](https://github.com/cevr/ergo/issues/123)) runs yet |
+| Laws as a general construct for behavior types can't state | Admitted, not built; shape open ([#125](https://github.com/cevr/ergo/issues/125)) |
 
 ### Proofs you can't forget to check
 
@@ -417,18 +417,18 @@ A machine is a small `machine` declaration that names its initial state and its 
 You need Go 1.27+ and Git.
 
 ```sh
-git clone https://github.com/cevr/effra.git
-cd effra
-go build -o bin/ef ./cmd/ef
+git clone https://github.com/cevr/ergo.git
+cd ergo
+go build -o bin/ergo ./cmd/ergo
 
-./bin/ef run examples/checkout.ef               # paid auth-7 / no such order
-./bin/ef build examples/checkout.ef             # static executable in dist/
-./bin/ef diagnostics examples/missing-service.ef  # expected failure: EF108
-./bin/ef inspect examples/checkout.ef checkout  # the checked contract as JSON
-./bin/ef graph examples/layers.ef               # services, providers and layers
-./bin/ef test examples/testing.ef
-./bin/ef mcp .                                  # compiler tools for agents over stdio
-./bin/ef lsp                                    # diagnostics, hover, definition and formatting over LSP
+./bin/ergo run examples/checkout.ef               # paid auth-7 / no such order
+./bin/ergo build examples/checkout.ef             # static executable in dist/
+./bin/ergo diagnostics examples/missing-service.ef  # expected failure: EF108
+./bin/ergo inspect examples/checkout.ef checkout  # the checked contract as JSON
+./bin/ergo graph examples/layers.ef               # services, providers and layers
+./bin/ergo test examples/testing.ef
+./bin/ergo mcp .                                  # compiler tools for agents over stdio
+./bin/ergo lsp                                    # diagnostics, hover, definition and formatting over LSP
 ```
 
 Native builds lower checked source into typed Go closures and run `go build`. The executable needs no Effra installation to run, and contains only the declarations and runtime modules its entry point reaches. `--target js` is the EF110 diagnostic: since 2026-10-26 Go is the only target.
@@ -476,7 +476,7 @@ Native builds lower checked source into typed Go closures and run `go build`. Th
 - [North star](NORTH_STAR.md), [prior art](PRIOR_ART.md) (Effect, Go, Gleam, ReScript, Elixir, Borgo, Bend and others) and [glossary](GLOSSARY.md)
 - [Upstream conformance](docs/conformance.md): Effect behavior mapped to Go acceptance tests
 
-Open design questions are tracked in the [Wayfinder map](https://github.com/cevr/effra/issues/1) on GitHub (`go run ./cmd/wayfinder frontier`; see [docs/wayfinder](docs/wayfinder/README.md)).
+Open design questions are tracked in the [Wayfinder map](https://github.com/cevr/ergo/issues/1) on GitHub (`go run ./cmd/wayfinder frontier`; see [docs/wayfinder](docs/wayfinder/README.md)).
 
 ## Development
 

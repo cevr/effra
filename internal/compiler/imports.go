@@ -78,7 +78,7 @@ type listedPackage struct {
 // generatedModulePath is the module of every generated Go program. Its main
 // package lives at the module root, so it is also the import path of the
 // package that imports declared foreign packages.
-const generatedModulePath = "effra.generated"
+const generatedModulePath = "ergo.generated"
 
 // goImportRefusal applies the Go command's import restrictions
 // (cmd/go/internal/load: disallowInternal, disallowVendor and the program
@@ -269,7 +269,7 @@ func loadContracts(dir string) (map[string]behavior, *goModule, error) {
 	if main.Dir == "" {
 		return contracts, &main, nil
 	}
-	content, err := os.ReadFile(filepath.Join(main.Dir, "effra.bindings.json"))
+	content, err := os.ReadFile(filepath.Join(main.Dir, "ergo.bindings.json"))
 	if os.IsNotExist(err) {
 		return contracts, &main, nil
 	}
@@ -279,11 +279,11 @@ func loadContracts(dir string) (map[string]behavior, *goModule, error) {
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.DisallowUnknownFields()
 	if err = decoder.Decode(&contracts); err != nil {
-		return nil, nil, fmt.Errorf("invalid effra.bindings.json: %w", err)
+		return nil, nil, fmt.Errorf("invalid ergo.bindings.json: %w", err)
 	}
 	var trailing any
 	if err = decoder.Decode(&trailing); err != io.EOF {
-		return nil, nil, fmt.Errorf("effra.bindings.json must contain one JSON object")
+		return nil, nil, fmt.Errorf("ergo.bindings.json must contain one JSON object")
 	}
 	// Keys are validated in sorted order so a load reports the same first
 	// error every time.
@@ -299,7 +299,7 @@ func loadContracts(dir string) (map[string]behavior, *goModule, error) {
 	return contracts, &main, nil
 }
 
-// checkContractKeys refuses every effra.bindings.json key that is not the
+// checkContractKeys refuses every ergo.bindings.json key that is not the
 // go/types full name of an exported function or method, as metadata loading
 // refuses an unknown field. A key resolves in the package it names, which
 // source need not import, so packages outside the import closure are listed
@@ -362,24 +362,24 @@ func checkContractKeys(dir string, contracts map[string]behavior, exports map[st
 	}
 	for _, key := range keys {
 		if strings.HasPrefix(key, "(interface).") {
-			refuse(key, fmt.Sprintf("effra.bindings.json key %q names a method of an unnamed interface, which Go spells this way whatever its package or signature, so it names no single declaration and carries no contract; pass an explicit context.Context argument, or declare a named Go interface with the method in the module and key that method", key))
+			refuse(key, fmt.Sprintf("ergo.bindings.json key %q names a method of an unnamed interface, which Go spells this way whatever its package or signature, so it names no single declaration and carries no contract; pass an explicit context.Context argument, or declare a named Go interface with the method in the module and key that method", key))
 			continue
 		}
 		path, ok := packages[key]
 		if !ok {
-			refuse(key, fmt.Sprintf("effra.bindings.json key %q is not a go/types full name such as %q or %q", key, "path.Func", "(*path.Type).Method"))
+			refuse(key, fmt.Sprintf("ergo.bindings.json key %q is not a go/types full name such as %q or %q", key, "path.Func", "(*path.Type).Method"))
 			continue
 		}
 		scope := scopes[path]
 		if scope == nil {
-			refuse(key, fmt.Sprintf("effra.bindings.json key %q names package %s, which does not load: %s", key, path, failed[path]))
+			refuse(key, fmt.Sprintf("ergo.bindings.json key %q names package %s, which does not load: %s", key, path, failed[path]))
 			continue
 		}
 		declared := declarations[path]
 		if declared[key] {
 			continue
 		}
-		message := fmt.Sprintf("effra.bindings.json key %q matches no Go function or method", key)
+		message := fmt.Sprintf("ergo.bindings.json key %q matches no Go function or method", key)
 		if near := contractNearMisses(key, scope, declared); len(near) > 0 {
 			quoted := make([]string, len(near))
 			for i, name := range near {
@@ -561,7 +561,7 @@ func admitCallable(b *Binding, fn *types.Func, host *hostImports) string {
 	b.Signature, b.Cancellation, b.Provenance, b.member = sig.String(), "unknown", "Go export data; behavior unclassified", fn.Name()
 	if meta.Cancellation != "" {
 		b.Cancellation = meta.Cancellation
-		b.Provenance = "Go export data; reviewed effra.bindings.json assertion"
+		b.Provenance = "Go export data; reviewed ergo.bindings.json assertion"
 	}
 	if sig.TypeParams().Len() > 0 {
 		return "generic Go functions are unsupported"
@@ -574,7 +574,7 @@ func admitCallable(b *Binding, fn *types.Func, host *hostImports) string {
 		typ := sig.Params().At(i).Type()
 		if i == 0 && isContext(typ) && meta.Context == "fiber" {
 			b.Context = true
-			b.Provenance = "Go export data; reviewed effra.bindings.json assertion"
+			b.Provenance = "Go export data; reviewed ergo.bindings.json assertion"
 			b.HostParameters = append(b.HostParameters, HostComponent{Native: "context.Context", Type: "Fiber context", Adaptation: hostAdaptContext})
 			continue
 		}

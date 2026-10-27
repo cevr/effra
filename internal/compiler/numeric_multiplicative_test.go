@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// signed64MultiplicativeCallers are ordinary Effra callers of `*`, `/` and
+// signed64MultiplicativeCallers are ordinary Ergo callers of `*`, `/` and
 // `%`. Division and remainder take a runtime divisor only behind a guard that
 // excludes zero, so the same functions run every boundary case on both
 // targets.

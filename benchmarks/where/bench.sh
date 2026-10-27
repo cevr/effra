@@ -6,10 +6,10 @@
 #
 # Usage: bench.sh EF_PROTO WORKDIR
 #   EF_PROTO  the prototype compiler, built from branch wf10/spike-where-proto
-#             (`go build -o EF_PROTO ./cmd/ef` in that worktree)
-#   WORKDIR   scratch directory for generated programs and builds (`ef build`
+#             (`go build -o EF_PROTO ./cmd/ergo` in that worktree)
+#   WORKDIR   scratch directory for generated programs and builds (`ergo build`
 #             also writes generated Go under WORKDIR/dist)
-# Writes a report to stdout. Checker time is `ef check --target go`'s
+# Writes a report to stdout. Checker time is `ergo check --target go`'s
 # checkMicros and totalMicros, median of 3, with the load average recorded
 # before each size.
 set -u
@@ -24,7 +24,7 @@ echo "== environment"
 echo "date $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "host $(uname -srm), $(nproc) cpus"
 echo "go on PATH: $(go version)"
-echo "ef $(sha256sum "$EF" | cut -c1-16)"
+echo "ergo $(sha256sum "$EF" | cut -c1-16)"
 
 echo
 echo "== checker time (types=16, distinct layouts; microseconds; median of 3)"
@@ -69,14 +69,14 @@ for types in 16 64; do
       stencils=$(echo "$nm" | awk '($3=="T"||$3=="t") && $4 ~ /^main\.efFunction_sort[23]\[go\.shape\./' | wc -l)
       stencilB=$(echo "$nm" | awk '($3=="T"||$3=="t") && $4 ~ /^main\.efFunction_sort[23]\[go\.shape\./ {s+=$2} END {print s+0}')
       dicts=$(echo "$nm" | awk '$4 ~ /^main\.\.dict\.efFunction_sort[23]\[/' | wc -l)
-      runtime=$(echo "$nm" | awk '($3=="T"||$3=="t") && $4 ~ /^effra\.generated\/runtime\./ && /\[go\.shape\./' | wc -l)
+      runtime=$(echo "$nm" | awk '($3=="T"||$3=="t") && $4 ~ /^ergo\.generated\/runtime\./ && /\[go\.shape\./' | wc -l)
       printf '%-6s %-9s %-5s %10s %8s %6s %8s %10s\n' "$types" "$layout" "$style" "$(wc -c < "$base.bin")" "$stencils" "$dicts" "$runtime" "$stencilB"
     done
   done
 done
 
 echo
-echo "Go binaries built by ef with $toolchain"
+echo "Go binaries built by ergo with $toolchain"
 echo
 echo "== JavaScript output (types=16; bytes of the .mjs, raw and gzip -9)"
 printf '%-6s %-5s %10s %10s %10s\n' N style mjs gzip d.mts

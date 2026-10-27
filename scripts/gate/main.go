@@ -33,12 +33,12 @@ import (
 	"sync"
 	"time"
 
-	"effra.local/prototype/internal/testinputs/testenv"
+	"ergo.local/prototype/internal/testinputs/testenv"
 )
 
 // cacheVersion is part of every key; bump it when a step's meaning changes in
 // a way its declared inputs cannot see.
-const cacheVersion = "effra-gate-v2"
+const cacheVersion = "ergo-gate-v2"
 
 // Step is one gate check.
 type Step struct {
@@ -55,7 +55,7 @@ type Step struct {
 	// and sh, which Go tests spawn. Their fingerprints, with the environment
 	// they and the Go programs a test runs read (testenv.Names, which
 	// include goRuntimeEnvironment), reach the step as one digest in
-	// EFFRA_TOOL_VERSIONS; a test that reads it keys Go's test cache on it.
+	// ERGO_TOOL_VERSIONS; a test that reads it keys Go's test cache on it.
 	ToolEnv []string
 }
 
@@ -209,7 +209,7 @@ func checkoutIdentity(root string) (string, error) {
 }
 
 func cacheDirectory() string {
-	if dir := os.Getenv("EFFRA_GATE_CACHE"); dir != "" {
+	if dir := os.Getenv("ERGO_GATE_CACHE"); dir != "" {
 		return dir
 	}
 	base := os.Getenv("XDG_CACHE_HOME")
@@ -220,7 +220,7 @@ func cacheDirectory() string {
 		}
 		base = filepath.Join(home, ".cache")
 	}
-	return filepath.Join(base, "effra-gate")
+	return filepath.Join(base, "ergo-gate")
 }
 
 // run executes the graph and returns the process exit code.

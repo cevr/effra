@@ -124,7 +124,7 @@ func graphRoundTripReferences(view *GraphView) (err error) {
 	if err := json.Unmarshal(encoded, &wire); err != nil {
 		return err
 	}
-	facts := view.Data.Effra.Facts
+	facts := view.Data.Ergo.Facts
 	types, rows, declarations, sources, parameters := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, node := range facts.Types {
 		types[node.ID] = true
@@ -187,7 +187,7 @@ func graphRoundTripReferences(view *GraphView) (err error) {
 		}
 		return nil
 	}
-	data := wire["data"].(map[string]any)["effra"].(map[string]any)
+	data := wire["data"].(map[string]any)["ergo"].(map[string]any)
 	tables := data["facts"].(map[string]any)
 	if err := walk("types", tables["types"]); err != nil {
 		return err
@@ -198,7 +198,7 @@ func graphRoundTripReferences(view *GraphView) (err error) {
 	for _, collection := range []string{"nodes", "edges"} {
 		items, _ := wire[collection].([]any)
 		for _, item := range items {
-			entity := item.(map[string]any)["data"].(map[string]any)["effra"].(map[string]any)
+			entity := item.(map[string]any)["data"].(map[string]any)["ergo"].(map[string]any)
 			if source, ok := entity["source"].(string); ok && source != "" && !sources[source] {
 				return fmt.Errorf("unpublished source reference %q", source)
 			}
@@ -324,7 +324,7 @@ func TestGraphViewReferenceWalkMatchesTheRoundTrip(t *testing.T) {
 // typed fields; that shared projection follow-up is not machine code.)
 func TestMachineGraphViewEncodedSizeIsExact(t *testing.T) {
 	for name, view := range graphReviewViews(t) {
-		if view.Data.Effra.Kind != GraphKindMachine {
+		if view.Data.Ergo.Kind != GraphKindMachine {
 			continue
 		}
 		measured, err := encodedSize(view, 1<<30)

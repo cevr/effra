@@ -153,7 +153,7 @@ func TestFormatPreservesCommentsAndDirectiveMeaning(t *testing.T) {
 effect fn task() -> string { "ok" }
 effect fn main() -> string {
 // leading block comment
-// effra-lint-disable-next-line unused-recipe -- both same-line recipes are deliberate
+// ergo-lint-disable-next-line unused-recipe -- both same-line recipes are deliberate
 let first = task(); let second = task() // trailing recipe comment
 let value = echo(
 // argument comment
@@ -169,7 +169,7 @@ else { "no" }
 	}
 	for _, comment := range []string{
 		"// leading block comment",
-		"// effra-lint-disable-next-line unused-recipe -- both same-line recipes are deliberate",
+		"// ergo-lint-disable-next-line unused-recipe -- both same-line recipes are deliberate",
 		"// trailing recipe comment",
 		"// argument comment",
 		"// trailing argument comment",
@@ -186,7 +186,7 @@ else { "no" }
 	assertLintMeaning(t, source, result.Text)
 
 	wrappedChain := `effect fn main() -> void {
-// effra-lint-disable-next-line redundant-provision -- keep the chain target line
+// ergo-lint-disable-next-line redundant-provision -- keep the chain target line
 run hello().provide<Console>(Stdout)
     .provide<Console>(Stdout)
 }`
@@ -203,7 +203,7 @@ run hello().provide<Console>(Stdout)
 	}
 
 	blankTarget := `effect fn main() -> void {
-// effra-lint-disable-next-line future-rule -- blank target remains blank
+// ergo-lint-disable-next-line future-rule -- blank target remains blank
 
 void
 }`
@@ -217,7 +217,7 @@ void
 	assertDirectiveTokenLines(t, blankTarget, blankResult.Text)
 
 	pinnedConstruct := `effect fn main() -> string {
-// effra-lint-disable-next-line future-rule -- preserve this whole syntax line
+// ergo-lint-disable-next-line future-rule -- preserve this whole syntax line
 let value = Data { first: "a", second: "b" }; value
 }
 record Data { first: string, second: string }`
@@ -231,8 +231,8 @@ record Data { first: string, second: string }`
 	assertDirectiveTokenLines(t, pinnedConstruct, pinnedConstructResult.Text)
 
 	for _, directive := range []string{
-		`// effra-lint-disable-next-line future-rule -- malformed unknown rule`,
-		`// effra-lint-disable-next-line unused-recipe -- unused directive`,
+		`// ergo-lint-disable-next-line future-rule -- malformed unknown rule`,
+		`// ergo-lint-disable-next-line unused-recipe -- unused directive`,
 	} {
 		caseSource := "effect fn main() -> void {\n" + directive + "\nvoid\n}"
 		formatted, err := FormatSource(caseSource)
@@ -242,9 +242,9 @@ record Data { first: string, second: string }`
 		assertLintMeaning(t, caseSource, formatted.Text)
 	}
 	for _, directive := range []string{
-		`//effra-lint-disable-next-line`,
-		`// effra-lint-disable-next-line unused-recipe`,
-		`// effra-lint-disable-next-line unused-recipe --`,
+		`//ergo-lint-disable-next-line`,
+		`// ergo-lint-disable-next-line unused-recipe`,
+		`// ergo-lint-disable-next-line unused-recipe --`,
 	} {
 		caseSource := "effect fn main() -> void {\n" + directive + "\nvoid\n}"
 		formatted, err := FormatSource(caseSource)
@@ -258,8 +258,8 @@ record Data { first: string, second: string }`
 	// formatter alike, so moving its target onto the next line by formatting
 	// cannot activate it, and it never suppresses a recipe on its own line.
 	for _, caseSource := range []string{
-		"effect fn task() -> void { void }\neffect fn main() -> void { /* effra-lint-disable-next-line unused-recipe -- intentional */ let pending = task(); void }",
-		"effect fn task() -> void { void }\neffect fn main() -> void {\n/* effra-lint-disable-next-line unused-recipe -- intentional */\nlet pending = task(); void\n}",
+		"effect fn task() -> void { void }\neffect fn main() -> void { /* ergo-lint-disable-next-line unused-recipe -- intentional */ let pending = task(); void }",
+		"effect fn task() -> void { void }\neffect fn main() -> void {\n/* ergo-lint-disable-next-line unused-recipe -- intentional */\nlet pending = task(); void\n}",
 	} {
 		formatted, err := FormatSource(caseSource)
 		if err != nil {
@@ -277,9 +277,9 @@ record Data { first: string, second: string }`
 	// An ordinary block comment inside a legitimate directive's target line
 	// stays on that line together with the line's remaining tokens.
 	for _, target := range []struct{ source, line string }{
-		{"effect fn task() -> void { void }\neffect fn main() -> void {\n// effra-lint-disable-next-line unused-recipe -- both are intentional\nlet first = task(); /* ordinary text */ let second = task(); void\n}",
+		{"effect fn task() -> void { void }\neffect fn main() -> void {\n// ergo-lint-disable-next-line unused-recipe -- both are intentional\nlet first = task(); /* ordinary text */ let second = task(); void\n}",
 			"\n    let first = task(); /* ordinary text */ let second = task(); void\n"},
-		{"effect fn task() -> void { void }\neffect fn main() -> void {\n// effra-lint-disable-next-line unused-recipe -- intentional\n/* ordinary text */ let pending = task(); void\n}",
+		{"effect fn task() -> void { void }\neffect fn main() -> void {\n// ergo-lint-disable-next-line unused-recipe -- intentional\n/* ordinary text */ let pending = task(); void\n}",
 			"\n    /* ordinary text */ let pending = task(); void\n"},
 	} {
 		formatted, err := FormatSource(target.source)
@@ -527,7 +527,7 @@ impl P for S {
 	assertFormat(t, source, want)
 
 	pinned := `service S {
-// effra-lint-disable-next-line future-rule -- keep both declarations together
+// ergo-lint-disable-next-line future-rule -- keep both declarations together
 effect fn one() -> void effect fn two() -> void
 }`
 	result, err := FormatSource(pinned)
@@ -619,13 +619,13 @@ effect fn main(state: State) -> string {
 	assertFormat(t, pattern, patternWant)
 
 	pinned := `effect fn main() -> void {
-// effra-lint-disable-next-line future-rule -- keep the opener line together
+// ergo-lint-disable-next-line future-rule -- keep the opener line together
 let value = scope { run task()
 run task()
 };
 }`
 	pinnedWant := `effect fn main() -> void {
-    // effra-lint-disable-next-line future-rule -- keep the opener line together
+    // ergo-lint-disable-next-line future-rule -- keep the opener line together
     let value = scope { run task()
         run task()
     };
@@ -685,18 +685,18 @@ func TestFormatContinuationClosersAndOwnLineBlockOpeners(t *testing.T) {
 
 	pinned := `fn f() -> i64 {
 match 1
-// effra-lint-disable-next-line future -- keep opener
+// ergo-lint-disable-next-line future -- keep opener
 {
 _ => 1
-// effra-lint-disable-next-line future -- keep closer
+// ergo-lint-disable-next-line future -- keep closer
 }
 }`
 	assertFormat(t, pinned, `fn f() -> i64 {
     match 1
-    // effra-lint-disable-next-line future -- keep opener
+    // ergo-lint-disable-next-line future -- keep opener
     {
         _ => 1
-        // effra-lint-disable-next-line future -- keep closer
+        // ergo-lint-disable-next-line future -- keep closer
     }
 }
 `)
@@ -706,7 +706,7 @@ _ => 1
 func TestFormatSpacingBeforeGroupedExpressions(t *testing.T) {
 	source := `fn take(first: i64, second: i64) -> i64 { first }
 effect fn main() -> void {
-// effra-lint-disable-next-line future-rule -- preserve the grouped spacing case
+// ergo-lint-disable-next-line future-rule -- preserve the grouped spacing case
 take(first:(1), second:(2));(2)
 	match Choice.A { Choice.A => void }
 }`
@@ -714,7 +714,7 @@ take(first:(1), second:(2));(2)
     first
 }
 effect fn main() -> void {
-    // effra-lint-disable-next-line future-rule -- preserve the grouped spacing case
+    // ergo-lint-disable-next-line future-rule -- preserve the grouped spacing case
     take(first: (1), second: (2)); (2)
     match Choice.A {
         Choice.A => void
@@ -956,7 +956,7 @@ func assertDirectiveTokenLines(t *testing.T, before, after string) {
 	seen := map[string]int{}
 	for _, comment := range beforeComments {
 		body := strings.TrimLeft(comment.Text, " \t")
-		if !strings.HasPrefix(body, "effra-lint-disable-next-line") {
+		if !strings.HasPrefix(body, "ergo-lint-disable-next-line") {
 			continue
 		}
 		lines := afterCommentLines[comment.Text]
