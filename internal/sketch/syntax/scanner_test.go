@@ -99,7 +99,7 @@ func TestNumberForms(t *testing.T) {
 	}
 }
 
-// TestKeywords: 28 keywords; goto, fallthrough, const and uses are not keywords
+// TestKeywords: 28 keywords; goto, fallthrough and const are not keywords
 // but are never names.
 func TestKeywords(t *testing.T) {
 	if n := len(Keywords()); n != 28 {

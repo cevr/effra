@@ -35,7 +35,7 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Error row** (implemented in prototype): The set of error types a function may fail with, written `error[A | B]` in its result. Order and repetition carry no meaning.
 
-**Capability row** (implemented in prototype): The set of capabilities a caller must supply, written `needs A, B` after a signature. Also called the `needs` row or requirement row. Before 2026-10-27 it was spelled `uses` ([#217](https://github.com/cevr/ergo/issues/217)); `uses` is now a syntax error with the hint "`uses` is now `needs`".
+**Capability row** (implemented in prototype): The set of capabilities a caller must supply, written `needs A, B` after a signature. Also called the `needs` row or requirement row. Before 2026-10-27 it was spelled `uses` ([#217](https://github.com/cevr/ergo/issues/217)); `uses` is now an ordinary identifier.
 
 **Row**: An error row or a capability row. Rows are checked and then erased from the emitted Go.
 

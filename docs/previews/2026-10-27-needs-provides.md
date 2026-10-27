@@ -2,7 +2,7 @@
 
 Labels: **Tested candidate** and **Proposed**. Supersedes the `uses` spelling of [the Go-shaped language preview](2026-10-27-go-sketch.md), which stays unchanged as the record of that day. Ticket: [#217](https://github.com/cevr/ergo/issues/217). Normative text: [grammar.md, Keywords](../spec/grammar.md#keywords) and [rows.md, Wire](../spec/rows.md#wire) rule 8.
 
-- **Tested candidate** snippets depend on branch `wf10/sweep`. Commit `71fc9ab4` implements the parser, the formatter and the bridge refusals. The commands ran there as `ef`, and again at commit `2c76d055`, after the Ergo rename ([2026-10-27-ergo.md](2026-10-27-ergo.md)), as `ergo check`, `ergo fmt --check` and `ergo run`, in a scratch directory with the manifest `ergo.json` holding `{"edition": "2026"}`. Both runs gave the results each snippet states.
+- **Tested candidate** snippets depend on branch `wf10/sweep`. Commit `71fc9ab4` implements the parser, the formatter and the bridge refusals. The commands ran there as `ef`, and again at commit `2c76d055`, after the Ergo rename ([2026-10-27-ergo.md](2026-10-27-ergo.md)), as `ergo check`, `ergo fmt --check` and `ergo run`, in a scratch directory with the manifest `ergo.json` holding `{"edition": "2026"}`. Both runs gave the results each snippet states. The plain-error snippet ran on the commit that carries this sentence, which removes an earlier `uses` hint.
 - **Proposed** means the checking of a wire header, which [#196](https://github.com/cevr/ergo/issues/196) owns.
 
 ## What changed
@@ -82,9 +82,9 @@ Designed in [rows.md](../spec/rows.md#wire) rule 8; checked by #196.
 - `needs Config, Clock`: the providers require `Config` and `Clock` from the `with` site, so they join that site's row.
 - Without `provides`, every entry is exposed, as today.
 
-## Tested candidate: the old spelling gets a repair
+## Tested candidate: the old spelling is a plain syntax error
 
-`ergo check` and `ergo fmt` both report S001 at 3:13, spanning the `uses` token: "`uses` is now `needs`". `ergo fmt` exits 2 and leaves the file unchanged.
+There is no compatibility path. The owner, 2026-10-27: "We don't need to give backwards compatible syntax parsing. This is still a prototype". `uses` is an ordinary identifier, so below it parses as `main`'s result type. `ergo check` and `ergo fmt` report the plain S001 "expected end of declaration, found "Console"" at 3:18. `ergo fmt` exits 2 and leaves the file unchanged. `TestUsesIsAnIdentifier` pins the plain error. *Prior art:* Gleam before 1.0 and Zig change syntax between releases without a migration path; deprecation windows (Elixir, Rust editions) suit released languages with users.
 
 ```text
 package checkout
@@ -93,8 +93,6 @@ func main() uses Console {
 	Console.Println("hi")
 }
 ```
-
-The fixtures `uses-hint-*` in `internal/sketch/sketchtest/fixtures.go` cover a declaration, a result, a function type in a list, an interface method, a wire header, a wire header after `provides`, and `uses` as a name.
 
 ## Prior art
 

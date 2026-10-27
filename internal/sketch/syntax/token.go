@@ -177,19 +177,14 @@ func Keywords() []string {
 	return out
 }
 
-// removed are the words the language refuses (grammar.md, Keywords): the Go
-// keywords it removes, and uses, the spelling of needs before 2026-10-27
-// (#217). They lex as identifiers, because they are not keywords, but no
-// declaration, statement or name may use them: generated Go reserves the Go
-// keywords, a program written with them is a Go program the language does
-// not admit, and old text that says uses gets a direct repair. A removed
-// word where a needs clause can stand is the same error (parseSignature,
-// parseWireDecl).
+// removed are Go keywords the language removes (grammar.md, Keywords). They
+// lex as identifiers, because they are not keywords, but no declaration,
+// statement or name may use them: generated Go reserves them, and a program
+// written with them is a Go program the language does not admit.
 var removed = map[string]string{
 	"goto":        "goto is not part of the language; use structured control flow",
 	"fallthrough": "fallthrough is not part of the language; list the cases together",
 	"const":       "const is not part of the language; a package-level var is immutable",
-	"uses":        "`uses` is now `needs`",
 }
 
 // Precedence is the binary precedence of op, or 0 when op is not a binary

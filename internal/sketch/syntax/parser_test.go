@@ -42,24 +42,28 @@ func TestMalformed(t *testing.T) {
 	}
 }
 
-// TestUsesHint (#217): the removed keyword uses is S001 with the fix hint
-// "`uses` is now `needs`", spanning the uses token itself, wherever a needs
-// clause, a provides clause or a name can stand.
-func TestUsesHint(t *testing.T) {
-	for _, m := range sketchtest.MalformedTable {
-		if !strings.HasPrefix(m.Name, "uses-hint-") {
-			continue
+// TestUsesIsAnIdentifier (#217): `uses` is not a keyword and has no
+// compatibility path (owner, 2026-10-27: "We don't need to give backwards
+// compatible syntax parsing. This is still a prototype"). It is an ordinary
+// name, so the old spelling of a needs clause gets the plain S001 any stray
+// identifier gets, never a dedicated hint.
+func TestUsesIsAnIdentifier(t *testing.T) {
+	for _, c := range []struct {
+		src, message string
+		line, column int
+	}{
+		// `uses` parses as the result type, so the error is at A.
+		{"package p\nfunc f() uses A {}\n", `expected end of declaration, found "A"`, 2, 15},
+		{"package p\nwire W uses A {\n}\n", `expected "{", found "uses"`, 2, 8},
+	} {
+		_, err := Parse(c.src)
+		var e *Error
+		if !errors.As(err, &e) || e.Code != CodeSyntax || e.Message != c.message || e.Line != c.line || e.Column != c.column {
+			t.Errorf("%q: got %v, want %d:%d S001 %s", c.src, err, c.line, c.column, c.message)
 		}
-		t.Run(m.Name, func(t *testing.T) {
-			_, err := Parse(m.Src)
-			var e *Error
-			if !errors.As(err, &e) || e.Code != CodeSyntax || e.Message != "`uses` is now `needs`" {
-				t.Fatalf("got %v, want S001 \"`uses` is now `needs`\"", err)
-			}
-			if got := m.Src[e.Offset : e.Offset+e.Length]; got != "uses" || strings.Count(m.Src, "uses") != 1 {
-				t.Fatalf("span %q at %d:%d, want the one uses token", got, e.Line, e.Column)
-			}
-		})
+	}
+	if _, err := Parse("package p\n\nvar uses = 1\n"); err != nil {
+		t.Fatalf("uses is not a name: %v", err)
 	}
 	// needs and provides are keywords, so neither is a name.
 	for _, word := range []string{"needs", "provides"} {

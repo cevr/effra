@@ -281,15 +281,6 @@ var MalformedTable = []Malformed{
 	{Name: "defer-non-simple", Src: "package p\n\nfunc f() {\n\tdefer if true {}\n}\n", Lines: []int{4}},
 	{Name: "empty-type-parameters", Src: "package p\n\nfunc f[]() {}\n", Lines: []int{3}},
 	{Name: "parenless-trailing-block", Src: "package p\n\nfunc f() {\n\tsync.Atomically {\n\t\tmove()\n\t}\n}\n", Lines: []int{5}},
-	// #217: the removed keyword uses, in every position a needs clause or a
-	// provides clause can stand, and as a name.
-	{Name: "uses-hint-declaration", Src: "package p\n\nfunc main() uses Console {\n}\n", Lines: []int{3}},
-	{Name: "uses-hint-after-result", Src: "package p\n\nfunc f() (int64, error[E]) uses A, B {\n}\n", Lines: []int{3}},
-	{Name: "uses-hint-function-type", Src: "package p\n\nfunc f(g func() int64 uses (A, B)) {\n}\n", Lines: []int{3}},
-	{Name: "uses-hint-interface-method", Src: "package p\n\ntype Store interface {\n\tPut(key string) uses Clock\n}\n", Lines: []int{4}},
-	{Name: "uses-hint-wire", Src: "package p\n\nwire App uses Account {\n\tStore = M{}\n}\n", Lines: []int{3}},
-	{Name: "uses-hint-wire-after-provides", Src: "package p\n\nwire App provides Account uses Config {\n\tStore = M{}\n}\n", Lines: []int{3}},
-	{Name: "uses-hint-name", Src: "package p\n\nvar uses = 1\n", Lines: []int{3}},
 	{Name: "wire-needs-before-provides", Src: "package p\n\nwire App needs Config provides Account {\n\tStore = M{}\n}\n", Lines: []int{3}},
 	{Name: "deep-nesting", Generate: func() string {
 		return "package p\n\nvar x = " + strings.Repeat("(", 200000) + "1" + strings.Repeat(")", 200000) + "\n"

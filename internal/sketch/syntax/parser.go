@@ -584,10 +584,8 @@ func (p *parser) parseFuncDecl(doc *CommentGroup) *FuncDecl {
 func (p *parser) parseWireDecl(doc *CommentGroup) *WireDecl {
 	d := &WireDecl{Doc: doc, Wire: p.want(WIRE)}
 	d.Name = p.parseIdent()
-	p.refuseRemoved()
 	if p.tok.tok == PROVIDES {
 		d.Provides = p.parseProvides()
-		p.refuseRemoved()
 	}
 	if p.tok.tok == NEEDS {
 		d.Needs = p.parseNeeds(false)
@@ -654,7 +652,6 @@ const (
 func (p *parser) parseSignature(funcPos Pos, list bool) *FuncType {
 	t := &FuncType{Func: funcPos}
 	t.Params = p.parseParameters(LPAREN, RPAREN, paramPlain)
-	p.refuseRemoved()
 	switch {
 	case p.tok.tok == LPAREN:
 		t.Results = p.parseParameters(LPAREN, RPAREN, paramResult)
@@ -662,7 +659,6 @@ func (p *parser) parseSignature(funcPos Pos, list bool) *FuncType {
 		r := p.parseResultType(list)
 		t.Results = &FieldList{Opening: NoPos, List: []*Field{{Type: r}}, Closing: NoPos}
 	}
-	p.refuseRemoved()
 	if p.tok.tok == NEEDS {
 		t.Needs = p.parseNeeds(list)
 	}
@@ -681,20 +677,6 @@ func (p *parser) startsType() bool {
 		return p.peek(1).tok == PERIOD
 	}
 	return false
-}
-
-// refuseRemoved reports a removed word where a result, a needs clause or a
-// provides clause can stand, so `func f() uses A` and `wire W uses A` get
-// the removed word's own message ("`uses` is now `needs`") at that word,
-// not a generic "expected" error. A removed word is never a type or a
-// capability, so no valid program has one there.
-func (p *parser) refuseRemoved() {
-	if p.tok.tok != IDENT {
-		return
-	}
-	if msg, ok := removed[p.tok.lit]; ok {
-		p.errorf("%s", msg)
-	}
 }
 
 // parseProvides parses a wire's `provides A, B`.
