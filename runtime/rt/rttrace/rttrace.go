@@ -9,6 +9,15 @@
 // events of one goroutine, a task's start before its events, a child's
 // body-exit before its owner's observation of it. A law checker reads the
 // partial order (docs/research/lawful-runtime-contract.md), never Seq alone.
+// The runtime's occurrence ID (rt.Event.ID) is a linear extension of that
+// order over the emission points: an event that happens before another has
+// the smaller ID. The links between events (rt.Event.Link) are recorded by
+// the runtime, so a reader follows them instead of inferring causes.
+//
+// The recorder keeps each rt.Event whole, including the error and panic
+// values it carries; DefaultCapacity bounds the number of slots, not the
+// bytes those values retain. Only the writer drops values: it serializes
+// failures and defects by type name.
 package rttrace
 
 import (

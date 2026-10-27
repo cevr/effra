@@ -25,7 +25,7 @@ func TestTraceRecorderIsBounded(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < each; i++ {
-				root.Trace(rt.TraceCall, "app.Cap.Op", "app.sketch:1:1")
+				root.Trace(rt.TraceConstruct, "app.Live", "app.sketch:1:1")
 			}
 		}()
 	}
@@ -61,13 +61,13 @@ func TestTraceRecorderIsBounded(t *testing.T) {
 // The hand encoder writes what encoding/json reads back unchanged, including
 // quotes, control characters, non-ASCII text and invalid UTF-8.
 func TestEncodeRoundTripsThroughEncodingJSON(t *testing.T) {
-	want := Line{Seq: 7, Time: -3, Kind: "body-exit", Task: 2, Parent: 1, Def: "a\"b\\c\n\x01é→", Site: "s.sketch:1:2",
+	want := Line{Seq: 7, Time: -3, ID: 9, Link: 4, Kind: "body-exit", Task: 2, Parent: 1, Def: "a\"b\\c\n\x01é→", Site: "s.sketch:1:2",
 		Cause: []Reason{{Reason: "defect", Name: "x\x7f", InRelease: true, Chain: []Frame{{Task: 2, Def: "d"}, {Task: 1, Def: "e"}}}, {Reason: "interrupted"}}}
 	var got Line
 	if err := json.Unmarshal(want.appendJSON(nil), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Def != want.Def || got.Seq != 7 || got.Time != -3 || len(got.Cause) != 2 || !got.Cause[0].InRelease || len(got.Cause[0].Chain) != 2 || got.Cause[0].Name != "x\x7f" {
+	if got.Def != want.Def || got.Seq != 7 || got.Time != -3 || got.ID != 9 || got.Link != 4 || len(got.Cause) != 2 || !got.Cause[0].InRelease || len(got.Cause[0].Chain) != 2 || got.Cause[0].Name != "x\x7f" {
 		t.Fatalf("round trip: %+v; want %+v", got, want)
 	}
 	var bad Line
@@ -93,6 +93,9 @@ func TestWriteJSONLNamesTypesNotValues(t *testing.T) {
 		{Seq: 1, Event: rt.Event{Kind: rt.TraceCall, Task: 2, Parent: 1, Def: "app.Orders.Find", Site: "app.sketch:7:3"}},
 		{Seq: 2, Event: rt.Event{Kind: rt.TraceBodyExit, Task: 2, Parent: 0, Def: "app.f/timeout.After#1", Cause: orderNotFound{ID: "secret-7"}}},
 		{Seq: 3, Event: rt.Event{Kind: rt.TraceBodyExit, Task: 3, Def: "app.g", Cause: rt.Expired{}}},
+		{Seq: 4, Event: rt.Event{Kind: rt.TraceCallExit, ID: 8, Link: 5, Task: 2, Def: "app.Orders.Find", Site: "app.sketch:7:3", Cause: orderNotFound{ID: "secret-8"}}},
+		{Seq: 5, Event: rt.Event{Kind: rt.TraceCallExit, ID: 9, Link: 6, Task: 2, Def: "app.Orders.Find", Site: "app.sketch:7:3", Defect: "secret-9"}},
+		{Seq: 6, Event: rt.Event{Kind: rt.TraceCallExit, ID: 10, Link: 7, Task: 2, Def: "app.Orders.Find", Site: "app.sketch:7:3"}},
 	}
 	var buf bytes.Buffer
 	sites := map[string]string{"app.f/timeout.After#1": "app.sketch:6:12"}
@@ -105,8 +108,8 @@ func TestWriteJSONLNamesTypesNotValues(t *testing.T) {
 	sc := bufio.NewScanner(&buf)
 	sc.Scan()
 	var h Header
-	if err := json.Unmarshal(sc.Bytes(), &h); err != nil || h.Schema != Schema || h.Revision != "abc" || h.Events != 4 {
-		t.Fatalf("header %+v (%v); want schema %s, revision abc, 4 events", h, err, Schema)
+	if err := json.Unmarshal(sc.Bytes(), &h); err != nil || h.Schema != Schema || h.Revision != "abc" || h.Events != 7 {
+		t.Fatalf("header %+v (%v); want schema %s, revision abc, 7 events", h, err, Schema)
 	}
 	var lines []Line
 	for sc.Scan() {
@@ -116,8 +119,8 @@ func TestWriteJSONLNamesTypesNotValues(t *testing.T) {
 		}
 		lines = append(lines, l)
 	}
-	if len(lines) != 4 {
-		t.Fatalf("%d event lines; want 4", len(lines))
+	if len(lines) != 7 {
+		t.Fatalf("%d event lines; want 7", len(lines))
 	}
 	if l := lines[0]; l.Kind != "start" || l.Site != "app.sketch:6:12" || l.Parent != 1 {
 		t.Errorf("start line %+v; want its definition's site and parent 1", l)
@@ -130,5 +133,14 @@ func TestWriteJSONLNamesTypesNotValues(t *testing.T) {
 	}
 	if l := lines[3]; len(l.Cause) != 1 || l.Cause[0].Name != "timeout.Expired" {
 		t.Errorf("exit line %+v; want cause timeout.Expired", l)
+	}
+	if l := lines[4]; l.Kind != "call-exit" || l.ID != 8 || l.Link != 5 || len(l.Cause) != 1 || l.Cause[0].Reason != "failure" || l.Cause[0].Name != "orderNotFound" {
+		t.Errorf("failed call-exit line %+v; want id 8, link 5, failure orderNotFound", l)
+	}
+	if l := lines[5]; len(l.Cause) != 1 || l.Cause[0].Reason != "defect" || l.Cause[0].Name != "string" {
+		t.Errorf("defect call-exit line %+v; want defect string", l)
+	}
+	if l := lines[6]; l.Link != 7 || len(l.Cause) != 0 {
+		t.Errorf("ok call-exit line %+v; want link 7 and no cause", l)
 	}
 }

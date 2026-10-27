@@ -1,0 +1,27 @@
+{"schema":"effra-trace-2","revision":"466654af0c0b75d30de2ffe855b36b8c308912bdf897eacf49085c64de6cc68f","producer":"sketchc -rt kernel","capacity":4096,"events":26,"dropped":0}
+{"seq":0,"time":13590,"id":1,"kind":"start","task":1,"parent":0,"def":"deadlines.main","site":"two-timeouts.sketch:23:1"}
+{"seq":1,"time":15629,"id":2,"kind":"construct","task":1,"parent":0,"def":"deadlines.Clock","site":"two-timeouts.sketch:24:11"}
+{"seq":2,"time":35839,"id":3,"kind":"start","task":2,"parent":1,"def":"deadlines.stall/timeout.After#1","site":"two-timeouts.sketch:10:15"}
+{"seq":3,"time":47039,"id":4,"kind":"call","task":2,"parent":1,"def":"host.Scheduler.Sleep","site":"two-timeouts.sketch:15:2"}
+{"seq":4,"time":1128056,"id":5,"kind":"deadline","task":2,"parent":1,"def":"deadlines.stall/timeout.After#1","site":"two-timeouts.sketch:10:15"}
+{"seq":5,"time":1129316,"id":6,"kind":"cancel-request","task":2,"parent":1,"def":"deadlines.stall/timeout.After#1","site":"two-timeouts.sketch:10:15"}
+{"seq":6,"time":1132336,"id":7,"link":4,"kind":"call-exit","task":2,"parent":1,"def":"host.Scheduler.Sleep","site":"two-timeouts.sketch:15:2","cause":[{"reason":"interrupted"}]}
+{"seq":7,"time":1132746,"id":8,"kind":"interrupt","task":2,"parent":1,"def":"deadlines.block","site":"two-timeouts.sketch:15:2"}
+{"seq":8,"time":1152566,"id":9,"link":8,"kind":"body-exit","task":2,"parent":1,"def":"deadlines.stall/timeout.After#1","site":"two-timeouts.sketch:10:15","cause":[{"reason":"interrupted"}]}
+{"seq":9,"time":1157586,"id":10,"link":9,"kind":"observe","task":2,"parent":1,"def":"deadlines.stall/timeout.After#1","site":"two-timeouts.sketch:10:15"}
+{"seq":10,"time":1159076,"id":11,"link":5,"kind":"handler","task":1,"parent":0,"def":"timeout.Expired","site":"two-timeouts.sketch:25:2"}
+{"seq":11,"time":1159246,"id":12,"kind":"call","task":1,"parent":0,"def":"host.Console.Println","site":"two-timeouts.sketch:28:2"}
+{"seq":12,"time":1210925,"id":13,"link":12,"kind":"call-exit","task":1,"parent":0,"def":"host.Console.Println","site":"two-timeouts.sketch:28:2"}
+{"seq":13,"time":1218445,"id":14,"kind":"construct","task":1,"parent":0,"def":"deadlines.Clock","site":"two-timeouts.sketch:29:12"}
+{"seq":14,"time":1252535,"id":15,"kind":"start","task":3,"parent":1,"def":"deadlines.stall/timeout.After#1","site":"two-timeouts.sketch:10:15"}
+{"seq":15,"time":1262594,"id":16,"kind":"call","task":3,"parent":1,"def":"host.Scheduler.Sleep","site":"two-timeouts.sketch:15:2"}
+{"seq":16,"time":2374621,"id":17,"kind":"deadline","task":3,"parent":1,"def":"deadlines.stall/timeout.After#1","site":"two-timeouts.sketch:10:15"}
+{"seq":17,"time":2375621,"id":18,"kind":"cancel-request","task":3,"parent":1,"def":"deadlines.stall/timeout.After#1","site":"two-timeouts.sketch:10:15"}
+{"seq":18,"time":2378471,"id":19,"link":16,"kind":"call-exit","task":3,"parent":1,"def":"host.Scheduler.Sleep","site":"two-timeouts.sketch:15:2","cause":[{"reason":"interrupted"}]}
+{"seq":19,"time":2379001,"id":20,"kind":"interrupt","task":3,"parent":1,"def":"deadlines.block","site":"two-timeouts.sketch:15:2"}
+{"seq":20,"time":2395601,"id":21,"link":20,"kind":"body-exit","task":3,"parent":1,"def":"deadlines.stall/timeout.After#1","site":"two-timeouts.sketch:10:15","cause":[{"reason":"interrupted"}]}
+{"seq":21,"time":2399341,"id":22,"link":21,"kind":"observe","task":3,"parent":1,"def":"deadlines.stall/timeout.After#1","site":"two-timeouts.sketch:10:15"}
+{"seq":22,"time":2400571,"id":23,"link":17,"kind":"handler","task":1,"parent":0,"def":"timeout.Expired","site":"two-timeouts.sketch:30:2"}
+{"seq":23,"time":2400731,"id":24,"kind":"call","task":1,"parent":0,"def":"host.Console.Println","site":"two-timeouts.sketch:33:2"}
+{"seq":24,"time":2425500,"id":25,"link":24,"kind":"call-exit","task":1,"parent":0,"def":"host.Console.Println","site":"two-timeouts.sketch:33:2"}
+{"seq":25,"time":2425950,"id":26,"kind":"body-exit","task":1,"parent":0,"def":"deadlines.main","site":"two-timeouts.sketch:23:1"}

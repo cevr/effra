@@ -37,6 +37,12 @@ func (l Line) appendJSON(b []byte) []byte {
 	b = strconv.AppendUint(b, l.Seq, 10)
 	b = append(b, `,"time":`...)
 	b = strconv.AppendInt(b, l.Time, 10)
+	b = append(b, `,"id":`...)
+	b = strconv.AppendUint(b, l.ID, 10)
+	if l.Link != 0 {
+		b = append(b, `,"link":`...)
+		b = strconv.AppendUint(b, l.Link, 10)
+	}
 	b = append(b, `,"kind":`...)
 	b = appendString(b, l.Kind)
 	b = append(b, `,"task":`...)

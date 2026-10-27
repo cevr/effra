@@ -48,26 +48,33 @@ func BenchmarkSpawnWaitTraced(b *testing.B) {
 	}
 }
 
-// BenchmarkTraceCallOff is what emitted code pays before each capability call
-// when no tracer is installed: Task.Trace, inlined to one load and compare.
+// BenchmarkTraceCallOff is what emitted code pays around each capability call
+// when no tracer is installed: Task.TraceCall and Task.TraceCallExit, each
+// inlined to one load and compare.
 func BenchmarkTraceCallOff(b *testing.B) {
 	t := rt.Root("bench")
 	for b.Loop() {
-		t.Trace(rt.TraceCall, "app.Gateway.Authorize", "app.sketch:9:14")
+		c := t.TraceCall("app.Gateway.Authorize", "app.sketch:9:14")
+		t.TraceCallExit(c, "app.Gateway.Authorize", "app.sketch:9:14", nil)
 	}
 }
 
-// BenchmarkTraceCallOn is one call event recorded by the bounded recorder.
+// BenchmarkTraceCallOn is one capability call, its call and call-exit
+// events, recorded by the bounded recorder: two events per op.
 func BenchmarkTraceCallOn(b *testing.B) {
 	rec := rttrace.New(rttrace.DefaultCapacity)
 	t := rt.TracedRoot("bench", rec)
 	b.ReportAllocs()
 	i := 0
 	for b.Loop() {
-		t.Trace(rt.TraceCall, "app.Gateway.Authorize", "app.sketch:9:14")
-		if i++; i%resetEvery == 0 {
+		c := t.TraceCall("app.Gateway.Authorize", "app.sketch:9:14")
+		t.TraceCallExit(c, "app.Gateway.Authorize", "app.sketch:9:14", nil)
+		if i += 2; i%resetEvery == 0 {
 			rec.Reset()
 		}
+	}
+	if rec.Dropped() != 0 {
+		b.Fatalf("recorder dropped %d events; the benchmark measured the drop path", rec.Dropped())
 	}
 }
 

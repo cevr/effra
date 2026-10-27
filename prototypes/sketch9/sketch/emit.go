@@ -583,14 +583,14 @@ func (e *emitter) call(x *Call) (val, err string) {
 		args := append([]string{"t__"}, e.args(x.Args)...)
 		site := callSite(x)
 		e.interruptCheck(site)
-		if e.kernel {
-			e.traceAt("call", e.model.CapOpID(recv, fun.Sel), site)
-		}
 		if recv == "Scheduler" && fun.Sel == "Sleep" {
-			e.sleep(args[1], site)
+			e.sleep(args[1], recv, fun.Sel, site)
 			return "", ""
 		}
-		return e.bindCall(e.envVal+"."+recv+"."+fun.Sel+"("+strings.Join(args, ", ")+")", in)
+		occ := e.callStart(recv, fun.Sel, site)
+		val, err = e.bindCall(e.envVal+"."+recv+"."+fun.Sel+"("+strings.Join(args, ", ")+")", in)
+		e.callExit(occ, recv, fun.Sel, site, err)
+		return val, err
 	}
 	panic("emit: unchecked call")
 }

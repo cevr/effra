@@ -45,6 +45,9 @@ func AfterSpan[T any](t *Task, s Scheduler, d time.Duration, span string, body f
 		if h != nil && !joined {
 			h.task.Interrupt()
 			<-h.done
+			if h.task.trace != nil {
+				h.task.traceForget()
+			}
 			c.Add(defectsOf(h.err))
 		}
 		if timer != nil {
@@ -63,19 +66,19 @@ func AfterSpan[T any](t *Task, s Scheduler, d time.Duration, span string, body f
 	case <-h.done:
 		joined = true
 		if h.task.trace != nil {
-			h.task.childEvent(TraceObserve, t)
+			h.task.childEvent(TraceObserve, t, true)
 		}
 		c.Add(h.err)
 		v = h.value
 	case <-timer.C():
 		if h.task.trace != nil {
-			h.task.childEvent(TraceDeadline, t)
+			h.task.childEvent(TraceDeadline, t, false)
 		}
 		h.task.Interrupt()
 		<-h.done
 		joined = true
 		if h.task.trace != nil {
-			h.task.childEvent(TraceObserve, t)
+			h.task.childEvent(TraceObserve, t, false)
 		}
 		c.Add(defectsOf(h.err))
 		c.AddFailure(Expired{})
@@ -83,6 +86,9 @@ func AfterSpan[T any](t *Task, s Scheduler, d time.Duration, span string, body f
 		h.task.Interrupt()
 		<-h.done
 		joined = true
+		if h.task.trace != nil {
+			h.task.traceForget()
+		}
 		c.Add(defectsOf(h.err))
 	}
 	return v, nil

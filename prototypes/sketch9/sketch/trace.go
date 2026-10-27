@@ -9,16 +9,26 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Trace query: read a recorded run against the checked model of the file it
 // came from. This is the prototype of `ef trace` and MCP `code.trace`
 // (docs/research/traceability.md, Query surface).
+//
+// The query states a causal link only where the runtime recorded it: an
+// event's link names the occurrence it refers to (a handler the failure it
+// caught, a body-exit the occurrence its exit carries, a call-exit its call).
+// Where no link was recorded the answer says so and lists candidates by type,
+// labelled as candidates. Before it explains anything the query validates
+// the trace: every definition and site against the model, every task
+// against its start, the parent graph, every link and every defect frame. A
+// trace that fails is refused with the reason, never explained.
 
 const (
 	// TraceSchema is the JSON Lines format a kernel program records
 	// (runtime/rt/rttrace).
-	TraceSchema = "effra-trace-1"
+	TraceSchema = "effra-trace-2"
 	// TraceEvidenceSchema is the envelope a query answers with. Its envelope
 	// fields are those of the review evidence schema (#156): schema,
 	// producer, revision, budgets, omissions and fingerprint.
@@ -27,13 +37,19 @@ const (
 	TraceProducer = "sketchc trace (effra.local/sketch9)"
 	// TraceByteBudget is the largest trace a query reads.
 	TraceByteBudget = 8 << 20
+	// traceMaxChain is the most frames the runtime keeps in a defect chain
+	// (runtime/rt maxChain).
+	traceMaxChain = 32
 )
 
 // taskKinds are the events the runtime raises for a task, keyed by the task's
 // definition; pointKinds are raised by emitted code at a point of the model.
+// preStartKinds may be raised before the task's start: a stop requested of a
+// task, or its deadline, before its goroutine runs.
 var (
-	taskKinds  = []string{"start", "body-exit", "cancel-request", "observe", "deadline", "release", "panic"}
-	pointKinds = []string{"call", "interrupt", "construct", "handler"}
+	taskKinds     = []string{"start", "body-exit", "cancel-request", "observe", "deadline", "release", "panic"}
+	pointKinds    = []string{"call", "call-exit", "interrupt", "construct", "handler"}
+	preStartKinds = []string{"cancel-request", "deadline"}
 )
 
 // TraceHeader is the first line of a recorded trace.
@@ -47,7 +63,7 @@ type TraceHeader struct {
 	InFlight int    `json:"inFlight,omitempty"`
 }
 
-// TraceReason is one reason of an exit, by type name.
+// TraceReason is one reason of an exit or a call outcome, by type name.
 type TraceReason struct {
 	Reason    string       `json:"reason"`
 	Name      string       `json:"name,omitempty"`
@@ -66,6 +82,8 @@ type TraceFrame struct {
 type TraceEvent struct {
 	Seq     uint64        `json:"seq"`
 	Time    int64         `json:"time"`
+	ID      uint64        `json:"id"`
+	Link    uint64        `json:"link,omitempty"`
 	Kind    string        `json:"kind"`
 	Task    uint64        `json:"task"`
 	Parent  uint64        `json:"parent"`
@@ -85,6 +103,19 @@ type TraceTask struct {
 	Site    string        `json:"site"`
 	Exited  bool          `json:"exited"`
 	Exit    []TraceReason `json:"exit"`
+}
+
+// TraceCallSpan is one capability call: its call event, its call-exit and the
+// time between them, read from the recorder's clock as each event arrived.
+type TraceCallSpan struct {
+	Call       uint64 `json:"call"`           // occurrence ID of the call event
+	Exit       uint64 `json:"exit,omitempty"` // occurrence ID of its call-exit, 0 when absent
+	Task       uint64 `json:"task"`
+	Def        string `json:"def"`
+	Site       string `json:"site"`
+	In         string `json:"in"`
+	Outcome    string `json:"outcome"` // ok, failure <def>, defect <type>, interrupted, or open
+	DurationNs int64  `json:"durationNs,omitempty"`
 }
 
 // TraceBudgets are the bounds the recording and the query ran under.
@@ -116,17 +147,127 @@ type TraceEvidence struct {
 	Fingerprint string          `json:"fingerprint"`
 	Root        *TraceTask      `json:"root"`
 	Tasks       []TraceTask     `json:"tasks"`
+	Calls       []TraceCallSpan `json:"calls"`
 	Events      []TraceEvent    `json:"events"`
 	CauseTrace  []string        `json:"causeTrace"`
 }
 
+// traceIndex is a validated trace: every lookup the explanation makes.
+type traceIndex struct {
+	m        *Model
+	events   []TraceEvent
+	dropped  bool
+	byID     map[uint64]*TraceEvent
+	start    map[uint64]*TraceEvent // by task
+	exit     map[uint64]*TraceEvent // by task
+	callExit map[uint64]*TraceEvent // by the call's ID
+	caught   map[uint64]*TraceEvent // by the caught occurrence: its handler
+	order    []uint64               // tasks in start order
+	root     uint64
+	omit     []TraceOmission
+	omitted  map[string]bool
+}
+
+// parentOf returns the parent its start recorded for task, and whether the
+// start is in the trace.
+func (x *traceIndex) parentOf(task uint64) (uint64, bool) {
+	s := x.start[task]
+	if s == nil {
+		return 0, false
+	}
+	return s.Parent, true
+}
+
+// unavailable records that the ancestry of task is not in the trace, once.
+// It is a refusal when the recorder dropped nothing: then the trace was
+// edited, not cut short.
+func (x *traceIndex) unavailable(task uint64, what string) error {
+	if !x.dropped {
+		return fmt.Errorf("%s: task #%d never started in this trace", what, task)
+	}
+	key := fmt.Sprintf("ancestry %d", task)
+	if !x.omitted[key] {
+		x.omitted[key] = true
+		x.omit = append(x.omit, TraceOmission{Kind: "ancestryUnavailable", Task: task, Detail: "the start of this task is not in the trace (the recorder dropped events), so its parent and definition are unavailable"})
+	}
+	return nil
+}
+
 // QueryTrace reads data, a recorded trace, against m, the model of the
 // source whose revision is revision. It refuses a trace whose revision,
-// definition IDs or sites do not match the model, rather than guess.
+// definition IDs, sites, task relationships or links do not match the model
+// and the runtime's rules, rather than guess.
 func QueryTrace(m *Model, revision string, data []byte) (*TraceEvidence, error) {
 	if len(data) > TraceByteBudget {
 		return nil, fmt.Errorf("trace is %d bytes, over the %d-byte budget", len(data), TraceByteBudget)
 	}
+	h, events, err := parseTrace(data)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case h.Schema != TraceSchema:
+		return nil, fmt.Errorf("trace schema %q; this query reads %s", h.Schema, TraceSchema)
+	case h.Revision != revision:
+		return nil, fmt.Errorf("trace revision %s does not match %s revision %s: the trace was recorded from another program or another version of this one", short(h.Revision), m.File, short(revision))
+	case h.Events != len(events):
+		return nil, fmt.Errorf("trace header counts %d events but the trace holds %d: it is truncated or edited", h.Events, len(events))
+	case h.Dropped < 0 || h.InFlight < 0:
+		return nil, fmt.Errorf("trace header counts %d dropped and %d in-flight events", h.Dropped, h.InFlight)
+	}
+	x, err := validateTrace(m, h, events)
+	if err != nil {
+		return nil, err
+	}
+
+	ev := &TraceEvidence{
+		Schema:   TraceEvidenceSchema,
+		Producer: TraceProducer,
+		Revision: revision,
+		Source:   m.File,
+		Recorder: h.Producer,
+		Order:    "partial: seq is the recorder's arrival order; id is the runtime's emission order, in which an event that happens before another has the smaller id, though a smaller id alone does not mean happens-before",
+		Budgets:  TraceBudgets{Events: h.Capacity, Bytes: TraceByteBudget, KeptEvents: len(events), TraceBytes: len(data)},
+		Omissions: []TraceOmission{
+			{Kind: "values", Detail: "argument, result and field values are not serialized (privacy default); failures and defects are named by type"},
+			{Kind: "functionCalls", Detail: "direct calls between functions are not events; each site resolves to its enclosing definition"},
+		},
+	}
+	if h.Dropped > 0 {
+		ev.Omissions = append(ev.Omissions, TraceOmission{Kind: "dropped", Count: h.Dropped, Detail: "the recorder was full; every event after the last kept one is missing"})
+	}
+	if h.InFlight > 0 {
+		ev.Omissions = append(ev.Omissions, TraceOmission{Kind: "inFlight", Count: h.InFlight, Detail: "events still being written when the trace was saved"})
+	}
+	ev.Omissions = append(ev.Omissions, x.omit...)
+	for _, id := range x.order {
+		s := x.start[id]
+		t := TraceTask{Task: id, Parent: s.Parent, Def: s.Def, DefKind: s.DefKind, Site: s.Site}
+		if e := x.exit[id]; e != nil {
+			t.Exited, t.Exit = true, e.Cause
+		} else {
+			ev.Omissions = append(ev.Omissions, TraceOmission{Kind: "missingExit", Task: id, Detail: "the task started but its body-exit is not in the trace"})
+		}
+		ev.Tasks = append(ev.Tasks, t)
+		if id == x.root {
+			root := t
+			ev.Root = &root
+		}
+	}
+	ev.Calls = x.calls()
+	ev.Events = events
+	ev.CauseTrace = x.causeTrace(ev.Root)
+	canon, err := json.Marshal(ev)
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(canon)
+	ev.Fingerprint = "sha256:" + hex.EncodeToString(sum[:])
+	return ev, nil
+}
+
+// parseTrace reads the header and the event lines.
+func parseTrace(data []byte) (TraceHeader, []TraceEvent, error) {
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 0, 64<<10), TraceByteBudget)
 	var h TraceHeader
@@ -140,121 +281,352 @@ func QueryTrace(m *Model, revision string, data []byte) (*TraceEvidence, error) 
 		}
 		if h.Schema == "" {
 			if err := json.Unmarshal(raw, &h); err != nil || h.Schema == "" {
-				return nil, fmt.Errorf("line %d: want a header with schema %s first", line, TraceSchema)
+				return h, nil, fmt.Errorf("line %d: want a header with schema %s first", line, TraceSchema)
 			}
 			continue
 		}
 		var ev TraceEvent
 		if err := json.Unmarshal(raw, &ev); err != nil || ev.Kind == "" {
-			return nil, fmt.Errorf("line %d: not a trace event", line)
+			return h, nil, fmt.Errorf("line %d: not a trace event", line)
 		}
 		events = append(events, ev)
 	}
 	if err := sc.Err(); err != nil {
-		return nil, err
+		return h, nil, err
 	}
-	switch {
-	case h.Schema == "":
-		return nil, fmt.Errorf("trace has no header")
-	case h.Schema != TraceSchema:
-		return nil, fmt.Errorf("trace schema %q; this query reads %s", h.Schema, TraceSchema)
-	case h.Revision != revision:
-		return nil, fmt.Errorf("trace revision %s does not match %s revision %s: the trace was recorded from another program or another version of this one", short(h.Revision), m.File, short(revision))
-	case h.Events != len(events):
-		return nil, fmt.Errorf("trace header counts %d events but the trace holds %d: it is truncated or edited", h.Events, len(events))
+	if h.Schema == "" {
+		return h, nil, fmt.Errorf("trace has no header")
 	}
+	return h, events, nil
+}
 
-	ev := &TraceEvidence{
-		Schema:   TraceEvidenceSchema,
-		Producer: TraceProducer,
-		Revision: revision,
-		Source:   m.File,
-		Recorder: h.Producer,
-		Order:    "partial: seq is the recorder's arrival order, not a happens-before order",
-		Budgets:  TraceBudgets{Events: h.Capacity, Bytes: TraceByteBudget, KeptEvents: len(events), TraceBytes: len(data)},
-		Omissions: []TraceOmission{
-			{Kind: "values", Detail: "argument, result and field values are not recorded (privacy default); failures and defects are named by type"},
-			{Kind: "functionCalls", Detail: "direct calls between functions are not events; each site resolves to its enclosing definition"},
-		},
+// validateTrace checks every event against the model and the runtime's rules
+// and indexes the trace. Any violation is a refusal.
+func validateTrace(m *Model, h TraceHeader, events []TraceEvent) (*traceIndex, error) {
+	x := &traceIndex{
+		m: m, events: events, dropped: h.Dropped > 0,
+		byID: map[uint64]*TraceEvent{}, start: map[uint64]*TraceEvent{}, exit: map[uint64]*TraceEvent{},
+		callExit: map[uint64]*TraceEvent{}, caught: map[uint64]*TraceEvent{}, omitted: map[string]bool{},
 	}
-	if h.Dropped > 0 {
-		ev.Omissions = append(ev.Omissions, TraceOmission{Kind: "dropped", Count: h.Dropped, Detail: "the recorder was full; every event after the last kept one is missing"})
-	}
-	if h.InFlight > 0 {
-		ev.Omissions = append(ev.Omissions, TraceOmission{Kind: "inFlight", Count: h.InFlight, Detail: "events still being written when the trace was saved"})
-	}
-
-	tasks := map[uint64]*TraceTask{}
-	var order []uint64
+	// Each event alone: identity, definition, site and reasons.
 	for i := range events {
 		e := &events[i]
-		d, ok := m.Def(e.Def)
-		if !ok {
-			return nil, fmt.Errorf("event seq %d: definition %q is not in %s at this revision", e.Seq, e.Def, m.File)
+		if err := x.resolve(e); err != nil {
+			return nil, fmt.Errorf("event seq %d: %w", e.Seq, err)
 		}
-		e.DefKind = d.Kind
-		switch {
-		case slices.Contains(taskKinds, e.Kind):
-			if d.Kind != DefTimeout && e.Def != m.id("main") {
-				return nil, fmt.Errorf("event seq %d: %s of %s, which is not a task definition", e.Seq, e.Kind, e.Def)
-			}
-			if e.Site != d.Site {
-				return nil, fmt.Errorf("event seq %d: site %s, but %s is declared at %s", e.Seq, e.Site, e.Def, d.Site)
-			}
-			e.In = d.In
-		case slices.Contains(pointKinds, e.Kind):
-			p, ok := m.PointAt(e.Kind, e.Def, e.Site)
-			if !ok {
-				return nil, fmt.Errorf("event seq %d: the model has no %s of %s at %s", e.Seq, e.Kind, e.Def, e.Site)
-			}
-			e.In = p.In
-		default:
-			return nil, fmt.Errorf("event seq %d: unknown kind %q", e.Seq, e.Kind)
+		if e.ID == 0 {
+			return nil, fmt.Errorf("event seq %d: no occurrence id", e.Seq)
 		}
-		for j := range e.Cause {
-			e.Cause[j].Def = m.failureDef(e.Cause[j])
+		if x.byID[e.ID] != nil {
+			return nil, fmt.Errorf("event seq %d: occurrence id %d is used twice", e.Seq, e.ID)
+		}
+		x.byID[e.ID] = e
+		if e.Task == 0 {
+			return nil, fmt.Errorf("event seq %d: no task", e.Seq)
 		}
 		switch e.Kind {
 		case "start":
-			if _, dup := tasks[e.Task]; dup {
+			if x.start[e.Task] != nil {
 				return nil, fmt.Errorf("event seq %d: task #%d starts twice", e.Seq, e.Task)
 			}
-			tasks[e.Task] = &TraceTask{Task: e.Task, Parent: e.Parent, Def: e.Def, DefKind: d.Kind, Site: d.Site}
-			order = append(order, e.Task)
+			x.start[e.Task] = e
+			x.order = append(x.order, e.Task)
 		case "body-exit":
-			if t := tasks[e.Task]; t != nil {
-				t.Exited, t.Exit = true, e.Cause
+			if x.exit[e.Task] != nil {
+				return nil, fmt.Errorf("event seq %d: task #%d exits twice", e.Seq, e.Task)
+			}
+			x.exit[e.Task] = e
+		}
+	}
+	// Each event against its task's start.
+	for i := range events {
+		e := &events[i]
+		s := x.start[e.Task]
+		if s == nil {
+			if err := x.unavailable(e.Task, fmt.Sprintf("event seq %d", e.Seq)); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if e.Parent != s.Parent {
+			return nil, fmt.Errorf("event seq %d: task #%d has parent #%d here but #%d at its start", e.Seq, e.Task, e.Parent, s.Parent)
+		}
+		if slices.Contains(taskKinds, e.Kind) && e.Def != s.Def {
+			return nil, fmt.Errorf("event seq %d: %s of task #%d names %s, but the task started as %s", e.Seq, e.Kind, e.Task, e.Def, s.Def)
+		}
+		if e != s && e.ID < s.ID && !slices.Contains(preStartKinds, e.Kind) {
+			return nil, fmt.Errorf("event seq %d: %s of task #%d (id %d) precedes the task's start (id %d)", e.Seq, e.Kind, e.Task, e.ID, s.ID)
+		}
+		if e.Kind == "observe" {
+			switch exit := x.exit[e.Task]; {
+			case exit == nil && !x.dropped:
+				return nil, fmt.Errorf("event seq %d: observe of task #%d, which has no body-exit", e.Seq, e.Task)
+			case exit != nil && exit.ID > e.ID:
+				return nil, fmt.Errorf("event seq %d: observe of task #%d (id %d) precedes its body-exit (id %d)", e.Seq, e.Task, e.ID, exit.ID)
 			}
 		}
 	}
-	for _, id := range order {
-		t := tasks[id]
-		if t.Parent != 0 && tasks[t.Parent] == nil && h.Dropped == 0 {
-			return nil, fmt.Errorf("task #%d names parent #%d, which never started in this trace", t.Task, t.Parent)
-		}
-		if t.Parent == 0 && ev.Root == nil {
-			ev.Root = t
-		}
-		if !t.Exited {
-			ev.Omissions = append(ev.Omissions, TraceOmission{Kind: "missingExit", Task: t.Task, Detail: "the task started but its body-exit is not in the trace"})
-		}
-		ev.Tasks = append(ev.Tasks, *t)
-	}
-	if ev.Root == nil {
-		return nil, fmt.Errorf("trace has no root task start")
-	}
-	root := *ev.Root
-	ev.Root = &root
-	ev.Events = events
-	ev.CauseTrace = causeTrace(m, ev)
-	ev.Fingerprint = ""
-	canon, err := json.Marshal(ev)
-	if err != nil {
+	if err := x.checkTasks(); err != nil {
 		return nil, err
 	}
-	sum := sha256.Sum256(canon)
-	ev.Fingerprint = "sha256:" + hex.EncodeToString(sum[:])
-	return ev, nil
+	for i := range events {
+		if err := x.checkLink(&events[i]); err != nil {
+			return nil, fmt.Errorf("event seq %d: %w", events[i].Seq, err)
+		}
+	}
+	for i := range events {
+		if err := x.checkFrames(&events[i]); err != nil {
+			return nil, fmt.Errorf("event seq %d: %w", events[i].Seq, err)
+		}
+	}
+	return x, nil
+}
+
+// resolve checks e's definition, site and reasons against the model and
+// fills in its resolved fields.
+func (x *traceIndex) resolve(e *TraceEvent) error {
+	m := x.m
+	d, ok := m.Def(e.Def)
+	if !ok {
+		return fmt.Errorf("definition %q is not in %s at this revision", e.Def, m.File)
+	}
+	e.DefKind = d.Kind
+	switch {
+	case slices.Contains(taskKinds, e.Kind):
+		if !m.isTaskDef(e.Def) {
+			return fmt.Errorf("%s of %s, which is not a task definition", e.Kind, e.Def)
+		}
+		if e.Site != d.Site {
+			return fmt.Errorf("site %s, but %s is declared at %s", e.Site, e.Def, d.Site)
+		}
+		e.In = d.In
+	case slices.Contains(pointKinds, e.Kind):
+		kind := e.Kind
+		if kind == "call-exit" {
+			kind = "call"
+		}
+		p, ok := m.PointAt(kind, e.Def, e.Site)
+		if !ok {
+			return fmt.Errorf("the model has no %s of %s at %s", kind, e.Def, e.Site)
+		}
+		e.In = p.In
+	default:
+		return fmt.Errorf("unknown kind %q", e.Kind)
+	}
+	if len(e.Cause) > 0 && !slices.Contains([]string{"body-exit", "call-exit", "panic"}, e.Kind) {
+		return fmt.Errorf("a %s event carries no cause", e.Kind)
+	}
+	for j := range e.Cause {
+		r := &e.Cause[j]
+		switch r.Reason {
+		case "failure":
+			r.Def = m.failureDef(*r)
+			if r.Def == "" {
+				return fmt.Errorf("failure %q is not an error type of %s", r.Name, m.File)
+			}
+		case "defect", "interrupted":
+		default:
+			return fmt.Errorf("unknown reason %q", r.Reason)
+		}
+		if len(r.Chain) > 0 && r.Reason != "defect" {
+			return fmt.Errorf("a %s reason carries a defect chain", r.Reason)
+		}
+	}
+	return nil
+}
+
+// isTaskDef reports whether id names a task: main or a timeout block.
+func (m *Model) isTaskDef(id string) bool {
+	d, ok := m.Def(id)
+	return ok && (d.Kind == DefTimeout || id == m.id("main"))
+}
+
+// checkTasks validates the parent graph: one root, every parent started
+// before its child, and no cycle.
+func (x *traceIndex) checkTasks() error {
+	var roots []uint64
+	for _, id := range x.order {
+		s := x.start[id]
+		switch {
+		case s.Parent == 0:
+			roots = append(roots, id)
+			continue
+		case s.Parent == id:
+			return fmt.Errorf("task #%d names itself as its parent", id)
+		}
+		p := x.start[s.Parent]
+		if p == nil {
+			if err := x.unavailable(s.Parent, fmt.Sprintf("task #%d names parent #%d, but the parent", id, s.Parent)); err != nil {
+				return err
+			}
+			continue
+		}
+		if p.ID > s.ID {
+			return fmt.Errorf("task #%d (start id %d) starts before its parent #%d (start id %d)", id, s.ID, s.Parent, p.ID)
+		}
+	}
+	// The start-order rule above already excludes a cycle; walk anyway, so a
+	// later change to that rule cannot make the explanation loop.
+	for _, id := range x.order {
+		seen := map[uint64]bool{}
+		for t := id; t != 0; {
+			if seen[t] {
+				return fmt.Errorf("the parent links of task #%d form a cycle", id)
+			}
+			seen[t] = true
+			p, ok := x.parentOf(t)
+			if !ok {
+				break
+			}
+			t = p
+		}
+	}
+	switch {
+	case len(roots) == 0:
+		return fmt.Errorf("trace has no root task start")
+	case len(roots) > 1:
+		return fmt.Errorf("trace has %d root tasks (#%d and #%d); one recorder holds one tree", len(roots), roots[0], roots[1])
+	}
+	x.root = roots[0]
+	return nil
+}
+
+// isChild reports whether task's recorded parent is owner.
+func (x *traceIndex) isChild(task, owner uint64) bool {
+	p, ok := x.parentOf(task)
+	return ok && p == owner
+}
+
+// checkLink validates the link of e against the kinds' rules.
+func (x *traceIndex) checkLink(e *TraceEvent) error {
+	if e.Link == 0 {
+		if e.Kind == "call-exit" {
+			return fmt.Errorf("call-exit links no call")
+		}
+		return nil
+	}
+	if !slices.Contains([]string{"call-exit", "handler", "body-exit", "observe", "panic"}, e.Kind) {
+		return fmt.Errorf("a %s event carries no link", e.Kind)
+	}
+	t := x.byID[e.Link]
+	if t == nil {
+		if !x.dropped {
+			return fmt.Errorf("%s links occurrence %d, which is not in the trace", e.Kind, e.Link)
+		}
+		x.omit = append(x.omit, TraceOmission{Kind: "unresolvedLink", Task: e.Task, Detail: fmt.Sprintf("the %s at seq %d links occurrence %d, which the recorder dropped", e.Kind, e.Seq, e.Link)})
+		e.Link = 0
+		return nil
+	}
+	if t.ID >= e.ID {
+		return fmt.Errorf("%s (id %d) links occurrence %d, which was raised after it", e.Kind, e.ID, t.ID)
+	}
+	ok := false
+	switch e.Kind {
+	case "call-exit":
+		ok = t.Kind == "call" && t.Task == e.Task && t.Def == e.Def && t.Site == e.Site
+		if ok && x.callExit[t.ID] != nil {
+			return fmt.Errorf("call %d (seq %d) exits twice", t.ID, t.Seq)
+		}
+		if ok {
+			x.callExit[t.ID] = e
+		}
+	case "handler":
+		switch t.Kind {
+		case "call-exit":
+			ok = t.Task == e.Task && hasFailure(t.Cause, e.Def)
+		case "deadline":
+			ok = x.isChild(t.Task, e.Task) && e.Def == expiredType
+		case "body-exit":
+			ok = x.isChild(t.Task, e.Task) && hasFailure(t.Cause, e.Def)
+		}
+		if ok {
+			if o := x.caught[t.ID]; o != nil {
+				return fmt.Errorf("occurrence %d is caught by two handlers (seq %d and %d)", t.ID, o.Seq, e.Seq)
+			}
+			x.caught[t.ID] = e
+		}
+	case "body-exit":
+		switch {
+		case len(e.Cause) == 0:
+			return fmt.Errorf("a successful body-exit links occurrence %d", t.ID)
+		case t.Task == e.Task:
+			ok = t.Kind == "interrupt" || t.Kind == "panic" || (t.Kind == "call-exit" && len(t.Cause) > 0)
+		case x.isChild(t.Task, e.Task):
+			ok = t.Kind == "deadline" || (t.Kind == "body-exit" && len(t.Cause) > 0)
+		}
+	case "observe":
+		ok = t.Kind == "body-exit" && t.Task == e.Task
+	case "panic":
+		ok = t.Kind == "call-exit" && t.Task == e.Task && hasReason(t.Cause, "defect")
+	}
+	if !ok {
+		return fmt.Errorf("%s of task #%d links the %s of task #%d (seq %d), which it cannot refer to", e.Kind, e.Task, t.Kind, t.Task, t.Seq)
+	}
+	return nil
+}
+
+func hasFailure(rs []TraceReason, def string) bool {
+	return slices.ContainsFunc(rs, func(r TraceReason) bool { return r.Reason == "failure" && r.Def == def })
+}
+
+func hasReason(rs []TraceReason, reason string) bool {
+	return slices.ContainsFunc(rs, func(r TraceReason) bool { return r.Reason == reason })
+}
+
+// checkFrames validates the defect chains e carries: each frame a task
+// definition of the model, the task that started under it, each frame the
+// parent of the one before, and the chain passing through e's own task.
+func (x *traceIndex) checkFrames(e *TraceEvent) error {
+	for _, r := range e.Cause {
+		if len(r.Chain) == 0 {
+			continue
+		}
+		if len(r.Chain) > traceMaxChain {
+			return fmt.Errorf("defect chain of %d frames; the runtime keeps at most %d", len(r.Chain), traceMaxChain)
+		}
+		through := false
+		for i, f := range r.Chain {
+			if _, ok := x.m.Def(f.Def); !ok {
+				return fmt.Errorf("defect chain frame %d names definition %q, which is not in %s at this revision", i, f.Def, x.m.File)
+			}
+			if !x.m.isTaskDef(f.Def) {
+				return fmt.Errorf("defect chain frame %d names %s, which is not a task definition", i, f.Def)
+			}
+			through = through || f.Task == e.Task
+			s := x.start[f.Task]
+			if s == nil {
+				if err := x.unavailable(f.Task, fmt.Sprintf("defect chain frame %d", i)); err != nil {
+					return err
+				}
+				continue
+			}
+			if s.Def != f.Def {
+				return fmt.Errorf("defect chain frame %d names task #%d as %s, but it started as %s", i, f.Task, f.Def, s.Def)
+			}
+			if i > 0 {
+				prev := r.Chain[i-1].Task
+				if p, ok := x.parentOf(prev); ok && p != f.Task {
+					return fmt.Errorf("defect chain frame %d: task #%d is not the parent of task #%d (its parent is #%d)", i, f.Task, prev, p)
+				}
+			}
+		}
+		last := r.Chain[len(r.Chain)-1].Task
+		p, known := x.parentOf(last)
+		switch {
+		case len(r.Chain) < traceMaxChain && known && p != 0:
+			return fmt.Errorf("defect chain stops at task #%d, whose parent #%d it leaves out", last, p)
+		case len(r.Chain) == traceMaxChain && known && p != 0:
+			key := fmt.Sprintf("chain %d", e.ID)
+			if !x.omitted[key] {
+				x.omitted[key] = true
+				x.omit = append(x.omit, TraceOmission{Kind: "ancestryUnavailable", Task: last, Detail: fmt.Sprintf("the defect chain at seq %d keeps %d frames; the ancestors above this task are not in it", e.Seq, traceMaxChain)})
+			}
+		}
+		if !through && (len(r.Chain) < traceMaxChain) && x.start[e.Task] != nil {
+			return fmt.Errorf("defect chain of the %s of task #%d does not pass through that task", e.Kind, e.Task)
+		}
+	}
+	return nil
 }
 
 // failureDef resolves the type name of a failure to its definition ID.
@@ -277,7 +649,7 @@ func short(rev string) string {
 	return rev
 }
 
-// exitText renders an exit.
+// exitText renders an exit or a call outcome.
 func exitText(rs []TraceReason, exited bool) string {
 	if !exited {
 		return "no exit recorded"
@@ -299,99 +671,208 @@ func exitText(rs []TraceReason, exited bool) string {
 	return strings.Join(parts, ", ")
 }
 
-// causeTrace explains the root exit: each reason it carries, or, for a
-// successful root, each failure that a catch handled on the way, back to the
-// events and the model facts that raised it.
-func causeTrace(m *Model, ev *TraceEvidence) []string {
-	var out []string
-	say := func(depth int, format string, args ...any) {
-		out = append(out, strings.Repeat("  ", depth)+fmt.Sprintf(format, args...))
+// outcome renders a call-exit's outcome.
+func outcome(e *TraceEvent) string {
+	if e == nil {
+		return "open"
 	}
-	root := ev.Root
-	say(0, "task #%d %s (%s, %s) exited with %s", root.Task, root.Def, root.DefKind, root.Site, exitText(root.Exit, root.Exited))
-	for _, r := range root.Exit {
-		switch r.Reason {
-		case "failure":
-			say(1, "failure %s", nameOf(r))
-			explain(m, ev, say, root.Task, r.Def, 2)
-		case "defect":
-			say(1, "defect %s, chain:", r.Name)
-			for _, f := range r.Chain {
-				d, _ := m.Def(f.Def)
-				say(2, "task #%d %s at %s", f.Task, f.Def, d.Site)
-			}
-		case "interrupted":
-			say(1, "interrupted")
-			for _, e := range ev.Events {
-				if e.Kind == "cancel-request" && e.Task == root.Task {
-					say(2, "cancel-request of task #%d (seq %d)", e.Task, e.Seq)
-				}
-			}
-		}
+	if len(e.Cause) == 0 {
+		return "ok"
 	}
-	for _, e := range ev.Events {
-		if e.Kind == "handler" {
-			say(1, "handled %s at %s in %s (task #%d, seq %d)", e.Def, e.Site, e.In, e.Task, e.Seq)
-			explain(m, ev, say, e.Task, e.Def, 2)
+	return exitText(e.Cause, true)
+}
+
+// calls pairs each call with its call-exit.
+func (x *traceIndex) calls() []TraceCallSpan {
+	var out []TraceCallSpan
+	for i := range x.events {
+		c := &x.events[i]
+		if c.Kind != "call" {
+			continue
 		}
+		s := TraceCallSpan{Call: c.ID, Task: c.Task, Def: c.Def, Site: c.Site, In: c.In}
+		e := x.callExit[c.ID]
+		s.Outcome = outcome(e)
+		if e != nil {
+			s.Exit, s.DurationNs = e.ID, e.Time-c.Time
+		}
+		out = append(out, s)
 	}
 	return out
 }
 
-func nameOf(r TraceReason) string {
-	if r.Def != "" {
-		return r.Def
+// causeTrace explains the root exit: each reason it carries, then each
+// failure a catch handled on the way, back along the recorded links.
+func (x *traceIndex) causeTrace(root *TraceTask) []string {
+	c := &causeWriter{x: x, seen: map[uint64]bool{}}
+	c.say(0, "task #%d %s (%s, %s) exited with %s", root.Task, root.Def, root.DefKind, root.Site, exitText(root.Exit, root.Exited))
+	exit := x.exit[root.Task]
+	for _, r := range root.Exit {
+		switch r.Reason {
+		case "failure":
+			c.say(1, "failure %s", r.Def)
+			c.carried(exit, r.Def, 2)
+		case "defect":
+			c.say(1, "defect %s, chain:", r.Name)
+			for _, f := range r.Chain {
+				d, _ := x.m.Def(f.Def)
+				c.say(2, "task #%d %s at %s", f.Task, f.Def, d.Site)
+			}
+			if exit.Link != 0 && x.byID[exit.Link].Kind == "panic" {
+				c.origin(exit.Link, 2, "carried ")
+			}
+		case "interrupted":
+			c.say(1, "interrupted")
+			c.stopFacts(root.Task, 2)
+		}
 	}
-	return r.Name
+	for i := range x.events {
+		e := &x.events[i]
+		if e.Kind != "handler" {
+			continue
+		}
+		c.say(1, "handled %s at %s in %s (task #%d, seq %d)", e.Def, e.Site, e.In, e.Task, e.Seq)
+		if e.Link != 0 {
+			c.origin(e.Link, 2, "caught ")
+			continue
+		}
+		c.unrecorded(e.Task, e.Def, e.ID, 2)
+	}
+	return c.out
 }
 
-// explain shows why task could fail with errDef: a deadline of a timeout
-// block it owns, a child that exited with the failure, or a call whose error
-// row in the model names it.
-func explain(m *Model, ev *TraceEvidence, say func(int, string, ...any), task uint64, errDef string, depth int) {
-	if errDef == expiredType {
-		for _, e := range ev.Events {
-			if e.Kind != "deadline" || e.Parent != task {
-				continue
-			}
-			d, _ := m.Def(e.Def)
-			say(depth, "deadline of task #%d %s passed first (seq %d): the %s %s at %s in %s, row error[%s]", e.Task, e.Def, e.Seq, d.Kind, d.Spelling, d.Site, d.In, strings.Join(d.Errors, " | "))
-			for _, f := range ev.Events {
-				switch {
-				case f.Task != e.Task:
-				case f.Kind == "cancel-request":
-					say(depth+1, "cancel-request of task #%d (seq %d)", f.Task, f.Seq)
-				case f.Kind == "interrupt":
-					say(depth+1, "task #%d observed the stop in %s at %s (seq %d)", f.Task, f.In, f.Site, f.Seq)
-				case f.Kind == "call":
-					say(depth+1, "it was in call %s at %s (seq %d)", f.Def, f.Site, f.Seq)
-				case f.Kind == "body-exit":
-					say(depth+1, "task #%d exited with %s (seq %d)", f.Task, exitText(f.Cause, true), f.Seq)
+// causeWriter writes cause-trace lines. seen guards every traversal: an
+// occurrence is explained once.
+type causeWriter struct {
+	x    *traceIndex
+	out  []string
+	seen map[uint64]bool
+}
+
+func (c *causeWriter) say(depth int, format string, args ...any) {
+	c.out = append(c.out, strings.Repeat("  ", depth)+fmt.Sprintf(format, args...))
+}
+
+// carried explains the occurrence a failed exit e carries for failure def.
+func (c *causeWriter) carried(e *TraceEvent, def string, depth int) {
+	switch {
+	case e == nil:
+		c.say(depth, "the body-exit is not in the trace")
+	case e.Link != 0:
+		c.origin(e.Link, depth, "carried ")
+	default:
+		c.unrecorded(e.Task, def, e.ID, depth)
+	}
+}
+
+// origin explains occurrence id, which a recorded link named.
+func (c *causeWriter) origin(id uint64, depth int, verb string) {
+	x := c.x
+	e := x.byID[id]
+	if c.seen[id] {
+		c.say(depth, "%s%s seq %d, explained above", verb, e.Kind, e.Seq)
+		return
+	}
+	c.seen[id] = true
+	switch e.Kind {
+	case "call-exit":
+		call := x.byID[e.Link]
+		d, _ := x.m.Def(e.Def)
+		c.say(depth, "%sthe %s of call %s at %s in %s, whose row is error[%s] (call seq %d, call-exit seq %d)", verb, outcome(e), e.Def, e.Site, e.In, strings.Join(d.Errors, " | "), call.Seq, e.Seq)
+	case "deadline":
+		d, _ := x.m.Def(e.Def)
+		c.say(depth, "%sthe deadline of task #%d %s (seq %d): the %s %s at %s in %s, row error[%s]", verb, e.Task, e.Def, e.Seq, d.Kind, d.Spelling, d.Site, d.In, strings.Join(d.Errors, " | "))
+		c.deadlineFacts(e, depth+1)
+	case "body-exit":
+		d, _ := x.m.Def(e.Def)
+		c.say(depth, "%sthe exit of task #%d %s (%s at %s) with %s (seq %d)", verb, e.Task, e.Def, d.Kind, d.Site, exitText(e.Cause, true), e.Seq)
+		if e.Link != 0 {
+			c.origin(e.Link, depth+1, "carried ")
+		} else {
+			for _, r := range e.Cause {
+				if r.Reason == "failure" {
+					c.unrecorded(e.Task, r.Def, e.ID, depth+1)
 				}
 			}
 		}
-		return
-	}
-	for _, e := range ev.Events {
-		if e.Kind != "body-exit" || e.Parent != task {
-			continue
-		}
-		for _, r := range e.Cause {
-			if r.Def == errDef {
-				d, _ := m.Def(e.Def)
-				say(depth, "task #%d %s (%s at %s) exited with %s (seq %d)", e.Task, e.Def, d.Kind, d.Site, exitText(e.Cause, true), e.Seq)
-				explain(m, ev, say, e.Task, errDef, depth+1)
-			}
+	case "interrupt":
+		c.say(depth, "%sthe stop task #%d observed in %s at %s (seq %d)", verb, e.Task, e.In, e.Site, e.Seq)
+		c.stopFacts(e.Task, depth+1)
+	case "panic":
+		c.say(depth, "%sthe defect %s in task #%d (seq %d)", verb, exitText(e.Cause, true), e.Task, e.Seq)
+		if e.Link != 0 {
+			c.origin(e.Link, depth+1, "left ")
 		}
 	}
-	for _, e := range ev.Events {
-		if e.Kind != "call" || e.Task != task {
+}
+
+// deadlineFacts states what the trace records of the task a deadline
+// stopped: the calls open when it passed, by occurrence order, the stop
+// request, its observation and the task's exit.
+func (c *causeWriter) deadlineFacts(dl *TraceEvent, depth int) {
+	x := c.x
+	for i := range x.events {
+		f := &x.events[i]
+		if f.Task != dl.Task || f.Kind != "call" || f.ID > dl.ID {
 			continue
 		}
-		d, _ := m.Def(e.Def)
-		if slices.Contains(d.Errors, errDef) {
-			say(depth, "raised by call %s at %s in %s, whose row is error[%s] (seq %d)", e.Def, e.Site, e.In, strings.Join(d.Errors, " | "), e.Seq)
+		exit := x.callExit[f.ID]
+		switch {
+		case exit == nil:
+			c.say(depth, "call %s at %s was open when the deadline passed (call seq %d); its call-exit is not in the trace", f.Def, f.Site, f.Seq)
+		case exit.ID > dl.ID:
+			c.say(depth, "call %s at %s was open when the deadline passed (call seq %d); it ended %s (call-exit seq %d)", f.Def, f.Site, f.Seq, outcome(exit), exit.Seq)
 		}
+	}
+	c.stopFacts(dl.Task, depth)
+}
+
+// stopFacts states the stop requests, interruption points and exit the trace
+// records for task.
+func (c *causeWriter) stopFacts(task uint64, depth int) {
+	x := c.x
+	for i := range x.events {
+		f := &x.events[i]
+		if f.Task != task {
+			continue
+		}
+		switch f.Kind {
+		case "cancel-request":
+			c.say(depth, "cancel-request of task #%d (seq %d)", f.Task, f.Seq)
+		case "interrupt":
+			c.say(depth, "task #%d observed the stop in %s at %s (seq %d)", f.Task, f.In, f.Site, f.Seq)
+		case "body-exit":
+			c.say(depth, "task #%d exited with %s (seq %d)", f.Task, exitText(f.Cause, true), f.Seq)
+		}
+	}
+}
+
+// unrecorded says that no link names the origin of failure def, which task
+// handled or exited with at occurrence before, and lists the candidates by
+// type, labelled as candidates.
+func (c *causeWriter) unrecorded(task uint64, def string, before uint64, depth int) {
+	x := c.x
+	c.say(depth, "origin not recorded: no event links the occurrence of %s", def)
+	n := 0
+	for i := range x.events {
+		f := &x.events[i]
+		if f.ID >= before {
+			continue
+		}
+		switch {
+		case f.Kind == "call-exit" && f.Task == task && hasFailure(f.Cause, def):
+			c.say(depth+1, "candidate by type only: call %s at %s ended %s (call-exit seq %d)", f.Def, f.Site, outcome(f), f.Seq)
+		case f.Kind == "deadline" && def == expiredType && x.isChild(f.Task, task):
+			c.say(depth+1, "candidate by type only: the deadline of task #%d %s (seq %d)", f.Task, f.Def, f.Seq)
+		case f.Kind == "body-exit" && x.isChild(f.Task, task) && hasFailure(f.Cause, def):
+			c.say(depth+1, "candidate by type only: the exit of task #%d %s with %s (seq %d)", f.Task, f.Def, exitText(f.Cause, true), f.Seq)
+		default:
+			continue
+		}
+		n++
+	}
+	if n == 0 {
+		c.say(depth+1, "no candidate in the trace: source code that returns the failure itself records no event")
 	}
 }
 
@@ -412,16 +893,30 @@ func (ev *TraceEvidence) Text() string {
 		depth[t.Task] = depth[t.Parent] + 1
 		fmt.Fprintf(&b, "%s#%d %s (%s) at %s, exit: %s\n", strings.Repeat("  ", depth[t.Task]), t.Task, t.Def, t.DefKind, t.Site, exitText(t.Exit, t.Exited))
 	}
+	if len(ev.Calls) > 0 {
+		b.WriteString("\ncapability calls (span: call to call-exit, on the recorder's clock)\n")
+		for _, c := range ev.Calls {
+			span := "no call-exit"
+			if c.Exit != 0 {
+				span = time.Duration(c.DurationNs).String()
+			}
+			fmt.Fprintf(&b, "  id %-4d task #%-3d %s at %s in %s: %s, %s\n", c.Call, c.Task, c.Def, c.Site, c.In, c.Outcome, span)
+		}
+	}
 	b.WriteString("\nevents\n")
-	fmt.Fprintf(&b, "  %-4s %-15s %-5s %-38s %-22s %s\n", "seq", "kind", "task", "def", "site", "in")
+	fmt.Fprintf(&b, "  %-4s %-4s %-5s %-15s %-5s %-38s %-22s %s\n", "seq", "id", "link", "kind", "task", "def", "site", "in")
 	for _, e := range ev.Events {
 		extra := e.In
 		if len(e.Cause) > 0 {
 			extra = strings.TrimSpace(extra + " -> " + exitText(e.Cause, true))
 		}
-		fmt.Fprintf(&b, "  %-4d %-15s #%-4d %-38s %-22s %s\n", e.Seq, e.Kind, e.Task, e.Def, e.Site, extra)
+		link := ""
+		if e.Link != 0 {
+			link = fmt.Sprint(e.Link)
+		}
+		fmt.Fprintf(&b, "  %-4d %-4d %-5s %-15s #%-4d %-38s %-22s %s\n", e.Seq, e.ID, link, e.Kind, e.Task, e.Def, e.Site, extra)
 	}
-	b.WriteString("\ncause trace of the root exit\n")
+	b.WriteString("\ncause trace of the root exit (links recorded by the runtime; candidates are labelled)\n")
 	for _, l := range ev.CauseTrace {
 		b.WriteString("  " + l + "\n")
 	}

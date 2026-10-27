@@ -38,7 +38,7 @@ func Run[T any](t *Task, body func(*Task) (T, error)) (v T, err error) {
 			v = zero
 		}
 		if t.trace != nil {
-			t.traceTask(TraceBodyExit, err)
+			t.traceExit(err)
 		}
 	}()
 	return body(t)

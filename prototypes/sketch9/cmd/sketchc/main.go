@@ -13,6 +13,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -205,7 +206,7 @@ func trace(file, tracePath string, asJSON bool, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	data, err := os.ReadFile(tracePath)
+	data, err := readTrace(tracePath)
 	if err != nil {
 		return err
 	}
@@ -220,4 +221,29 @@ func trace(file, tracePath string, asJSON bool, stdout io.Writer) error {
 	}
 	_, err = io.WriteString(stdout, ev.Text())
 	return err
+}
+
+// readTrace reads the trace at path, at most sketch.TraceByteBudget bytes. It
+// reads through a limit of one byte past the budget, so a larger trace is
+// refused after the budget is read, never loaded whole; the buffer is sized
+// from the file once, so reading it does not reallocate.
+func readTrace(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	size := 0
+	if fi, err := f.Stat(); err == nil && fi.Mode().IsRegular() {
+		size = int(min(fi.Size(), sketch.TraceByteBudget))
+	}
+	var buf bytes.Buffer
+	buf.Grow(size + 1 + bytes.MinRead)
+	if _, err := buf.ReadFrom(io.LimitReader(f, sketch.TraceByteBudget+1)); err != nil {
+		return nil, err
+	}
+	if buf.Len() > sketch.TraceByteBudget {
+		return nil, fmt.Errorf("%s: refused: trace is over the %d-byte budget", path, sketch.TraceByteBudget)
+	}
+	return buf.Bytes(), nil
 }

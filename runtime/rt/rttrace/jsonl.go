@@ -10,7 +10,7 @@ import (
 )
 
 // Schema names the JSON Lines format WriteJSONL writes.
-const Schema = "effra-trace-1"
+const Schema = "effra-trace-2"
 
 // Header is the first line of a JSON Lines trace. The revision is written
 // once here; events carry plain definition IDs, which the revision qualifies.
@@ -24,10 +24,14 @@ type Header struct {
 	InFlight int    `json:"inFlight,omitempty"`
 }
 
-// Line is one event line of a JSON Lines trace.
+// Line is one event line of a JSON Lines trace. ID and Link are the
+// runtime's occurrence IDs (rt.Event): id orders events by when the runtime
+// raised them, and link names the occurrence the event refers to.
 type Line struct {
 	Seq    uint64   `json:"seq"`
 	Time   int64    `json:"time"` // nanoseconds since the recorder started
+	ID     uint64   `json:"id"`
+	Link   uint64   `json:"link,omitempty"`
 	Kind   string   `json:"kind"`
 	Task   uint64   `json:"task"`
 	Parent uint64   `json:"parent"`
@@ -36,9 +40,10 @@ type Line struct {
 	Cause  []Reason `json:"cause,omitempty"`
 }
 
-// Reason is one reason of a body-exit cause, or the defect of a panic event.
-// It names types, never values: a typed failure by its type name, a defect by
-// the type of its panic value.
+// Reason is one reason of a body-exit cause, the outcome of a call-exit, or
+// the defect of a panic event. It names types, never values: a typed failure
+// by its type name, a defect by the type of its panic value. A call-exit with
+// no reason returned ok.
 type Reason struct {
 	Reason    string  `json:"reason"` // failure, defect or interrupted
 	Name      string  `json:"name,omitempty"`
@@ -65,7 +70,7 @@ func Lines(recs []Record, sites map[string]string) []Line {
 	}
 	out := make([]Line, len(recs))
 	for i, r := range recs {
-		l := Line{Seq: r.Seq, Time: int64(r.Time), Kind: r.Kind.String(), Task: r.Task, Parent: r.Parent, Def: r.Def, Site: r.Site}
+		l := Line{Seq: r.Seq, Time: int64(r.Time), ID: r.ID, Link: r.Link, Kind: r.Kind.String(), Task: r.Task, Parent: r.Parent, Def: r.Def, Site: r.Site}
 		if p, ok := parent[r.Task]; ok {
 			l.Parent = p
 		}
@@ -75,6 +80,12 @@ func Lines(recs []Record, sites map[string]string) []Line {
 		switch r.Kind {
 		case rt.TraceBodyExit:
 			l.Cause = Reasons(r.Cause)
+		case rt.TraceCallExit:
+			if r.Defect != nil {
+				l.Cause = []Reason{{Reason: "defect", Name: typeName(r.Defect)}}
+			} else {
+				l.Cause = Reasons(r.Cause)
+			}
 		case rt.TracePanic:
 			l.Cause = []Reason{{Reason: "defect", Name: typeName(r.Defect), InRelease: r.InRelease}}
 		}
