@@ -3,6 +3,7 @@ package rt
 import (
 	"sync"
 	"sync/atomic"
+	"unsafe"
 )
 
 // EventKind is the kind of one trace event. The names are the trace
@@ -148,17 +149,14 @@ type tracer struct {
 // instead of leaving them to a reader's inference. An entry lives from the
 // task's first linkable event until its owner observes or forgets it.
 type taskLinks struct {
-	// failure is the task's latest typed-failure occurrence that no handler
-	// has consumed (a failed call-exit, the deadline of a timeout the task
-	// owns, or a child's failed exit the task received), and failErr the
-	// error it carried. A failure travels from where it is raised to a
-	// handler or to the body exit by return, inside one task. The body exit
-	// links a typed failure to it only when the exit's error is that same
-	// error value. That holds for emitted code, which handles or returns
-	// every failure it receives; hand-written Go that drops a failure and
-	// returns an equal one would be linked to the dropped one.
-	failure uint64
-	failErr error
+	// failures are the task's typed-failure occurrences that no handler has
+	// consumed, oldest first: a failed call-exit, the deadline of a timeout
+	// the task owns, or a child's failed exit the task received. A handler
+	// consumes the latest. At most maxFailures are kept; lossy records that
+	// an older one was dropped, and then no failure reason of the exit gets
+	// an origin, because the dropped one could have been its source.
+	failures []failureOcc
+	lossy    bool
 	// cancel is the task's first cancel-request, the origin of an
 	// interruption in its exit.
 	cancel uint64
@@ -177,6 +175,35 @@ type openCall struct {
 	id        uint64
 	def, site string
 }
+
+// failureOcc is one unconsumed typed-failure occurrence: its occurrence ID
+// and the error value it carried. Holding err keeps the value's storage
+// alive, so its identity (see identOf) cannot be reused while it is pending.
+type failureOcc struct {
+	id  uint64
+	err error
+}
+
+// maxFailures bounds the unconsumed failures kept per task. Emitted code has
+// at most one in flight (a failure is handled or returned at once); only
+// hand-written Go that accumulates or ignores failures reaches the bound.
+const maxFailures = 16
+
+// ident is the identity of an error interface value: its type word and its
+// data word. Two interface values with the same ident hold the same stored
+// value, so a failure keeps its ident as it is returned, wrapped in a Cause
+// and returned again. Two separate failures of a type stored behind a
+// pointer (a value with fields, boxed when it became an error, or a pointer
+// type) have different idents even when they are equal. A value with no
+// storage of its own (a zero-size struct such as Missing{}, or a constant
+// the compiler keeps in static data) shares its ident with every equal
+// value, so the identity of such a failure cannot be recovered from the
+// value: see origins.
+type ident struct{ typ, data unsafe.Pointer }
+
+// identOf returns the ident of err. It reads the two words of the interface
+// value; it never dereferences them.
+func identOf(err error) ident { return *(*ident)(unsafe.Pointer(&err)) }
 
 // raise delivers e as an event of task t and gives it the next occurrence ID.
 // The event's parent is owner, or t's live parent when owner is nil (an
@@ -213,25 +240,34 @@ func (h *tracer) raise(t, owner *Task, e Event) uint64 {
 // rather than sharing one helper that takes a func: the func's *taskLinks
 // argument made every entry escape, one allocation per event.
 
-// setFailure makes occ, which carried err, the latest failure of task id.
-func (h *tracer) setFailure(id, occ uint64, err error) {
+// addFailure records occ, which carried err, as the latest unconsumed
+// failure of task id.
+func (h *tracer) addFailure(id, occ uint64, err error) {
 	h.mu.Lock()
 	l := h.tasks[id]
-	l.failure, l.failErr = occ, err
+	if len(l.failures) == maxFailures {
+		l.failures = append(l.failures[:0], l.failures[1:]...)
+		l.lossy = true
+	}
+	l.failures = append(l.failures, failureOcc{occ, err})
 	h.tasks[id] = l
 	h.mu.Unlock()
 }
 
-// takeFailure returns and clears the latest failure of task id.
+// takeFailure removes and returns the latest unconsumed failure of task id,
+// 0 for none.
 func (h *tracer) takeFailure(id uint64) uint64 {
 	h.mu.Lock()
-	l, ok := h.tasks[id]
-	occ := l.failure
-	if ok && occ != 0 {
-		l.failure, l.failErr = 0, nil
-		h.tasks[id] = l
+	defer h.mu.Unlock()
+	l := h.tasks[id]
+	n := len(l.failures)
+	if n == 0 {
+		return 0
 	}
-	h.mu.Unlock()
+	occ := l.failures[n-1].id
+	l.failures[n-1] = failureOcc{}
+	l.failures = l.failures[:n-1]
+	h.tasks[id] = l
 	return occ
 }
 
@@ -298,22 +334,53 @@ func (h *tracer) unwound(id uint64, floor int) []openCall {
 
 // origins returns the per-reason links of task id's exit err, in the order
 // rttrace.Reasons lists the reasons.
+//
+// A typed failure's origin is an occurrence, never an equal value: the
+// reason links the unconsumed failure occurrence whose error has the same
+// ident (the same stored value), and only when that choice is unique. When
+// two reasons of the exit hold the same ident, or two unconsumed occurrences
+// do, or an occurrence was dropped (lossy), the value cannot tell which
+// occurrence a reason came from, and every such reason gets 0; the query
+// then says "origin not recorded" and names the candidates. Equal failures
+// of a zero-size type, such as two calls that each return Missing{}, are
+// that case: their values are the same bits at the same address.
 func (h *tracer) origins(id uint64, err error) []uint64 {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	l := h.tasks[id]
-	// The latest failure is the origin of at most one reason: of an exit
-	// that holds two equal failures, the first.
-	failure := func(e error) uint64 {
-		if occ := l.failure; occ != 0 && sameError(l.failErr, e) {
-			l.failure = 0
-			return occ
-		}
-		return 0
-	}
+	var failures []ident // the idents of the exit's failure reasons
 	switch c := err.(type) {
 	case nil:
 		return nil
+	case *Cause:
+		if c != nil {
+			for _, r := range c.Reasons {
+				if r.Kind == KindFailure {
+					failures = append(failures, identOf(r.Err))
+				}
+			}
+		}
+	}
+	failure := func(e error) uint64 {
+		if l.lossy {
+			return 0
+		}
+		who := identOf(e)
+		if len(failures) > 1 && count(failures, who) > 1 {
+			return 0
+		}
+		var occ uint64
+		for _, f := range l.failures {
+			if identOf(f.err) == who {
+				if occ != 0 {
+					return 0 // two occurrences carry this value
+				}
+				occ = f.id
+			}
+		}
+		return occ
+	}
+	switch c := err.(type) {
 	case *Cause:
 		if c == nil {
 			return []uint64{failure(err)}
@@ -339,15 +406,15 @@ func (h *tracer) origins(id uint64, err error) []uint64 {
 	return []uint64{failure(err)}
 }
 
-// sameError reports whether a and b are the same error value. An error whose
-// dynamic type cannot be compared is never the same.
-func sameError(a, b error) (same bool) {
-	defer func() {
-		if recover() != nil {
-			same = false
+// count returns how many of ids equal who.
+func count(ids []ident, who ident) int {
+	n := 0
+	for _, x := range ids {
+		if x == who {
+			n++
 		}
-	}()
-	return a == b
+	}
+	return n
 }
 
 // exited replaces the entry of task id by its body-exit.
@@ -455,7 +522,7 @@ func (t *Task) traceCallExit(call uint64, def, site string, err error) {
 	}
 	id := t.trace.raise(t, nil, Event{Kind: TraceCallExit, Link: call, Def: def, Site: site, Cause: err})
 	if err != nil && err != Interrupted && id != 0 {
-		t.trace.setFailure(t.id, id, err)
+		t.trace.addFailure(t.id, id, err)
 	}
 }
 
@@ -580,7 +647,7 @@ func (t *Task) childEvent(k EventKind, owner *Task, carry bool) {
 	h := t.trace
 	if k == TraceDeadline {
 		if id := h.raise(t, owner, e); id != 0 && owner != nil {
-			h.setFailure(owner.id, id, Expired{})
+			h.addFailure(owner.id, id, Expired{})
 		}
 		return
 	}
@@ -589,7 +656,7 @@ func (t *Task) childEvent(k EventKind, owner *Task, carry bool) {
 	h.raise(t, owner, e)
 	if carry && exit != 0 && owner != nil {
 		if _, ok := Failure(err); ok {
-			h.setFailure(owner.id, exit, err)
+			h.addFailure(owner.id, exit, err)
 		}
 	}
 }

@@ -256,6 +256,10 @@ func TestQueryTraceRefuses(t *testing.T) {
 		{"origin on a call-exit reason", "only a body-exit's reasons", recorded(src, 0, start, call, point(3, 2, "call-exit", 1, 0, findID, findSite, origin(notFound, 2)))},
 		{"origin raised after the exit", "raised after it", recorded(src, 0, start, call, task(3, 0, "body-exit", 1, 0, origin(notFound, 4)), point(4, 2, "call-exit", 1, 0, findID, findSite, notFound))},
 		{"origin not in the trace", "not in the trace", recorded(src, 0, start, task(3, 0, "body-exit", 1, 0, origin(notFound, 2)))},
+		// Round-3 M1: an origin is an occurrence. One a handler consumed, or a
+		// child exit the owner never observed, is not the origin of an exit reason.
+		{"origin a handler consumed", "consumed", recorded(src, 0, start, call, failed, handler, task(5, 0, "body-exit", 1, 0, origin(notFound, 3)))},
+		{"origin an unobserved child exit", "cannot raise it", recorded(src, 0, start, child, task(3, 0, "body-exit", 2, 1, notFound), task(4, 0, "body-exit", 1, 0, origin(notFound, 3)))},
 		{"link on a kind without links", "carries no link", recorded(src, 0, start, point(2, 1, "construct", 1, 0, "latency.Live", "timeout.sketch:70:13"))},
 		{"unknown failure type", "not an error type", recorded(src, 0, start, call, point(3, 2, "call-exit", 1, 0, findID, findSite, TraceReason{Reason: "failure", Name: "Ghost"}))},
 		// M3: a valid outer event with an invalid nested frame.
@@ -363,6 +367,21 @@ func TestQueryTraceExplainsEachReason(t *testing.T) {
 			"  defect string in a release, chain:",
 			"    task #1 latency.main at timeout.sketch:81:1",
 			"    raised by the panic defect string in a release in task #1 (seq 3)",
+		}},
+		// Round-3 M1: two equal failures the runtime could not tell apart. Each
+		// reason says so and names both occurrences as "one of"; neither gets
+		// the other's origin.
+		{"two equal failures without origins", []TraceEvent{start, call, failed, point(4, 0, "call", 1, 0, findID, findSite), point(5, 4, "call-exit", 1, 0, findID, findSite, notFound),
+			task(6, 0, "body-exit", 1, 0, notFound, notFound)}, []string{
+			"task #1 latency.main (func, timeout.sketch:81:1) exited with failure latency.OrderNotFound, failure latency.OrderNotFound",
+			"  failure latency.OrderNotFound",
+			"    origin not recorded: 2 reasons of this exit carry an equal latency.OrderNotFound, and the runtime cannot tell which occurrence each came from",
+			"      one of: call latency.Orders.Find at timeout.sketch:38:15 ended failure latency.OrderNotFound (call-exit seq 2)",
+			"      one of: call latency.Orders.Find at timeout.sketch:38:15 ended failure latency.OrderNotFound (call-exit seq 4)",
+			"  failure latency.OrderNotFound",
+			"    origin not recorded: 2 reasons of this exit carry an equal latency.OrderNotFound, and the runtime cannot tell which occurrence each came from",
+			"      one of: call latency.Orders.Find at timeout.sketch:38:15 ended failure latency.OrderNotFound (call-exit seq 2)",
+			"      one of: call latency.Orders.Find at timeout.sketch:38:15 ended failure latency.OrderNotFound (call-exit seq 4)",
 		}},
 		{"failure and interruption", []TraceEvent{start, task(2, 0, "cancel-request", 1, 0), point(3, 0, "call", 1, 0, findID, findSite), point(4, 3, "call-exit", 1, 0, findID, findSite, notFound),
 			task(5, 0, "body-exit", 1, 0, origin(notFound, 4), origin(interrupted, 2))}, []string{

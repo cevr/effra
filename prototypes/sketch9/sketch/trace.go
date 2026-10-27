@@ -169,6 +169,8 @@ type traceIndex struct {
 	exit     map[uint64]*TraceEvent // by task
 	callExit map[uint64]*TraceEvent // by the call's ID
 	caught   map[uint64]*TraceEvent // by the caught occurrence: its handler
+	consumed map[uint64]*TraceEvent // by a failure occurrence: the body-exit one of whose reasons names it
+	observe  map[uint64]*TraceEvent // by task: its observation
 	order    []uint64               // tasks in start order
 	root     uint64
 	omit     []TraceOmission
@@ -313,7 +315,7 @@ func validateTrace(m *Model, h TraceHeader, events []TraceEvent) (*traceIndex, e
 	x := &traceIndex{
 		m: m, events: events, dropped: h.Dropped > 0,
 		byID: map[uint64]*TraceEvent{}, start: map[uint64]*TraceEvent{}, exit: map[uint64]*TraceEvent{},
-		callExit: map[uint64]*TraceEvent{}, caught: map[uint64]*TraceEvent{}, omitted: map[string]bool{},
+		callExit: map[uint64]*TraceEvent{}, caught: map[uint64]*TraceEvent{}, consumed: map[uint64]*TraceEvent{}, observe: map[uint64]*TraceEvent{}, omitted: map[string]bool{},
 	}
 	// Each event alone: identity, definition, site and reasons.
 	for i := range events {
@@ -343,6 +345,10 @@ func validateTrace(m *Model, h TraceHeader, events []TraceEvent) (*traceIndex, e
 				return nil, fmt.Errorf("event seq %d: task #%d exits twice", e.Seq, e.Task)
 			}
 			x.exit[e.Task] = e
+		case "observe":
+			if x.observe[e.Task] == nil {
+				x.observe[e.Task] = e
+			}
 		}
 	}
 	// Each event against its task's start.
@@ -380,6 +386,9 @@ func validateTrace(m *Model, h TraceHeader, events []TraceEvent) (*traceIndex, e
 		if err := x.checkLink(&events[i]); err != nil {
 			return nil, fmt.Errorf("event seq %d: %w", events[i].Seq, err)
 		}
+	}
+	// Origins after every link, so a handler later in arrival order is known.
+	for i := range events {
 		if err := x.checkOrigins(&events[i]); err != nil {
 			return nil, fmt.Errorf("event seq %d: %w", events[i].Seq, err)
 		}
@@ -576,8 +585,13 @@ func (x *traceIndex) checkLink(e *TraceEvent) error {
 // task with that failure, the deadline of a child (for timeout.Expired) or a
 // child's exit with that failure; a defect's origin is the panic of the
 // task that heads its chain, with the same panic type; an interruption's
-// origin is a cancel-request of the same task. Two reasons never share an
-// origin.
+// origin is a cancel-request of the same task.
+//
+// An origin names an occurrence, so the checks are about occurrences, not
+// only types: a failure occurrence is consumed once, by one handler or by
+// one exit reason, never both; a child's exit is an origin
+// only of an owner that observed it before exiting. Two reasons never share
+// an origin.
 func (x *traceIndex) checkOrigins(e *TraceEvent) error {
 	used := map[uint64]int{}
 	for j, r := range e.Cause {
@@ -588,6 +602,12 @@ func (x *traceIndex) checkOrigins(e *TraceEvent) error {
 			return fmt.Errorf("reasons %d and %d of the body-exit name the same origin %d", k, j, r.Origin)
 		}
 		used[r.Origin] = j
+		if r.Reason == "failure" {
+			if h := x.caught[r.Origin]; h != nil {
+				return fmt.Errorf("reason %d of the body-exit names origin %d, which the handler at seq %d consumed", j, r.Origin, h.Seq)
+			}
+			x.consumed[r.Origin] = e
+		}
 		if r.Origin >= e.ID {
 			return fmt.Errorf("reason %d of the body-exit (id %d) names origin %d, which was raised after it", j, e.ID, r.Origin)
 		}
@@ -606,7 +626,13 @@ func (x *traceIndex) checkOrigins(e *TraceEvent) error {
 			case t.Task == e.Task:
 				ok = t.Kind == "call-exit" && hasFailure(t.Cause, r.Def)
 			case x.isChild(t.Task, e.Task):
-				ok = (t.Kind == "deadline" && r.Def == expiredType) || (t.Kind == "body-exit" && hasFailure(t.Cause, r.Def))
+				switch t.Kind {
+				case "deadline":
+					ok = r.Def == expiredType
+				case "body-exit":
+					obs := x.observe[t.Task]
+					ok = hasFailure(t.Cause, r.Def) && obs != nil && obs.Parent == e.Task && obs.ID < e.ID
+				}
 			}
 		case "defect":
 			ok = t.Kind == "panic" && len(r.Chain) > 0 && t.Task == r.Chain[0].Task &&
@@ -816,6 +842,13 @@ func (c *causeWriter) reasonOrigin(e *TraceEvent, r TraceReason, depth int) {
 	}
 	switch r.Reason {
 	case "failure":
+		if n := equalFailures(e.Cause, r.Def); n > 1 {
+			// The runtime records an origin only for an occurrence it can tell
+			// apart; equal failures of one exit can share their values.
+			c.say(depth, "origin not recorded: %d reasons of this exit carry an equal %s, and the runtime cannot tell which occurrence each came from", n, r.Def)
+			c.candidates(e.Task, r.Def, e.ID, depth+1, "one of: ")
+			return
+		}
 		c.unrecorded(e.Task, r.Def, e.ID, depth)
 	case "defect":
 		c.say(depth, "origin not recorded: no event links this defect")
@@ -932,28 +965,47 @@ func (c *causeWriter) stopFacts(task uint64, depth int) {
 // handled or exited with at occurrence before, and lists the candidates by
 // type, labelled as candidates.
 func (c *causeWriter) unrecorded(task uint64, def string, before uint64, depth int) {
-	x := c.x
 	c.say(depth, "origin not recorded: no event links the occurrence of %s", def)
+	c.candidates(task, def, before, depth+1, "candidate by type only: ")
+}
+
+// equalFailures counts the failure reasons of rs with definition def.
+func equalFailures(rs []TraceReason, def string) int {
+	n := 0
+	for _, r := range rs {
+		if r.Reason == "failure" && r.Def == def {
+			n++
+		}
+	}
+	return n
+}
+
+// candidates lists, labelled as candidates, the occurrences before before
+// that could have raised failure def in task: its failed calls, its
+// children's deadlines and failed exits. An occurrence a handler consumed or
+// another reason names is not a candidate.
+func (c *causeWriter) candidates(task uint64, def string, before uint64, depth int, label string) {
+	x := c.x
 	n := 0
 	for i := range x.events {
 		f := &x.events[i]
-		if f.ID >= before {
+		if f.ID >= before || x.caught[f.ID] != nil || x.consumed[f.ID] != nil {
 			continue
 		}
 		switch {
 		case f.Kind == "call-exit" && f.Task == task && hasFailure(f.Cause, def):
-			c.say(depth+1, "candidate by type only: call %s at %s ended %s (call-exit seq %d)", f.Def, f.Site, outcome(f), f.Seq)
+			c.say(depth, label+"call %s at %s ended %s (call-exit seq %d)", f.Def, f.Site, outcome(f), f.Seq)
 		case f.Kind == "deadline" && def == expiredType && x.isChild(f.Task, task):
-			c.say(depth+1, "candidate by type only: the deadline of task #%d %s (seq %d)", f.Task, f.Def, f.Seq)
+			c.say(depth, label+"the deadline of task #%d %s (seq %d)", f.Task, f.Def, f.Seq)
 		case f.Kind == "body-exit" && x.isChild(f.Task, task) && hasFailure(f.Cause, def):
-			c.say(depth+1, "candidate by type only: the exit of task #%d %s with %s (seq %d)", f.Task, f.Def, exitText(f.Cause, true), f.Seq)
+			c.say(depth, label+"the exit of task #%d %s with %s (seq %d)", f.Task, f.Def, exitText(f.Cause, true), f.Seq)
 		default:
 			continue
 		}
 		n++
 	}
 	if n == 0 {
-		c.say(depth+1, "no candidate in the trace: source code that returns the failure itself records no event")
+		c.say(depth, "no candidate in the trace: source code that returns the failure itself records no event")
 	}
 }
 
