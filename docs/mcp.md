@@ -18,6 +18,7 @@ The adapter implements a small read-only tools server using the [2025-11-25 stdi
 | Tool | Arguments | Result |
 | --- | --- | --- |
 | project.describe | `{}` | Compiler/runtime versions, supported targets, default Go target, operations, guardrail limits |
+| project.edition | `file` only | The file's [edition](specs/editions.md) as the canonical JSON text that `ef edition` prints and LSP `effra/edition` returns; a successful result even on EF144, whose diagnostic is in the `diagnostic` field |
 | code.format | Exactly one of `file` (workspace-relative `.ef`) or `source` (explicit buffer); optional buffer-only `uri`, `expectedDigest` and `expectedProducer` | Syntax-only formatted full text, origin, optional URI, formatter identity, input/output digests, producer identity and changed state; never writes |
 | project.check | `file`, optional `target` (`go`, the only target), optional `expectedRevision` and `expectedProducer` | Checked status, source revision, producer-qualified snapshot, bounded diagnostics, timing, symbol and nominal declaration metadata, bounded used host bindings, a complete or explicitly refused schema 9 type/row projection, and `applications`: each declared native entry mode's closed runtime modules, requirement counts and `goInitialization` packages (each declared foreign Go package with its rooting import declarations and `named` or `blank` lowering), or its `EF136` diagnostic |
 | project.diagnostics | `file`, optional `target`, `expectedRevision`, `expectedProducer`, boolean `strict` | Shared compiler and lint report with exact counts, UTF-8 byte spans, canonical `file:` source identity, producer-qualified snapshot, and UTF-16 LSP ranges |
@@ -29,6 +30,8 @@ The adapter implements a small read-only tools server using the [2025-11-25 stdi
 | project.tests | `file`, optional `target`, `expectedRevision` and `expectedProducer` | Selected checked cases and their complete reachable type/row closure under one cumulative catalog budget, independent of whole-source projection refusal; live capability requirement, no execution |
 | code.inspect | `file`, `symbol`, optional `target`, `expectedRevision` and `expectedProducer` | Canonical function contract or nominal record/enum/error declaration, byte span, local contributions |
 | code.explain | Same as inspect | Same initial semantic detail; no transitive explanation engine yet |
+
+Every tool with a `file` resolves the file's edition before any front-end reads it, in the directory of `ROOT/file`. A `legacy` file gets every tool above unchanged. A `2026` file gets `project.edition`, `project.check` and `project.diagnostics`, with prototype `S` codes and lint unavailable; every other file tool returns `isError=true` with the text `EF145: ...`, naming the ticket that adds it. Under an unsupported manifest, `project.check` and `project.diagnostics` report EF144 alone in their structured result, and every other file tool returns `EF144: ...` as its error. `code.format` with `source` has no directory and is `legacy`. See [editions](specs/editions.md#routing).
 
 Example inspection tool call:
 

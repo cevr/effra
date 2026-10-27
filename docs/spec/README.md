@@ -9,6 +9,7 @@ This directory is the normative specification of the Go-shaped Effra language: E
 - **In scope.** Lexical rules and grammar, types, error and capability rows, resources, the runtime rules, the standard-library outline and the diagnostics of the core.
 - **Sources.** The design sketches of 2026-10-26, numbered 8, 9 and 10, their two independent reviews, and the merged prototype compiler in [`prototypes/sketch9`](../../prototypes/sketch9/README.md) with its [receipt](../../prototypes/sketch9/RECEIPT.md). The [language evolution preview](../previews/2026-10-27-go-sketch.md) shows the language as of this version.
 - **Out of scope.** The earlier `.ef` language that `internal/compiler` implements today. Its documents stay in force for that compiler until [#205](https://github.com/cevr/effra/issues/205) retires it. [`docs/design.md`](../design.md) marks each section this specification supersedes.
+- **Edition.** This specification is the `2026` [edition](../specs/editions.md): a module opts in with an `effra.json` of `{"edition": "2026"}`, and a file without one is the earlier language.
 - **Terms.** Every domain term is defined only in the [glossary](../../GLOSSARY.md). These files state rules and link to it.
 - **Direction.** [NORTH_STAR.md](../../NORTH_STAR.md) holds the pillars P1 to P7 and the tiebreaks. [PRIOR_ART.md](../../PRIOR_ART.md) holds the source comparisons.
 

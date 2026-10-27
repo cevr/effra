@@ -4,6 +4,7 @@ The compiler's checked model supplies CLI and MCP answers. These are default cap
 
 | CLI | MCP | Purpose |
 | --- | --- | --- |
+| `ef edition FILE` | `project.edition` | The file's [edition](specs/editions.md) as canonical JSON (`edition`, `source`, `manifest`, and `diagnostic` on EF144); LSP `effra/edition` returns the same bytes; exit 1 on EF144 |
 | `ef check FILE` | `project.check` | Non-disableable source admission diagnostics |
 | `ef diagnostics FILE [--strict] [--json]` | `project.diagnostics` | One shared compiler/lint report with byte spans and UTF-16 ranges |
 | `ef lint FILE [--strict] [--lint-config FILE] [--rules MANIFEST]...` | `project.lint` | Checked semantic advice merged with selected rule packs; separate `checked`, `lintPassed` and `complete` |
@@ -16,6 +17,8 @@ The compiler's checked model supplies CLI and MCP answers. These are default cap
 | `ef graph FILE` | `project.graph` | Dependencies, providers, calls and provision boundaries; with view options, one selected [graph view](#graph-views) |
 | `ef test FILE` | `project.tests` discovers cases | CLI executes; MCP remains read-only |
 | `ef fmt FILE... [--check] [--json]` / `ef fmt --stdin` | `code.format` | Canonical syntax-only formatting; CLI writes atomically, MCP returns a full-text preview and never writes |
+
+Every command and tool that takes a file first resolves the file's edition from the nearest `effra.json` ([editions](specs/editions.md)). A file no manifest governs is `legacy`, and every row above applies to it unchanged. A `2026` file supports `check`, `diagnostics`, `build` (without `--receipt`) and `run`, and MCP `project.check` and `project.diagnostics`, with prototype `S` codes; every other row is the EF145 refusal, and an unsupported manifest is EF144 on every row (see [edition diagnostics](#edition-diagnostics)). `ef fmt --stdin` and `code.format` with `source` have no directory and are `legacy`.
 
 File commands accept `--target go`, the only target and the default; any other target, including `js`, is the EF110 diagnostic. Semantic results identify the source/import revision and the executing compiler producer. MCP semantic file tools accept independent `expectedRevision` and `expectedProducer` guards; omitting `expectedProducer` requests fresh facts for that invocation and makes no cross-producer reuse claim. `code.format` accepts `expectedProducer`, while `expectedDigest` separately guards exact source bytes.
 

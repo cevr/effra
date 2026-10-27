@@ -20,6 +20,12 @@ Only a name the checker resolved to a declaration has an answer: the selection m
 
 Hover and definition notifications receive an Invalid Request log. Missing position fields, negative or non-integer coordinates, an unopened document, a line beyond the document and a character between the two UTF-16 units of one astral character receive Invalid Params (-32602). A projection or tooling-limit refusal of the selected query receives Request Failed (-32803) with the opening URI and accepted version. Each refusal leaves the session and later requests intact. Arbitrary expression types remain available through the CLI and MCP queries.
 
+## Editions
+
+Every accepted open or change resolves the document's [edition](specs/editions.md) afresh in the directory of its URI path, so a manifest edit takes effect at the next change. A `legacy` document behaves as this page describes. A `2026` document publishes the prototype's `S` diagnostics through the same report, with lint unavailable; hover and definition answer `null`, and formatting is Request Failed (-32803) whose `data` is the EF145 diagnostic. Under an unsupported manifest the publication holds EF144 alone at the document start, and formatting fails with EF144 in `data`. Formatting and navigation resolve the edition again when they run, and refuse unless both the last analysis and the current manifest are `legacy`.
+
+The `effra/edition` request takes `{"textDocument": {"uri": URI}}` for an open or unopened `file:` URI and returns the canonical edition JSON that `ef edition` prints and MCP `project.edition` returns. It never reads the file, and it is refused before `initialized` like every other request.
+
 ## Document formatting
 
 textDocument/formatting formats the document's current accepted text with the syntax-only formatter of `ef fmt` and MCP `code.format` (formatter identity `effra/formatter-16`); there is no editor-specific printer. Like those surfaces it needs valid syntax, not checked types: an ill-typed buffer or one with unresolved imports still formats, and the target does not matter. The `options` field is ignored, including tabSize and insertSpaces; the style is canonical. The buffer is formatted, never the disk file, which is neither read nor written.
