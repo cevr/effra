@@ -1070,12 +1070,12 @@ var fileTools = map[string]string{
 	"project.check":       "",
 	"project.diagnostics": "",
 	"code.format":         "",
-	"code.inspect":        edition.TicketChecker,
-	"code.explain":        edition.TicketChecker,
-	"code.type":           edition.TicketChecker,
-	"code.typeAt":         edition.TicketChecker,
-	"project.graph":       edition.TicketChecker,
-	"project.lint":        edition.TicketChecker,
+	"code.inspect":        edition.TicketTooling,
+	"code.explain":        edition.TicketTooling,
+	"code.type":           edition.TicketTooling,
+	"code.typeAt":         edition.TicketTooling,
+	"project.graph":       edition.TicketTooling,
+	"project.lint":        edition.TicketTooling,
 	"project.tests":       edition.TicketTests,
 }
 
@@ -1106,7 +1106,7 @@ func editionRefusal(tool string, resolution edition.Resolution) *edition.Diagnos
 func foreignCall(packs *lintpacks.Session, name string, args arguments, target string, snapshot compiler.SourceSnapshot, resolution edition.Resolution) (any, error) {
 	refusal := editionRefusal(name, resolution)
 	if refusal == nil && name == "project.diagnostics" && packs.SelectsPacks() {
-		unavailable := edition.Unavailable("project.diagnostics with rule packs", resolution.Edition, edition.TicketChecker)
+		unavailable := edition.Unavailable("project.diagnostics with rule packs", resolution.Edition, edition.TicketTooling)
 		refusal = &unavailable
 	}
 	if refusal != nil && name != "project.check" && name != "project.diagnostics" {
@@ -1131,7 +1131,7 @@ func foreignCall(packs *lintpacks.Session, name string, args arguments, target s
 		return r.ForeignCheckResponse(string(resolution.Edition)), nil
 	}
 	if name == "project.diagnostics" {
-		reason := edition.Unavailable("lint", edition.E2026, edition.TicketChecker).Message
+		reason := edition.Unavailable("lint", edition.E2026, edition.TicketTooling).Message
 		if refusal != nil {
 			reason = refusal.String()
 		}

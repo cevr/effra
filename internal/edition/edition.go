@@ -66,7 +66,7 @@ var Codes = []string{CodeUnsupported, CodeUnavailable, CodeAdmission}
 
 // The tickets that add an operation the 2026 edition lacks today.
 const (
-	TicketChecker = "#196"
+	TicketTooling = "#203" // semantic tooling: lint, query, type, graph, inspect, explain
 	TicketTests   = "#204"
 )
 

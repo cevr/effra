@@ -386,7 +386,7 @@ func (s *session) synchronize(req request) error {
 		report = doc.analysis.ForeignReport(doc.snapshot, false, resolution.Diagnostic.String())
 	case resolution.Edition == edition.E2026:
 		doc.analysis = sketchfront.Check(text).Result(text, s.target)
-		report = doc.analysis.ForeignReport(doc.snapshot, false, edition.Unavailable("lint", edition.E2026, edition.TicketChecker).Message)
+		report = doc.analysis.ForeignReport(doc.snapshot, false, edition.Unavailable("lint", edition.E2026, edition.TicketTooling).Message)
 	case resolution.Edition == edition.Legacy:
 		doc.legacy = true
 		doc.analysis = compiler.CompileAt(text, s.target, filepath.Dir(path))
@@ -477,7 +477,7 @@ func (s *session) navigate(req request) error {
 		return s.failure(req.ID, -32602, "document is not open")
 	}
 	// Navigation answers from legacy facts only: a document whose analysis or
-	// current manifest is another edition has no answer yet (#196).
+	// current manifest is another edition has no answer yet (#203).
 	if current := edition.ResolveDocument(path); !doc.legacy || current.Diagnostic != nil || current.Edition != edition.Legacy {
 		return s.result(req.ID, nil)
 	}

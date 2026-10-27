@@ -32,16 +32,16 @@ var fileCommands = []fileCommand{
 	{name: "diagnostics"},
 	{name: "build"},
 	{name: "run"},
-	{name: "lint", ticket: edition.TicketChecker},
-	{name: "query", ticket: edition.TicketChecker},
-	{name: "type", ticket: edition.TicketChecker},
-	{name: "graph", ticket: edition.TicketChecker},
-	{name: "inspect", ticket: edition.TicketChecker},
-	{name: "explain", ticket: edition.TicketChecker},
+	{name: "lint", ticket: edition.TicketTooling},
+	{name: "query", ticket: edition.TicketTooling},
+	{name: "type", ticket: edition.TicketTooling},
+	{name: "graph", ticket: edition.TicketTooling},
+	{name: "inspect", ticket: edition.TicketTooling},
+	{name: "explain", ticket: edition.TicketTooling},
 	{name: "test", ticket: edition.TicketTests},
 	{name: "fmt"},
-	{name: "lint test", ticket: edition.TicketChecker},
-	{name: "lint receipt", ticket: edition.TicketChecker},
+	{name: "lint test", ticket: edition.TicketTooling},
+	{name: "lint receipt", ticket: edition.TicketTooling},
 }
 
 func lookupFileCommand(name string) (fileCommand, bool) {
@@ -126,7 +126,7 @@ func editionCommand(args []string) error {
 }
 
 // lintUnavailable is why a 2026 diagnostic report has no lint advice.
-var lintUnavailable = edition.Unavailable("lint", edition.E2026, edition.TicketChecker).Message
+var lintUnavailable = edition.Unavailable("lint", edition.E2026, edition.TicketTooling).Message
 
 // foreignCommand runs a file command on a source that the legacy front-end
 // must not read: an edition refusal, or a command of the 2026 edition.
@@ -136,11 +136,11 @@ func foreignCommand(command string, source receipt.Location, admitted *edition.S
 	resolution := admitted.Resolution
 	refusal := editionRefusal(command, resolution)
 	if refusal == nil && command == "build" && opts.receipt != "" {
-		unavailable := edition.Unavailable("ef build --receipt", resolution.Edition, edition.TicketChecker)
+		unavailable := edition.Unavailable("ef build --receipt", resolution.Edition, edition.TicketTooling)
 		refusal = &unavailable
 	}
 	if refusal == nil && command == "diagnostics" && session.SelectsPacks() {
-		unavailable := edition.Unavailable("ef diagnostics with rule packs", resolution.Edition, edition.TicketChecker)
+		unavailable := edition.Unavailable("ef diagnostics with rule packs", resolution.Edition, edition.TicketTooling)
 		refusal = &unavailable
 	}
 	if refusal != nil && command != "check" && command != "diagnostics" {
@@ -196,7 +196,7 @@ func foreignCommand(command string, source receipt.Location, admitted *edition.S
 	case "build", "run":
 		if !r.Checked {
 			_ = printJSON(r.ForeignCheckResponse(string(resolution.Edition)))
-			return fmt.Errorf("check failed")
+			return fmt.Errorf("check failed: %w", &sketchfront.BuildError{Diagnostics: analysis.Diagnostics})
 		}
 		paths, err := locateBuild(source, opts)
 		if err != nil {

@@ -595,7 +595,7 @@ func TestUnavailableOperationsReportEF145(t *testing.T) {
 		t.Fatal(err)
 	}
 	supported := []string{"edition", "check", "diagnostics", "build", "run", "fmt"}
-	tickets := regexp.MustCompile(`#(196|204)\b`)
+	tickets := regexp.MustCompile(`#(203|204)\b`)
 	for _, command := range fileCommands {
 		if slices.Contains(supported, command.name) {
 			continue

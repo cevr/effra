@@ -426,7 +426,7 @@ func TestEditionDiagnosticsAreDocumented(t *testing.T) {
 	if !slices.Equal(declared, documented) {
 		t.Fatalf("internal/edition declares %v; the docs/tooling.md edition table documents %v", declared, documented)
 	}
-	if diagnostic := Unavailable("ef lint FILE", E2026, TicketChecker); diagnostic.Code != CodeUnavailable || !strings.Contains(diagnostic.Message, `"2026"`) || !strings.Contains(diagnostic.Message, "#196") {
+	if diagnostic := Unavailable("ef lint FILE", E2026, TicketTooling); diagnostic.Code != CodeUnavailable || !strings.Contains(diagnostic.Message, `"2026"`) || !strings.Contains(diagnostic.Message, "#203") {
 		t.Fatalf("EF145 message %q does not name the edition and the ticket", diagnostic.Message)
 	}
 }
