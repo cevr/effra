@@ -81,3 +81,13 @@ func InstancesMade(src string) (int, []Diagnostic) {
 	}
 	return c.instancesMade, diags
 }
+
+// InferOps checks src and returns the constraint-guard work of its generic
+// calls (round-8 M4: linear in each signature), with the diagnostics.
+func InferOps(src string) (int, []Diagnostic) {
+	c, diags := checkFor(src)
+	if c == nil {
+		return -1, diags
+	}
+	return c.inferOps, diags
+}

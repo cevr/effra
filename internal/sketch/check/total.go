@@ -55,6 +55,10 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 			sizes[i] = u.len()
 		}
 	}
+	// Resolving the cases is charged to the switch's own step counter,
+	// against the solvers' budget (round 9 class C): past it the switch is
+	// S103, so no uncounted pass runs before the solvers.
+	resolve := &lookupSteps{ops: &c.variantOps}
 	// The case rows, resolved once, in source order: rowOf[clause][item]
 	// is nil for a case that does not resolve (reported).
 	hasDefault := false
@@ -87,7 +91,13 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 					ok = false
 					break
 				}
-				idx := c.caseVariant(e, unions[j], subj[j])
+				idx := c.caseVariant(e, unions[j], subj[j], resolve)
+				if idx == variantOver {
+					resolve.over = true
+					ok = false
+					patternsOK = false
+					break
+				}
 				if idx == -2 {
 					ok = false
 					patternsOK = false
@@ -112,7 +122,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 		var tuples [][]int
 		for ii, item := range cl.List {
 			row := rowOf[ci][ii]
-			if row == nil {
+			if row == nil || resolve.over { // past the budget: refused below, no case verdict
 				continue
 			}
 			if u, ok := useful.caseUseful(matrix, row); ok && !u {
@@ -172,6 +182,14 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 	if useful.over {
 		// A case whose reachability is unproven is never accepted.
 		c.errorAt(s.Switch, s.Switch+6, CodeNotTotal, "too many cases to prove which cases of this switch are reachable; split it (rows.md, Totality 5)")
+		c.totalSwitch[s] = true
+		return
+	}
+	if resolve.over {
+		// Resolving the cases ran past the budget (round 9 class C): the
+		// switch is refused like a solver past its budget, never accepted
+		// unproven.
+		c.errorAt(s.Switch, s.Switch+6, CodeNotTotal, "too many cases to prove this switch total; split it or add default (rows.md, Totality 5)")
 		c.totalSwitch[s] = true
 		return
 	}

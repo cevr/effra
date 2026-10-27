@@ -219,8 +219,8 @@ func TestSharedOriginLinear(t *testing.T) {
 				ops, inst := variantWork(t, src)
 				_, base := variantWork(t, s.src(n, true))
 				t.Logf("n=%d bytes=%d variant ops=%d instances=%d control instances=%d", n, len(src), ops, inst, base)
-				if ops > 10*n {
-					t.Errorf("n=%d: %d variant operations, more than 10 per subject or case: superlinear", n, ops)
+				if ops > 16*n {
+					t.Errorf("n=%d: %d variant operations, more than 16 per subject or case: superlinear", n, ops)
 				}
 				if inst-base > 3*n {
 					t.Errorf("n=%d: the switch adds %d instances, more than 3 per subject or case: superlinear", n, inst-base)

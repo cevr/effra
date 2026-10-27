@@ -568,9 +568,19 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 	// refused before any guess (round-7 M2; D6 rule 3 as amended in
 	// round 8). A constraint error stays for parameters fixed by typed or
 	// written arguments.
-	for _, tp := range order {
+	// The parameters the constraints mention are collected once per call,
+	// a walk over the constraints, then each constant-bound parameter is a
+	// set lookup: linear in the signature (round-8 M4; round 9 class C).
+	if len(order) > 0 {
+		mentioned := map[*TypeParam]bool{}
 		for _, q := range sig.TParams {
-			if q.Constraint != nil && occurs(tp, q.Constraint) {
+			if q.Constraint != nil {
+				c.paramsIn(q.Constraint, mentioned)
+			}
+		}
+		for _, tp := range order {
+			c.inferOps++
+			if mentioned[tp] {
 				c.cannotInfer(x, tp.Name, x.Fun, sig)
 				return bad(x)
 			}
@@ -673,6 +683,69 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 }
 
 // ---------------------------------------------------------------- literals and blocks
+
+// paramsIn adds the type parameters t mentions to set, one visit per
+// sub-term (counted in inferOps).
+func (c *checker) paramsIn(t Type, set map[*TypeParam]bool) {
+	c.inferOps++
+	switch t := t.(type) {
+	case *TypeParam:
+		set[t] = true
+	case *Named:
+		for _, a := range t.TArgs {
+			c.paramsIn(a, set)
+		}
+	case *RowArg:
+		for _, e := range t.Row.Elems() {
+			c.paramsIn(e, set)
+		}
+	case *Slice:
+		c.paramsIn(t.Elem, set)
+	case *Array:
+		c.paramsIn(t.Elem, set)
+	case *Map:
+		c.paramsIn(t.Key, set)
+		c.paramsIn(t.Elem, set)
+	case *Chan:
+		c.paramsIn(t.Elem, set)
+	case *Pointer:
+		c.paramsIn(t.Elem, set)
+	case *Tuple:
+		for _, e := range t.Types {
+			c.paramsIn(e, set)
+		}
+	case *Struct:
+		for _, f := range t.Fields {
+			c.paramsIn(f.Type, set)
+		}
+	case *Union:
+		for _, v := range t.Variants {
+			c.paramsIn(v, set)
+		}
+	case *Signature:
+		for _, p := range t.Params {
+			c.paramsIn(p.Type, set)
+		}
+		for _, r := range t.Results {
+			c.paramsIn(r, set)
+		}
+		for _, e := range t.Errors.Elems() {
+			c.paramsIn(e, set)
+		}
+		for _, e := range t.Uses.Elems() {
+			c.paramsIn(e, set)
+		}
+	case *Interface:
+		for _, m := range t.Methods {
+			if m.Sig != nil {
+				c.paramsIn(m.Sig, set)
+			}
+		}
+	case *MachineType:
+		c.paramsIn(t.State, set)
+		c.paramsIn(t.Signal, set)
+	}
+}
 
 // funcLit checks a function literal. Its rows are declared when written,
 // else taken from the function type it is passed to when that type's rows

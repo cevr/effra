@@ -15,6 +15,11 @@ type switchUnion struct {
 	orig *Union              // the origin's union, or the subject's own
 	m    map[*TypeParam]Type // the instance's type arguments; nil for a non-instance
 	inst map[int]Type        // the variants substituted so far
+	tps  []*TypeParam        // the declaration's type parameters, in order (determinism)
+	// bound indexes the instance's type arguments by identity key, and
+	// rows its bound rows per index node, each built once (variantindex.go).
+	bound map[string][]*TypeParam
+	rows  map[*vnode]map[string][]*vnode
 }
 
 // subjectUnion returns t's union as a switch subject, or nil when t is not
@@ -22,7 +27,7 @@ type switchUnion struct {
 func (c *checker) subjectUnion(t Type) *switchUnion {
 	if n, ok := t.(*Named); ok && n.Orig != nil && n.under == nil {
 		if ou, ok := n.Orig.under.(*Union); ok {
-			return &switchUnion{c: c, orig: ou, m: paramMap(n.Orig.TParams, n.TArgs)}
+			return &switchUnion{c: c, orig: ou, m: paramMap(n.Orig.TParams, n.TArgs), tps: n.Orig.TParams}
 		}
 	}
 	if u := asUnion(t); u != nil {
@@ -50,28 +55,42 @@ func (s *switchUnion) at(i int) Type {
 	return v
 }
 
+// variantOver is lookup's result when the switch's step counter, or the
+// union's insertion counter, ran out (S103, rows.md Totality 5).
+const variantOver = -3
+
 // lookup returns the index of the variant t names: the variant identical
 // to t, or, for a generic type written without type arguments, the first
-// variant instantiated from it; -1 when none. It follows t's path in the
-// origin's variant index (round-7 M4): no variant is scanned or
-// substituted to find it, only a wildcard candidate is checked.
-func (s *switchUnion) lookup(t Type, ops *int) int {
+// variant instantiated from it; -1 when none; variantOver past the budget.
+// It follows t's path in the origin's variant index (round-7 M4, round 9
+// class C): no variant is scanned or substituted to find it, only a
+// wildcard candidate is checked, and every step is charged to b.
+func (s *switchUnion) lookup(t Type, b *lookupSteps) int {
 	n, ok := t.(*Named)
 	if !ok {
 		return -1
 	}
-	ix := s.orig.index(ops)
+	ix := s.orig.index(b.ops)
+	if ix.over {
+		return variantOver
+	}
 	if n.Orig == nil && len(n.TParams) > 0 {
 		if i, ok := ix.first[n]; ok {
 			return i
 		}
 		return -1
 	}
-	for _, cand := range ix.lookup(t, s.bind, ops) {
+	cands, ok := s.candidates(ix, t, b)
+	if !ok {
+		return variantOver
+	}
+	for _, cand := range cands {
 		if cand.exact {
 			return cand.i
 		}
-		*ops++
+		if !b.charge(1) {
+			return variantOver
+		}
 		if identical(s.at(cand.i), t) {
 			return cand.i
 		}
@@ -89,10 +108,11 @@ func (s *switchUnion) bind(tp *TypeParam) Type {
 }
 
 // caseVariant resolves a case type to its variant index in the union, -1
-// for _, or -2 on an error (reported). It is a keyed lookup, not a scan:
+// for _, -2 on an error (reported), or variantOver when the switch's step
+// counter ran out (reported once by the switch). It is a keyed lookup, not a scan:
 // resolving the cases stays linear before the solvers' counters (round-5
 // M2; D16 as amended in round 5).
-func (c *checker) caseVariant(e syntax.Expr, u *switchUnion, subj Type) int {
+func (c *checker) caseVariant(e syntax.Expr, u *switchUnion, subj Type, b *lookupSteps) int {
 	if id, ok := e.(*syntax.Ident); ok && id.Name == "_" {
 		return -1
 	}
@@ -100,7 +120,8 @@ func (c *checker) caseVariant(e syntax.Expr, u *switchUnion, subj Type) int {
 	if isInvalid(t) {
 		return -2
 	}
-	if i := u.lookup(t, &c.variantOps); i >= 0 {
+	i := u.lookup(t, b)
+	if i >= 0 || i == variantOver {
 		return i
 	}
 	if !u.bad() {

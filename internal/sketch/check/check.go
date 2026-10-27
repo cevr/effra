@@ -94,7 +94,10 @@ type checker struct {
 	// switch over generic unions creates none (round-6 M5), bounded by a
 	// test.
 	instancesMade int
-	mono          monoState // the instantiation graph (instantiation cycles)
+	// inferOps counts the constraint-guard work of generic calls: linear
+	// in each signature (round-8 M4), bounded by a test.
+	inferOps int
+	mono     monoState // the instantiation graph (instantiation cycles)
 
 	errorTypes map[*Named]syntax.Pos // origin error types named in an error row of this package
 	funcs      []*Func               // every package function and method, in source order
