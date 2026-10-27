@@ -292,6 +292,6 @@ The "without" binary is the same emitted program with the trace switch removed b
 | `go test -count=1 -race ./runtime/rt/...` | 0 |
 
 - `checkOrigins` checks the occurrence, not only the kind: it runs after every link is checked, refuses a failure origin that a handler consumed, and accepts a child's exit as an origin only when the owner observed that exit. Two new refusal cases cover them.
-- When several reasons of an exit carry an equal failure and none has an origin, the cause trace says so for each reason and names the unconsumed occurrences as "one of" the candidates. A lone reason without an origin still lists its "candidate by type only".
+- When several failure reasons of an exit have the same error type and a reason has no origin, the cause trace states the shared type for that reason and lists the unconsumed occurrences as candidates by type. (Round 5 replaced the round-4 wording "carry an equal", which the recording could not support.)
 - `TestKernelEqualFailureProbes` is the third review's pair of probes (two calls that fail with equal `Missing` values; two children whose Waits return equal values) as a kernel program, built and run, then recorded, written and queried. With zero-size values the query states no origin and names both occurrences; with values stored on their own each reason names its own occurrence. In every variant no reason names another reason's occurrence.
 - The reviewer's round-3 native harness, rerun at round 4: all five modes pass, including `two-failures` and `two-child-failures` (`round-4-receipts/native-*.log`).

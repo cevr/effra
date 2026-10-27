@@ -368,20 +368,36 @@ func TestQueryTraceExplainsEachReason(t *testing.T) {
 			"    task #1 latency.main at timeout.sketch:81:1",
 			"    raised by the panic defect string in a release in task #1 (seq 3)",
 		}},
-		// Round-3 M1: two equal failures the runtime could not tell apart. Each
-		// reason says so and names both occurrences as "one of"; neither gets
-		// the other's origin.
-		{"two equal failures without origins", []TraceEvent{start, call, failed, point(4, 0, "call", 1, 0, findID, findSite), point(5, 4, "call-exit", 1, 0, findID, findSite, notFound),
+		// Round-3 M1: two failures of one type without origins (the runtime
+		// could not tell them apart). Each reason states the shared type and
+		// lists both occurrences as candidates by type; neither gets the
+		// other's origin, and the answer does not call the values equal,
+		// because the recording holds only their type (round-4 m1).
+		{"two failures of one type without origins", []TraceEvent{start, call, failed, point(4, 0, "call", 1, 0, findID, findSite), point(5, 4, "call-exit", 1, 0, findID, findSite, notFound),
 			task(6, 0, "body-exit", 1, 0, notFound, notFound)}, []string{
 			"task #1 latency.main (func, timeout.sketch:81:1) exited with failure latency.OrderNotFound, failure latency.OrderNotFound",
 			"  failure latency.OrderNotFound",
-			"    origin not recorded: 2 reasons of this exit carry an equal latency.OrderNotFound, and the runtime cannot tell which occurrence each came from",
-			"      one of: call latency.Orders.Find at timeout.sketch:38:15 ended failure latency.OrderNotFound (call-exit seq 2)",
-			"      one of: call latency.Orders.Find at timeout.sketch:38:15 ended failure latency.OrderNotFound (call-exit seq 4)",
+			"    origin not recorded: 2 reasons of this exit have the same error type latency.OrderNotFound, and no event links this one",
+			"      candidate by type only: call latency.Orders.Find at timeout.sketch:38:15 ended failure latency.OrderNotFound (call-exit seq 2)",
+			"      candidate by type only: call latency.Orders.Find at timeout.sketch:38:15 ended failure latency.OrderNotFound (call-exit seq 4)",
 			"  failure latency.OrderNotFound",
-			"    origin not recorded: 2 reasons of this exit carry an equal latency.OrderNotFound, and the runtime cannot tell which occurrence each came from",
-			"      one of: call latency.Orders.Find at timeout.sketch:38:15 ended failure latency.OrderNotFound (call-exit seq 2)",
-			"      one of: call latency.Orders.Find at timeout.sketch:38:15 ended failure latency.OrderNotFound (call-exit seq 4)",
+			"    origin not recorded: 2 reasons of this exit have the same error type latency.OrderNotFound, and no event links this one",
+			"      candidate by type only: call latency.Orders.Find at timeout.sketch:38:15 ended failure latency.OrderNotFound (call-exit seq 2)",
+			"      candidate by type only: call latency.Orders.Find at timeout.sketch:38:15 ended failure latency.OrderNotFound (call-exit seq 4)",
+		}},
+		// Round-4 m1: two failures of one type that no traced point raised (in
+		// the reviewer's probe, Missing{"first"} and Missing{"second"}). The
+		// recording cannot tell equal values from distinct ones, so the
+		// answer is the shared type, no origin and no candidate.
+		{"two failures of one type that no event raised", []TraceEvent{start,
+			task(2, 0, "body-exit", 1, 0, notFound, notFound)}, []string{
+			"task #1 latency.main (func, timeout.sketch:81:1) exited with failure latency.OrderNotFound, failure latency.OrderNotFound",
+			"  failure latency.OrderNotFound",
+			"    origin not recorded: 2 reasons of this exit have the same error type latency.OrderNotFound, and no event links this one",
+			"      no candidate in the trace: source code that returns the failure itself records no event",
+			"  failure latency.OrderNotFound",
+			"    origin not recorded: 2 reasons of this exit have the same error type latency.OrderNotFound, and no event links this one",
+			"      no candidate in the trace: source code that returns the failure itself records no event",
 		}},
 		{"failure and interruption", []TraceEvent{start, task(2, 0, "cancel-request", 1, 0), point(3, 0, "call", 1, 0, findID, findSite), point(4, 3, "call-exit", 1, 0, findID, findSite, notFound),
 			task(5, 0, "body-exit", 1, 0, origin(notFound, 4), origin(interrupted, 2))}, []string{

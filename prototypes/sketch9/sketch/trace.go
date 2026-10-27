@@ -842,11 +842,13 @@ func (c *causeWriter) reasonOrigin(e *TraceEvent, r TraceReason, depth int) {
 	}
 	switch r.Reason {
 	case "failure":
-		if n := equalFailures(e.Cause, r.Def); n > 1 {
-			// The runtime records an origin only for an occurrence it can tell
-			// apart; equal failures of one exit can share their values.
-			c.say(depth, "origin not recorded: %d reasons of this exit carry an equal %s, and the runtime cannot tell which occurrence each came from", n, r.Def)
-			c.candidates(e.Task, r.Def, e.ID, depth+1, "one of: ")
+		if n := sameTypeFailures(e.Cause, r.Def); n > 1 {
+			// The recording names a failure by its type only. It cannot show
+			// that the reasons carried equal values, nor which occurrence
+			// each came from, so the answer states the shared type and labels
+			// the occurrences candidates by type.
+			c.say(depth, "origin not recorded: %d reasons of this exit have the same error type %s, and no event links this one", n, r.Def)
+			c.candidates(e.Task, r.Def, e.ID, depth+1, "candidate by type only: ")
 			return
 		}
 		c.unrecorded(e.Task, r.Def, e.ID, depth)
@@ -969,8 +971,8 @@ func (c *causeWriter) unrecorded(task uint64, def string, before uint64, depth i
 	c.candidates(task, def, before, depth+1, "candidate by type only: ")
 }
 
-// equalFailures counts the failure reasons of rs with definition def.
-func equalFailures(rs []TraceReason, def string) int {
+// sameTypeFailures counts the failure reasons of rs with error type def.
+func sameTypeFailures(rs []TraceReason, def string) int {
 	n := 0
 	for _, r := range rs {
 		if r.Reason == "failure" && r.Def == def {

@@ -14,9 +14,12 @@ import (
 // probeProgram is a hand-written kernel program, the second review's
 // equal-failure probes (round-3 M1): two failures of calls.Missing enter one
 // rt.Cause in order, either from two traced calls of calls.Store.Get or from
-// two children's Waits. It records the run with the real recorder and writer
-// and prints the occurrence each reason came from, as the program saw it.
-// The definitions and sites are the checker's, filled in by the test.
+// two children's Waits. In the "untraced" mode (the fourth review's m1) the
+// body adds both failures itself, and no traced point raises them. It
+// records the run with the real recorder and writer and prints the
+// occurrence each reason came from, as the program saw it (0 when no event
+// raised it). mk(i) makes the i-th failure. The definitions and sites are
+// the checker's, filled in by the test.
 const probeProgram = `package main
 
 import (
@@ -47,10 +50,15 @@ func main() {
 	var tasks [2]uint64
 	_, err := rt.Run(root, func(t0 *rt.Task) (struct{}, error) {
 		var c rt.Cause
+		if mode == "untraced" {
+			c.Add(mk(0))
+			c.Add(mk(1))
+			return struct{}{}, c.Err()
+		}
 		if mode == "calls" {
 			for i, site := range getSites {
 				call := t0.TraceCall(getDef, site)
-				e := mk()
+				e := mk(i)
 				t0.TraceCallExit(call, getDef, site, e)
 				recs, _ := rec.Records()
 				for _, r := range recs {
@@ -67,7 +75,7 @@ func main() {
 			for i := range hs {
 				hs[i] = rt.Go(s, mainDef, func(ct *rt.Task) (struct{}, error) {
 					tasks[i] = ct.ID()
-					return struct{}{}, mk()
+					return struct{}{}, mk(i)
 				})
 			}
 			for _, h := range hs {
@@ -94,11 +102,14 @@ func main() {
 }
 `
 
-// The second review's equal-failure probes, through the real kernel,
+// The third review's equal-failure probes, through the real kernel,
 // recorder, writer and query: no reason names another reason's occurrence.
-// Equal zero-size failures cannot be told apart, so the answer names the
-// candidates ("one of") and states no origin; failures stored on their own
-// keep their identity, and each reason names its own occurrence.
+// Equal zero-size failures cannot be told apart, so the answer states no
+// origin and lists the occurrences as candidates by type; failures stored
+// on their own keep their identity, and each reason names its own
+// occurrence. The recording names failures by type only, so the answer
+// never calls two reasons equal: two distinct values that no traced point
+// raised get the same answer as equal ones (the fourth review's m1).
 func TestKernelEqualFailureProbes(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("no go tool")
@@ -120,8 +131,9 @@ func TestKernelEqualFailureProbes(t *testing.T) {
 		name, typ, mk string
 		linked        bool
 	}{
-		{"zero-size", "type Missing struct{}", "func mk() error { return Missing{} }", false},
-		{"stored", "type Missing struct{ key string }", "func mk() error { return Missing{key: string([]byte(\"k\"))} }", true},
+		{"zero-size", "type Missing struct{}", "func mk(int) error { return Missing{} }", false},
+		{"stored", "type Missing struct{ key string }", "func mk(int) error { return Missing{key: string([]byte(\"k\"))} }", true},
+		{"distinct", "type Missing struct{ key string }", "func mk(i int) error { return Missing{key: fmt.Sprint(\"value-\", i)} }", true},
 	} {
 		dir := t.TempDir()
 		code := fmt.Sprintf(probeProgram, v.typ+"\n\n"+v.mk, "calls.main", main.Site, "calls.Store.Get", sites[0], sites[1], Revision(src))
@@ -136,7 +148,7 @@ func TestKernelEqualFailureProbes(t *testing.T) {
 		if out, err := build.CombinedOutput(); err != nil {
 			t.Fatalf("%s: go build: %v\n%s", v.name, err, out)
 		}
-		for _, mode := range []string{"calls", "children"} {
+		for _, mode := range []string{"calls", "children", "untraced"} {
 			name := v.name + "/" + mode
 			path := filepath.Join(dir, mode+".jsonl")
 			out, err := exec.Command(bin, mode, path).Output()
@@ -145,9 +157,11 @@ func TestKernelEqualFailureProbes(t *testing.T) {
 			}
 			var from [2]uint64
 			var failed bool
-			if _, err := fmt.Sscan(string(out), &from[0], &from[1], &failed); err != nil || !failed || from[0] == 0 || from[1] == 0 {
+			raised := mode != "untraced" // a traced point raised each failure
+			if _, err := fmt.Sscan(string(out), &from[0], &from[1], &failed); err != nil || !failed || raised != (from[0] != 0) || raised != (from[1] != 0) {
 				t.Fatalf("%s: program printed %q (%v)", name, out, err)
 			}
+			linked := v.linked && raised
 			data, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)
@@ -163,21 +177,33 @@ func TestKernelEqualFailureProbes(t *testing.T) {
 				if r.Origin != 0 && r.Origin != from[i] {
 					t.Fatalf("%s: reason %d came from occurrence %d; its recorded origin %d belongs to another reason", name, i, from[i], r.Origin)
 				}
-				if v.linked != (r.Origin == from[i]) {
-					t.Fatalf("%s: reason %d origin %d, source %d; want linked=%v", name, i, r.Origin, from[i], v.linked)
+				if linked != (r.Origin != 0 && r.Origin == from[i]) {
+					t.Fatalf("%s: reason %d origin %d, source %d; want linked=%v", name, i, r.Origin, from[i], linked)
 				}
 			}
 			text := strings.Join(ev.CauseTrace, "\n")
-			if !v.linked {
-				want := "origin not recorded: 2 reasons of this exit carry an equal calls.Missing, and the runtime cannot tell which occurrence each came from"
-				if strings.Count(text, want) != 2 {
-					t.Errorf("%s: cause trace lacks the ambiguity, twice:\n%s", name, text)
+			// The recording names failures by type only: the answer never
+			// claims the values were equal.
+			if strings.Contains(text, "equal") {
+				t.Errorf("%s: cause trace claims equality the recording does not hold:\n%s", name, text)
+			}
+			if linked {
+				continue
+			}
+			want := "origin not recorded: 2 reasons of this exit have the same error type calls.Missing, and no event links this one"
+			if strings.Count(text, want) != 2 {
+				t.Errorf("%s: cause trace lacks the shared type, twice:\n%s", name, text)
+			}
+			if !raised {
+				if strings.Count(text, "no candidate in the trace") != 2 {
+					t.Errorf("%s: cause trace names a candidate for failures no event raised:\n%s", name, text)
 				}
-				for _, id := range from {
-					seq := ev.Events[slices.IndexFunc(ev.Events, func(e TraceEvent) bool { return e.ID == id })].Seq
-					if !strings.Contains(text, "one of: ") || !strings.Contains(text, "seq "+strconv.FormatUint(seq, 10)+")") {
-						t.Errorf("%s: cause trace does not name occurrence %d (seq %d) as a candidate:\n%s", name, id, seq, text)
-					}
+				continue
+			}
+			for _, id := range from {
+				seq := ev.Events[slices.IndexFunc(ev.Events, func(e TraceEvent) bool { return e.ID == id })].Seq
+				if !strings.Contains(text, "candidate by type only: ") || !strings.Contains(text, "seq "+strconv.FormatUint(seq, 10)+")") {
+					t.Errorf("%s: cause trace does not name occurrence %d (seq %d) as a candidate:\n%s", name, id, seq, text)
 				}
 			}
 		}
