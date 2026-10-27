@@ -416,15 +416,15 @@ func TestTotalityCost(t *testing.T) {
 		t.Logf("subjects=%d bytes=%d elapsed=%s", n, len(src), elapsed)
 	}
 	// An even cycle is two-colourable with unequal neighbours: not total, and
-	// the alternating vector is the witness. Its closing edge's two cases are
-	// unreachable (the path before them already forces x0 != x19), and the
-	// function, whose switch is not total, can reach its end (S107).
+	// an alternating vector is the witness. Its closing edge's two cases are
+	// unreachable (the path before them already forces x0 != x19). No S107
+	// follows the S103 (D3; round-2 N1).
 	src := oddCycleSwitch(20)
 	_, diags := check.CheckSource(src)
-	if got := codesOf(diags); got != "S103 S108 S108 S107" {
-		t.Fatalf("even cycle: want S103 S108 S108 S107, got %s", describe(diags))
+	if got := codesOf(diags); got != "S103 S108 S108" {
+		t.Fatalf("even cycle: want S103 S108 S108, got %s", describe(diags))
 	}
-	if !strings.Contains(diags[0].Message, "(main.A, main.B, main.A, main.B") {
+	if !strings.Contains(diags[0].Message, "(main.A, main.B, main.A, main.B") && !strings.Contains(diags[0].Message, "(main.B, main.A, main.B, main.A") {
 		t.Fatalf("even cycle: want an alternating witness, got %s", diags[0].Message)
 	}
 }

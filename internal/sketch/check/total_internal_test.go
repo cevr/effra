@@ -5,14 +5,14 @@ import (
 	"testing"
 )
 
-// TestMatrixSolverAgreesWithEnumeration cross-checks the pruned,
-// memoized solver (M8) against brute-force enumeration of every value
-// vector, over random small case matrices: pruning and memoization must
-// change no answer.
+// TestMatrixSolverAgreesWithEnumeration cross-checks the solver (column
+// choice, canonical memo, pruning) against brute-force enumeration of every
+// value vector, over random small case matrices (up to 6 subjects of up to
+// 3 variants): no answer changes, and no small case reaches the budget.
 func TestMatrixSolverAgreesWithEnumeration(t *testing.T) {
 	rng := rand.New(rand.NewSource(196))
 	for trial := 0; trial < 20000; trial++ {
-		cols := 1 + rng.Intn(4)
+		cols := 1 + rng.Intn(6)
 		sizes := make([]int, cols)
 		for j := range sizes {
 			sizes[j] = 1 + rng.Intn(3)
@@ -28,12 +28,16 @@ func TestMatrixSolverAgreesWithEnumeration(t *testing.T) {
 			}
 			return r
 		}
-		s := newMatrixSolver()
+		s := newMatrixSolver(sizes)
 		var matrix, all [][]int
-		for k := rng.Intn(7); k > 0; k-- {
+		for k := rng.Intn(9); k > 0; k-- {
 			q := randRow()
 			want := enumUseful(all, q, sizes)
-			if got := s.caseUseful(matrix, q, sizes); got != want {
+			got, ok := s.caseUseful(matrix, q)
+			if !ok {
+				t.Fatalf("trial %d: a small case reached the budget", trial)
+			}
+			if got != want {
 				t.Fatalf("trial %d: useful(%v, %v, sizes %v) = %v, enumeration says %v", trial, all, q, sizes, got, want)
 			}
 			if want {
@@ -41,7 +45,10 @@ func TestMatrixSolverAgreesWithEnumeration(t *testing.T) {
 				all = append(all, q)
 			}
 		}
-		w, ok := s.missing(matrix, sizes)
+		w, ok, proved := s.total(matrix)
+		if !proved {
+			t.Fatalf("trial %d: a small switch reached the budget", trial)
+		}
 		wantOK := enumUseful(all, wild(cols), sizes)
 		if ok != wantOK {
 			t.Fatalf("trial %d: missing(%v, sizes %v) ok = %v, enumeration says %v", trial, all, sizes, ok, wantOK)
