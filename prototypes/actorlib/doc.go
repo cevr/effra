@@ -21,8 +21,9 @@
 //     OTP and Akka Typed. [Ask] types the reply from the message constructor
 //     alone, so a wrong reply type is a Go compile error.
 //   - [StartMachine] is a machine-backed actor written on top of Start.
-//   - [StartAgent] and [Call] serve any state type with typed calls whose
-//     reply is the call's return value (Elixir Agent).
+//   - [StartAgent] and [Call] serve any state type with typed calls on a lent
+//     *S, whose reply is the call's return value (Elixir Agent). A call runs on
+//     the agent's task and receives it, so its waits observe the stop.
 //
 // # Lowering conventions
 //
@@ -30,5 +31,8 @@
 // lowers to Go's error; a lone typed failure is returned as itself. A resource
 // that Effra releases at scope end lowers to a Close call on every path where
 // it is still owned. A message struct with a [Reply] field gets the generated
-// Close of resources.md R3, which closes the reply.
+// Close of resources.md R3, which closes the reply. A value that crosses
+// from one task to another (a message, a reply, an agent result, a state
+// snapshot) is copied by snapshot, the stand-in for the copy the compiler
+// emits per type (runtime.md Tasks rule 6).
 package actorlib

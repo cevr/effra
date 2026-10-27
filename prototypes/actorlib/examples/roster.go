@@ -71,9 +71,9 @@ func rosterHandler(_ *rt.Task, r Room, m RosterMsg) (actorlib.Next[Room], error)
 		m.Reply.Send(int64(len(r.names)))
 		return actorlib.Continue(r), nil
 	case Members:
-		// Value semantics: the reply is a snapshot, never the state's backing
-		// array (Q7).
-		m.Reply.Send(slices.Clone(r.names))
+		// Value semantics: Reply.Send copies, so the reply never shares the
+		// state's backing array (Q7).
+		m.Reply.Send(r.names)
 		return actorlib.Continue(r), nil
 	}
 	panic("unreachable: RosterMsg is sealed")
@@ -106,46 +106,46 @@ func RoomMembers(t *rt.Task, room actorlib.Address[RosterMsg]) ([]string, error)
 }
 
 // The agent form of the roster: roster-agent.go.sketch. The protocol is the
-// methods of Room; there is no message union and no reply address.
+// methods of Room, which take a lent *Room receiver; there is no message
+// union and no reply address.
 
-// Join lowers `func (r Room) Join(name string) (Room, int64, error[RoomFull])`.
-func (r Room) Join(name string) (Room, int64, error) {
+// Join lowers `func (r *Room) Join(name string) (int64, error[RoomFull])`.
+func (r *Room) Join(name string) (int64, error) {
 	if int64(len(r.names)) >= r.limit {
-		return r, 0, RoomFull{Limit: r.limit}
+		return 0, RoomFull{Limit: r.limit}
 	}
-	r.names = append(slices.Clone(r.names), name)
-	return r, int64(len(r.names)), nil
+	r.names = append(r.names, name)
+	return int64(len(r.names)), nil
 }
 
-// Leave lowers `func (r Room) Leave(name string) (Room, int64)`.
-func (r Room) Leave(name string) (Room, int64) {
+// Leave lowers `func (r *Room) Leave(name string) int64`.
+func (r *Room) Leave(name string) int64 {
 	if i := slices.Index(r.names, name); i >= 0 {
-		r.names = slices.Delete(slices.Clone(r.names), i, i+1)
+		r.names = slices.Delete(r.names, i, i+1)
 	}
-	return r, int64(len(r.names))
+	return int64(len(r.names))
 }
+
+// Members lowers `func (r *Room) Members() []string`. The result leaves the
+// agent through Call, which copies it.
+func (r *Room) Members() []string { return r.names }
 
 // StartRoomAgent lowers `actor.StartAgent(Room{limit: limit}, 64)`.
 func StartRoomAgent(s *rt.Scope, limit int64, capacity int) actorlib.Agent[Room] {
 	return actorlib.StartAgent(s, "room-agent", Room{limit: limit}, capacity)
 }
 
-// AgentJoin lowers the agent sketch's `JoinRoom`.
+// AgentJoin lowers `actor.Call(room, func(r *Room) (int64, error[RoomFull]) { return r.Join(name) })`.
 func AgentJoin(t *rt.Task, room actorlib.AgentAddress[Room], name string) (int64, error) {
-	return actorlib.Call(t, room, func(r Room) (Room, int64, error) { return r.Join(name) })
+	return actorlib.Call(t, room, func(_ *rt.Task, r *Room) (int64, error) { return r.Join(name) })
 }
 
-// AgentLeave lowers the agent sketch's `LeaveRoom`.
+// AgentLeave lowers `actor.Call(room, func(r *Room) int64 { return r.Leave(name) })`.
 func AgentLeave(t *rt.Task, room actorlib.AgentAddress[Room], name string) (int64, error) {
-	return actorlib.Call(t, room, func(r Room) (Room, int64, error) {
-		next, n := r.Leave(name)
-		return next, n, nil
-	})
+	return actorlib.Call(t, room, func(_ *rt.Task, r *Room) (int64, error) { return r.Leave(name), nil })
 }
 
-// AgentMembers lowers the agent sketch's `RoomMembers`.
+// AgentMembers lowers `actor.Call(room, func(r *Room) []string { return r.Members() })`.
 func AgentMembers(t *rt.Task, room actorlib.AgentAddress[Room]) ([]string, error) {
-	return actorlib.Call(t, room, func(r Room) (Room, []string, error) {
-		return r, slices.Clone(r.names), nil
-	})
+	return actorlib.Call(t, room, func(_ *rt.Task, r *Room) ([]string, error) { return r.Members(), nil })
 }

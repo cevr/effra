@@ -8,8 +8,9 @@ import (
 )
 
 // Stopped is the typed failure of a request the actor refused or discarded
-// because it was stopping or had ended: a Send to a stopped actor, a queued
-// request discarded by Stop, and a reply released while the actor stopped.
+// because it was stopping or had ended: a Send after the stop was requested, a
+// queued request discarded by the stop, and a reply released while the actor
+// stopped.
 type Stopped struct{}
 
 func (Stopped) Error() string { return "actor stopped" }
@@ -40,8 +41,8 @@ const (
 // outcome is one answer in a reply slot: a value, a typed failure or a
 // refusal. It is the lowering of the Exit[T, E] value the sketch names
 // (research note, Gap A7). The failure is held as its own type E, not as a Go
-// error, so an outcome of pointer-free T and E is pointer-free and its slot is
-// one allocation.
+// error, so an outcome of pointer-free T and E is pointer-free and its
+// channel is one allocation.
 type outcome[T any, E error] struct {
 	v    T
 	e    E
@@ -62,61 +63,144 @@ func (o outcome[T, E]) result() (T, error) {
 	}
 }
 
+// release releases what the outcome owns: the value of an answer or the
+// failure of a failed answer. A refusal owns nothing.
+func (o outcome[T, E]) release() {
+	switch o.kind {
+	case answered:
+		release(o.v)
+	case failed:
+		release(o.e)
+	}
+}
+
+const (
+	slotOpen uint32 = iota
+	slotAnswered
+	slotAbandoned
+)
+
+// slot is a one-shot handoff from the answering side to one receiver. Its
+// state makes the handoff cancellation-safe: the first answer wins and is
+// delivered, unless the receiver has abandoned the slot; every other answer,
+// and an answer nobody can receive, is released (research note, Gap A3: a
+// value nobody can receive is released). Tokio's oneshot has the same two
+// halves: a dropped sender completes the receiver, a dropped receiver
+// releases the value.
+type slot[T any, E error] struct {
+	state atomic.Uint32
+	ch    chan outcome[T, E] // capacity 1: an answer never blocks
+	from  *control
+}
+
+func newSlot[T any, E error](from *control) *slot[T, E] {
+	return &slot[T, E]{ch: make(chan outcome[T, E], 1), from: from}
+}
+
+// answer delivers o, or releases it when the slot is answered or abandoned.
+func (s *slot[T, E]) answer(o outcome[T, E]) {
+	if s.state.CompareAndSwap(slotOpen, slotAnswered) {
+		s.ch <- o
+		return
+	}
+	o.release()
+}
+
+// abandon is the release of the receiving end: an answer that arrived first
+// is taken and released, and a later one will be released by answer.
+func (s *slot[T, E]) abandon() {
+	if s.state.CompareAndSwap(slotOpen, slotAbandoned) {
+		return
+	}
+	(<-s.ch).release() // answered: the answer is buffered or about to be
+}
+
+// receive waits for the answer. It is an interruption point (I1): when t is
+// stopped first, the receiver detaches and abandons the slot, and stop wins
+// over an answer that raced it.
+func (s *slot[T, E]) receive(t *rt.Task) (T, error) {
+	select {
+	case o := <-s.ch:
+		return o.result()
+	case <-t.Done():
+		s.abandon()
+		var zero T
+		return zero, rt.Interrupted
+	}
+}
+
 // Reply is a one-shot reply address carried in a message: actor.Reply[T, E]
 // in the sketch. It is a resource (resources.md R1): Send and Fail consume it,
 // and its Close, which an owner scope runs when the reply is released
 // unanswered, answers NoReply, or Stopped when the actor is stopping. The
 // first answer wins; the checker makes a second answer a use after consume
-// (R20), and the lowering drops it without blocking.
-type Reply[T any, E error] struct {
-	slot chan outcome[T, E]
-	from *control
-}
+// (R20), and the lowering releases it. A Reply is one pointer, so a message
+// variant holding only a Reply is pointer-shaped and boxes for free.
+type Reply[T any, E error] struct{ s *slot[T, E] }
 
 // Send answers the request with v.
-func (r Reply[T, E]) Send(v T) { r.answer(outcome[T, E]{v: v}) }
+func (r Reply[T, E]) Send(v T) {
+	if r.s == nil {
+		release(v)
+		return
+	}
+	r.s.answer(outcome[T, E]{v: snapshot(v)}) // a copy: the state keeps its own value
+}
 
 // Fail answers the request with the typed failure e.
-func (r Reply[T, E]) Fail(e E) { r.answer(outcome[T, E]{e: e, kind: failed}) }
+func (r Reply[T, E]) Fail(e E) {
+	if r.s == nil {
+		release(e)
+		return
+	}
+	r.s.answer(outcome[T, E]{e: e, kind: failed})
+}
 
 // Close answers an unanswered request with NoReply, or Stopped when the actor
-// is stopping or has ended. After Send or Fail it has no effect on the caller.
+// is stopping or has ended. After Send or Fail it has no effect.
 func (r Reply[T, E]) Close() {
-	if r.slot == nil {
+	if r.s == nil {
 		return
 	}
-	r.answer(outcome[T, E]{kind: r.from.refusal()})
+	r.s.answer(outcome[T, E]{kind: r.s.from.refusal()})
 }
 
-// answer never blocks: the slot has capacity one, so the first answer is
-// buffered for the caller, or the caller has already taken an answer and a
-// late one is garbage.
-func (r Reply[T, E]) answer(o outcome[T, E]) {
-	if r.slot == nil {
-		return
-	}
-	select {
-	case r.slot <- o:
-	default:
-	}
-}
-
-// control is the part of an actor that a reply needs to choose its refusal,
-// and that senders need to stop waiting.
+// control is the part of an actor that replies and senders share.
 type control struct {
-	// mu fences admission: a sender holds it shared while it admits a
-	// message, and shutdown takes it exclusively once, so that no message is
-	// admitted after the drain and every admitted message is released.
+	// mu fences admission. A sender holds it shared while it admits a
+	// message; closeAdmission takes it exclusively once. After that no
+	// message is admitted, so every admitted message is handled or released
+	// by the drain.
 	mu     sync.RWMutex
 	closed bool // guarded by mu
 
-	ended    atomic.Bool
-	stopping chan struct{} // closed when the actor ends: wakes blocked senders
+	closing  atomic.Bool   // admission closed or closing
+	ended    atomic.Bool   // the loop has ended or is ending
+	stopOnce sync.Once     // closes stopping
+	stopping chan struct{} // closed with admission: wakes blocked senders
 	task     *rt.Task      // the actor's task, set before Start returns
 }
 
+// closeAdmission refuses every later Send and wakes every waiting sender. It
+// runs at stop initiation (Actor.Stop) and again, idempotently, when the loop
+// ends for any reason.
+func (c *control) closeAdmission() {
+	c.closing.Store(true)
+	c.stopOnce.Do(func() { close(c.stopping) })
+	c.mu.Lock()
+	c.closed = true
+	c.mu.Unlock()
+}
+
+// refused reports whether admission is refused: closed, or a stop requested
+// on the actor's task by any path (Stop, the owner scope's end, a stop of an
+// ancestor task).
+func (c *control) refused() bool {
+	return c.closed || c.task.StopRequested()
+}
+
 func (c *control) refusal() kind {
-	if c.ended.Load() || c.task.StopRequested() {
+	if c.ended.Load() || c.closing.Load() || c.task.StopRequested() {
 		return refusedStopped
 	}
 	return refusedNoReply
@@ -128,22 +212,28 @@ type cell[M any] struct {
 }
 
 // Address is the copyable half of an actor: Send and Ask. It is not a
-// resource and does not keep the actor running. After the actor ends, Send
-// and Ask fail with Stopped.
+// resource and does not keep the actor running. After the stop is requested,
+// Send and Ask fail with Stopped.
 type Address[M any] struct{ c *cell[M] }
 
 // Send admits m, waiting while the mailbox is full. It is an interruption
-// point (I1). It fails with Stopped when the actor is stopping or has ended,
+// point (I1). It fails with Stopped when the actor's stop has been requested,
 // and with rt.Interrupted when t is stopped first. Send consumes m: on
 // failure it releases m, so a reply inside it is answered.
+//
+// A sender that started waiting on a full mailbox before a stop that came
+// from outside Actor.Stop (an ancestor's stop) may complete its send while the
+// loop winds down; the drain then releases that message as a queued request.
+// Actor.Stop closes admission before it interrupts, so it has no such window.
 func (a Address[M]) Send(t *rt.Task, m M) error {
 	if t.Stopped() {
 		release(m)
 		return rt.Interrupted
 	}
+	m = snapshot(m) // a copy: the sender keeps its own value; a resource moves
 	c := a.c
 	c.mu.RLock()
-	if c.closed {
+	if c.refused() {
 		c.mu.RUnlock()
 		release(m)
 		return Stopped{}
@@ -174,20 +264,15 @@ func (a Address[M]) Send(t *rt.Task, m M) error {
 // request's parameter alone, so a message that carries a reply of another
 // type is a compile error. The exit is the answer's value, its typed failure
 // E, Stopped, NoReply, or rt.Interrupted when t is stopped while it waits;
-// the caller then detaches and the actor's late answer is dropped.
+// the caller then detaches, and the actor's late answer is released.
 func Ask[M, T any, E error](t *rt.Task, to Address[M], request func(Reply[T, E]) M) (T, error) {
-	slot := make(chan outcome[T, E], 1)
-	if err := to.Send(t, request(Reply[T, E]{slot: slot, from: &to.c.control})); err != nil {
+	s := newSlot[T, E](&to.c.control)
+	if err := to.Send(t, request(Reply[T, E]{s})); err != nil {
+		s.abandon()
 		var zero T
 		return zero, err
 	}
-	select {
-	case o := <-slot:
-		return o.result()
-	case <-t.Done():
-		var zero T
-		return zero, rt.Interrupted
-	}
+	return s.receive(t)
 }
 
 // Next is a handler's decision: continue with a state, or end the actor
@@ -228,7 +313,8 @@ func Start[S, M any](s *rt.Scope, span string, initial S, capacity int, handle H
 	c := &cell[M]{mailbox: make(chan M, capacity)}
 	c.stopping = make(chan struct{})
 	h := rt.Go(s, span, func(t *rt.Task) (struct{}, error) {
-		return struct{}{}, serve(t, c, initial, handle)
+		l := loop[S, M]{c: c, s: initial, owned: true}
+		return struct{}{}, l.serve(t, handle)
 	})
 	c.task = h.Task()
 	return Actor[M]{addr: Address[M]{c}, h: h, owner: s.Task()}
@@ -240,12 +326,14 @@ func (a Actor[M]) Address() Address[M] { return a.addr }
 // Send is a.Address().Send.
 func (a Actor[M]) Send(t *rt.Task, m M) error { return a.addr.Send(t, m) }
 
-// Stop interrupts the actor and waits until it has ended: its in-flight
-// handler has stopped at its next interruption point, queued requests are
-// answered Stopped and its state is released. It returns the actor's exit
-// without the interruption Stop caused: nil, the typed failure that ended the
-// actor before the stop, and any defect. Stop consumes the handle.
+// Stop closes admission, interrupts the actor and waits until it has ended:
+// its in-flight handler has stopped at its next interruption point, queued
+// requests are answered Stopped and its state is released. It returns the
+// actor's exit without the interruption Stop caused: nil, the typed failure
+// that ended the actor before the stop, and every defect, in order. Stop
+// consumes the handle.
 func (a Actor[M]) Stop() error {
+	a.addr.c.closeAdmission()
 	a.h.Task().Interrupt()
 	_, err := a.h.Wait()
 	if a.owner.Stopped() {
@@ -254,27 +342,35 @@ func (a Actor[M]) Stop() error {
 	return dropInterruption(err)
 }
 
-func serve[S, M any](t *rt.Task, c *cell[M], s S, handle Handler[S, M]) (err error) {
-	owned := true // the loop owns s except while a handler holds it
-	defer func() {
-		c.shutdown()
-		if owned {
-			release(s)
-		}
-	}()
+// loop is the actor's task body and what it owns.
+type loop[S, M any] struct {
+	c       *cell[M]
+	s       S
+	owned   bool // the loop owns s, except while a handler holds it
+	held    M    // a message dequeued after the stop was requested
+	holding bool
+}
+
+func (l *loop[S, M]) serve(t *rt.Task, handle Handler[S, M]) (err error) {
+	defer l.finish(t, &err)
 	done := t.Done()
 	for {
 		if t.Stopped() {
 			return rt.Interrupted
 		}
 		select {
-		case m := <-c.mailbox:
-			owned = false
-			next, err := handle(t, s, m)
+		case m := <-l.c.mailbox:
+			if t.StopRequested() {
+				// Dequeued as the stop arrived: it is a queued request.
+				l.held, l.holding = m, true
+				return rt.Interrupted
+			}
+			l.owned = false
+			next, err := handle(t, l.s, m)
 			if err != nil {
 				return err
 			}
-			s, owned = next.state, true
+			l.s, l.owned = next.state, true
 			if next.end {
 				return nil
 			}
@@ -284,28 +380,66 @@ func serve[S, M any](t *rt.Task, c *cell[M], s S, handle Handler[S, M]) (err err
 	}
 }
 
-// shutdown refuses admission and releases every queued message, so a queued
-// request is answered Stopped. It runs on every exit of the loop.
-func (c *cell[M]) shutdown() {
-	c.ended.Store(true)
-	close(c.stopping)
-	c.mu.Lock()
-	c.closed = true
-	c.mu.Unlock()
-	var first any
+// finish runs on every exit of the loop, masked (I2). It keeps the body's
+// exit, a body panic and every release defect in one cause, in order, and
+// runs every release even after an earlier one panicked (R9): admission
+// closes, the queued messages are released (a queued request is answered
+// Stopped), then the state.
+//
+// The cause is built only when a panic must be recorded, so a clean stop
+// allocates nothing here and leaves the body's exit as it is.
+func (l *loop[S, M]) finish(t *rt.Task, err *error) {
+	ex := exit{t: t, body: *err}
+	if p := recover(); p != nil {
+		ex.panicked(p, false)
+	}
+	mask := t.Mask()
+	l.c.ended.Store(true)
+	l.c.closeAdmission()
+	if l.holding {
+		releaseInto(&ex, l.held)
+	}
 	for {
 		select {
-		case m := <-c.mailbox:
-			if p := releaseRecovering(m); p != nil && first == nil {
-				first = p
-			}
+		case m := <-l.c.mailbox:
+			releaseInto(&ex, m)
+			continue
 		default:
-			if first != nil {
-				panic(first) // the task boundary records it as a defect
-			}
-			return
 		}
+		break
 	}
+	if l.owned {
+		releaseInto(&ex, l.s)
+	}
+	mask.Unmask()
+	*err = ex.err()
+}
+
+// exit accumulates a loop's exit: the body's exit, then each panic in order.
+type exit struct {
+	t     *rt.Task
+	body  error
+	cause *rt.Cause // nil until the first panic
+}
+
+func (e *exit) panicked(p any, inRelease bool) {
+	if e.cause == nil {
+		e.cause = new(rt.Cause)
+		e.cause.Add(e.body)
+	}
+	if p == rt.Interrupted && !inRelease {
+		e.cause.AddInterruption()
+		return
+	}
+	e.cause.AddDefect(e.t, p)
+	e.cause.Reasons[len(e.cause.Reasons)-1].InRelease = inRelease
+}
+
+func (e *exit) err() error {
+	if e.cause == nil {
+		return e.body
+	}
+	return e.cause.Err()
 }
 
 // release is the release of a value whose type is a type parameter: the
@@ -316,10 +450,15 @@ func release[V any](v V) {
 	}
 }
 
-func releaseRecovering[V any](v V) (p any) {
-	defer func() { p = recover() }()
+// releaseInto releases v and records a panic in its Close as a release
+// defect, after the reasons already in e (R9).
+func releaseInto[V any](e *exit, v V) {
+	defer func() {
+		if p := recover(); p != nil {
+			e.panicked(p, true)
+		}
+	}()
 	release(v)
-	return nil
 }
 
 // dropInterruption removes the interruption a stop caused from an exit and

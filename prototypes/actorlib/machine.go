@@ -30,8 +30,11 @@ func (Reject[S, O]) decision(S, O) {}
 func (Done[S, O]) decision(S, O)   {}
 
 // Machine is the value of a `machine[S, E]` declaration: its initial state
-// and its step. Step's requirements are captured where the value is built
-// (the sketch's `uses R` on step), so a machine value is a plain value.
+// and its step. The step's whole signature is in the type: its state S, event
+// E and output O as type arguments, its failure row F erased to Go's error,
+// and its requirement row R captured where the value is built (the sketch's
+// Machine[S, E, O, F, R], research note O1). A machine value is a plain
+// value.
 type Machine[S, E, O any] struct {
 	Initial S
 	Step    func(t *rt.Task, s S, e E) (Decision[S, O], error)
@@ -50,15 +53,15 @@ type event[S, E, O any] struct {
 	reply Reply[Decision[S, O], error]
 }
 
-// snapshot asks for the current state.
-type snapshot[S, E, O any] struct{ reply Reply[S, Never] }
+// stateQuery asks for a snapshot of the current state.
+type stateQuery[S, E, O any] struct{ reply Reply[S, Never] }
 
-func (event[S, E, O]) machineMsg(S, E, O)    {}
-func (snapshot[S, E, O]) machineMsg(S, E, O) {}
+func (event[S, E, O]) machineMsg(S, E, O)      {}
+func (stateQuery[S, E, O]) machineMsg(S, E, O) {}
 
 // Close is the generated release of a struct with a resource field (R3).
-func (m event[S, E, O]) Close()    { m.reply.Close() }
-func (m snapshot[S, E, O]) Close() { m.reply.Close() }
+func (m event[S, E, O]) Close()      { m.reply.Close() }
+func (m stateQuery[S, E, O]) Close() { m.reply.Close() }
 
 // MachineActor is the owner handle of a machine-backed actor.
 type MachineActor[S, E, O any] struct {
@@ -75,7 +78,8 @@ type MachineAddress[S, E, O any] struct {
 // and the handler applies the step's decision. A step failure goes to the
 // asker and leaves the state unchanged; a failing Send has no asker, so the
 // failure ends the actor and Stop returns it. Done answers the asker, then
-// ends the actor.
+// ends the actor. The state snapshot and every decision sent to an asker are
+// copies (snapshot): the actor keeps the only reference to its state.
 func StartMachine[S, E, O any](s *rt.Scope, span string, m Machine[S, E, O], capacity int) MachineActor[S, E, O] {
 	handle := func(t *rt.Task, st S, msg machineMsg[S, E, O]) (Next[S], error) {
 		switch msg := msg.(type) {
@@ -85,7 +89,7 @@ func StartMachine[S, E, O any](s *rt.Scope, span string, m Machine[S, E, O], cap
 			defer msg.Close()
 			d, err := m.Step(t, st, msg.ev)
 			if err != nil {
-				if f, ok := rt.Failure(err); ok && msg.reply.slot != nil {
+				if f, ok := rt.Failure(err); ok && msg.reply.s != nil {
 					msg.reply.Fail(f)
 					return Continue(st), nil
 				}
@@ -100,13 +104,15 @@ func StartMachine[S, E, O any](s *rt.Scope, span string, m Machine[S, E, O], cap
 			case Done[S, O]:
 				end = true
 			}
-			msg.reply.Send(d)
+			if msg.reply.s != nil {
+				msg.reply.Send(d) // Reply.Send copies (snapshot)
+			}
 			if end {
 				return End(st), nil
 			}
 			return Continue(st), nil
-		case snapshot[S, E, O]:
-			msg.reply.Send(st)
+		case stateQuery[S, E, O]:
+			msg.reply.Send(st) // a snapshot: Reply.Send copies
 			return Continue(st), nil
 		}
 		panic("unreachable: machineMsg is sealed")
@@ -149,6 +155,6 @@ func (b MachineAddress[S, E, O]) Ask(t *rt.Task, e E) (Decision[S, O], error) {
 // State returns a snapshot of the state.
 func (b MachineAddress[S, E, O]) State(t *rt.Task) (S, error) {
 	return Ask(t, b.a, func(r Reply[S, Never]) machineMsg[S, E, O] {
-		return snapshot[S, E, O]{reply: r}
+		return stateQuery[S, E, O]{reply: r}
 	})
 }
