@@ -181,6 +181,9 @@ func findKernelRoot(file, rtRoot string) (string, error) {
 	}
 	for _, dir := range starts {
 		gomod, found, err := sketch.EnclosingModule(dir)
+		if err != nil && found {
+			return "", fmt.Errorf("%w; pass -rtroot", err)
+		}
 		if err != nil {
 			return "", fmt.Errorf("finding the module that contains %s: %w; pass -rtroot", dir, err)
 		}
