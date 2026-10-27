@@ -2,7 +2,7 @@
 
 Labels: **Checked (prototype)** and **Proposed**.
 
-- **Checked (prototype)**: the program, the trace and the answer below were produced by the merged prototype compiler, from `prototypes/sketch9` at commit `8c988195`. Commands: `go run ./cmd/sketchc check testdata/trace/timeout.sketch` exits 0; `go run ./cmd/sketchc build -rt kernel testdata/trace/timeout.sketch -out gen -o timeout` builds the program; `EFFRA_TRACE=timeout.jsonl ./timeout` prints `gateway timed out` and records the run; `go run ./cmd/sketchc trace testdata/trace/timeout.sketch timeout.jsonl` prints the answer shown (trailing spaces trimmed). The call spans vary by run; the cause trace has no times.
+- **Checked (prototype)**: the program, the trace and the answer below were produced by the merged prototype compiler, from `prototypes/sketch9` at commit `ecc82507`. Commands: `go run ./cmd/sketchc check testdata/trace/timeout.sketch` exits 0; `go run ./cmd/sketchc build -rt kernel testdata/trace/timeout.sketch -out gen -o timeout` builds the program; `EFFRA_TRACE=timeout.jsonl ./timeout` prints `gateway timed out` and records the run; `go run ./cmd/sketchc trace testdata/trace/timeout.sketch timeout.jsonl` prints the answer shown (trailing spaces trimmed). The call spans vary by run; the cause trace has no times.
 - **Proposed**: `ef trace` and MCP `code.trace`, designed in [docs/research/traceability.md](../research/traceability.md#query-surface). The sketch is not in `ef` until #203.
 
 It does not claim a production tracer, an OpenTelemetry exporter, sampling for servers or values in events. The note lists those as follow-up units.
@@ -42,7 +42,7 @@ The agent runs the query against the checked file. The query validates the trace
 
 ```text
 $ go run ./cmd/sketchc trace testdata/trace/timeout.sketch timeout.jsonl
-trace of timeout.sketch at revision 3f777fe573d6 (recorder sketchc -rt kernel; schema effra-trace-2)
+trace of timeout.sketch at revision 3f777fe573d6 (recorder sketchc -rt kernel; schema effra-trace-3)
 events: 16 kept of capacity 4096, 0 dropped. Order is partial: seq is the recorder's arrival order; id is the runtime's emission order, in which an event that happens before another has the smaller id, though a smaller id alone does not mean happens-before.
 
 tasks
@@ -50,9 +50,9 @@ tasks
     #2 latency.checkout/timeout.After#1 (timeout block) at timeout.sketch:39:17, exit: interrupted
 
 capability calls (span: call to call-exit, on the recorder's clock)
-  id 3    task #1   latency.Orders.Find at timeout.sketch:38:15 in latency.checkout: ok, 900ns
-  id 6    task #2   host.Scheduler.Sleep at timeout.sketch:32:2 in latency.roundTrip: interrupted, 102.948398ms
-  id 14   task #1   host.Console.Println at timeout.sketch:78:2 in latency.report: ok, 45.519µs
+  id 3    task #1   latency.Orders.Find at timeout.sketch:38:15 in latency.checkout: ok, 3.01µs
+  id 6    task #2   host.Scheduler.Sleep at timeout.sketch:32:2 in latency.roundTrip: interrupted, 100.242099ms
+  id 14   task #1   host.Console.Println at timeout.sketch:78:2 in latency.report: ok, 75.609µs
 
 events
   seq  id   link  kind            task  def                                    site                   in
@@ -66,7 +66,7 @@ events
   7    8          cancel-request  #2    latency.checkout/timeout.After#1       timeout.sketch:39:17   latency.checkout
   8    9    6     call-exit       #2    host.Scheduler.Sleep                   timeout.sketch:32:2    latency.roundTrip -> interrupted
   9    10         interrupt       #2    latency.roundTrip                      timeout.sketch:32:2    latency.roundTrip
-  10   11   10    body-exit       #2    latency.checkout/timeout.After#1       timeout.sketch:39:17   latency.checkout -> interrupted
+  10   11         body-exit       #2    latency.checkout/timeout.After#1       timeout.sketch:39:17   latency.checkout -> interrupted (origins 8)
   11   12   11    observe         #2    latency.checkout/timeout.After#1       timeout.sketch:39:17   latency.checkout
   12   13   7     handler         #1    timeout.Expired                        timeout.sketch:75:2    latency.report
   13   14         call            #1    host.Console.Println                   timeout.sketch:78:2    latency.report
@@ -91,8 +91,8 @@ omissions
 
 The request timed out because the deadline of the timeout block `latency.checkout/timeout.After#1` passed before its body finished (seq 6). The block is `timeout.After(100ms)` at `timeout.sketch:39:17`, inside `latency.checkout`. The handler at `timeout.sketch:75:2` recorded that deadline as the occurrence it caught (its `link` is the deadline's `id`, 7), so this is not a guess from the error's type.
 
-- **Where the work was.** The block's task, #2, was in the capability call `host.Scheduler.Sleep` at `timeout.sketch:32:2`, inside `latency.roundTrip`: the call (id 6) started before the deadline (id 7) and its exit (id 9) came after. That line sleeps `2s`, twenty times the deadline; the call span shows it ended interrupted after about 103 ms.
-- **How it stopped.** The runtime requested the stop of task #2 (seq 7). The task observed it at the same sleep (seq 9) and exited interrupted (seq 10). No `call` event names `latency.Gateway.Authorize`, so the gateway was never called, and `latency.GatewayDown` appears nowhere: the gateway did not fail.
+- **Where the work was.** The block's task, #2, was in the capability call `host.Scheduler.Sleep` at `timeout.sketch:32:2`, inside `latency.roundTrip`: the call (id 6) started before the deadline (id 7) and its exit (id 9) came after. That line sleeps `2s`, twenty times the deadline; the call span shows it ended interrupted after about 100 ms.
+- **How it stopped.** The runtime requested the stop of task #2 (seq 7, id 8). The task observed it at the same sleep (seq 9) and exited interrupted (seq 10); that exit names the request as the origin of its interruption (`origins 8`), a link the runtime recorded. No `call` event names `latency.Gateway.Authorize`, so the gateway was never called, and `latency.GatewayDown` appears nowhere: the gateway did not fail.
 - **How it reached the output.** `timeout.After` then failed with `timeout.Expired`. That error is in the block's row `error[latency.GatewayDown | timeout.Expired]` and in the declared row of `latency.checkout`. The catch arm in `latency.report` at `timeout.sketch:75:2` handled it (seq 12) and printed "gateway timed out". The root task `latency.main` exited with success.
 - **What to change.** Give the block a deadline above the round trip, or make `latency.roundTrip` faster. The trace does not show the gateway's own latency, because the call was never made.
 

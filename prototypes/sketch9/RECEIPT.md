@@ -262,3 +262,22 @@ The "without" binary is the same emitted program with the trace switch removed b
 | `testdata/trace/checkout.sketch` | 12 | 1,768 | 3.00 / 2.73 | 2,674,231 / 2,611,499 / 2,548,840 |
 | `testdata/trace/timeout.sketch` | 16 | 2,400 | 106.61 / 108.23 | 2,675,381 / 2,612,177 / 2,549,215 |
 | `testdata/trace/failure.sketch` | 11 | 1,716 | 3.27 / 2.91 | 2,669,014 / 2,610,594 / 2,544,058 |
+
+## Round 3: one origin per exit reason
+
+| Command (from the worktree root) | Exit |
+| --- | --- |
+| `bash /home/exedev/.cache/baton/wf10/trace-188/accept.sh` | see `accept-r3.log` |
+| `./scripts/gate.sh` | see `gate-r3.log` |
+| `cd prototypes/sketch9 && go vet ./... && go test -count=1 ./...` | 0 |
+
+- Schema `effra-trace-3`: a `body-exit` has no `link`; each reason of its cause carries its own `origin`. `sketch/trace.go` checks each origin against the reason it explains (`checkOrigins`), refuses a `body-exit` link, and explains each reason from its own origin; a reason without one says "origin not recorded". The events table prints the origins.
+- `TestQueryTraceRefuses` adds nine origin cases, among them a failure whose origin is a cleanup panic (the second review's compound case). `TestQueryTraceExplainsEachReason` checks the cause traces of a failure with two cleanup defects, a failure without an origin beside a cleanup defect, and a failure with an interruption.
+- `testdata/trace/two-calls.jsonl` and `two-timeouts.jsonl` were re-recorded with the round-3 runtime; their cause traces are unchanged.
+- The second review's native probes, rerun against real `rt.Scoped`, `rt.Run` and `Check`: the compound exit names the failed call for the failure and the release panic for the defect; the release call and the interrupted call each end with a `call-exit` (`round-3-receipts/native-*.log` in the unit directory).
+
+| Example (`examples-r3.txt`) | Events | Trace bytes | Wall median off / on (ms) | Binary, kernel with switch / without / embedded (bytes) |
+| --- | --- | --- | --- | --- |
+| `testdata/trace/checkout.sketch` | 12 | 1,768 | 3.60 / 3.58 | 2,686,611 / 2,623,434 / 2,548,840 |
+| `testdata/trace/timeout.sketch` | 16 | 2,401 | 105.42 / 104.69 | 2,687,625 / 2,632,200 / 2,549,215 |
+| `testdata/trace/failure.sketch` | 11 | 1,718 | 2.53 / 2.48 | 2,685,922 / 2,623,105 / 2,544,058 |
