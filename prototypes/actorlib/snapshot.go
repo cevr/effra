@@ -30,8 +30,8 @@ func snapshot[V any](v V) V {
 		return v
 	}
 	if t.Kind() == reflect.Interface {
-		d := reflect.TypeOf(any(v)) // V is an interface type: no allocation
-		if d == nil || planFor(d) == planNone {
+		d := reflect.ValueOf(any(v)) // V is an interface type: no allocation
+		if !d.IsValid() || !needsCopy(d) {
 			return v
 		}
 	}
