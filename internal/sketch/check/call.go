@@ -363,6 +363,41 @@ func (in *inferer) unify(p, a Type) {
 		if ap, ok := a.(*Pointer); ok {
 			in.unify(p.Elem, ap.Elem)
 		}
+	case *Struct:
+		// Field by field when the field names agree, as go/types unifies
+		// struct types (round 5, differential test).
+		as, ok := under(a).(*Struct)
+		if !ok || len(as.Fields) != len(p.Fields) {
+			return
+		}
+		for i, f := range p.Fields {
+			if as.Fields[i].Name != f.Name {
+				return
+			}
+		}
+		for i, f := range p.Fields {
+			in.unify(f.Type, as.Fields[i].Type)
+		}
+	case *Interface:
+		// Method by method when the method names agree.
+		ai, ok := under(a).(*Interface)
+		if !ok || len(ai.Methods) != len(p.Methods) {
+			return
+		}
+		byName := make(map[string]*Method, len(ai.Methods))
+		for _, m := range ai.Methods {
+			byName[m.Name] = m
+		}
+		for _, m := range p.Methods {
+			if byName[m.Name] == nil {
+				return
+			}
+		}
+		for _, m := range p.Methods {
+			if am := byName[m.Name]; m.Sig != nil && am.Sig != nil {
+				in.unify(m.Sig, am.Sig)
+			}
+		}
 	case *Signature:
 		as, ok := under(a).(*Signature)
 		if !ok {
@@ -555,15 +590,14 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 	// The callee and its parentheses record the instantiated signature, as
 	// go/types records it, not the generic one recorded while they were
 	// checked (D1; round-3 M4). An explicit instantiation Id[int] records
-	// it on the index expression too.
+	// it on the index expression and the parentheses around it; the
+	// generic name inside keeps its generic type, as in go/types (round-4
+	// M3). An inferred call Id(1) records the instance on the name.
 	for f := x.Fun; f != nil; {
 		c.record(f, operand{mode: modeValue, typ: inst})
-		switch p := f.(type) {
-		case *syntax.ParenExpr:
+		if p, ok := f.(*syntax.ParenExpr); ok {
 			f = p.X
 			continue
-		case *syntax.IndexExpr:
-			c.record(p.X, operand{mode: modeValue, typ: inst})
 		}
 		break
 	}

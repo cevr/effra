@@ -188,8 +188,14 @@ func (c *checker) expr0(x syntax.Expr, hint Type) operand {
 		return c.basicLit(x)
 	case *syntax.ParenExpr:
 		// Parentheses keep what the operand denotes: (x) = 1 assigns x,
-		// as in Go (N4).
-		return c.expr(x.X, hint)
+		// as in Go (N4). A generic function is the exception: Go reads
+		// the inside of parentheses as a value, so (Fn)[int] and (Fn)(1)
+		// are errors there and (Fn[int]) is the instance (round 5).
+		op := c.expr(x.X, hint)
+		if op.mode == modeGeneric {
+			c.needValue(&op)
+		}
+		return op
 	case *syntax.CompositeLit:
 		return c.compositeLit(x, hint)
 	case *syntax.FuncLit:
