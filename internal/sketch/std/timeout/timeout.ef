@@ -1,0 +1,10 @@
+package timeout
+
+// Expired is the failure of a body that did not finish before its deadline.
+type Expired struct{}
+
+// After runs f as a child task and fails with Expired when d passes first
+// (docs/spec/runtime.md, Timeouts). It is an ordinary library function: a
+// trailing block is its f argument, and its row parameters give the rows
+// that the prototype gave timeout.After by name (README Gap 31).
+func After(d duration, f func() (A, error[E]) uses R) (A, error[E | Expired]) uses R, Scheduler
