@@ -2,7 +2,6 @@ package sketch
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -468,116 +467,6 @@ func TestQueryTraceLabelsCandidates(t *testing.T) {
 	}
 	if !slices.Equal(ev.CauseTrace, want) {
 		t.Errorf("cause trace\n%s\nwant\n%s", strings.Join(ev.CauseTrace, "\n"), strings.Join(want, "\n"))
-	}
-}
-
-// kernelRoot finds the checkout that holds runtime/rt above the test
-// (kernelVerdict).
-func kernelRoot(t *testing.T) string {
-	t.Helper()
-	root, skip, err := kernelVerdict(".")
-	if skip {
-		t.Skip("no checkout of " + KernelModule + " above the test")
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	return root
-}
-
-// kernelVerdict decides how a kernel test run from dir proceeds: with the
-// checkout root, by skipping, or by failing with err. It skips only when
-// there is no checkout at all (sketch9 copied elsewhere). Inside a checkout
-// it fails when the module is not KernelModule, or when go.mod is missing,
-// unreadable or declares no module: a skip there hid the #218 rename, when
-// every kernel test skipped silently.
-func kernelVerdict(dir string) (root string, skip bool, err error) {
-	c, found, err := FindCheckout(dir)
-	switch {
-	case !found:
-		return "", true, nil
-	case err != nil:
-		return "", false, fmt.Errorf("%v; kernel mode links %s (sketch.KernelModule)", err, KernelModule)
-	case c.Module != KernelModule:
-		return "", false, fmt.Errorf("the checkout at %s declares module %s, but kernel mode links %s (sketch.KernelModule); update KernelModule", c.Root, c.Module, KernelModule)
-	}
-	return c.Root, false, nil
-}
-
-// The skip/fail boundary of the kernel tests, from sketch9's layout in a
-// checkout: the nearest checkout is found by its runtime/rt or its module's
-// shape, sketch9's own go.mod is passed over, and once a checkout is found
-// any problem with its module is a failure that names it, never a skip. Only
-// a copy with no checkout structure skips.
-func TestKernelCheckoutVerdict(t *testing.T) {
-	write := func(path, body string) {
-		t.Helper()
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	long := "// " + strings.Repeat("x", 70000) + "\n" // past bufio.Scanner's 64 KiB line limit
-	rt := []string{"runtime/rt"}
-	for _, tc := range []struct {
-		name  string
-		files map[string]string
-		dirs  []string
-		want  string // "root", "skip", or the substrings of the failure, joined by "|"
-	}{
-		{"kernel module", map[string]string{"go.mod": "module " + KernelModule + "\n"}, rt, "root"},
-		{"kernel module, no runtime/rt", map[string]string{"go.mod": "module " + KernelModule + "\n"}, nil, "root"},
-		{"renamed module", map[string]string{"go.mod": "// root\nmodule other.local/prototype\n"}, nil, "declares module other.local/prototype|" + KernelModule},
-		{"runtime/rt, unrelated module", map[string]string{"go.mod": "module example.com/x\n"}, rt, "declares module example.com/x|" + KernelModule},
-		{"long comment line, kernel module", map[string]string{"go.mod": long + "module " + KernelModule + "\n\ngo 1.27\n"}, rt, "root"},
-		{"long comment line, renamed module", map[string]string{"go.mod": long + "module other.local/prototype\n\ngo 1.27\n"}, rt, "declares module other.local/prototype|" + KernelModule},
-		{"long comment line, no runtime/rt", map[string]string{"go.mod": long + "module other.local/prototype\n"}, nil, "declares module other.local/prototype|" + KernelModule},
-		{"no module line", map[string]string{"go.mod": "go 1.27\n"}, rt, "declares no module|" + KernelModule},
-		{"no root go.mod", nil, rt, "no go.mod at|" + KernelModule},
-		{"unreadable go.mod", nil, []string{"runtime/rt", "go.mod"}, "reading|go.mod|" + KernelModule},
-		{"unrelated module, no runtime/rt", map[string]string{"go.mod": "module example.com/x\n"}, nil, "skip"},
-		{"no go.mod, no runtime/rt", nil, nil, "skip"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			top := t.TempDir()
-			for name, body := range tc.files {
-				write(filepath.Join(top, name), body)
-			}
-			for _, d := range tc.dirs {
-				if err := os.MkdirAll(filepath.Join(top, d), 0o755); err != nil {
-					t.Fatal(err)
-				}
-			}
-			start := filepath.Join(top, "prototypes", "sketch9", "sketch")
-			write(filepath.Join(top, "prototypes", "sketch9", "go.mod"), "module effra.local/sketch9\n")
-			if err := os.MkdirAll(start, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			root, skip, err := kernelVerdict(start)
-			switch tc.want {
-			case "root":
-				if skip || err != nil || root != top {
-					t.Fatalf("verdict %q, skip %v, %v; want root %s", root, skip, err, top)
-				}
-			case "skip":
-				// t.TempDir can sit under a checkout: then the verdict comes
-				// from above top, and only a verdict at or below top is wrong.
-				if !skip && (strings.HasPrefix(root, top) || err != nil && strings.Contains(err.Error(), top)) {
-					t.Fatalf("verdict %q, %v; want a skip", root, err)
-				}
-			default:
-				if skip || err == nil {
-					t.Fatalf("verdict %q, skip %v, %v; want a failure naming %s", root, skip, err, tc.want)
-				}
-				for _, s := range strings.Split(tc.want, "|") {
-					if !strings.Contains(err.Error(), s) {
-						t.Errorf("failure %q lacks %q", err, s)
-					}
-				}
-			}
-		})
 	}
 }
 

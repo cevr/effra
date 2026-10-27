@@ -6,9 +6,10 @@
 //	sketchc trace [-json] FILE TRACE
 //
 // build -rt kernel links the kernel runtime, ergo.local/prototype/runtime/rt,
-// from the repository checkout (found above FILE or the working directory,
-// or named by -rtroot) instead of copying the embedded prototype runtime. A
-// kernel program records a trace to the file ERGO_TRACE names.
+// from the repository checkout instead of copying the embedded prototype
+// runtime: -rtroot names it, or else it is the module that contains FILE
+// (or, when none does, the working directory). A kernel program records a
+// trace to the file ERGO_TRACE names.
 package main
 
 import (
@@ -120,10 +121,8 @@ func build(file, out, bin string, kernel bool, rtRoot string) error {
 	var code string
 	var emitErr error
 	if kernel {
-		if rtRoot == "" {
-			if rtRoot, err = findKernelRoot(file); err != nil {
-				return err
-			}
+		if rtRoot, err = findKernelRoot(file, rtRoot); err != nil {
+			return err
 		}
 		code, emitErr = sketch.EmitWith(c, sketch.Options{Kernel: true, Revision: sketch.Revision(src)})
 		files["go.mod"] = sketch.KernelGoMod(rtRoot)
@@ -158,42 +157,43 @@ func build(file, out, bin string, kernel bool, rtRoot string) error {
 	return gobuild.Run()
 }
 
-// findKernelRoot finds the checkout that holds the kernel runtime: the
-// nearest checkout (sketch.FindCheckout) above file, or else above the
-// working directory, whose go.mod declares module sketch.KernelModule
-// (ergo.local/prototype). A checkout that declares another module, or whose
-// go.mod is missing, unreadable or declares no module, is named in the error,
-// so a renamed or broken root module reads as itself, not as no checkout.
-func findKernelRoot(file string) (string, error) {
-	var starts []string
-	if abs, err := filepath.Abs(file); err == nil {
-		starts = append(starts, filepath.Dir(abs))
+// findKernelRoot returns the checkout whose runtime/rt a kernel build of file
+// links, checked by sketch.KernelRoot. -rtroot (rtRoot) names it explicitly.
+// Otherwise it is the module that contains file's physical directory, as the
+// go tool finds it (sketch.EnclosingModule, past sketch9's own module), and
+// any problem with that module is returned at once. Only when no module
+// contains file does it try the working directory the same way.
+func findKernelRoot(file, rtRoot string) (string, error) {
+	if rtRoot != "" {
+		root, err := sketch.KernelRoot(rtRoot)
+		if err != nil {
+			return "", fmt.Errorf("-rtroot: %w", err)
+		}
+		return root, nil
 	}
+	abs, err := filepath.Abs(file)
+	if err != nil {
+		return "", err
+	}
+	starts := []string{filepath.Dir(abs)}
 	if wd, err := os.Getwd(); err == nil {
 		starts = append(starts, wd)
 	}
-	var mismatch error
 	for _, dir := range starts {
-		c, found, err := sketch.FindCheckout(dir)
+		gomod, found, err := sketch.EnclosingModule(dir)
+		if err != nil {
+			return "", fmt.Errorf("finding the module that contains %s: %w; pass -rtroot", dir, err)
+		}
 		if !found {
 			continue
 		}
-		if err == nil && c.Module == sketch.KernelModule {
-			return c.Root, nil
-		}
-		if mismatch != nil {
-			continue
-		}
+		root, err := sketch.KernelRoot(filepath.Dir(gomod))
 		if err != nil {
-			mismatch = fmt.Errorf("%w; kernel mode links %s; pass -rtroot", err, sketch.KernelModule)
-		} else {
-			mismatch = fmt.Errorf("the checkout at %s declares module %s, but kernel mode links %s; pass -rtroot", c.Root, c.Module, sketch.KernelModule)
+			return "", fmt.Errorf("%w; pass -rtroot", err)
 		}
+		return root, nil
 	}
-	if mismatch != nil {
-		return "", mismatch
-	}
-	return "", fmt.Errorf("no checkout of %s above %s or the working directory; pass -rtroot", sketch.KernelModule, file)
+	return "", fmt.Errorf("no module contains %s or the working directory; pass -rtroot naming a checkout of %s", file, sketch.KernelModule)
 }
 
 func trace(file, tracePath string, asJSON bool, stdout io.Writer) error {
