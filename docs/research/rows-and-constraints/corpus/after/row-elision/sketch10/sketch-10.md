@@ -44,7 +44,7 @@ type Retry struct{}
 
 // One step: the state, a signal, and a Decision (Enter, Stay, Ignore, Reject, Done).
 // The switch is checked for totality over State × Signal.
-func step(s State, sig Signal) Decision[State, string] {
+func step(s State, sig Signal) (Decision[State, string], error[ProbeDown]) uses Probe {
 	switch s, sig := s.(type), sig.(type) {
 	case (Closed, Failure):
 		if s.Failures >= 2 {

@@ -38,6 +38,6 @@ wire TestLive {
 func TestRunBatches() {
 	with(TestLive) {
 		try Run(10500ms)
-		T.Equal(Recorded.Sizes(), []int{5, 5})
+		testing.T.Equal(Recorded.Sizes(), []int{5, 5})
 	}
 }

@@ -24,7 +24,7 @@ func fetchOnce(url string) int {
 // Get returns after the headers. resp is a linear resource: the checker
 // rejects get unless every path closes or moves it.
 func get(url string) int {
-	resp := try Client.Get(url)
+	resp := try http.Client.Get(url)
 	defer resp.Close()
 	if resp.Status == 401 {
 		return Unauthorized{}

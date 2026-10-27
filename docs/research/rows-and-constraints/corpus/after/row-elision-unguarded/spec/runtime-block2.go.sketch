@@ -1,4 +1,4 @@
-// docs/spec/runtime.md#block2, rewritten by measure.py for candidate row-elision
+// docs/spec/runtime.md#block2, rewritten by measure.py for candidate row-elision-unguarded
 type State interface{ Closed | Open | HalfOpen }
 type Signal interface{ Failure | Success | Retry }
 

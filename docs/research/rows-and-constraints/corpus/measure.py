@@ -121,7 +121,12 @@ class Sig:
         self.idents = []                # (name, position) with position type, error or uses
         self.children = []
         self.machine = False
+        self.step = None                # a machine type's step function name
         self.untyped_params = False
+        self.child_role = "param"       # for a nested function type: param, result, where or other
+        self.bodiless = False           # a declaration with no body
+        self.foreign = False            # a bodiless declaration under an //ef:go directive
+        self.body = None                # (start, end) token indexes of the body braces
 
     def exported(self):
         return bool(self.name) and self.name[0].isupper()
@@ -336,7 +341,11 @@ class Parser:
             sig.params_end = self.t(i).start
             sig.tail_end = sig.params_end
             return i
+        mark = len(sig.children)
         j = self.parse_params(i, sig)
+        for c in sig.children[mark:]:
+            c.child_role = "param"
+        mark = len(sig.children)
         sig.params_end = self.t(j - 1).end
         last = j - 1
         tok = self.t(j)
@@ -382,12 +391,17 @@ class Parser:
             sig.value_text = self.src[tok.start:self.t(k - 1).end]
             j = k
             last = j - 1
+        for c in sig.children[mark:]:
+            c.child_role = "result"
+        mark = len(sig.children)
         if self.t(j).text == "uses":
             j = self.parse_uses(j, sig, in_params)
             last = j - 1
         if self.t(j).text == "where":
             j = self.parse_where(j, sig)
             last = j - 1
+            for c in sig.children[mark:]:
+                c.child_role = "where"
         sig.tail_end = self.t(last).end
         return j
 
@@ -448,6 +462,13 @@ class Parser:
                     td.machine = True
                 j = self.parse_type(j, td, in_group=False)
                 td.tail_end = self.t(j - 1).end
+                if td.machine and self.t(j).text == "{":
+                    end = self.balanced(j, "{", "}")
+                    for k in range(j + 1, end - 1):
+                        if self.t(k).text == "step" and self.t(k + 1).kind == "ident":
+                            td.step = self.t(k + 1).text
+                for c in td.children:
+                    c.child_role = "other"
                 i = j
                 continue
             if text == "wire" and not stack and self.t(i + 1).kind == "ident":
@@ -491,6 +512,13 @@ class Parser:
                     if self.t(j).text == "[":
                         j = self.parse_bracket_list(j, sig)
                     j = self.parse_sig_rest(j, sig)
+                    if self.t(j).text == "{":
+                        sig.body = (j, self.balanced(j, "{", "}"))
+                    else:
+                        sig.bodiless = True
+                        line_start = self.src.rfind("\n", 0, sig.start)
+                        prev_line_start = self.src.rfind("\n", 0, max(line_start, 0))
+                        sig.foreign = self.src[prev_line_start + 1:line_start].strip().startswith("//ef:go")
                     self.sigs.append(sig)
                     i = j
                     continue
@@ -500,6 +528,9 @@ class Parser:
                 if self.t(j).text != "{":
                     sig.kind = "functype"
                     sig.untyped_params = False
+                    sig.child_role = "field" if parent is not None else "other"
+                else:
+                    sig.body = (j, self.balanced(j, "{", "}"))
                 if parent is not None and sig.kind == "functype":
                     sig.parent = parent
                     parent.children.append(sig)
@@ -659,19 +690,52 @@ def iter_records(units):
 
 
 # ---- candidates ----------------------------------------------------------
-def c1_elides(sig, variant):
+C1_VARIANTS = ("unexported", "unguarded", "landing", "main")
+
+
+def guarded_steps(unit):
+    """Step functions named by an exported machine type in the same unit: they keep their rows."""
+    return {s.step for s in unit.parser.sigs if s.kind == "typedecl" and s.machine and s.exported() and s.step}
+
+
+def c1_elides(sig, variant, unit):
     """Candidate 1: rows of these signatures are inferred and need not be written.
 
-    Variants, cumulative: "unexported" (unexported functions and function literals),
-    "tests" (plus TestX, the landing rule), "main" (plus main, measured and refused)."""
+    Variants:
+      unexported: unexported functions and function literals;
+      unguarded:  plus TestX, with no export guard (the round-1 total; leaks rows, comparison only);
+      landing:    plus TestX, but a step named by an exported machine type and a bodiless
+                  foreign (//ef:go) declaration keep their rows;
+      main:       the landing rule plus main (measured and refused)."""
     r = role(sig)
+    guarded = variant in ("landing", "main")
+    if guarded and sig.kind == "func" and (sig.foreign or sig.name in guarded_steps(unit)):
+        return False
     if r in ("literal", "unexported function"):
         return True
     if r == "test":
-        return variant in ("tests", "main")
+        return variant != "unexported"
     if r == "main":
         return variant == "main"
     return False
+
+
+def lost_bindings(unit, sig):
+    """Bare capability names that the elided `uses pkg.X` clause bound in the body: token indexes of each `X.` use."""
+    names = {}
+    for u in sig.uses:
+        if "." in u:
+            pkg, name = u.split(".", 1)
+            names[name] = pkg
+    out = []
+    if not names or sig.body is None:
+        return out
+    p = unit.parser
+    for k in range(sig.body[0], sig.body[1]):
+        tok = p.t(k)
+        if tok.kind == "ident" and tok.text in names and p.t(k + 1).text == "." and p.t(k - 1).text != ".":
+            out.append((k, tok.text, names[tok.text]))
+    return out
 
 
 def tail_text(sig, keep_err=lambda e: True, keep_use=lambda u: True, keep_where=True):
@@ -697,10 +761,15 @@ def edit_tail(sig, **kw):
 
 
 def c1_edits(unit, variant):
+    """Remove the rows, and qualify each bare capability name the removed `uses` clause bound
+    (name-resolution option (a): `Client.Get` becomes `http.Client.Get`)."""
     edits = []
     for _, s in iter_records([unit]):
-        if s.kind in ("func", "method", "literal") and c1_elides(s, variant) and entries(s):
+        if s.kind in ("func", "method", "literal") and c1_elides(s, variant, unit) and entries(s):
             edits.append(edit_tail(s, keep_err=lambda e: False, keep_use=lambda u: False))
+            for k, _, pkg in lost_bindings(unit, s):
+                off = unit.parser.t(k).start
+                edits.append((off, off, pkg + "."))
     return edits
 
 
@@ -753,7 +822,8 @@ def apply_edits(text, edits):
 
 
 CANDIDATES = {
-    "row-elision": lambda u: c1_edits(u, "tests"),
+    "row-elision": lambda u: c1_edits(u, "landing"),
+    "row-elision-unguarded": lambda u: c1_edits(u, "unguarded"),
     "named-constraints": c2_edits,
     "function-type-rows": c3_edits,
 }
@@ -851,18 +921,44 @@ def measure(units, after):
     ]
 
     # Candidate 1, step by step, on the corpus (fixtures excluded).
-    c1 = {}
-    for variant in ("unexported", "tests", "main"):
+    c1 = {"guarded": [], "foreign": []}
+    for variant in C1_VARIANTS:
         removed = {"user": 0, "library": 0}
         sigs = {"user": 0, "library": 0}
         for u, s in iter_records(units):
             if u.group == "fixtures" or not entries(s):
                 continue
-            if s.kind in ("func", "method", "literal") and c1_elides(s, variant):
+            if s.kind in ("func", "method", "literal") and c1_elides(s, variant, u):
                 removed[u.audience(s)] += entries(s)
                 sigs[u.audience(s)] += 1
         c1[variant] = {"removed_user": removed["user"], "removed_library": removed["library"],
                        "signatures_user": sigs["user"], "signatures_library": sigs["library"]}
+    for u, s in iter_records(units):
+        if u.group == "fixtures" or s.kind != "func" or not entries(s):
+            continue
+        if c1_elides(s, "unguarded", u) and not c1_elides(s, "landing", u):
+            key = "foreign" if s.foreign else "guarded"
+            c1[key].append(f"{u.rel}: {s.name} ({entries(s)} entries)")
+
+    # Name resolution once a `uses` clause is elided (M4): option (a) qualifies, option (b) looks up imports.
+    lost, ambiguous, per_name = [], 0, {}
+    for u, s in iter_records(units):
+        if u.group == "fixtures" or s.kind not in ("func", "method", "literal") or not c1_elides(s, "landing", u):
+            continue
+        exporters = {}
+        for _, other in iter_records([u]):
+            for e in other.uses:
+                if "." in e:
+                    pkg, name = e.split(".", 1)
+                    exporters.setdefault(name, set()).add(pkg)
+        for _, name, pkg in lost_bindings(u, s):
+            lost.append(f"{u.rel}: {s.name or '(literal)'} {name} -> {pkg}.{name}")
+            per_name[f"{pkg}.{name}"] = per_name.get(f"{pkg}.{name}", 0) + 1
+            if len(exporters.get(name, ())) > 1:
+                ambiguous += 1
+    c1["names"] = {"uses": len(lost), "by_capability": dict(sorted(per_name.items())),
+                   "tokens_a": 2 * len(lost), "ambiguous_b": ambiguous, "tokens_b": 2 * ambiguous,
+                   "functions": len({x.rsplit(' ', 3)[0] for x in lost})}
     after_inv = inventory(after["row-elision"])
     before_user = summarize(inv, lambda r: corpus_pred(r) and r["audience"] == "user")
     after_user = summarize(after_inv, lambda r: corpus_pred(r) and r["audience"] == "user")
@@ -941,7 +1037,7 @@ def measure(units, after):
             c3["saved_by_combined"] += sum(1 for x in s.all_sigs() for e in x.uses if e in use_through)
         if any(x.kind == "functype" for x in s.children) and tparams(u, s):
             for c in s.children:
-                if c.kind == "functype" and not entries(c):
+                if c.kind == "functype" and c.child_role == "param" and not entries(c):
                     c3["empty_row_callbacks"] += 1
                     c3["empty_row_list"].append(f"{s.package}.{s.name}: {u.text[c.start:c.tail_end]}")
     after3 = inventory(after["function-type-rows"])
@@ -966,7 +1062,21 @@ def measure(units, after):
         if u.group == "fixtures":
             continue
         explicit_inst += len(re.findall(r"\b(?:json\.Decode|http\.ReadJSON|retry\.On)\[", u.text))
+    # A one-letter name in a signature that resolves to a declaration in scope, not to a parameter (M3).
+    bound = []
+    for u, s in iter_records(units):
+        if u.group == "fixtures":
+            continue
+        declared = declared_names(u, s)
+        for x in s.all_sigs():
+            for n, pos in x.idents:
+                if TPARAM.match(n) and n in declared:
+                    bound.append(f"{u.rel}: {s.name} ({pos} {n})")
+    tests_qualified = sum(1 for u, s in iter_records(units)
+                          if u.group != "fixtures" and role(s) == "test" and "testing.T" in s.uses)
     res["gap23"] = {
+        "bound_one_letter_names": bound,
+        "tests_using_testing_T": tests_qualified,
         "single_letter_declarations": [f"{a}: {b}" for a, b in single_declared],
         "parameter_names": dict(sorted(names.items())),
         "bare_T_capability_calls": bare_t,
@@ -1068,9 +1178,20 @@ def render(res, inv):
     c1 = res["candidates"]["row-elision"]
     sec["c1"] = md_table(
         ["Step", "User signatures elided", "User row entries removed", "Library row entries removed"],
-        [["unexported functions and literals", c1["unexported"]["signatures_user"], c1["unexported"]["removed_user"], c1["unexported"]["removed_library"]],
-         ["plus tests (lands)", c1["tests"]["signatures_user"], c1["tests"]["removed_user"], c1["tests"]["removed_library"]],
-         ["plus `main` (refused)", c1["main"]["signatures_user"], c1["main"]["removed_user"], c1["main"]["removed_library"]]])
+        [["unexported functions and literals, no guard", c1["unexported"]["signatures_user"], c1["unexported"]["removed_user"], c1["unexported"]["removed_library"]],
+         ["plus tests, no guard (round 1; leaks rows, comparison only)", c1["unguarded"]["signatures_user"], c1["unguarded"]["removed_user"], c1["unguarded"]["removed_library"]],
+         ["**plus tests, with the export guard and the foreign exemption (lands)**", c1["landing"]["signatures_user"], c1["landing"]["removed_user"], c1["landing"]["removed_library"]],
+         ["landing rule plus `main` (refused)", c1["main"]["signatures_user"], c1["main"]["removed_user"], c1["main"]["removed_library"]]])
+    sec["c1-kept"] = "\n".join(
+        [f"- export guard (step of an exported machine): {x}" for x in c1["guarded"]]
+        + [f"- foreign declaration (`//ef:go`, no body): {x}" for x in c1["foreign"]])
+    nm = c1["names"]
+    sec["names"] = md_table(
+        ["Measure", "Option (a): qualify", "Option (b): unique import"],
+        [["bare capability uses that lose their `uses` binding (landing rule)", nm["uses"], nm["uses"]],
+         ["… by capability", ", ".join(f"{k}: {v}" for k, v in nm["by_capability"].items()), "same"],
+         ["uses that need a qualifier", nm["uses"], nm["ambiguous_b"]],
+         ["tokens added back", nm["tokens_a"], nm["tokens_b"]]])
     sec["c1-roles"] = md_table(
         ["User role", "Signatures", "Row entries before", "Row entries after"],
         [[ro, v["signatures"], v["before"], v["after"]] for ro, v in c1["after_user_by_role"].items()]
@@ -1107,6 +1228,8 @@ def render(res, inv):
     sec["gap23"] = md_table(
         ["Measure", "Value"],
         [["package-level declarations with a one-letter name", f"{len(g23['single_letter_declarations'])} ({'; '.join(g23['single_letter_declarations'])})"],
+         ["one-letter names in signatures that resolve to a declaration, not a parameter", f"{len(g23['bound_one_letter_names'])} ({'; '.join(g23['bound_one_letter_names'])})"],
+         ["tests that write `uses testing.T` (qualified; unaffected by the rule)", g23["tests_using_testing_T"]],
          ["parameter names used (kind: signatures)", ", ".join(f"{k}: {v}" for k, v in g23["parameter_names"].items())],
          ["bracket lists written (explicit instantiation or constraint)", g23["bracket_lists"]],
          ["calls with explicit type arguments (`json.Decode[…]`, `http.ReadJSON[…]`, `retry.On[…]`)", g23["explicit_instantiation_calls"]],
@@ -1124,15 +1247,19 @@ def render(res, inv):
            ["library signatures whose rows are derived from a type's codec (no candidate states them)", h["derived_codec_rows"]]])
 
     # Prose with numbers: generated, so that no count in the note is typed by hand.
-    c1t, c1m, ub = c1["tests"], c1["main"], c1["before_user"]
+    c1t, c1m, ub = c1["landing"], c1["main"], c1["before_user"]
+    c1u = c1["unguarded"]
     by_role = c1["after_user_by_role"]
     kept_roles = ("exported function", "interface method", "method")
     tparam_users = [t for t in tps if t["audience"] == "user"]
     gt = res["go"]["totals"]
     sec["answer"] = "\n".join([
-        f"- **Row elision lands** for unexported functions, function literals and `TestX` functions. It removes "
-        f"{c1t['removed_user']} of the {ub['row_entries']} row entries in user-facing signatures. In the Go-controlled "
-        f"loop programs, signature tokens fall from {gt['before']} to {gt['after']}, against {gt['go']} for Go.",
+        f"- **Row elision lands** for unexported functions, function literals and `TestX` functions, except a step "
+        f"named by an exported machine type and a bodiless foreign declaration. It removes "
+        f"{c1t['removed_user']} of the {ub['row_entries']} row entries in user-facing signatures. An elided function "
+        f"reaches an imported capability by its qualified name (`http.Client.Get`), which adds back {nm['tokens_a']} tokens "
+        f"in the corpus. In the Go-controlled loop programs, signature tokens fall from {gt['before']} to {gt['after']}, "
+        f"against {gt['go']} for Go.",
         f"- **Named constraints land** in Go's bracket list, `func Max[T cmp.Ordered](a, b T) T`. A bracket list is "
         f"written only when it carries a constraint or fixes an order for explicit type arguments. "
         f"{c2['user_constrained']} user-facing signatures in the corpus need a constraint; {c2['library_constrained']} library signatures do.",
@@ -1153,11 +1280,22 @@ def render(res, inv):
     ])
     hn = h["negative_fixtures_S101_S102"]
     sec["decision"] = md_table(["Candidate", "Decision", "Measured", "Cost"], [
-        ["1. Infer rows of unexported functions and literals", "**Land**",
-         f"{c1['unexported']['removed_user']} user entries removed",
+        ["1. Infer rows of unexported functions, literals and `TestX`, with the export guard and the foreign exemption", "**Land**",
+         f"{c1t['removed_user']} of {ub['row_entries']} user entries removed",
          "package-level row fixpoint; a missing row reads as \"inferred\" on unexported code; inlay hints needed"],
-        ["1. Infer rows of `TestX`", "**Land**", f"{c1t['removed_user'] - c1['unexported']['removed_user']} more user entries removed",
-         "none beyond the above"],
+        ["1. The same with no guard (round 1)", "Refuse",
+         f"{c1u['removed_user']} removed; {c1u['removed_user'] - c1t['removed_user']} of them leak into exported machine types or drop a foreign row",
+         "public rows written nowhere; a foreign binding loses its stated row"],
+        ["1. Steps named by an exported machine type keep their rows (export guard)", "**Land (new rule)**",
+         f"{len(c1['guarded'])} steps kept ({len(h['exported_machine_types'])} exported machine types)", "one more rule in the checker"],
+        ["1. Bodiless foreign declarations (`//ef:go`) keep their rows", "**Land (new rule)**",
+         f"{len(c1['foreign'])} declaration kept", "none: there is no body to infer from"],
+        ["1. Name resolution in elided functions: (a) qualified access", "**Land**",
+         f"{nm['uses']} bare uses qualified, {nm['tokens_a']} tokens added back",
+         "two spellings of one capability call, by whether `uses` is written"],
+        ["1. Name resolution in elided functions: (b) unique import", "Refuse",
+         f"{nm['ambiguous_b']} ambiguous uses, {nm['tokens_b']} tokens added back",
+         "a capability-only lookup rule; adding an import can break an unrelated function"],
         ["1. Infer rows of `main`", "Refuse",
          f"would remove {c1m['removed_user'] - c1t['removed_user']} entries; {len(hn.get('main', []))} of "
          f"{h['negative_fixtures_S101_S102_total']} S101/S102 fixtures change, `wire-initializer-error` is accepted",
@@ -1166,8 +1304,6 @@ def render(res, inv):
          "a provider law's `uses` selects the providers it is checked against"],
         ["1. Infer rows of methods on unexported types", "Refuse for v0", f"{by_role['method']['before']} entries kept",
          "needs export reachability; leaks rows when an exported function returns the type"],
-        ["1. Machine steps named by an exported type spell rows", "**Land (new rule)**",
-         f"{len(h['exported_machine_types'])} exported machine types", "one more rule in the checker"],
         ["2. Named constraints in Go's bracket list", "**Land**",
          f"{c2['user_constrained']} user, {c2['library_constrained']} library signatures; {c2['tokens_before']} → {c2['tokens_after']} signature tokens",
          "two ways to introduce a parameter, limited to Go's cases"],
@@ -1176,8 +1312,9 @@ def render(res, inv):
         ["2. Roc: constraints inferred", "Refuse", f"{c2['user_constrained']} user signatures to simplify",
          "a hidden requirement on exported generics"],
         ["2. Gap 23 naming rule and `[F error]`", "**Land**",
-         f"{len(g23['single_letter_declarations'])} one-letter declaration (library `testing.T`); "
-         f"{g23['explicit_instantiation_calls']} calls with explicit type arguments", "one-letter type names reserved"],
+         f"one-letter names bound by a declaration: {len(g23['bound_one_letter_names'])} (library `testing.T`); "
+         f"{g23['tests_using_testing_T']} tests unaffected; {g23['explicit_instantiation_calls']} calls with explicit type arguments",
+         "a declared one-letter name shadows the parameter reading in its package"],
         ["3a. Explicit row parameters, kinds by position", "**Land (status quo)**",
          f"{c3['row_var_occurrences']} row-variable occurrences, {c3['user_functype_with_row_vars']} in user-facing function types",
          "library authors write `E` and `R`"],

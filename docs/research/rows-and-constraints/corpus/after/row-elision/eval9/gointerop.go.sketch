@@ -14,7 +14,7 @@ type BadURL struct{ Raw string }
 // the declaration says URL, or a panic, becomes a defect, never a nil value.
 //
 //ef:go net/url.Parse
-func parseURL(raw string) url.URL
+func parseURL(raw string) (url.URL, error[go.Error]) uses go.Foreign
 
 func absolute(base url.URL, href string) string {
 	ref := parseURL(href) catch {

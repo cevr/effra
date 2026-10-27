@@ -146,32 +146,32 @@ func order(contentType string, body string) int {
 
 func TestOrderIsCreated() {
 	with(Shop) {
-		T.Equal(order("application/json", `{"member":"m-1","item":"tea","quantity":"2"}`), 201)
+		testing.T.Equal(order("application/json", `{"member":"m-1","item":"tea","quantity":"2"}`), 201)
 	}
 }
 
 func TestUnknownMemberIsNotMalformedInput() {
 	with(Shop) {
-		T.Equal(order("application/json", `{"member":"m-9","item":"tea","quantity":"2"}`), 422)
-		T.Equal(order("application/json", `{"member":"m-1"}`), 400)
+		testing.T.Equal(order("application/json", `{"member":"m-9","item":"tea","quantity":"2"}`), 422)
+		testing.T.Equal(order("application/json", `{"member":"m-1"}`), 400)
 	}
 }
 
 func TestHandlerFailureAnswersItsStatus() {
 	with(Shop) {
-		T.Equal(order("application/json", `{"member":"m-1","item":"tea","quantity":"9"}`), 409)
+		testing.T.Equal(order("application/json", `{"member":"m-1","item":"tea","quantity":"9"}`), 409)
 	}
 }
 
 func TestUnsupportedMediaType() {
 	with(Shop) {
-		T.Equal(order("text/plain", "{}"), 415)
+		testing.T.Equal(order("text/plain", "{}"), 415)
 	}
 }
 
 func TestStoredOrderSharesTheWireForms() {
 	order := try with(Shop) { restoreOrder(`{"member":"m-1","item":"tea","quantity":"1"}`) }
-	T.Equal(order.Member.Name, "Ada")
+	testing.T.Equal(order.Member.Name, "Ada")
 }
 
 func main() error[http.ListenFailed] uses http.Server {

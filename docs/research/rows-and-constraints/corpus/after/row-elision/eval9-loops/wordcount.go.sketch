@@ -16,7 +16,7 @@ type WordCount struct {
 // Lines opens the file and closes it when the loop ends, on every exit.
 func topWords(path string, n int) []WordCount {
 	var counts map[string]int
-	for line := range try Files.Lines(path) {
+	for line := range try fs.Files.Lines(path) {
 		for _, w := range strings.Fields(strings.ToLower(line)) {
 			counts[w]++
 		}

@@ -1,0 +1,7 @@
+// docs/spec/resources.md#block5, rewritten by measure.py for candidate row-elision-unguarded
+func run(signals chan Signal) {
+	b := actor.Start(Breaker{}, 16)
+	set := tasks.Set(tasks.Restart(schedule.Exponential(1s).UpTo(5))) // bound after b
+	set.Go(func() { actor.Pump(b, signals) })                          // structured lend of b (R31)
+	d := try b.Ask(Retry{}) catch { case ProbeDown: Reject{} }
+}                                                                     // set stopped, then b stopped

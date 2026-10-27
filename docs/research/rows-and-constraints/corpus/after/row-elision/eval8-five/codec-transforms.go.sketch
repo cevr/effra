@@ -157,15 +157,15 @@ var stored = `{"buyer":"u-7","member":{"handle":"ada","sponsor":"u-1"},"quantity
 
 func TestNominalRoundTrips() {
 	id := try json.Decode[UserId](`"u-42"`)
-	T.Equal(id.Wire(), "u-42")
-	T.Equal(try json.Encode(id), `"u-42"`)
+	testing.T.Equal(id.Wire(), "u-42")
+	testing.T.Equal(try json.Encode(id), `"u-42"`)
 }
 
 func TestNormalizingCanonicalizes() {
 	legacy := try json.Decode[Status](`{"_tag":"Enabled"}`)
-	T.Equal(try json.Encode(legacy), `{"_tag":"Active"}`)
+	testing.T.Equal(try json.Encode(legacy), `{"_tag":"Active"}`)
 	suspended := try json.Decode[Status](try json.Encode(Suspended{}))
-	T.Equal(suspended, Suspended{})
+	testing.T.Equal(suspended, Suspended{})
 }
 
 func TestRefinementRejectsOnDecode() {
@@ -173,7 +173,7 @@ func TestRefinementRejectsOnDecode() {
 	case InvalidQuantity:
 		Quantity{99}
 	}
-	T.Equal(refused, Quantity{99})
+	testing.T.Equal(refused, Quantity{99})
 }
 
 func TestEncodeSideRejection() {
@@ -181,12 +181,12 @@ func TestEncodeSideRejection() {
 	case InvalidQuantity:
 		"refused"
 	}
-	T.Equal(written, "refused")
+	testing.T.Equal(written, "refused")
 }
 
 func TestNestedRoundTrip() {
 	written := try with(Healthy) { reencodeOrder(stored) }
-	T.Equal(written, `{"buyer":"u-7","member":{"handle":"ada","sponsor":"u-1"},"quantity":"3","status":{"_tag":"Active"}}`)
+	testing.T.Equal(written, `{"buyer":"u-7","member":{"handle":"ada","sponsor":"u-1"},"quantity":"3","status":{"_tag":"Active"}}`)
 }
 
 func TestNestedFailureKeepsItsType() {
@@ -195,7 +195,7 @@ func TestNestedFailureKeepsItsType() {
 	case UnknownMember:
 		"unknown member"
 	}
-	T.Equal(outcome, "unknown member")
+	testing.T.Equal(outcome, "unknown member")
 }
 
 func TestMalformedInputNeverReachesAService() {
@@ -204,7 +204,7 @@ func TestMalformedInputNeverReachesAService() {
 	case json.DecodeFailed:
 		"malformed"
 	}
-	T.Equal(outcome, "malformed")
+	testing.T.Equal(outcome, "malformed")
 }
 
 func TestServiceFailureIsNotMalformedInput() {
@@ -212,7 +212,7 @@ func TestServiceFailureIsNotMalformedInput() {
 	case DirectoryDown:
 		"directory down"
 	}
-	T.Equal(outcome, "directory down")
+	testing.T.Equal(outcome, "directory down")
 }
 
 // Encoding needs Audit and never Directory: the row says so.
@@ -222,12 +222,12 @@ func TestEncodeRunsOnlyEncodeServices() {
 	case AuditRefused:
 		"audit refused"
 	}
-	T.Equal(outcome, "audit refused")
+	testing.T.Equal(outcome, "audit refused")
 }
 
 func TestConfigurationSharesTheWireForms() {
 	settings := try with(wire{ Env = StoredSettings{} }) { loadSettings() }
-	T.Equal(try settingsJSON.Encode(settings), `{"owner":"u-1","defaultStatus":{"_tag":"Active"}}`)
+	testing.T.Equal(try settingsJSON.Encode(settings), `{"owner":"u-1","defaultStatus":{"_tag":"Active"}}`)
 }
 
 func main() (string, error[json.DecodeFailed | json.EncodeFailed | InvalidQuantity | UnknownMember | DirectoryDown | AuditRefused]) {

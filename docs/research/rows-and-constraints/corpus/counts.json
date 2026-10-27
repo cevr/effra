@@ -6,15 +6,11 @@
     "tasks.Go: E"
    ],
    "decls_with_row_vars": 11,
-   "empty_row_callbacks": 7,
+   "empty_row_callbacks": 3,
    "empty_row_list": [
     "build.Acquire: func(A)",
     "sync.Update: func(v *T)",
-    "slices.SortFunc: func(A, A) int",
-    "cmp.Compare: func(T, T) int",
-    "cmp.Or: func(T, T) bool",
-    "builtin.min: func(T, T) int",
-    "batch.Resolve: func(P, []K) map[K]Option[V]"
+    "slices.SortFunc: func(A, A) int"
    ],
    "error_uses_pairs": 6,
    "functype_multi_uses": 0,
@@ -135,10 +131,10 @@
   },
   "row-elision": {
    "after_user": {
-    "row_entries": 115,
+    "row_entries": 123,
     "signatures": 185,
-    "tokens": 1806,
-    "with_rows": 59,
+    "tokens": 1846,
+    "with_rows": 63,
     "with_tparams": 2
    },
    "after_user_by_role": {
@@ -183,7 +179,7 @@
      "signatures": 5
     },
     "unexported function": {
-     "after": 0,
+     "after": 8,
      "before": 122,
      "signatures": 62
     },
@@ -200,28 +196,57 @@
     "with_rows": 123,
     "with_tparams": 2
    },
+   "foreign": [
+    "eval9/gointerop.go.sketch: parseURL (2 entries)"
+   ],
+   "guarded": [
+    "eval8-five/machine-breaker.go.sketch: breakerStep (2 entries)",
+    "sketch10/sketch-10.md#block0: step (2 entries)",
+    "docs/spec/runtime.md#block2: step (2 entries)"
+   ],
+   "landing": {
+    "removed_library": 0,
+    "removed_user": 166,
+    "signatures_library": 0,
+    "signatures_user": 60
+   },
    "main": {
     "removed_library": 0,
-    "removed_user": 213,
+    "removed_user": 205,
     "signatures_library": 0,
-    "signatures_user": 77
+    "signatures_user": 73
    },
-   "tests": {
-    "removed_library": 0,
-    "removed_user": 174,
-    "signatures_library": 0,
-    "signatures_user": 64
+   "names": {
+    "ambiguous_b": 0,
+    "by_capability": {
+     "fs.Files": 1,
+     "http.Client": 1,
+     "testing.T": 19
+    },
+    "functions": 18,
+    "tokens_a": 42,
+    "tokens_b": 0,
+    "uses": 21
    },
    "unexported": {
     "removed_library": 0,
     "removed_user": 124,
     "signatures_library": 0,
     "signatures_user": 48
+   },
+   "unguarded": {
+    "removed_library": 0,
+    "removed_user": 174,
+    "signatures_library": 0,
+    "signatures_user": 64
    }
   }
  },
  "gap23": {
   "bare_T_capability_calls": 19,
+  "bound_one_letter_names": [
+   "library/implied.go.sketch: Equal (uses T)"
+  ],
   "bracket_lists": 17,
   "explicit_instantiation_calls": 14,
   "parameter_names": {
@@ -237,7 +262,8 @@
   },
   "single_letter_declarations": [
    "library/implied.go.sketch: T"
-  ]
+  ],
+  "tests_using_testing_T": 16
  },
  "go": {
   "matched": [
