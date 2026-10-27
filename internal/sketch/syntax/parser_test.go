@@ -2,6 +2,7 @@ package syntax
 
 import (
 	"errors"
+	"math/rand/v2"
 	"slices"
 	"strings"
 	"testing"
@@ -276,4 +277,154 @@ func TestNestingLimit(t *testing.T) {
 			t.Errorf("%s: %d levels: %v, want the nesting S001", c.name, c.deep+1, err)
 		}
 	}
+}
+
+// nestingAt parses src and returns the offset of its nesting S001, or -1
+// when src parses. Any other result fails the test.
+func nestingAt(t *testing.T, src string) int {
+	t.Helper()
+	_, err := Parse(src)
+	if err == nil {
+		return -1
+	}
+	var e *Error
+	if !errors.As(err, &e) || e.Code != CodeSyntax || !strings.Contains(e.Message, "nesting deeper than") {
+		t.Fatalf("%v, want the nesting S001 or a parse", err)
+	}
+	return e.Offset
+}
+
+// TestNestingLimitBoundsTheTree (review r2 M2): the limit bounds the height
+// of the returned tree, not only the path the parser has open. A chain whose
+// operand is itself deep counts the operand in full, and the S001 is at the
+// first token past the limit.
+func TestNestingLimitBoundsTheTree(t *testing.T) {
+	// `var x = E` opens one level for E; `( … )` opens two (the operand and
+	// the expression inside). So `(a` + 900 links + `)` + k links is
+	// 1 + 2 + 900 + k levels: k = 97 is exactly the limit.
+	chain := "package p\nvar x = (a" + strings.Repeat(".a", 900) + ")"
+	if at := nestingAt(t, chain+strings.Repeat(".a", 97)+"\n"); at != -1 {
+		t.Fatalf("1000 levels: S001 at %d", at)
+	}
+	if at, want := nestingAt(t, chain+strings.Repeat(".a", 900)+"\n"), len(chain)+2*97; at != want {
+		t.Fatalf("1803 levels: S001 at %d, want %d (the 98th link after the parenthesis)", at, want)
+	}
+
+	// The reviewer's layered input: 32 groups of 900 links, each wrapped in
+	// parentheses and extended (round-2-receipts/mixed-depth.ef).
+	x := "a" + strings.Repeat(".a", 900)
+	for range 31 {
+		x = "(" + x + ")" + strings.Repeat(".a", 900)
+	}
+	if at := nestingAt(t, "package p\nvar x = "+x+"\n"); at == -1 {
+		t.Fatal("the 32-group mixed chain parsed")
+	}
+
+	// A binary operand counts in full too, and so does a deep argument.
+	for _, src := range []string{
+		"package p\nvar x = (" + strings.Repeat("!", 600) + "a)" + strings.Repeat(" + a", 600) + "\n",
+		"package p\nvar x = f(" + strings.Repeat("(", 300) + "a" + strings.Repeat(")", 300) + ")" + strings.Repeat("[0]", 500) + "\n",
+		"package p\nvar x = " + strings.Repeat("!", 500) + "(a" + strings.Repeat(" + a", 500) + ")\n",
+	} {
+		if nestingAt(t, src) == -1 {
+			t.Errorf("parsed: %.60s…", src)
+		}
+	}
+
+	// The open path alone never refuses a tree within the limit: the
+	// argument of the last of 900 links sits one level below the call.
+	shallow := "package p\nvar x = a" + strings.Repeat(".a", 900) + "(" + strings.Repeat("(", 200) + "a" + strings.Repeat(")", 200) + ")\n"
+	if at := nestingAt(t, shallow); at != -1 {
+		t.Fatalf("a 902-level tree: S001 at %d", at)
+	}
+}
+
+// genNested renders a random expression of postfix links, binary and unary
+// operators and parentheses, and returns its height in levels: a link,
+// operator or unary operator is one level, parentheses are two, and an
+// argument or index is one more below its link (grammar.md, Parser rule 6).
+// class is 0 for a primary expression, 1 for a unary one, 2 for a binary
+// one; a lower class is needed in some operand positions.
+func genNested(r *rand.Rand, budget int) (src string, height, class int) {
+	paren := func(s string, h, c, limit int) (string, int) {
+		if c > limit {
+			return "(" + s + ")", h + 2
+		}
+		return s, h
+	}
+	if budget < 3 || r.IntN(8) == 0 {
+		return "a", 0, 0
+	}
+	run := 1 + r.IntN(budget/2)
+	switch r.IntN(6) {
+	case 0:
+		s, h, _ := genNested(r, budget-2)
+		return "(" + s + ")", h + 2, 0
+	case 1:
+		s, h := paren(genNestedAt(r, budget-run, 0))
+		return s + strings.Repeat(".a", run), h + run, 0
+	case 2, 3:
+		s, h := paren(genNestedAt(r, budget/2, 0))
+		a, ha, _ := genNested(r, budget/2)
+		open, close := "(", ")"
+		if r.IntN(2) == 0 {
+			open, close = "[", "]"
+		}
+		return s + open + a + close, 1 + max(h, 1+ha), 0
+	case 4:
+		s, h := paren(genNestedAt(r, budget-run, 1))
+		return strings.Repeat("!", run) + s, h + run, 1
+	default:
+		s, h, _ := genNested(r, budget/2)
+		var b strings.Builder
+		b.WriteString(s)
+		for range 1 + r.IntN(4) {
+			y, hy := paren(genNestedAt(r, budget/4, 1))
+			b.WriteString(" + " + y)
+			h = max(h, hy) + 1
+		}
+		return b.String(), h, 2
+	}
+}
+
+// genNestedAt is genNested with the class limit its caller needs, in the
+// argument order of the caller's paren helper.
+func genNestedAt(r *rand.Rand, budget, limit int) (string, int, int, int) {
+	s, h, c := genNested(r, budget)
+	return s, h, c, limit
+}
+
+// TestNestingLimitOnCompositions: for random compositions of links,
+// operators and parentheses, a tree within the limit parses and one level
+// more is S001 at the first token past the limit.
+func TestNestingLimitOnCompositions(t *testing.T) {
+	r := rand.New(rand.NewPCG(195, 3))
+	exact, over := 0, 0
+	for range 400 {
+		s, h, c := genNested(r, 600+r.IntN(4400))
+		if c > 0 {
+			s, h = "("+s+")", h+2
+		}
+		// `var x = E` opens one level; k more links reach the limit.
+		prefix := "package p\nvar x = " + s
+		if 1+h > MaxNesting {
+			if nestingAt(t, prefix+"\n") == -1 {
+				t.Fatalf("%d levels parsed: %.80s…", 1+h, s)
+			}
+			over++
+			continue
+		}
+		k := MaxNesting - 1 - h
+		if at := nestingAt(t, prefix+strings.Repeat(".a", k)+"\n"); at != -1 {
+			t.Fatalf("%d levels: S001 at %d in %.80s…", MaxNesting, at, s)
+		}
+		if at, want := nestingAt(t, prefix+strings.Repeat(".a", k+1)+"\n"), len(prefix)+2*k; at != want {
+			t.Fatalf("%d levels: S001 at %d, want %d (the link past the limit) in %.80s…", MaxNesting+1, at, want, s)
+		}
+		exact++
+	}
+	if exact < 100 || over < 50 {
+		t.Fatalf("the generator reached the limit %d times and passed it %d times", exact, over)
+	}
+	t.Logf("reached the limit exactly %d times, passed it %d times", exact, over)
 }

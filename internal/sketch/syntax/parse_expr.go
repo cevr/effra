@@ -15,25 +15,32 @@ func (p *parser) parseExpr() Expr {
 }
 
 // parseBinary parses a binary expression of precedence prec or tighter. Each
-// operator deepens the left spine of the tree by one level, so each charges
-// the nesting limit until the expression ends, as go/parser's
-// parseBinaryExpr does: a long chain is as deep for every recursive consumer
-// as the same number of parentheses.
+// operator wraps the tree built so far in one more level: a long chain is
+// as deep for every recursive consumer as the same number of parentheses.
+// The loop retains the tree's height (see measure), so an operand that is
+// itself deep, such as a parenthesized chain, counts in full.
 func (p *parser) parseBinary(prec int) Expr {
+	o := p.nest
+	saved := p.measure()
 	x := p.parseUnary()
-	n := 0
-	defer func() { p.nest -= n }()
+	h := p.height(saved)
+	defer func() { p.nest = o; p.reach(o + h) }()
 	for {
 		op := p.tok.tok
 		opPrec := op.Precedence()
 		if opPrec < prec {
 			return x
 		}
-		n++
+		if o+h+1 > MaxNesting {
+			p.tooDeep()
+		}
 		p.enter()
 		pos := p.tok.pos
 		p.next()
+		inner := p.measure()
 		y := p.parseBinary(opPrec + 1)
+		h = max(h, p.height(inner)) + 1
+		p.leave()
 		x = &BinaryExpr{X: x, OpPos: pos, Op: op, Y: y}
 	}
 }
@@ -122,17 +129,28 @@ func (p *parser) parseCatch(x Expr) *CatchExpr {
 }
 
 // parsePrimaryExpr parses an operand and its selectors, indexes, calls and
-// literals. Each one deepens the tree by one level and charges the nesting
-// limit until the expression ends (go/parser's parsePrimaryExpr).
+// literals. Each one wraps the tree built so far in one more level; the
+// loop retains the tree's height as parseBinary does.
 func (p *parser) parsePrimaryExpr() Expr {
+	o := p.nest
+	saved := p.measure()
 	x := p.parseOperand()
-	n := 0
-	defer func() { p.nest -= n }()
+	h := p.height(saved)
+	inner := 0
+	defer func() { p.nest = o; p.reach(o + h) }()
 	for {
+		if p.nest > o {
+			// The previous link's children are parsed: fold their height.
+			h = max(h, p.height(inner)) + 1
+			p.leave()
+		}
 		switch p.tok.tok {
 		case PERIOD, LBRACK, LPAREN, LBRACE:
-			n++
+			if o+h+1 > MaxNesting {
+				p.tooDeep()
+			}
 			p.enter()
+			inner = p.measure()
 		}
 		switch p.tok.tok {
 		case PERIOD:

@@ -6,8 +6,10 @@ import (
 	"strconv"
 )
 
-// MaxNesting bounds the nesting of expressions, types, statements and
-// blocks. Deeper input is S001, so no input exhausts the stack of the
+// MaxNesting bounds the height, in levels, of the returned tree: the
+// nesting of expressions, types, statements and blocks in any composition
+// (grammar.md, Parser rule 6). A higher tree is S001 at the first token past
+// the limit, so no input exhausts the stack of the
 // parser or of any consumer of the AST (the printer, the converter, the
 // checker). go/parser bounds nesting at 100 000; 1 000 leaves every
 // consumer a small stack and is far above any program written by hand.
@@ -49,8 +51,13 @@ type parser struct {
 	// literal or a trailing block (Go's rule); it is above zero inside
 	// parentheses and brackets.
 	exprLev int
-	nest    int
-	err     *Error
+	// nest is the number of levels open on the path being parsed: each
+	// enter() opens one. peak is the deepest level reached by the subtree
+	// being measured (see measure); a chain retains its own height in it,
+	// so a composed tree's height is checked, not only the active path.
+	nest int
+	peak int
+	err  *Error
 
 	// guards are the TypeGuards parsed so far; a switch header checks that
 	// its own are all subjects.
@@ -127,14 +134,52 @@ func (p *parser) got(tok Token) bool {
 	return false
 }
 
+// enter opens one level on the path being parsed; past MaxNesting it is
+// S001 at the current token.
 func (p *parser) enter() {
 	p.nest++
+	if p.nest > p.peak {
+		p.peak = p.nest
+	}
 	if p.nest > MaxNesting {
-		p.errorf("nesting deeper than %d levels", MaxNesting)
+		p.tooDeep()
 	}
 }
 
 func (p *parser) leave() { p.nest-- }
+
+func (p *parser) tooDeep() {
+	p.errorf("nesting deeper than %d levels", MaxNesting)
+}
+
+// The binary and postfix loops build a left spine: each operator or link
+// wraps the tree built so far, so the tree is taller than the path the
+// parser has open. Each loop retains its tree's height h in levels above
+// its base o = p.nest, checks o+h+1 before it adds a level, and reports
+// o+h through p.peak, where an enclosing loop measures its operand.
+//
+// measure starts measuring the subtree parsed next from the current level
+// and returns the peak to restore; height returns the subtree's height and
+// restores the enclosing measurement.
+func (p *parser) measure() (saved int) {
+	saved, p.peak = p.peak, p.nest
+	return saved
+}
+
+func (p *parser) height(saved int) int {
+	h := p.peak - p.nest
+	if saved > p.peak {
+		p.peak = saved
+	}
+	return h
+}
+
+// reach records that the tree under the current loop reaches level top.
+func (p *parser) reach(top int) {
+	if top > p.peak {
+		p.peak = top
+	}
+}
 
 // endStmt consumes the end of a statement, declaration or entry: a
 // semicolon, or nothing before closer.
