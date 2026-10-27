@@ -281,3 +281,17 @@ The "without" binary is the same emitted program with the trace switch removed b
 | `testdata/trace/checkout.sketch` | 12 | 1,768 | 3.60 / 3.58 | 2,686,611 / 2,623,434 / 2,548,840 |
 | `testdata/trace/timeout.sketch` | 16 | 2,401 | 105.42 / 104.69 | 2,687,625 / 2,632,200 / 2,549,215 |
 | `testdata/trace/failure.sketch` | 11 | 1,718 | 2.53 / 2.48 | 2,685,922 / 2,623,105 / 2,544,058 |
+
+## Round 4: an origin names an occurrence
+
+| Command (from the worktree root, head `4957c40e`) | Exit |
+| --- | --- |
+| `bash /home/exedev/.cache/baton/wf10/trace-188/accept.sh` | 0, `ACCEPT OK` (`accept-r4.log`). Six later reruns exited 0, 1, 1, 0, 0, 0: the two failures are a race in the script's own `printf ... \| grep -q` under `pipefail`, which fails a pipeline when `grep` exits before `printf` has written all of its text; it fails 4 to 5 pipelines in 900 on the round-3 and round-4 notes alike (`round-4-receipts/accept-pipefail-flake.txt`) |
+| `./scripts/gate.sh` | 0 (`gate: passed 30 steps in 104.3s`, `gate-r4.log`) |
+| `cd prototypes/sketch9 && go vet ./... && go test -count=1 ./...` | 0 |
+| `go test -count=1 -race ./runtime/rt/...` | 0 |
+
+- `checkOrigins` checks the occurrence, not only the kind: it runs after every link is checked, refuses a failure origin that a handler consumed, and accepts a child's exit as an origin only when the owner observed that exit. Two new refusal cases cover them.
+- When several reasons of an exit carry an equal failure and none has an origin, the cause trace says so for each reason and names the unconsumed occurrences as "one of" the candidates. A lone reason without an origin still lists its "candidate by type only".
+- `TestKernelEqualFailureProbes` is the third review's pair of probes (two calls that fail with equal `Missing` values; two children whose Waits return equal values) as a kernel program, built and run, then recorded, written and queried. With zero-size values the query states no origin and names both occurrences; with values stored on their own each reason names its own occurrence. In every variant no reason names another reason's occurrence.
+- The reviewer's round-3 native harness, rerun at round 4: all five modes pass, including `two-failures` and `two-child-failures` (`round-4-receipts/native-*.log`).
