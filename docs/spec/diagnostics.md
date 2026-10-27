@@ -103,7 +103,7 @@ The checker does not restrict `main`'s capability row; the build refuses what th
 | A field and a method of one type share a name | `probes/field-method-name.sketch` |
 | A receiver is not a struct type declared in the package | `receiver-not-local` |
 | A union variant is not a struct type declared in the package | `union-variant-interface` |
-| A struct contains itself by value | `recursive-struct` |
+| A struct contains itself by value, also through an instance of a generic struct (`type U struct{ F Wrap[U] }`) or an instance that grows without end | `recursive-struct`; checker review tests (M7) |
 | A value of one type where another is expected: an assignment, an argument, a return, a field or an element | `var-mismatch`, `argument-mismatch`, `return-mismatch` |
 | A type does not implement an interface, or its method's rows are wider (interface assignability) | `interface-missing-method`, `interface-wider-row` |
 | A keyed literal omits a field that has no zero value; `var x T` of a type with no zero value | `keyed-literal-nondefaultable`, `var-nondefaultable` |
@@ -111,19 +111,22 @@ The checker does not restrict `main`'s capability row; the build refuses what th
 | A type switch on a non-union; a case that is not a variant of its subject's union; a case already covered by the cases before it (unreachable) | `type-switch-non-union`, `case-not-variant` |
 | An operator on operands it is not defined for; `==` on values that are not comparable or of different types | `equality-mismatch`, `plus-on-bool` |
 | An untyped integer where a `duration` is expected (only a duration literal is a duration) | `untyped-integer-as-duration` |
-| A constant that overflows its type; an integer literal with a leading zero; an invalid escape; a duration that overflows `int64` nanoseconds | `constant-overflow`, `probes/decimal-leading-zero.sketch`, `probes/string-escape.sketch`, `probes/duration-overflow.sketch` |
+| A constant that overflows its type; an integer literal with a leading zero; an invalid escape; a duration that overflows `int64` nanoseconds. A typed `float32`, `float64`, `complex64` or `complex128` constant holds its type's rounded value, so `1/int(float32(16777217)-float32(16777216))` divides by zero | `constant-overflow`, `probes/decimal-leading-zero.sketch`, `probes/string-escape.sketch`, `probes/duration-overflow.sketch`; checker review tests (M12) |
+| A constant index, slice bound or `make` size is negative; a constant index or bound is out of range of an array or a constant string; constant slice bounds are out of order; a constant `make` length exceeds its capacity (Go's rules) | checker review tests (M11) |
+| A constant key appears twice in a map literal, compared after conversion to the key type | checker review tests (N3) |
+| `:=` declares no new name, or repeats a name on its left; a name already declared in the block is assigned, not redeclared (Go's rule) | checker review tests (M9) |
 | `try` or `catch` on an expression that cannot fail; a caught type not in the row or caught twice | `try-infallible`, `catch-arm-not-in-row` |
-| A type argument that cannot be inferred; a constraint the argument does not satisfy; a parameter used as a type and as a row; a method that would have type parameters of its own | `type-argument-not-inferred`, `constraint-unsatisfied`, `parameter-kind-conflict`, `method-type-parameter` |
+| A type argument that cannot be inferred; a constraint the argument does not satisfy, written, inferred or given by explicit instantiation `Id[int]`; a parameter used as a type and as a row; a method that would have type parameters of its own; a function with implicit parameters used as a value without a call | `type-argument-not-inferred`, `constraint-unsatisfied`, `parameter-kind-conflict`, `method-type-parameter` |
 | `*T` outside a parameter or receiver type | `borrow-in-field` |
 | A function value whose rows are wider than the function type's, such as a fallible function where an infallible type is expected | `fallible-function-value` |
 | A wire literal outside `with` | `wire-literal-outside-with` |
 | An interface or capability method writes a capability row | `interface-method-uses` |
 | `return`, `break` or `continue` crosses a `with` block, a block argument or a bare block | `return-in-with-block` |
 | An error type declares a method named `Error` | `error-method-on-error-type` |
-| A named wire whose build can reach itself: a `with` of the wire in its providers, through a function, a method or a capability provider that enters it, or an embedding | `wire-cycle`, `probes/cyclic-wire.sketch`, `probes/wire-method-cycle.sketch` |
+| A named wire whose build can reach itself: a `with` of the wire in its providers, through a function, a method or a capability provider that enters it, or an embedding; entries of one named wire whose providers use each other's capabilities, so none can be built first | `wire-cycle`, `probes/cyclic-wire.sketch`, `probes/wire-method-cycle.sketch`; checker review tests (M14) |
 | A machine's state or signal type is not a union; its initial value is not a value of the state type; its step is not a function from the state and signal types to `Decision[S, O]` | runtime.md, Machines and actors 1 |
 | An argument or an operand has no value; a no-value function returns a value | `probes/void-argument.sketch`, `probes/void-fallible-return-value.sketch` |
-| Others: a wrong argument or result count; a call of a non-function; a non-`bool` condition; a field set twice; an assignment to a package `var` (immutable) or to a non-addressable value; a label defined twice; `break` or `continue` outside a loop, switch or select; `with` without a block; builtins called with the wrong arguments | the checker's messages |
+| Others: a wrong argument or result count; a call of a non-function; a non-`bool` condition; a field set twice; an assignment to a package `var` (immutable) or to a non-addressable value, such as a field of a map element `m[k].f = v` (a map element itself is assignable, not addressable); a label defined twice; `break` or `continue` outside a loop, switch or select; `with` without a block; builtins called with the wrong arguments | the checker's messages |
 
 ### S109: owned by another ticket
 
@@ -150,7 +153,7 @@ The checker refuses a construct that another ticket owns, and names it, instead 
 ### S111: duplicate wire entry
 
 - A wire has two entries for one capability, and neither is a `replace` of an embedded entry (`duplicate-wire-entry`; README Gap 28).
-- Two embedded wires bind one capability; `replace` one entry.
+- Two embedded wires bind one capability, and no `replace` entry of the embedding wire overrides it (rows.md, Wire 7).
 
 *Prior art:* Google Wire rejects two providers of one type; Effect's `Layer.merge` keeps the last silently, which Effra refuses.
 
@@ -163,5 +166,6 @@ Designed: a map's key type must not be a resource in v0 ([resources: containers]
 - `main` takes parameters (`main-parameter`) or type parameters.
 - `main` returns a value; only an error row is allowed, as Go's `main` returns nothing (`main-value-result`; README Gap 4).
 - `main` is called (`main-called`, `probes/main-call.sketch`); only the host calls it.
+- `main` is used as a value, such as `run := main` or `call(main)`: a value would let ordinary code call it.
 
 *Prior art:* Go's `func main()` takes nothing and returns nothing (Go still allows a call of `main`; Effra refuses it, so the host is its only caller); Gleam's `main` takes no arguments.

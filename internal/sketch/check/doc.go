@@ -14,9 +14,10 @@
 // Phases: collect the package's declarations; resolve type declarations
 // lazily with cycle colouring; resolve signatures; check bodies one strongly
 // connected component of the reference graph at a time, so the inferred
-// rows of a callee are final before its callers; then the package rules
-// that need every body (named wires, wire cycles, Error methods, unused
-// imports). An invalid operand or type suppresses every diagnostic that
+// rows of a callee are final before its callers (inside a component, a
+// worklist joins the rows to a fixpoint before any is published); then the
+// rules that read inferred rows (machine declarations, named wires, wire
+// cycles), Error methods and unused imports. An invalid operand or type suppresses every diagnostic that
 // would follow from it: one mistake, one diagnostic.
 //
 // The prelude (internal/sketch/std/prelude.ef) and the standard library are
@@ -33,15 +34,19 @@
 //   - ReScript and OCaml: constructors disambiguated by the expected type
 //     (generic literals and case variants without type arguments); OCaml's
 //     Parmatch usefulness algorithm (Maranget 2007) for totality over a case
-//     matrix, never the product of the subjects.
+//     matrix, never the product of the subjects, with Parmatch's pruning:
+//     subsumed rows dropped, a wildcard row answering at once, equal
+//     submatrices answered once.
 //   - Koka and Effekt: effect rows inferred for unannotated functions and
 //     discharged by handlers; here a with block subtracts the capabilities
 //     its wire binds, and a catch subtracts the caught error types.
 //   - Effect: Effect<A, E, R>, where catchTag removes a tag from E and
 //     provide removes a service from R; a function value widens to a type
 //     whose rows are supersets, never the reverse.
-//   - Elixir: inference stays inside the module; the exported surface spells
-//     its contract, the cross-module trade-off its type system states.
+//   - Elixir: its gradual set-theoretic types infer across modules without
+//     requiring written signatures, so it does not impose explicit exported
+//     rows; Effra's written exported rows (types.md, Generics 4) follow
+//     MoonBit and Go's export data instead, and Elixir is the contrast.
 //   - MoonBit: top-level signatures are annotated and locals inferred, and
 //     its raise rows are part of the function type.
 package check
