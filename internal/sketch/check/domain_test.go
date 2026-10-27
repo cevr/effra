@@ -636,11 +636,24 @@ type S struct{}
 func (S) M(x int) {}
 type Box[T any, V I[T]] struct{ X T; Y V }
 func F() { _ = Box[int, S]{1, S{}} }`},
-	{"dependent-constraint-call", "", `type I[T] interface { M(T) }
+	// T is bound only by a constant and V's constraint mentions it: Go
+	// infers T through the constraint, the subset refuses (D6 rule 3 as
+	// amended in round 8); the typed and explicit forms are valid.
+	{"dependent-constraint-call", "S108", `type I[T] interface { M(T) }
 type S struct{}
 func (S) M(x int) {}
 func Use[T any, V I[T]](x T, v V) {}
 func F() { Use(1, S{}) }`},
+	{"dependent-constraint-call-typed", "", `type I[T] interface { M(T) }
+type S struct{}
+func (S) M(x int) {}
+func Use[T any, V I[T]](x T, v V) {}
+func F(n int) { Use(n, S{}) }`},
+	{"dependent-constraint-call-explicit", "", `type I[T] interface { M(T) }
+type S struct{}
+func (S) M(x int) {}
+func Use[T any, V I[T]](x T, v V) {}
+func F() { Use[int](1, S{}) }`},
 	{"dependent-constraint-value", "", `type I[T] interface { M(T) }
 type S struct{}
 func (S) M(x int) {}

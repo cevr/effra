@@ -463,18 +463,40 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 	allExplicit := len(explicit) == len(sig.TParams)
 	failed := false
 	ops := make([]*operand, n)
-	isLit := func(i int) bool {
-		if i == len(args.exprs) {
-			return true
+	lits := make([]Type, n)
+	mismatch := func(at syntax.Node, t, pt Type) {
+		// A typed argument that does not match its parameter, or
+		// conflicts with what an earlier argument inferred (round-5 M3;
+		// go/types infer.go).
+		if want := c.subst(pt, in.m); in.hasFree(pt) || identical(want, pt) {
+			c.errorf(at, CodeType, "the argument has type %s, which does not match %s (D6; type inference)", t, pt)
+		} else {
+			c.errorf(at, CodeType, "the argument has type %s, which does not match %s, inferred for %s (D6; type inference)", t, want, pt)
 		}
-		_, ok := args.exprs[i].(*syntax.FuncLit)
-		return ok
 	}
 	for i := 0; i < len(args.exprs); i++ {
-		if isLit(i) {
+		pt := paramType(sig, i, spread)
+		if lit, ok := args.exprs[i].(*syntax.FuncLit); ok {
+			// A function literal's parameter and result types are written
+			// (#214 would infer them), so it is a typed argument: it
+			// unifies in source order with the others, before the
+			// constants default, as in Go (round-7 M3; D6 rule 2). Only
+			// its unwritten rows take the parameter type's, when known.
+			expected, _ := under0(c.subst(pt, in.m)).(*Signature)
+			op := c.funcLit(lit, expected, in)
+			op.expr = lit
+			c.record(lit, op)
+			lt := op.typ.(*Signature)
+			lits[i] = lt
+			if allExplicit || failed || !in.mentions(pt) {
+				continue
+			}
+			if !in.unify(pt, lt, unifyAssign) {
+				mismatch(lit, lt, pt)
+				failed = true
+			}
 			continue
 		}
-		pt := paramType(sig, i, spread)
 		var hint Type
 		if !in.hasFree(pt) {
 			hint = c.subst(pt, in.m)
@@ -491,14 +513,7 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 			continue
 		}
 		if !in.unify(pt, op.typ, unifyAssign) {
-			// A typed argument that does not match its parameter, or
-			// conflicts with what an earlier argument inferred (round-5
-			// M3; go/types infer.go).
-			if want := c.subst(pt, in.m); in.hasFree(pt) || identical(want, pt) {
-				c.errorf(args.exprs[i], CodeType, "the argument has type %s, which does not match %s (D6; type inference)", op.typ, pt)
-			} else {
-				c.errorf(args.exprs[i], CodeType, "the argument has type %s, which does not match %s, inferred for %s (D6; type inference)", op.typ, want, pt)
-			}
+			mismatch(args.exprs[i], op.typ, pt)
 			failed = true
 		}
 	}
@@ -536,32 +551,36 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 			return bad(x)
 		}
 	}
+	// A parameter bound only by constants that a constraint mentions: Go
+	// infers it through the constraint (core types, method signatures)
+	// before it defaults, which the subset does not do, so the call is
+	// refused before any guess (round-7 M2; D6 rule 3 as amended in
+	// round 8). A constraint error stays for parameters fixed by typed or
+	// written arguments.
+	for _, tp := range order {
+		for _, q := range sig.TParams {
+			if q.Constraint != nil && occurs(tp, q.Constraint) {
+				c.cannotInfer(x, tp.Name, x.Fun, sig)
+				return bad(x)
+			}
+		}
+	}
 	for _, tp := range order {
 		in.m[tp] = defaultType(widest[tp])
 	}
-	lits := make([]Type, n)
-	for i := 0; i < n; i++ {
-		if !isLit(i) {
-			continue
-		}
+	if args.trailing != nil {
+		// A trailing block writes no types: its result binds what is still
+		// free, after the constants (D6).
+		i := len(args.exprs)
 		pt := paramType(sig, i, spread)
 		expected, _ := under0(c.subst(pt, in.m)).(*Signature)
-		var lt *Signature
-		if i == len(args.exprs) {
-			if expected == nil {
-				c.errorf(args.trailing, CodeType, "a trailing block is a function-literal argument, but the final parameter has type %s", pt)
-				return bad(x)
-			}
-			lt = c.blockLit(args.trailing, expected, in)
-		} else {
-			op := c.funcLit(args.exprs[i].(*syntax.FuncLit), expected, in)
-			if op.invalid() {
-				return bad(x)
-			}
-			lt = op.typ.(*Signature)
+		if expected == nil {
+			c.errorf(args.trailing, CodeType, "a trailing block is a function-literal argument, but the final parameter has type %s", pt)
+			return bad(x)
 		}
+		lt := c.blockLit(args.trailing, expected, in)
 		lits[i] = lt
-		_ = in.unify(pt, lt, unifyAssign) // a literal's mismatch is the assignment's error below
+		_ = in.unify(pt, lt, unifyAssign) // a block's mismatch is the assignment's error below
 	}
 	for _, tp := range sig.TParams {
 		if in.m[tp] != nil {
@@ -629,6 +648,9 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 					at = args.exprs[i]
 				}
 				c.errorf(at, CodeType, "this function literal cannot be %s: %s", pt, why)
+				// One diagnostic for the call; its result is invalid, so
+				// nothing cascades (round-7 M3; D3).
+				return bad(x)
 			}
 			continue
 		}

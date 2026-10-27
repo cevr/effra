@@ -705,6 +705,8 @@ func inferProgram(rng *rand.Rand) string {
 	b.WriteString("func Id[U any](x U) U { return x }\n\n")
 	b.WriteString("func Apply[T any](f func(T) T, x T) {}\n\n")
 	b.WriteString("func Fix(f func(int) int) {}\n\n")
+	b.WriteString("func Rev[T any](x T, f func(T) T) {}\n\n")
+	b.WriteString("func Dep[T any, P interface{ M(T) T }](v T, p P) {}\n\n")
 	fmt.Fprintf(&b, "func Main(%s) {\n", strings.Join(values, ", "))
 	name := func(v string) string { return v[:strings.Index(v, " ")] }
 	for range 1 + rng.Intn(2) {
@@ -717,7 +719,21 @@ func inferProgram(rng *rand.Rand) string {
 			return name(values[rng.Intn(len(values))])
 		}
 		v, w := arg(), arg()
-		switch rng.Intn(9) {
+		lit := func() string {
+			t := []string{"int", "int8", "int32", "string"}[rng.Intn(4)]
+			return fmt.Sprintf("func(v %s) %s { return v }", t, t)
+		}
+		switch rng.Intn(12) {
+		case 9:
+			// An annotated literal is a typed argument, unified before the
+			// constants default, in either position (round-7 M3).
+			fmt.Fprintf(&b, "\tApply(%s, %s)\n", lit(), v)
+		case 10:
+			fmt.Fprintf(&b, "\tRev(%s, %s)\n", v, lit())
+		case 11:
+			// A parameter a constraint mentions: refused when only a
+			// constant binds it (round-7 M2).
+			fmt.Fprintf(&b, "\tDep(%s, %s)\n", v, w)
 		case 7:
 			// A result in context: Info records the converted type of the
 			// argument and its constant sub-expressions (round-7 M1).
