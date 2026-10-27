@@ -57,6 +57,8 @@ In about thirty lines, the design checks what Go leaves to convention. Every exp
 
 ## The guarantees
 
+The "In Ergo" column is the design. The last column says what runs today.
+
 | Guarantee | What it means | In Go today | In Ergo | Runs today |
 | --- | --- | --- | --- | --- |
 | **Typed errors** | You can see every expected failure of a function, and the compiler knows which failures you handled. | `error` says only "something failed" | `error[NotFound \| Declined]`, exhaustive `catch` | prototype checker |
@@ -73,6 +75,8 @@ Ergo keeps Go's spelling, Go's runtime and garbage collector, and single static 
 ---
 
 ## Errors you can see
+
+*Status:* the prototype checker enforces the rules below today ([rows](docs/spec/rows.md)). One part of the example is designed, not built: a method call on a value, such as `order.Paid()`.
 
 ```go
 type NotFound struct{ ID string }
@@ -99,9 +103,9 @@ func Settle(id string, card Card) error[NotFound] needs Orders, Payments {
 - Interruption and defects are in no row. They pass through every `catch`.
 - In Go, these become plain `if err != nil { return … }`. The row is checked, then erased.
 
-*Today:* the prototype checker enforces these rules ([rows](docs/spec/rows.md)). A method call on a value, such as `order.Paid()`, is designed.
-
 ## Needs and provides
+
+*Status:* the prototype checks `needs` rows, inline wires and closed named wires today. The rest of this section is designed, not built: the `provides` and `needs` wire header, constructors, embedding, `replace` and an error row on `main` parse and format, and their checks are designed ([rows](docs/spec/rows.md#wire)).
 
 ```go
 wire Store provides Orders needs Config {
@@ -128,6 +132,8 @@ func main() error[NotFound | Declined | DialFailed] needs Console {
 
 ### Tests replace providers, with no mock framework
 
+*Status:* designed, not built. `replace` and embedding parse and format; `testing.VirtualClock` is designed ([stdlib](docs/spec/stdlib.md#testing)).
+
 ```go
 wire Fixture provides Orders, Payments, Scheduler {
 	Live
@@ -137,9 +143,9 @@ wire Fixture provides Orders, Payments, Scheduler {
 }
 ```
 
-*Today:* the prototype checks `needs` rows, inline wires and closed named wires. The `provides` and `needs` wire header, constructors, embedding and `replace` are parsed and formatted, and their checks are designed ([rows](docs/spec/rows.md#wire)).
-
 ## Resources close themselves
+
+*Status:* designed, not built: the checker does not yet track resources ([resources](docs/spec/resources.md), [#197](https://github.com/cevr/ergo/issues/197)). `runtime/rt` implements the release rules that emitted code will call.
 
 ```go
 func copyFile(src, dst string) error[NotFound | WriteFailed] needs FS {
@@ -155,9 +161,9 @@ func copyFile(src, dst string) error[NotFound | WriteFailed] needs FS {
 - Releases run to completion, even when the scope ends because it was stopped.
 - There is no `defer f.Close()` to forget, and no double close.
 
-*Today:* designed ([resources](docs/spec/resources.md)). `runtime/rt` implements the release rules that emitted code will call.
-
 ## Tasks that cannot leak
+
+*Status:* `go`, `Task` and the `tasks` package are designed, not built ([runtime](docs/spec/runtime.md#tasks)). Today `runtime/rt` implements the task tree, stops, masks and `timeout.After`, and the prototype checks `timeout.After`. The runtime keeps every defect, but not yet every typed failure. A completed child's failure that nobody waited for is dropped when its scope closes normally. When a deadline wins, `timeout.After` drains the child and returns `timeout.Expired` to its caller, with any cleanup defects; the child's own exit keeps its failure and the interruption, and the caller's cause does not carry them ([receipt](runtime/rt/RECEIPT.md)).
 
 ```go
 func Prices(ids []string) ([]Price, error[NotFound | timeout.Expired]) needs Catalog, Scheduler {
@@ -174,9 +180,9 @@ func Prices(ids []string) ([]Price, error[NotFound | timeout.Expired]) needs Cat
 - A stop is checked at interruption points, and cleanup runs uninterrupted.
 - `go f(x)` starts a task and gives a `Task[T, E]`. A `Task` is a resource, so its owner scope stops and drains it.
 
-*Today:* `runtime/rt` implements the task tree, stops, masks and `timeout.After`. The prototype checks `timeout.After`. The runtime keeps every defect, but not yet every typed failure: a completed child's failure that nobody waited for is dropped when its scope closes normally, and a child stopped by a deadline reports `timeout.Expired` in place of its own failure ([receipt](runtime/rt/RECEIPT.md)). `go`, `Task` and the `tasks` package are designed ([runtime](docs/spec/runtime.md#tasks)).
-
 ## Machines and actors, as ordinary code
+
+*Status:* designed, not built. The `machine` declaration and the multi-subject switch parse, and their checks are designed ([runtime](docs/spec/runtime.md#machines-and-actors)). The actor library's hand-written Go lowering runs in [`prototypes/actorlib`](prototypes/actorlib/doc.go), with its cost measured ([#101 note](docs/research/actor-library.md)).
 
 ```go
 type State interface{ Closed | Open | HalfOpen }
@@ -213,9 +219,9 @@ func join(name string) (int64, error[RoomFull | actor.Stopped | actor.NoReply]) 
 - Actors are a library, not syntax. `actor.Start`, `actor.Ask` with a typed `actor.Reply[T, E]`, `actor.StartMachine`, `actor.StartAgent` and `actor.Call` are ordinary code, and no compiler rule names them.
 - A reply is a resource. Every ask is answered once, or the caller gets `actor.NoReply` or `actor.Stopped`.
 
-*Today:* the `machine` declaration and the multi-subject switch parse, and their checks are designed ([runtime](docs/spec/runtime.md#machines-and-actors)). The actor library's Go lowering runs in [`prototypes/actorlib`](prototypes/actorlib/doc.go), with its cost measured ([#101 note](docs/research/actor-library.md)).
-
 ## Laws: say what must always hold
+
+*Status:* designed, not built ([types](docs/spec/types.md#laws), [#162](https://github.com/cevr/ergo/issues/162)). The #125 spike built the law check, generators, shrinker and receipts for the earlier language, on a branch that is not merged.
 
 ```go
 // Found by name, like TestX, and run with generated inputs and shrinking.
@@ -239,9 +245,9 @@ func LawFindAfterPut(id string, v Order) bool needs Store {
 - A refuted law fails the build. A passing law is reported as tested, never as proved.
 - Under research: evidence values and a tier of laws that are proved instead of tested ([laws note](docs/research/laws.md)).
 
-*Today:* designed ([types](docs/spec/types.md#laws), [#162](https://github.com/cevr/ergo/issues/162)). The #125 spike built the law check, generators, shrinker and receipts for the earlier language, on a branch that is not merged.
-
 ## Observability by construction
+
+*Status:* `runtime/rt` records traces today. The prototype run below was recorded on 2026-10-27. `ergo trace`, `ergo ps` and an OpenTelemetry exporter are designed, not built.
 
 The checker knows every definition, every capability call and every row. So the compiler can name every trace event, and the source needs no span calls. The [#188 spike](docs/research/traceability.md) put this into `runtime/rt` and the prototype compiler. This is real output of the prototype's trace query, recorded on 2026-10-27. In that run, a 100ms timeout interrupted `Scheduler.Sleep(2s)`, before `Gateway.Authorize` ran (trimmed; [full run](docs/previews/2026-10-27-traceability.md)):
 
@@ -268,7 +274,9 @@ cause trace of the root exit (links recorded by the runtime; candidates are labe
 
 ## Built for agents
 
-Agents read the same checked model as the compiler. The CLI and the MCP server share it. A diagnostic has a registered code, a position and a message. This is real output of the current CLI for a 2026-edition file whose `pay` calls `Gateway` without declaring it:
+*Status:* `ergo diagnostics`, `ergo fmt` and the MCP formatter work on 2026-edition files today. `ergo inspect` and the semantic MCP tools refuse 2026-edition files until the checker lands ([#196](https://github.com/cevr/ergo/issues/196)); for the earlier language they work today.
+
+Agents read the same checked model as the compiler, through the CLI or MCP. A diagnostic has a registered code, a position and a message. This is real output of the current CLI for a 2026-edition file whose `pay` calls `Gateway` without declaring it:
 
 ```console
 $ ergo diagnostics pay.ef
@@ -293,6 +301,8 @@ $ ergo inspect checkout.ef Checkout
 
 ## Go interop
 
+*Status:* designed, not built, for the 2026 edition: the prototype checker refuses `import go` with S109 ([grammar](docs/spec/grammar.md#declarations)). The earlier `.ef` language imports Go packages today ([interop](docs/interop.md)).
+
 ```go
 import go "strconv" // every call through strconv charges go.Foreign
 
@@ -304,8 +314,6 @@ func parsePort(text string) (int64, error[go.Error]) needs go.Foreign {
 - Go's `(T, error)` becomes `(T, error[go.Error])`. A Go result that may be nil becomes `Option`. A Go panic becomes a defect. Slices and maps are copied at the boundary.
 - A bodiless declaration with a `//ef:go pkg.Func` directive binds one Go function with stated types, and a generated adapter checks them.
 - The emitted Go stays readable. The prototype carries source positions in `//line` directives, so Go panics, pprof, delve and the race detector point at Ergo lines.
-
-*Today:* designed for the 2026 edition ([grammar](docs/spec/grammar.md#declarations)). The earlier `.ef` language imports Go packages today ([interop](docs/interop.md)).
 
 ## Performance, measured
 
@@ -323,6 +331,8 @@ Ergo is designed to lower to the Go you would write by hand: rows are erased, ge
 Performance claims in this repo require receipts. Each receipt names its machine and its load. The losses stay in the table: the actor library is slower than the hand-written baseline today.
 
 ## What Ergo does not do
+
+These are rules of the designed language. The parser enforces the syntax rules today: `goto`, `fallthrough`, `const`, a type assertion and a type alias are S001 ([grammar](docs/spec/grammar.md#parser)).
 
 - Go is the only target. Ergo adds no scheduler and no garbage collector; it uses Go's.
 - There is no `nil`. Absence is `Option[T]`.
