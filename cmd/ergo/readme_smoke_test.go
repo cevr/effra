@@ -17,17 +17,25 @@ import (
 // (docs/spec), whose checker is in progress, so each claim is held to what
 // runs today:
 //
-//   - every go block parses and is canonical under the 2026 parser and
-//     formatter, with a package clause added, and uses no form the
-//     specification removed: `uses` (#217), `nil` (types.md) or a prefix
-//     catch (rows.md);
+//   - every go block, found as CommonMark finds fenced code blocks,
+//     parses and is canonical under the 2026 parser and formatter, with a
+//     package clause added, and uses no form the specification removed:
+//     `uses` (#217), `nil` (types.md) or a prefix catch (rows.md); nor a
+//     deferred Close, which the README never shows because resources
+//     release themselves (resources.md, `defer`);
 //   - the quoted S102 line is what `ergo diagnostics` prints for
 //     readmeSmokeS102Source;
 //   - each `./bin/ergo` command under "Working in this repo" exits 0 and
 //     prints the output its comment names.
+//
+// TODO(#196): once the 2026 checker lands, also type-check each block
+// against declarations of the names it leaves undeclared, so a block that
+// drops a failure from a row fails here too.
 
 var (
-	readmeSmokeGoBlock = regexp.MustCompile("(?ms)^```go\n(.*?)^```$")
+	// readmeSmokeFence is a CommonMark opening code fence: indentation, a
+	// run of three or more backticks or tildes, and the info string.
+	readmeSmokeFence = regexp.MustCompile("^([ \t]*)(`{3,}|~{3,})(.*)$")
 	// readmeSmokeDiagnostics is the console block that quotes the S102 line.
 	readmeSmokeDiagnostics = regexp.MustCompile("(?ms)^```console\n\\$ ergo diagnostics pay\\.ef\n(.*?)^```$")
 	// readmeSmokeShBlock is the shell block of "Working in this repo".
@@ -71,6 +79,60 @@ func main() needs Console {
 }
 `
 
+// readmeGoBlocks returns the body of every fenced code block whose info
+// string's first word is go, in any case, as CommonMark reads a fence: the
+// info string is trimmed and its first word is the language, whatever
+// follows it (`go `, `go title=x`). The closing fence uses the opening's
+// character, at least as many times, followed only by white space; an
+// unclosed block runs to the end of the document. Each content line loses
+// up to as many spaces as the opening fence's indentation. Any indentation
+// opens a fence, so
+// a fence nested in a list item is found too.
+func readmeGoBlocks(readme string) []string {
+	var blocks []string
+	lines := strings.Split(readme, "\n")
+	for i := 0; i < len(lines); i++ {
+		open := readmeSmokeFence.FindStringSubmatch(lines[i])
+		if open == nil || (open[2][0] == '`' && strings.Contains(open[3], "`")) {
+			continue
+		}
+		indent, fence := open[1], open[2]
+		words := strings.Fields(open[3])
+		var body []string
+		for i++; i < len(lines); i++ {
+			trimmed := strings.TrimLeft(lines[i], " \t")
+			run := len(trimmed) - len(strings.TrimLeft(trimmed, fence[:1]))
+			if run >= len(fence) && strings.TrimSpace(trimmed[run:]) == "" {
+				break
+			}
+			line := lines[i]
+			for k := 0; k < len(indent) && strings.HasPrefix(line, " "); k++ {
+				line = line[1:]
+			}
+			body = append(body, line)
+		}
+		if len(words) > 0 && strings.EqualFold(words[0], "go") {
+			blocks = append(blocks, strings.Join(body, "\n")+"\n")
+		}
+	}
+	return blocks
+}
+
+// readmeProblems reports every inadmissible go block of a README.
+func readmeProblems(readme string) []string {
+	blocks := readmeGoBlocks(readme)
+	if len(blocks) < readmeSmokeMinBlocks {
+		return []string{fmt.Sprintf("README has %d go blocks, want at least %d", len(blocks), readmeSmokeMinBlocks)}
+	}
+	var problems []string
+	for index, block := range blocks {
+		if problem := readmeBlockProblem(block); problem != nil {
+			problems = append(problems, fmt.Sprintf("README go block %d: %v", index+1, problem))
+		}
+	}
+	return problems
+}
+
 // readmeBlockProblem reports why one README go block is not admissible
 // 2026-edition source, or nil when it is.
 func readmeBlockProblem(body string) error {
@@ -87,12 +149,28 @@ func readmeBlockProblem(body string) error {
 		return err
 	}
 	var refused []string
+	lineOf := func(pos syntax.Pos) int {
+		return strings.Count(source[:int(pos)], "\n") + 1 - strings.Count(header, "\n")
+	}
 	syntax.Inspect(file, func(n syntax.Node) bool {
+		if deferred, ok := n.(*syntax.DeferStmt); ok {
+			// Ordinary defer is valid Ergo; a deferred Close is what the
+			// README promises the reader never writes.
+			syntax.Inspect(deferred.Stmt, func(m syntax.Node) bool {
+				if call, ok := m.(*syntax.CallExpr); ok {
+					if selector, ok := call.Fun.(*syntax.SelectorExpr); ok && selector.Sel.Name == "Close" {
+						refused = append(refused, fmt.Sprintf("line %d: a resource releases itself; the README shows no deferred Close (resources.md)", lineOf(deferred.Defer)))
+					}
+				}
+				return true
+			})
+			return true
+		}
 		ident, ok := n.(*syntax.Ident)
 		if !ok {
 			return true
 		}
-		line := strings.Count(source[:int(ident.NamePos)], "\n") + 1 - strings.Count(header, "\n")
+		line := lineOf(ident.NamePos)
 		switch ident.Name {
 		case "nil":
 			refused = append(refused, fmt.Sprintf("line %d: Ergo has no nil (docs/spec/types.md)", line))
@@ -119,13 +197,37 @@ func TestReadmeSmoke(t *testing.T) {
 
 	t.Run("blocks", func(t *testing.T) {
 		t.Parallel()
-		blocks := readmeSmokeGoBlock.FindAllStringSubmatch(readme, -1)
-		if len(blocks) < readmeSmokeMinBlocks {
-			t.Fatalf("README has %d go blocks, want at least %d", len(blocks), readmeSmokeMinBlocks)
+		for _, problem := range readmeProblems(readme) {
+			t.Error(problem)
 		}
-		for index, block := range blocks {
-			if problem := readmeBlockProblem(block[1]); problem != nil {
-				t.Errorf("README go block %d: %v", index+1, problem)
+	})
+
+	// Whole-document mutants of the real README: each fence variant that
+	// CommonMark reads as a go block is checked, so an edit cannot hide a
+	// removed form behind it.
+	t.Run("refuses-document-mutants", func(t *testing.T) {
+		t.Parallel()
+		const charge = "needs Accounts, Payments, Scheduler {"
+		const lock = "\t\tlock := try Accounts.Lock(card) // a resource: released on every exit, the timeout included\n"
+		if !strings.Contains(readme, "```go\n") || strings.Count(readme, charge) != 1 || strings.Count(readme, lock) != 1 {
+			t.Fatal("the mutant anchors are not in README.md once each; update them with the first snippet")
+		}
+		first := func(mutated string) string { return strings.Replace(readme, "```go\n", mutated, 1) }
+		uses := func(doc string) string {
+			return strings.Replace(doc, charge, "uses Accounts, Payments, Scheduler {", 1)
+		}
+		for _, mutant := range []struct{ name, doc, want string }{
+			{"uses clause", uses(readme), "S001"},
+			{"fence `go ` with a trailing space, uses clause", uses(first("```go \n")), "S001"},
+			{"fence ` ```go` indented, uses clause", uses(first(" ```go\n")), "S001"},
+			{"fence `~~~go`, uses clause", uses(strings.Replace(first("~~~go\n"), "}\n```\n", "}\n~~~\n", 1)), "S001"},
+			{"fence `Go`, uses clause", uses(first("```Go\n")), "S001"},
+			{"fence `go title=pay.ef`, uses clause", uses(first("```go title=pay.ef\n")), "S001"},
+			{"deferred Close", strings.Replace(readme, lock, lock+"\t\tdefer lock.Close()\n", 1), "deferred Close"},
+		} {
+			problems := strings.Join(readmeProblems(mutant.doc), "\n")
+			if !strings.Contains(problems, "README go block 1: ") || !strings.Contains(problems, mutant.want) {
+				t.Errorf("%s: got %q, want a refusal of block 1 naming %q", mutant.name, problems, mutant.want)
 			}
 		}
 	})
@@ -142,15 +244,21 @@ func TestReadmeSmoke(t *testing.T) {
 			{"prefix catch of a type", "func f() Receipt {\n\treturn catch Declined {\n\t\tReceipt{}\n\t}\n}\n", "S001"},
 			{"prefix catch of a call", "func f() Receipt {\n\tr := catch Charge(c, 1) {\n\tcase Declined:\n\t\tReceipt{}\n\t}\n\treturn r\n}\n", "S001"},
 			{"not canonical", "func f()   {\n}\n", "not canonical"},
+			{"deferred Close", "func f() needs FS {\n\tfile := FS.Open(\"x\")\n\tdefer file.Close()\n\tread(file)\n}\n", "deferred Close"},
 		} {
 			problem := readmeBlockProblem(mutant.body)
 			if problem == nil || !strings.Contains(problem.Error(), mutant.want) {
 				t.Errorf("%s: got %v, want a refusal naming %q:\n%s", mutant.name, problem, mutant.want, mutant.body)
 			}
 		}
-		control := "func f(x Order) (Receipt, error[Declined]) needs Payments {\n\treturn Payments.Charge(x)\n}\n"
-		if problem := readmeBlockProblem(control); problem != nil {
-			t.Errorf("control block refused: %v", problem)
+		for _, control := range []string{
+			"func f(x Order) (Receipt, error[Declined]) needs Payments {\n\treturn Payments.Charge(x)\n}\n",
+			// Ordinary defer stays valid language (resources.md, `defer`).
+			"func f(done chan int64) {\n\tdefer done <- 1\n\twork()\n}\n",
+		} {
+			if problem := readmeBlockProblem(control); problem != nil {
+				t.Errorf("control block refused: %v\n%s", problem, control)
+			}
 		}
 	})
 
