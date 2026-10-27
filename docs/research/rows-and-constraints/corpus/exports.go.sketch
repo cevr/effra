@@ -1,0 +1,24 @@
+// Export metadata for name-resolution option (b). Written for #135; not a library
+// reconstruction, not compiled, not normative, and not counted in any inventory.
+//
+// Option (b) resolves a bare capability name through the packages a file imports,
+// so it needs each imported package's exported capabilities. measure.py reads
+// them from two places: the interface declarations in library/implied.go.sketch
+// (under before/) and the ones below. A package section in either file is taken
+// as that package's complete list of exported capabilities. A package with no
+// section has no export inventory, and option (b) counts a reference whose
+// candidates depend on it as unresolved, not as resolved.
+//
+// Only capabilities that a corpus or control file names in a qualified `uses`
+// clause, in a package the reconstruction declares without them, are added here.
+// Names only: their methods do not matter to name resolution.
+
+package http
+
+// fetchall.go.sketch get: uses http.Client
+type Client interface{}
+
+package grpc
+
+// controls/before/two-imports-export-client.go.sketch: the collision of option (b)
+type Client interface{}

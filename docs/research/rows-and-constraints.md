@@ -7,7 +7,7 @@
 The sketch can come within reach of Go's signatures for the code users write, without losing a checked row:
 
 <!-- measure.py:begin answer -->
-- **Row elision lands** for unexported functions, function literals and `TestX` functions, except a step named by an exported machine type and a bodiless foreign declaration. It removes 166 of the 289 row entries in user-facing signatures. An elided function reaches an imported capability by its qualified name (`http.Client.Get`), which adds back 42 tokens in the corpus. In the Go-controlled loop programs, signature tokens fall from 243 to 157, against 175 for Go.
+- **Row elision lands** for unexported functions, function literals and `TestX` functions, except a step named by an exported machine type and a bodiless foreign declaration. It removes 166 of the 289 row entries in user-facing signatures. An elided function reaches an imported capability by its qualified name (`http.Client.Get`): 21 references, 42 tokens added back. User source still shrinks by 536 tokens. In the Go-controlled loop programs, signature tokens fall from 243 to 157, against 175 for Go.
 - **Named constraints land** in Go's bracket list, `func Max[T cmp.Ordered](a, b T) T`. A bracket list is written only when it carries a constraint or fixes an order for explicit type arguments. 0 user-facing signatures in the corpus need a constraint; 4 library signatures do.
 - **Row parameters on function types stay explicit.** All 33 row-variable occurrences are in library code (0 user-facing). Each simplification that would remove them hides a failure from a reader or loses a resource rule.
 - **Refused:** row elision for `main`, for laws and for methods; constraints inferred from bodies; one combined row variable; implicit callback rows.
@@ -35,7 +35,7 @@ The complexity moves out of what users write and stays in what the checker check
 - A *row entry* is one name a user writes in a row: each error type in `error[A | B]`, each capability in `uses A, B`, and each row variable (`E`, `R`) wherever it is written.
 - *User-facing* code is application code. *Library-internal* code is a library package (`tasks.Map`, the reconstruction, and the two library functions shown in `docs/spec`). *Fixtures* are compiler test inputs; a *negative* fixture carries `// want`.
 
-**Rewrites.** `measure.py` parses every signature with one parser, applies each candidate as a mechanical rewrite into `corpus/after/<candidate>/`, then parses the rewritten text again and counts from that parse.
+**Rewrites.** `measure.py` parses every signature with one parser, applies each candidate as a mechanical rewrite into `corpus/after/<candidate>/`, then parses the rewritten text again and counts from that parse. For row elision it also resolves every capability reference in every body, before and after the rewrite, and fails on any reference whose capability changes ([§2](#name-resolution-in-an-elided-function)). Hand-written controls (`corpus/controls/`) and export metadata for name-resolution option (b) (`corpus/exports.go.sketch`) sit outside `before/` and enter no inventory count.
 
 ```sh
 python3 -I docs/research/rows-and-constraints/corpus/measure.py --check   # exit 0 when every table, counts.json and after/ are current
@@ -280,6 +280,12 @@ By role, with the landing rule applied:
 
 After elision, each unexported sketch signature and the test are shorter than their Go controls, because the context and the service parameters are gone. The one exception is `apply`, which has no row and whose borrow `*[]Account` costs one token. The exported `Run` and every `main` keep their rows and stay longer than Go: that is the price of an explicit public contract.
 
+**Source tokens.** The table above compares signatures only. Whole source is a separate measure:
+
+<!-- measure.py:begin source-tokens -->
+Whole-source tokens, qualifiers included, in the 42 user-facing source units: 8702 before, 8166 after the landing rewrite, 536 saved. Option (a)'s qualifiers cost 42 of them (6 in the loop programs). The Go comparison above counts signature tokens only, so the qualifiers, which sit in bodies, are not in it.
+<!-- measure.py:end source-tokens -->
+
 ### Honesty
 
 **Meaning unchanged.** Inference computes the least row the body needs, by the composition table of `docs/spec/rows.md`. A row that a user writes stays declared, so a loose row is never silently tightened and the fixtures classified `written` in the [honesty table](#5-honesty-per-candidate) keep their S101 and S102. Every exported function still spells the union of what its unexported callees can do, so no public contract changes when an unexported body changes.
@@ -300,21 +306,86 @@ After elision, each unexported sketch signature and the test are shorter than th
 
 ### Name resolution in an elided function
 
-A `uses` clause does two things: it states a row, and it brings the bare name of an imported capability into scope for the body (`uses http.Client` makes `Client.Get` legal, `docs/spec/rows.md` Capability rows rule 5). Eliding the row also removes the binding, so `get`'s `Client.Get(url)`, `topWords`'s `Files.Lines(path)` and every test's `T.Equal(…)` would name nothing. Two options, measured on the landing rewrite:
+A `uses` clause does two things: it states a row, and it brings the bare name of an imported capability into scope for the body (`uses http.Client` makes `Client.Get` legal, `docs/spec/rows.md` Capability rows rule 5). Eliding the row also removes the binding, so `get`'s `Client.Get(url)`, `topWords`'s `Files.Lines(path)` and every test's `T.Equal(…)` would name nothing.
+
+**Scope rule, both options.** A `uses pkg.X` clause binds the bare name `X` in its function's body, including the literals nested in it, unless a nested literal's own written clause binds `X` again. A capability reference is any bare use of `X` in a body: the receiver of a selector (`X.m(…)`), an inline wire key (`wire{ X = p }`), a `replace X = p` target, or `X` in a type. A selector's member (`c.X`) and a composite-literal key (`Conn{X: 1}`) are not references. Locals cannot take a capability's name (rows rule 5), but they can take a package's name (`http := 1`). A reference resolves, innermost first, to the nearest written `uses` binding of its name, then to a declaration in the same package. Eliding a row removes one binding; the reference then falls back to the next binding out, which may be another written clause, a same-package declaration, or nothing.
+
+`measure.py` resolves each reference to its binding and the function that owns it before any edit, deciding functions outer body first. A reference that still resolves to the same capability after elision needs no edit (a method keeps its row, so the literal inside it stays bare). Any other reference is respelled once. Two options, measured on the landing rewrite:
 
 <!-- measure.py:begin names -->
 | Measure | Option (a): qualify | Option (b): unique import |
 | --- | --- | --- |
-| bare capability uses that lose their `uses` binding (landing rule) | 21 | 21 |
+| capability references whose binding the elided `uses` clause carried | 21 | 21 |
 | … by capability | fs.Files: 1, http.Client: 1, testing.T: 19 | same |
-| uses that need a qualifier | 21 | 0 |
-| tokens added back | 42 | 0 |
+| … by position | selector: 21, wire or replace key: 0, other: 0 | same |
+| resolve with no edit (exactly one import exports the name) | 0 | 19 |
+| captured by an outer `uses` or a same-package declaration (need a qualifier) | 0 | 0 |
+| ambiguous: two imports export the name (need a qualifier) | 0 | 0 |
+| unresolved: an import has no export inventory | 0 | 2 |
+| qualified once | 21 | 0 |
+| functions that keep their rows because a local hides every import name | 0 | 0 |
+| tokens added back | 42 | 0, plus up to 4 if the unresolved references need a qualifier |
+| tokens added back if `T.Equal` is spelled with the library's `testing.Equal` | 4 | 0 |
 <!-- measure.py:end names -->
 
-- **(a) Qualified access.** An elided function reaches an imported capability by its qualified name: `http.Client.Get(url)`, `fs.Files.Lines(path)`, `testing.T.Equal(got, want)`. A bare capability name resolves only through a written `uses` clause or a declaration in the same package. *Collision case:* a package that declares its own `type Client interface { Get(url string) (Response, error[Down]) }` and imports `http`. A bare `Client.Get` is always the local capability and `http.Client.Get` is always the imported one; adding or removing an import never changes what a bare name means.
-- **(b) Unique import.** A bare capability name resolves when exactly one imported package exports a capability of that name; two candidates are an error that asks for qualification. It adds no token in the corpus. *Collision case:* a file importing `http` and `grpc`, both exporting `Client`. Every bare `Client.Get` in the file becomes an error the moment the second import is added, in functions that never used `grpc`.
+- **(a) Qualified access.** Scope rule as above, and nothing more: a reference that loses its binding is written `pkg.X`, with the name of an import of that package. `http.Client.Get(url)`, `fs.Files.Lines(path)`, `testing.T.Equal(got, want)`, `wire{ http.Client = Fake{} }`, `replace http.Client = Fake{}`. The qualifier is chosen at the reference: when a local hides the package name (`http := 1`), another import name of the package is used (`import web "http"` gives `web.Client.Ping()`); when every import name is hidden, the rewrite never writes a name the local would capture, and the function keeps its written row (the author adds an import alias or keeps the row). *Collision case:* a package that declares its own `type Client interface{ Ping() }` and imports `http`. Once `remote`'s `uses http.Client` is elided, its bare `Client` would fall back to the local declaration, so it becomes `http.Client.Ping()`; the bare `Client.Ping()` in `local` stays the package's own. Adding or removing an import never changes what a bare name means.
+- **(b) Unique import.** Precedence: a written `uses` binding in an enclosing body, then a same-package declaration, then the import set. A bare name not bound by the first two resolves when exactly one imported package exports a capability of that name. Two candidates are an error at the reference that asks for qualification (Elixir's rule for imported functions, below); a reference captured by an outer `uses` or a same-package declaration of another capability must be qualified, as in (a). The rule needs each imported package's exported capabilities. The corpus has them only for the packages in the library reconstruction and in [`corpus/exports.go.sketch`](rows-and-constraints/corpus/exports.go.sketch), taken as complete; a reference in a file that imports any other package is unresolved, because that package might export the name too. *Collision case:* a file importing `http` and `grpc`, both exporting `Client`. Every bare `Client.Ping()` in the file becomes an error the moment the second import is added, in functions that never use `grpc`.
 
-**Recommendation: (a).** It is Go's rule (Go names every imported identifier through its package, `http.Get`, unless a dot import is written), so it serves P3. It is the ordinary selector rule applied to capabilities, with no lookup that exists only for capabilities, which is the owner's "general features, not special casing" rule. (b) is a capability-only search over the import set and makes a name's meaning depend on unrelated imports. The cost of (a) is the tokens in the table, and two spellings of one call (`Client.Get` under a written `uses`, `http.Client.Get` without one). The after/ corpus uses (a).
+<!-- measure.py:begin names-detail -->
+- `eval8-five/codec-transforms.go.sketch:160 T (selector) -> testing.T; (b) unique`
+- `eval8-five/codec-transforms.go.sketch:161 T (selector) -> testing.T; (b) unique`
+- `eval8-five/codec-transforms.go.sketch:166 T (selector) -> testing.T; (b) unique`
+- `eval8-five/codec-transforms.go.sketch:168 T (selector) -> testing.T; (b) unique`
+- `eval8-five/codec-transforms.go.sketch:176 T (selector) -> testing.T; (b) unique`
+- `eval8-five/codec-transforms.go.sketch:184 T (selector) -> testing.T; (b) unique`
+- `eval8-five/codec-transforms.go.sketch:189 T (selector) -> testing.T; (b) unique`
+- `eval8-five/codec-transforms.go.sketch:198 T (selector) -> testing.T; (b) unique`
+- `eval8-five/codec-transforms.go.sketch:207 T (selector) -> testing.T; (b) unique`
+- `eval8-five/codec-transforms.go.sketch:215 T (selector) -> testing.T; (b) unique`
+- `eval8-five/codec-transforms.go.sketch:225 T (selector) -> testing.T; (b) unique`
+- `eval8-five/codec-transforms.go.sketch:230 T (selector) -> testing.T; (b) unique`
+- `eval9/http-endpoints.go.sketch:149 T (selector) -> testing.T; (b) unique`
+- `eval9/http-endpoints.go.sketch:155 T (selector) -> testing.T; (b) unique`
+- `eval9/http-endpoints.go.sketch:156 T (selector) -> testing.T; (b) unique`
+- `eval9/http-endpoints.go.sketch:162 T (selector) -> testing.T; (b) unique`
+- `eval9/http-endpoints.go.sketch:168 T (selector) -> testing.T; (b) unique`
+- `eval9/http-endpoints.go.sketch:174 T (selector) -> testing.T; (b) unique`
+- `eval9-loops/fetchall.go.sketch:27 Client (selector) -> http.Client; (b) unresolved`
+- `eval9-loops/poller_test.go.sketch:41 T (selector) -> testing.T; (b) unique`
+- `eval9-loops/wordcount.go.sketch:19 Files (selector) -> fs.Files; (b) unresolved`
+<!-- measure.py:end names-detail -->
+
+**Controls.** Each case of the rule has a hand-written before and after file under [`corpus/controls/`](rows-and-constraints/corpus/controls/), outside the counted corpus; the rows marked "round-2 review probe" are the reviewer's cases. The landing rewrite of each control must equal its after file, and its outcomes must equal its `// expect` lines.
+
+<!-- measure.py:begin controls -->
+| Control (`corpus/controls/`) | What it shows | Option (a) | Option (b) |
+| --- | --- | --- | --- |
+| `import-without-inventory` | `os` has no export inventory, so (b) cannot rule out a second `Client`; the use is unresolved, not resolved | qualified 1, needs alias 0 | unique 0, ambiguous 0, lexical 0, unresolved 1 |
+| `inline-wire-key` | an inline wire key names the capability; the key and both calls are qualified (round-2 review probe) | qualified 3, needs alias 0 | unique 3, ambiguous 0, lexical 0, unresolved 0 |
+| `kept-outer-binding` | a method keeps its written `uses http.Client`, so the call in its elided literal stays bare and bound | qualified 0, needs alias 0 | unique 0, ambiguous 0, lexical 0, unresolved 0 |
+| `nested-literal-inherits` | a literal with no row calls the capability its enclosing function binds; the call is qualified once | qualified 1, needs alias 0 | unique 1, ambiguous 0, lexical 0, unresolved 0 |
+| `nested-literal-same-row` | a literal and its enclosing function both write `uses http.Client`; the call is qualified once (round-2 review probe) | qualified 1, needs alias 0 | unique 1, ambiguous 0, lexical 0, unresolved 0 |
+| `not-references` | a struct field and a composite-literal key spelled `Client` are not capability references; only the call is qualified | qualified 1, needs alias 0 | unique 1, ambiguous 0, lexical 0, unresolved 0 |
+| `package-name-shadowed-alias` | a local named `http` hides one import name; the qualifier uses the other import name of the package | qualified 1, needs alias 0 | unique 1, ambiguous 0, lexical 0, unresolved 0 |
+| `package-name-shadowed` | a local named `http` hides the import, and no other import name exists; the function keeps its row (round-2 review probe) | qualified 0, needs alias 1 | unique 1, ambiguous 0, lexical 0, unresolved 0 |
+| `replace-key` | a `replace` target names the capability; the target and both calls are qualified (round-2 review probe) | qualified 3, needs alias 0 | unique 3, ambiguous 0, lexical 0, unresolved 0 |
+| `same-package-name` | the package declares its own `Client`; the imported one is qualified, the local one stays bare | qualified 1, needs alias 0 | unique 0, ambiguous 0, lexical 1, unresolved 0 |
+| `two-imports-export-client` | `http` and `grpc` both export `Client`; (a) qualifies, (b) reports the bare name ambiguous (round-2 review probe) | qualified 1, needs alias 0 | unique 0, ambiguous 1, lexical 0, unresolved 0 |
+<!-- measure.py:end controls -->
+
+<!-- measure.py:begin binding-check -->
+**Binding check.** `measure.py` resolves every capability reference of each unit before and after both elision rewrites (92 unit rewrites; 27 references in the corpus before the landing rewrite) and of each control, and fails when a reference resolves to another capability or to nothing, or when a doubled qualifier (`http.http.`) appears. Each control's rewrite must also equal its hand-written `controls/after/` file and the outcomes its `// expect` lines state. The check must also reject 4 known-bad rewrites of the controls (`CHECKER_MUTANTS`: a doubled qualifier, a bare wire key, a bare `replace` target and a qualifier captured by a local). Problems found: 0.
+<!-- measure.py:end binding-check -->
+
+**Provider and row.** Qualification changes the spelling, not the binding. `http.Client.Ping()` and the bare `Client.Ping()` it replaces name one capability, so the call takes the nearest provider in scope: the innermost `with` that supplies `http.Client`, else the caller's. It charges the same capability row, and the inferred row of the function is the row the elided clause stated. A qualified wire key or `replace` target supplies the same capability as the bare key did.
+
+**Recommendation: (a).** Both options are general scoping rules over every capability, user-declared or imported. Neither makes the compiler recognise a library declaration by identity or name, so neither is the special-cased library item that `GLOSSARY.md` rejects. (a) is chosen on two grounds:
+- Go familiarity (P3). Go reaches an imported identifier through its package name, and only an explicit dot import declares a package's names unqualified in a file (Go specification, Import declarations). (a) adds no new lookup: a capability is reached the way any imported name is.
+- Explicit, stable bindings (P6). Under (a) a bare name is bound by something written in the same function or package. Under (b) its meaning depends on the import set: adding an import can turn a working reference into an ambiguity error, and the checker needs a complete export inventory of every import. The corpus does not supply one for every import, so (b)'s count has unresolved references.
+
+The measured cost of (a) is the qualifier tokens in the table, a small part of the source tokens elision saves ([Source tokens](#2-candidate-1-row-elision-for-unexported-functions-and-tests)). There are also two spellings of one call: `Client.Get` under a written `uses`, `http.Client.Get` without one. Most of the cost is the spelling `testing.T.Equal`: the library reconstruction declares `testing.Equal` as a package function that charges `T`, because Go has no generic interface methods (amendment 7). With that spelling the cost falls to the last row of the table. (b) stays the documented alternative, with the precedence and ambiguity rules above, if the owner prefers fewer tokens to stable bindings. The after/ corpus uses (a).
+
+*Prior art.* Go qualifies imports and allows an explicit dot import; an inner declaration may shadow an import name ([`golang/go@go1.27.0`](https://github.com/golang/go/tree/go1.27.0), `doc/go_spec.html`, Import declarations and Declarations and scope). Gleam qualifies by default, allows an explicit unqualified import list, and recommends qualified use for readability ([`gleam-lang/language-tour@234cb028`](https://github.com/gleam-lang/language-tour/tree/234cb0284d91c458fa26e1b66e4b0276597d722f), `src/content/chapter0_basics/lesson03_unqualified_imports/en.html`). ReScript's `open` exposes a module's members in a lexical scope and advises using it sparingly and locally ([`rescript-lang/rescript-lang.org@a62233bc`](https://github.com/rescript-lang/rescript-lang.org/tree/a62233bc155bb1d643a2083485d0485a8f42d8aa), `apps/docs/markdown-pages/docs/manual/module.mdx:119-183`). Elixir's `import` is lexical, and a call that two imported modules both define is an error only when it is made ([`elixir-lang/elixir@7a405793`](https://github.com/elixir-lang/elixir/tree/7a4057930cedbc43fc4f24f70c0ccd68e96f5bf8), `lib/elixir/lib/kernel/special_forms.ex:637-640`, `:673-678`). That is (b)'s ambiguity rule, behind an explicit `import` of the module. Every one of them makes unqualified access a written choice; none resolves through the bare import set by default.
 
 **Reading cost.** On an exported function, a missing error row means "cannot fail". On an unexported function it means "inferred". A reader of `func helper() string` cannot tell whether it fails. The language server's inlay hints and `ef inspect` show the inferred rows (pillar 6). The fixture `error-as-value` relies on the old meaning and must be restated with an exported function.
 
@@ -464,8 +535,8 @@ Function-typed value parameters of generic declarations whose empty rows are par
 | 1. The same with no guard (round 1) | Refuse | 174 removed; 8 of them leak into exported machine types or drop a foreign row | public rows written nowhere; a foreign binding loses its stated row |
 | 1. Steps named by an exported machine type keep their rows (export guard) | **Land (new rule)** | 3 steps kept (3 exported machine types) | one more rule in the checker |
 | 1. Bodiless foreign declarations (`//ef:go`) keep their rows | **Land (new rule)** | 1 declaration kept | none: there is no body to infer from |
-| 1. Name resolution in elided functions: (a) qualified access | **Land** | 21 bare uses qualified, 42 tokens added back | two spellings of one capability call, by whether `uses` is written |
-| 1. Name resolution in elided functions: (b) unique import | Refuse | 0 ambiguous uses, 0 tokens added back | a capability-only lookup rule; adding an import can break an unrelated function |
+| 1. Name resolution in elided functions: (a) qualified access | **Land** | 21 references qualified once, 42 tokens added back (4 with `testing.Equal`); 0 functions need an import alias | two spellings of one capability call, by whether `uses` is written |
+| 1. Name resolution in elided functions: (b) unique import | Documented alternative | 19 resolve, 0 ambiguous, 0 captured, 2 unresolved (13 imported packages have no export inventory); controls: 1 ambiguous | a bare name's meaning depends on the import set; needs every import's export inventory |
 | 1. Infer rows of `main` | Refuse | would remove 39 entries; 5 of 10 S101/S102 fixtures change, `wire-initializer-error` is accepted | the host contract and exit failures become implicit |
 | 1. Infer rows of `LawX` | Refuse | 1 entry kept | a provider law's `uses` selects the providers it is checked against |
 | 1. Infer rows of methods on unexported types | Refuse for v0 | 18 entries kept | needs export reachability; leaks rows when an exported function returns the type |
@@ -486,11 +557,17 @@ This note does not edit `docs/spec/`. These are the recommended amendments, for 
 **To #196, the sketch checker.**
 1. `rows.md`, Capability rows rule 6: infer both rows of unexported functions, function literals and `TestX` functions when none is written. A written row is the declared row. `main`, `LawX`, methods and capability methods spell their rows. Two exceptions keep written rows on unexported code: a function named by an exported type, such as a machine's step (the export guard), and a bodiless foreign declaration bound by `//ef:go` (`grammar.md` Declarations rule 3), whose stated rows are the adapter's contract. Ordinary code may not call a `TestX`.
 2. `types.md`, Generics rule 1 and README Gap 23: the naming rule of [§3](#3-candidate-2-named-constraints) (declarations in scope resolve first; an otherwise unbound one-letter name is an implicit parameter), kinds by position, and the bracket list for constraints, explicit instantiation and `[F error]`.
-3. `rows.md`, Capability rows rule 5 (names): a `uses` clause binds bare capability names only where it is written. A function without one reaches an imported capability by its qualified name (`http.Client.Get`); a same-package capability stays bare. Name resolution option (a) of [§2](#name-resolution-in-an-elided-function).
+3. `rows.md`, Capability rows rule 5 (names), option (a) of [§2](#name-resolution-in-an-elided-function):
+   - A written `uses pkg.X` binds the bare name `X` in its function's body, including nested literals. A reference resolves, innermost first, to the nearest written binding, then to a declaration in the same package. Without either, an imported capability is reached by its qualified name (`http.Client.Get`); a same-package capability stays bare.
+   - A capability reference is the receiver of a selector, an inline wire key, a `replace` target, or a type. Each takes the same name resolution, so `wire{ http.Client = p }` and `replace http.Client = p` are valid. A selector's member and a composite-literal key are not references.
+   - Nested literals: a reference is owned by the nearest body whose written clause binds it. When that clause is absent or inferred, the reference resolves through the next binding out. It needs a qualifier only when that next binding is another capability or nothing.
+   - Shadowed package names: a local may take a package's name. Inside its scope, the package is reached through another import name of it (`import web "http"`). The checker reports a reference that no visible import name can qualify (S104), with a hint to add an import alias or write the `uses` clause.
+   - A qualified reference names the same capability as the bare one. It takes the nearest provider in scope (the innermost `with` that supplies it, else the caller's) and charges the same capability row.
+   - Acceptance: the controls under `corpus/controls/`, each with its before and after file.
 4. `types.md`, Generics rule 3: replace "Rows in a generic signature may be elided only where they pass through unchanged" with "Row parameters are written wherever they occur. Only the inference of `rows.md` Capability rows rule 6 elides rows." The current text admits 3c.
 5. `grammar.md`: a function type inside a parameter list parenthesises a `uses` clause of more than one entry.
 6. Fixtures: keep every S101/S102 negative fixture. With `main` explicit, only `error-as-value` changes meaning. Restate `error-as-value` with an exported function. Add a positive fixture where an unexported function and a literal infer their rows; a negative fixture where an exported machine's unexported step writes no row; a fixture where a foreign binding keeps its row; a negative fixture where an elided function writes a bare imported capability name (S104); and the two test-wire cases of [§2](#honesty).
-7. Library: generic capability operations (`build.Scope.Acquire`, `testing.T.Equal`) cannot be Go interface methods. Either they are package functions that charge the capability, or the checker lowers a generic capability method to one.
+7. Library: generic capability operations (`build.Scope.Acquire`, `testing.T.Equal`) cannot be Go interface methods. Either they are package functions that charge the capability, or the checker lowers a generic capability method to one. Decide this before qualification is a finished library surface: with package functions an elided test writes `testing.Equal(got, want)`, and most of option (a)'s measured cost goes away ([§2](#name-resolution-in-an-elided-function)).
 8. Some library signatures, counted in the honesty table, have rows derived from a type's codec: `json.Decode[Order]` has the rows of every `ParseX` it reaches. No candidate states them; they stay compiler-derived until [#49](https://github.com/cevr/effra/issues/49) decides codec discovery (README Gap 20).
 9. Two sketches write `wire App uses Account, Invoice` to expose part of a wire. `docs/spec/rows.md` has no such clause. Decide it with wire composition (README Gaps 6 and 22).
 
@@ -502,7 +579,7 @@ This note does not edit `docs/spec/`. These are the recommended amendments, for 
 ## 8. Composability
 
 - **Lossless wrapping.** An unexported wrapper of any function infers the wrapped rows exactly. An exported wrapper spells them, and the checker proves them. A wrapper of a generic combinator writes the same `E` and `R` as the combinator (3a), so no row is lost through a library layer.
-- **Nesting.** Inference composes through nested literals and `with` blocks by the composition table of `docs/spec/rows.md`; a literal inside an unexported function is inferred inside its enclosing inference.
+- **Nesting.** Inference composes through nested literals and `with` blocks by the composition table of `docs/spec/rows.md`; a literal inside an unexported function is inferred inside its enclosing inference. Names nest by the scope rule of [§2](#name-resolution-in-an-elided-function): a reference keeps its capability through any nesting of literals, wires and `replace`, which the controls and the binding check measure.
 - **First-class recipes.** Function types keep their rows (3a), so a stored recipe such as `Attempt.Work func() (T, error[Transient]) uses Console` states its contract. 3c would have weakened recipes, because a function type would stop saying what it requires.
 - **Orthogonality.** Inference, constraints and row parameters are independent rules; none names a library item.
 - **Laws.** Inference is idempotent and agrees with declarations: for an unexported `f` with a written row `D`, the inferred row `I` satisfies `I ⊆ D`, and writing `I` in place of nothing changes no caller. Erasing every unexported row and inferring it again gives the same rows (the after/ corpus is a test of this once the checker exists).
@@ -541,3 +618,7 @@ Each source is cited at the commit read on 2026-10-27, as `owner/repo@commit` wi
 - The rewrite assumes each removed row equals the inferred row ([Method](#method)).
 - The library reconstruction is this spike's; the library's design is [#206](https://github.com/cevr/effra/issues/206).
 - Codec-derived rows and the `FindMany` to `Find` mapping of `batch.Resolve` are not expressible by any candidate.
+<!-- measure.py:begin sibling-gap -->
+- Name resolution reads one unit at a time: a same-package declaration in a sibling file is not seen. References whose name a sibling file of the same package declares: 0.
+<!-- measure.py:end sibling-gap -->
+- Option (b)'s count treats each package section of the library reconstruction and `exports.go.sketch` as that package's complete capability list. Imports with no section are listed in `counts.json` (`imports_without_export_inventory`); references that depend on them are counted unresolved.

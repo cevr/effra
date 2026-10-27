@@ -1,0 +1,15 @@
+// control: an inline wire key names the capability; the key and both calls are qualified (round-2 review probe)
+// expect (a): qualified 3, needs alias 0
+// expect (b): unique 3, ambiguous 0, lexical 0, unresolved 0
+package demo
+
+import "http"
+
+type Fake struct{}
+
+func (Fake) Ping() {}
+
+func work() {
+	http.Client.Ping()
+	with(wire{ http.Client = Fake{} }) { http.Client.Ping() }
+}

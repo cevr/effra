@@ -1,0 +1,12 @@
+// control: a local named `http` hides the import, and no other import name exists; the function keeps its row (round-2 review probe)
+// expect (a): qualified 0, needs alias 1
+// expect (b): unique 1, ambiguous 0, lexical 0, unresolved 0
+package demo
+
+import "http"
+
+func work() uses http.Client, Console {
+	http := 1
+	Console.Println(http)
+	Client.Ping()
+}

@@ -1,0 +1,15 @@
+// control: a local named `http` hides one import name; the qualifier uses the other import name of the package
+// expect (a): qualified 1, needs alias 0
+// expect (b): unique 1, ambiguous 0, lexical 0, unresolved 0
+package demo
+
+import (
+	"http"
+	web "http"
+)
+
+func work() {
+	http := 1
+	Console.Println(http)
+	web.Client.Ping()
+}

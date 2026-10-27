@@ -1,0 +1,14 @@
+// control: a struct field and a composite-literal key spelled `Client` are not capability references; only the call is qualified
+// expect (a): qualified 1, needs alias 0
+// expect (b): unique 1, ambiguous 0, lexical 0, unresolved 0
+package demo
+
+import "http"
+
+type Conn struct{ Client int }
+
+func work(c Conn) {
+	x := Conn{Client: 1}
+	println(c.Client, x.Client)
+	http.Client.Ping()
+}

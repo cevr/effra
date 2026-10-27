@@ -1,0 +1,17 @@
+// control: a `replace` target names the capability; the target and both calls are qualified (round-2 review probe)
+// expect (a): qualified 3, needs alias 0
+// expect (b): unique 3, ambiguous 0, lexical 0, unresolved 0
+package demo
+
+import "http"
+
+type Fake struct{}
+
+func (Fake) Ping() {}
+
+wire Base { http.Client = Fake{} }
+
+func work() uses http.Client {
+	Client.Ping()
+	with(wire{ Base; replace Client = Fake{} }) { Client.Ping() }
+}

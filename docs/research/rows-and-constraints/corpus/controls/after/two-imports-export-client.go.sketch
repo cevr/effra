@@ -1,0 +1,11 @@
+// control: `http` and `grpc` both export `Client`; (a) qualifies, (b) reports the bare name ambiguous (round-2 review probe)
+// expect (a): qualified 1, needs alias 0
+// expect (b): unique 0, ambiguous 1, lexical 0, unresolved 0
+package demo
+
+import (
+	"http"
+	"grpc"
+)
+
+func work() { http.Client.Ping() }
