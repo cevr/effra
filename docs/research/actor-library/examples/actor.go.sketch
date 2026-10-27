@@ -98,8 +98,8 @@ func (a Address[M]) Send(m M) error[Stopped] {
 // an interruption point: a stopped caller detaches, Ask's scope releases its
 // share of the slot, and a late answer is released by the reply's (A3). An
 // answer taken while the caller is being stopped is the caller's to release;
-// when the stop wins at the caller's task boundary, the boundary must release
-// the discarded result (Gap A13, a runtime rule).
+// when a stop wins at a later boundary, a task's or a scope's, that boundary
+// must release the discarded result (Gap A13, a runtime and lowering rule).
 func Ask(to Address[M], request func(Reply[T, E]) M) (T, error[E | Stopped | NoReply]) {
 	slot := make(chan Exit[T, E | Stopped | NoReply], 1)
 	try to.Send(request(Reply[T, E]{slot, to.control}))
@@ -306,7 +306,9 @@ func StartAgent(initial S, capacity int64) Agent[S] {
 // the caller's failure, and the agent goes on. An interruption or a defect
 // passes through the catch, unwinds the handler and ends the agent with that
 // cause; the call's release answers the caller NoReply, or Stopped once the
-// stop is requested, and the drain answers queued callers Stopped.
+// stop is requested, and the drain answers queued callers Stopped. Only a
+// successful f hands its value on; after any other exit f's value is not
+// valid and is not released here (Gap A13).
 func Call(a AgentAddress[S], f func(s *S) (T, error[E])) (T, error[E | Stopped | NoReply]) {
 	slot := make(chan Exit[T, E | Stopped | NoReply], 1)
 	answer := func(x Exit[T, E | Stopped | NoReply]) {
