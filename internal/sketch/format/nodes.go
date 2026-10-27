@@ -215,43 +215,42 @@ func (p *printer) list(openPos syntax.Pos, open string, items []syntax.Node, ite
 		p.token(closePos, close)
 		return
 	}
-	broken := p.line(items[0].Pos()) > p.lineOr(openPos, items[0].Pos()) || p.line(closePos) > p.line(items[n-1].End())
-	for i := 1; i < n && !broken; i++ {
-		broken = p.line(items[i].Pos()) > p.line(items[i-1].End())
-	}
-	if broken {
-		p.indent++
-	}
-	savedBroken := p.listBroken
-	p.listBroken = broken
+	// The items indent at the list's first line break, not before it, as
+	// go/printer's exprList and parameters do: an item that spans lines
+	// before that break (a function literal, a nested parameter list) takes
+	// the level the list started at.
+	indented := false
+	savedIndented := p.listIndented
 	for i := range items {
 		if i == 0 {
 			if p.gap(items[0].Pos(), false) {
 				p.noBlank = true
+				p.indent++
+				indented = true
 			}
 		} else {
 			p.synth(",")
-			p.gap(items[i].Pos(), true)
+			if p.gap(items[i].Pos(), true) && !indented {
+				p.indent++
+				indented = true
+			}
 		}
+		p.listIndented = indented
 		item(i)
 	}
-	p.listBroken = savedBroken
-	if broken {
-		if p.breakBefore(closePos) {
-			p.synth(",")
-			p.closeBody(closePos, close)
-			return
+	p.listIndented = savedIndented
+	if p.breakBefore(closePos) {
+		if !indented {
+			p.indent++
 		}
+		p.synth(",")
+		p.closeBody(closePos, close)
+		return
+	}
+	if indented {
 		p.indent--
 	}
 	p.token(closePos, close)
-}
-
-func (p *printer) lineOr(pos, fallback syntax.Pos) int {
-	if pos.IsValid() {
-		return p.line(pos)
-	}
-	return p.line(fallback)
 }
 
 // exprList prints an unbracketed expression list; a line break after a
@@ -287,7 +286,7 @@ func nodes[T syntax.Node](list []T) []syntax.Node {
 func (p *printer) fieldList(l *syntax.FieldList, open, close string, trailingComma bool) {
 	p.list(l.Opening, open, nodes(l.List), func(i int) {
 		f := l.List[i]
-		p.identList(f.Names, !p.listBroken)
+		p.identList(f.Names, !p.listIndented)
 		if f.Type != nil {
 			if len(f.Names) > 0 {
 				p.space()

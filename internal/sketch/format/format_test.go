@@ -364,6 +364,16 @@ func TestLayout(t *testing.T) {
 			"package p\nfunc f(a,\n\tb int,\n\tc,\n\td string) {}\nfunc g(\n\ta,\n\tb int,\n\tc,\n\td string,\n) {}\nfunc h() (a,\n\tb int,\n\tc,\n\td string) {}\nvar (\n\tx,\n\ty int\n\tz string\n)\nvar u,\n\tv int\nfunc k() {\n\tvar p,\n\t\tq int\n}\n",
 		},
 		{
+			// Review r3 m1: a list indents at its first line break, as
+			// go/printer's parameters and exprList do, so a nested
+			// parameter list or a multi-line item before that break keeps
+			// the level the list started at. gofmt's layouts (with the same
+			// two deviations as above).
+			"lists indent at their first line break",
+			"package p\nfunc f(a,\nb func(x,\ny int),\nc,\nd int) {}\nfunc f4(\na func(x,\ny int),\n) {}\nfunc f7(a,\nb func() func(x,\ny int),\nc int) {}\nfunc g() {\nh(a,\nfunc(x,\ny int) {\nk(p,\nq)\n},\nb)\nf(T{\nA: 1,\n},\nb)\n}\n",
+			"package p\nfunc f(a,\n\tb func(x,\n\ty int),\n\tc,\n\td int) {}\nfunc f4(\n\ta func(x,\n\t\ty int),\n) {}\nfunc f7(a,\n\tb func() func(x,\n\ty int),\n\tc int) {}\nfunc g() {\n\th(a,\n\t\tfunc(x,\n\t\t\ty int) {\n\t\t\tk(p,\n\t\t\t\tq)\n\t\t},\n\t\tb)\n\tf(T{\n\t\tA: 1,\n\t},\n\t\tb)\n}\n",
+		},
+		{
 			// Review M9: the explicit empty statement keeps the label; the
 			// loop after it stays unlabelled.
 			"labelled empty statement",

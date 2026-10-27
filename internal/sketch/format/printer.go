@@ -39,9 +39,10 @@ type printer struct {
 
 	walked map[*syntax.BinaryExpr]walkResult // walkBinary, memoised
 
-	// listBroken reports that the innermost list being printed breaks
-	// across lines, so its items already have a continuation level.
-	listBroken bool
+	// listIndented reports that the innermost list being printed has
+	// already broken a line before the current item, so the item has a
+	// continuation level (go/printer's ws == ignore in parameters).
+	listIndented bool
 }
 
 type walkResult struct {
@@ -427,9 +428,14 @@ func (e *LimitError) Error() string {
 // most alignSmall: gofmt's `b            = 2` under typed neighbours stays,
 // and a run of empty cells never inherits a long cell's width. A section
 // that holds an empty cell ends before a cell wider than alignSmall.
-// Padding is therefore bounded by the line's own section, never by an
-// arbitrary long cell elsewhere (go/printer breaks its sections at zero
-// sizes for the same reason).
+//
+// The section bound: in a section whose widest cell W is wider than
+// alignSmall, every non-empty cell is wider than W/alignRatio, and no cell
+// is empty. A cell's padding is therefore at most alignSmall+1 columns, or
+// less than 1.5 times its own width plus one. Each aligned column adds at
+// most a constant plus a constant factor of its own text, so the output is
+// linear in the input for every input, not only where go/printer's
+// neighbour test happens to break a taper (review r3 M1).
 const (
 	alignRatio = 2.5
 	alignSmall = 40
@@ -444,7 +450,7 @@ func (p *printer) align(lines []outLine, widths [][]int, from, to, column int) {
 		j := i + 1
 		size := func(k int) int { return utf8.RuneCountInString(lines[k].cells[column]) }
 		prev := size(i)
-		widest, hasEmpty := prev, prev == 0
+		widest, narrowest, hasEmpty := prev, prev, prev == 0
 		lnsum, count := 0.0, 0
 		if prev > 0 {
 			lnsum, count = math.Log(float64(prev)), 1
@@ -467,6 +473,19 @@ func (p *printer) align(lines []outLine, widths [][]int, from, to, column int) {
 				if ratio*alignRatio <= 1 || ratio >= alignRatio {
 					break
 				}
+			}
+			if count > 0 {
+				// The section bound: once any cell is wider than
+				// alignSmall, every non-empty cell stays within alignRatio
+				// of the widest, so a slow taper cannot carry a long
+				// cell's width to short ones.
+				hi, lo := max(widest, s), min(narrowest, s)
+				if hi > alignSmall && float64(hi) >= alignRatio*float64(lo) {
+					break
+				}
+				narrowest = lo
+			} else {
+				narrowest = s
 			}
 			lnsum += math.Log(float64(s))
 			count++

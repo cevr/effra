@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,6 +142,50 @@ func TestFmtFormatsAMixedVarGroupUnderTheDefaultBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(after) > len(source)+len(source)/5 {
+		t.Fatalf("a %d-byte source formatted to %d bytes", len(source), len(after))
+	}
+}
+
+// TestFmtFormatsATaperedStructUnderTheDefaultBound (review r3 M1): a struct
+// whose first field name is 4,096 wide, whose next names taper to 40 (each
+// half the geometric mean of the names before it) and which ends with
+// 16,384 short names formats under the default 4 MiB bound. Before the
+// section bound, the 225,682-byte file needed 69,090,014 bytes of output.
+func TestFmtFormatsATaperedStructUnderTheDefaultBound(t *testing.T) {
+	binary := buildTestCLI(t)
+	root := editionWorkspace(t)
+	var b strings.Builder
+	b.WriteString("package p\ntype T struct {\n")
+	lnsum, count := 0.0, 0
+	for w := 4096; ; {
+		name := fmt.Sprintf("p%d", count)
+		fmt.Fprintf(&b, "%s%s int\n", name, strings.Repeat("a", w-len(name)))
+		lnsum += math.Log(float64(w))
+		count++
+		if w == 40 {
+			break
+		}
+		w = max(40, int(math.Ceil(math.Exp(lnsum/float64(count))/2)))
+	}
+	for i := range 4 * 4096 {
+		fmt.Fprintf(&b, "f%d int\n", i)
+	}
+	b.WriteString("}\n")
+	source := b.String()
+	if len(source) != 225682 {
+		t.Fatalf("the generated taper is %d bytes, want the reviewer's 225682", len(source))
+	}
+	editionWrite(t, filepath.Join(root, "new", "effra.json"), `{"edition":"2026"}`)
+	editionWrite(t, filepath.Join(root, "new", "alignment-taper.ef"), source)
+	stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "--json", "new/alignment-taper.ef")
+	if code != 0 {
+		t.Fatalf("ef fmt: exit %d\n%s\n%s", code, firstLines(stdout), stderr)
+	}
+	after, err := os.ReadFile(filepath.Join(root, "new", "alignment-taper.ef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) > 2*len(source) {
 		t.Fatalf("a %d-byte source formatted to %d bytes", len(source), len(after))
 	}
 }
