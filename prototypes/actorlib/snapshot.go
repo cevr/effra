@@ -68,9 +68,9 @@ const (
 	planDeep                // a slice or map is reachable through fields
 )
 
-// plans caches each type's plan. A copy-on-write map behind an atomic
-// pointer measured slower than sync.Map here (19 against 15 ns/op for
-// int64).
+// plans caches each type's plan in a sync.Map. A copy-on-write map behind an
+// atomic pointer was tried in round 2 and was not faster in an unrecorded
+// local run; no receipt was kept, so no figure is claimed.
 var plans sync.Map // reflect.Type -> plan
 
 func planFor(t reflect.Type) plan {
