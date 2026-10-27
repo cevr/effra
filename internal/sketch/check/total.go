@@ -210,24 +210,17 @@ func (c *checker) caseVariant(e syntax.Expr, u *Union, subj Type) int {
 	if isInvalid(t) {
 		return -2
 	}
-	if n, ok := t.(*Named); ok && n.Orig == nil && len(n.TParams) > 0 {
-		for i, v := range u.Variants {
-			if vn, ok := v.(*Named); ok && vn.origin() == n {
-				return i
-			}
-		}
-		if !u.Bad {
-			c.errorf(e, CodeType, "%s is not a variant of %s (rows.md, Totality 1)", n.Obj.Name, subj)
-		}
-		return -2
-	}
-	for i, v := range u.Variants {
-		if identical(v, t) {
-			return i
-		}
+	// A keyed lookup, not a scan: resolving the cases stays linear before
+	// the solvers' counters (round-5 M2; D16 as amended in round 5).
+	if i := u.variant(t, &c.variantOps); i >= 0 {
+		return i
 	}
 	if !u.Bad {
-		c.errorf(e, CodeType, "%s is not a variant of %s (rows.md, Totality 1)", t, subj)
+		what := t.String()
+		if n, ok := t.(*Named); ok && n.Orig == nil && len(n.TParams) > 0 {
+			what = n.Obj.Name
+		}
+		c.errorf(e, CodeType, "%s is not a variant of %s (rows.md, Totality 1)", what, subj)
 	}
 	return -2
 }

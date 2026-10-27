@@ -59,3 +59,14 @@ func BodyGraphEdges(src string) (int, []Diagnostic) {
 	}
 	return c.bodyEdges, diags
 }
+
+// VariantOps checks src and returns the variant-index operations that
+// resolved its type-switch cases (round-5 M2: linear in the source), with
+// the diagnostics.
+func VariantOps(src string) (int, []Diagnostic) {
+	c, diags := checkFor(src)
+	if c == nil {
+		return -1, diags
+	}
+	return c.variantOps, diags
+}

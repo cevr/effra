@@ -105,6 +105,45 @@ type Union struct {
 	// Bad: a variant failed to resolve (reported), so a case that names no
 	// listed variant may name the lost one: no case diagnostic follows (D3).
 	Bad bool
+
+	// The variant index, built once on the first lookup: each variant by
+	// its identity key, and each generic variant by its origin, so a case
+	// resolves without a scan of the variants (round-5 M2).
+	byKey    map[string]int
+	byOrigin map[*Named]int
+}
+
+// variant returns the index of the variant t names: the variant identical
+// to t, or, for a generic type written without type arguments, the
+// variant instantiated from it; -1 when no variant matches. ops counts the
+// index entries built and the lookups made, for the tests' linear bound.
+func (u *Union) variant(t Type, ops *int) int {
+	if u.byKey == nil {
+		u.byKey = make(map[string]int, len(u.Variants))
+		u.byOrigin = map[*Named]int{}
+		for i, v := range u.Variants {
+			*ops++
+			if _, dup := u.byKey[typeKey(v)]; !dup {
+				u.byKey[typeKey(v)] = i
+			}
+			if vn, ok := v.(*Named); ok {
+				if _, dup := u.byOrigin[vn.origin()]; !dup {
+					u.byOrigin[vn.origin()] = i
+				}
+			}
+		}
+	}
+	*ops++
+	if n, ok := t.(*Named); ok && n.Orig == nil && len(n.TParams) > 0 {
+		if i, ok := u.byOrigin[n]; ok {
+			return i
+		}
+		return -1
+	}
+	if i, ok := u.byKey[typeKey(t)]; ok && identical(u.Variants[i], t) {
+		return i
+	}
+	return -1
 }
 
 // MachineType is a `machine[S, E]` declaration's type.

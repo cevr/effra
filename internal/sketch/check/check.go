@@ -81,7 +81,11 @@ type checker struct {
 	// bodyEdges counts the edges of the body graph: linear in the source
 	// (round-3 M5), and bounded by a test.
 	bodyEdges int
-	mono      monoState // the instantiation graph (instantiation cycles)
+	// variantOps counts the variant-index entries built and the lookups
+	// that resolve type-switch cases: linear in the source (round-5 M2),
+	// and bounded by a test.
+	variantOps int
+	mono       monoState // the instantiation graph (instantiation cycles)
 
 	errorTypes map[*Named]syntax.Pos // origin error types named in an error row of this package
 	funcs      []*Func               // every package function and method, in source order
