@@ -29,10 +29,19 @@ type Scope struct {
 	n      int
 	inline [inlineEntries]entry
 	more   []entry
+	// depth is how many capability calls were open in task when the scope
+	// began, on a traced tree: an unwind End recovers closes only the calls
+	// opened inside the scope.
+	depth int
 }
 
 // NewScope returns an empty scope owned by task t.
-func NewScope(t *Task) Scope { return Scope{task: t} }
+func NewScope(t *Task) Scope {
+	if t.trace != nil {
+		return Scope{task: t, depth: t.traceDepth()}
+	}
+	return Scope{task: t}
+}
 
 // Task is the task that owns s.
 func (s *Scope) Task() *Task { return s.task }
@@ -108,7 +117,7 @@ func (s *Scope) End(err *error) {
 		c.Add(*err)
 	}
 	if p != nil {
-		c.recovered(s.task, p, false)
+		c.recovered(s.task, p, false, s.depth)
 	}
 	s.release(&c)
 	s.task.settle(&c, nil)
@@ -129,10 +138,32 @@ func (s *Scope) release(c *Cause) {
 }
 
 func (s *Scope) runRelease(e entry, c *Cause) {
+	if s.task.trace != nil {
+		s.runReleaseTraced(e, c)
+		return
+	}
 	defer func() {
 		if p := recover(); p != nil {
-			c.recovered(s.task, p, true)
+			c.recovered(s.task, p, true, 0)
 		}
+	}()
+	e.run.release(e.v)
+}
+
+// runReleaseTraced is runRelease on a traced tree. It notes the calls open
+// when the release begins, so an unwind closes only the calls the release
+// opened, and raises the release event. It is a separate frame so the
+// untraced release keeps its size: the floor and the extra call grew
+// runRelease's frame from 0x48 to 0x70 bytes.
+//
+//go:noinline
+func (s *Scope) runReleaseTraced(e entry, c *Cause) {
+	floor := s.task.traceDepth()
+	defer func() {
+		if p := recover(); p != nil {
+			c.recovered(s.task, p, true, floor)
+		}
+		s.task.traceTask(TraceRelease, nil)
 	}()
 	e.run.release(e.v)
 }

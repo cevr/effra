@@ -74,6 +74,17 @@ func (t *Task) Stopped() bool {
 	}
 }
 
+// Sleep is Scheduler.Sleep: it waits d on s, or until t is stopped, and then
+// returns Interrupted.
+func Sleep(t *Task, s Scheduler, d time.Duration) error {
+	select {
+	case <-s.After(d):
+		return nil
+	case <-t.stop:
+		return Interrupted
+	}
+}
+
 // Check panics with Interrupted when t is stopped. Code that cannot fail calls
 // it; a task boundary recovers the panic.
 func (t *Task) Check() {

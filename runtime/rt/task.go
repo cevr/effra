@@ -17,6 +17,11 @@ var nextID atomic.Uint64
 type Task struct {
 	// stopped is the stop flag, set by Interrupt from any goroutine.
 	stopped atomic.Bool
+	// shielded is fixed before t is linked: t was started while its owner was
+	// inside a masked region, so the owner's ambient stop does not cascade
+	// into it. The cascade reads only this field, never the owner's mask. It
+	// sits beside stopped so that the two share one word.
+	shielded bool
 	// regions is the stack of open mask regions (regions.go). Only the owner
 	// goroutine reads or writes it, so masking costs no atomic operation.
 	regions regionStack
@@ -24,11 +29,9 @@ type Task struct {
 	span    string
 	parent  atomic.Pointer[Task] // live link; cleared when t finishes
 	values  *values              // G1 context; owner goroutine only
-
-	// shielded is fixed before t is linked: t was started while its owner was
-	// inside a masked region, so the owner's ambient stop does not cascade
-	// into it. The cascade reads only this field, never the owner's mask.
-	shielded bool
+	// trace is the tree's tracer, nil when tracing is off (trace.go). It is
+	// fixed before t runs, so any goroutine may read it.
+	trace *tracer
 
 	mu    sync.Mutex
 	stop  chan struct{} // made by Done on first use, closed by Interrupt
@@ -60,12 +63,16 @@ func (t *Task) init(parent *Task, span string, masked bool) {
 	t.span = span
 	t.parent.Store(parent)
 	t.values = parent.values
+	t.trace = parent.trace
 	t.shielded = parent.regions.shields()
 	if masked {
 		t.regions.push(protecting)
 	}
 	parent.mu.Lock()
 	if !t.shielded && parent.stopped.Load() {
+		if t.trace != nil {
+			t.traceTask(TraceCancelRequest, nil) // born stopped: the request precedes its start
+		}
 		t.stopped.Store(true)
 	}
 	t.next = parent.first
@@ -125,6 +132,11 @@ func (t *Task) Chain() []Frame {
 func (t *Task) Interrupt() {
 	t.mu.Lock()
 	if !t.stopped.Load() {
+		// The event is recorded before the flag is set, so it happens before
+		// any observation of the stop and a recorder orders it first.
+		if t.trace != nil {
+			t.traceTask(TraceCancelRequest, nil)
+		}
 		t.stopped.Store(true)
 		if t.stop != nil {
 			close(t.stop)

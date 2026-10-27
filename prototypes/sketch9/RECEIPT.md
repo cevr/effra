@@ -211,3 +211,87 @@ Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-6-findings.md` (1 M
 | M1 identifier tested one byte at a time | The lexer decodes each code point (`utf8.DecodeRuneInString`) and applies Go's identifier rule to the rune: a letter or `_` to start, and a letter, digit or `_` after that. A non-identifier rune or invalid UTF-8 in identifier position is S001. Number suffixes are decoded the same way. String literals keep their own path. |
 
 The 2 round-6 programs join `testdata/probes/` (103 in all): `nonletter-name` (`x⪪`, S001) and `letter-name` (`xª`, builds and prints `ok`). `sketch/lex_test.go` sweeps every non-ASCII code point, first and later in a name, against `go/token.IsIdentifier`, and rejects four invalid UTF-8 names with S001. These tests fail on the round-6 lexer. The sweep also shows that the old lexer rejected valid letters such as `À`. `accept.sh` exit 0 (`accept-r7.log`).
+
+# trace-188: kernel mode and traces (#188)
+
+Host: shared exe workbox, AMD EPYC 9554P, 16 vCPU, load average 6–13; go1.27.0 linux/amd64. Unit directory: `/home/exedev/.cache/baton/wf10/trace-188`. The research note is `docs/research/traceability.md`.
+
+## Commands and exit codes
+
+| Command (from the worktree root) | Exit |
+| --- | --- |
+| `bash /home/exedev/.cache/baton/wf10/trace-188/accept.sh` | 0 (`ACCEPT OK`, `accept-r1.log`) |
+| `prototypes/sketch9/accept.sh` | 0 (`ACCEPT OK`) |
+| `cd prototypes/sketch9 && go vet ./... && go test -count=1 ./...` | 0 |
+
+## What changed
+
+- `sketchc build -rt kernel` links `effra.local/prototype/runtime/rt`. `sketchc trace [-json]` reads a recorded run against the checked model (README, "Kernel mode and traces").
+- `sketch/defs.go`: `NewModel`, the definition table and the trace points, derived from the checked declarations. `sketch/emit_kernel.go`: the kernel `main`, the constants, the site table and the point events. `sketch/trace.go`: the query and its refusals.
+- `Scheduler.Sleep(d)` joins the prelude. Both runtimes lower it to `rt.Sleep`. `testdata/reject/sleep-not-duration.sketch` (S108) and `testdata/probes/sleep-timeout.sketch` (both outcomes of a timeout, embedded mode) cover it.
+- Default mode: for the 40 accepted programs (`testdata/checkout.sketch` and the accepted probes), the base `854f21e7` `sketchc` and this branch emit byte-identical `main.go`. The embedded `rt/rt.go` gains only `Sleep`.
+
+## The three traced examples (`examples-r1.txt`)
+
+25 runs off and 25 on, interleaved; wall time includes process start.
+
+| Example | Output | Events | Trace bytes | Wall median off / on (ms) | Binary, kernel with switch / without / embedded (bytes) |
+| --- | --- | --- | --- | --- | --- |
+| `testdata/trace/checkout.sketch` | `paid auth-7` | 9 | 1,269 | 3.29 / 2.75 | 2,649,099 / 2,586,999 / 2,548,752 |
+| `testdata/trace/timeout.sketch` | `gateway timed out` | 13 | 1,818 | 105.41 / 104.73 | 2,650,345 / 2,588,197 / 2,549,423 |
+| `testdata/trace/failure.sketch` | `no such order` | 9 | 1,297 | 3.13 / 2.95 | 2,644,650 / 2,582,278 / 2,544,050 |
+
+The "without" binary is the same emitted program with the trace switch removed by a scratch script, to measure the switch alone: about 62 KB. A first writer that used `encoding/json` made the switch cost 1.48 MB.
+
+## Round 2: recorded occurrences and a validating query
+
+| Command (from the worktree root) | Exit |
+| --- | --- |
+| `bash /home/exedev/.cache/baton/wf10/trace-188/accept.sh` | 0 (`ACCEPT OK`, `accept-r2.log`) |
+| `./scripts/gate.sh` | 0 (`gate-r2.log`) |
+| `cd prototypes/sketch9 && go vet ./... && go test -count=1 ./...` | 0 |
+
+- The emitter brackets each capability call with `c__N := t__.TraceCall(def, site)` and `t__.TraceCallExit(c__N, def, site, err)`; `Scheduler.Sleep` is a traced call whose outcome is ok or interrupted. The runtime links each handler to the occurrence it caught.
+- `sketch/trace.go` validates the trace before it explains it (`validateTrace`, `checkTasks`, `checkLink`, `checkFrames`) and states a cause only along a recorded link; without one it prints "origin not recorded" and labels candidates. It lists each call with its outcome and span.
+- `cmd/sketchc` reads the trace through a limit of `TraceByteBudget+1` bytes: a 24 MiB file is refused after 8,487,040 bytes of allocation (`TestTraceByteBudgetBeforeRead`).
+- `testdata/trace/two-calls` and `two-timeouts` are the round-1 reviewer probes, each with a recorded trace (`.jsonl`). `TestQueryTraceStatesOnlyRecordedLinks` checks their full cause traces against the recordings; `TestKernelProbeTraces` builds and runs them and checks the handler and caught lines.
+- Default mode: the round-1 and round-2 `sketchc` emit byte-identical `main.go` for 46 programs (`testdata/checkout.sketch`, the probes and the trace examples).
+
+| Example (`examples-r2.txt`) | Events | Trace bytes | Wall median off / on (ms) | Binary, kernel with switch / without / embedded (bytes) |
+| --- | --- | --- | --- | --- |
+| `testdata/trace/checkout.sketch` | 12 | 1,768 | 3.00 / 2.73 | 2,674,231 / 2,611,499 / 2,548,840 |
+| `testdata/trace/timeout.sketch` | 16 | 2,400 | 106.61 / 108.23 | 2,675,381 / 2,612,177 / 2,549,215 |
+| `testdata/trace/failure.sketch` | 11 | 1,716 | 3.27 / 2.91 | 2,669,014 / 2,610,594 / 2,544,058 |
+
+## Round 3: one origin per exit reason
+
+| Command (from the worktree root) | Exit |
+| --- | --- |
+| `bash /home/exedev/.cache/baton/wf10/trace-188/accept.sh` | 1 (`accept-r3.log`): its only failure is `root go.mod or go.sum changed` against base `854f21e7`, from main's `f883c1c7` merged in; the branch's `go.mod` equals main's. With that check pointed at main (`accept-r3-mainbase.sh`): 0, `ACCEPT OK` (`accept-r3-mainbase.log`) |
+| `./scripts/gate.sh` | 0 (`gate: passed 30 steps in 83.6s`, `gate-r3.log`) |
+| `cd prototypes/sketch9 && go vet ./... && go test -count=1 ./...` | 0 |
+
+- Schema `effra-trace-3`: a `body-exit` has no `link`; each reason of its cause carries its own `origin`. `sketch/trace.go` checks each origin against the reason it explains (`checkOrigins`), refuses a `body-exit` link, and explains each reason from its own origin; a reason without one says "origin not recorded". The events table prints the origins.
+- `TestQueryTraceRefuses` adds nine origin cases, among them a failure whose origin is a cleanup panic (the second review's compound case). `TestQueryTraceExplainsEachReason` checks the cause traces of a failure with two cleanup defects, a failure without an origin beside a cleanup defect, and a failure with an interruption.
+- `testdata/trace/two-calls.jsonl` and `two-timeouts.jsonl` were re-recorded with the round-3 runtime; their cause traces are unchanged.
+- The second review's native probes, rerun against real `rt.Scoped`, `rt.Run` and `Check`: the compound exit names the failed call for the failure and the release panic for the defect; the release call and the interrupted call each end with a `call-exit` (`round-3-receipts/native-*.log` in the unit directory).
+
+| Example (`examples-r3.txt`) | Events | Trace bytes | Wall median off / on (ms) | Binary, kernel with switch / without / embedded (bytes) |
+| --- | --- | --- | --- | --- |
+| `testdata/trace/checkout.sketch` | 12 | 1,768 | 3.60 / 3.58 | 2,686,611 / 2,623,434 / 2,548,840 |
+| `testdata/trace/timeout.sketch` | 16 | 2,401 | 105.42 / 104.69 | 2,687,625 / 2,632,200 / 2,549,215 |
+| `testdata/trace/failure.sketch` | 11 | 1,718 | 2.53 / 2.48 | 2,685,922 / 2,623,105 / 2,544,058 |
+
+## Round 4: an origin names an occurrence
+
+| Command (from the worktree root, head `4957c40e`) | Exit |
+| --- | --- |
+| `bash /home/exedev/.cache/baton/wf10/trace-188/accept.sh` | 0, `ACCEPT OK` (`accept-r4.log`). Six later reruns exited 0, 1, 1, 0, 0, 0: the two failures are a race in the script's own `printf ... \| grep -q` under `pipefail`, which fails a pipeline when `grep` exits before `printf` has written all of its text; it fails 4 to 5 pipelines in 900 on the round-3 and round-4 notes alike (`round-4-receipts/accept-pipefail-flake.txt`) |
+| `./scripts/gate.sh` | 0 (`gate: passed 30 steps in 104.3s`, `gate-r4.log`) |
+| `cd prototypes/sketch9 && go vet ./... && go test -count=1 ./...` | 0 |
+| `go test -count=1 -race ./runtime/rt/...` | 0 |
+
+- `checkOrigins` checks the occurrence, not only the kind: it runs after every link is checked, refuses a failure origin that a handler consumed, and accepts a child's exit as an origin only when the owner observed that exit. Two new refusal cases cover them.
+- When several failure reasons of an exit have the same error type and a reason has no origin, the cause trace states the shared type for that reason and lists the unconsumed occurrences as candidates by type. (Round 5 replaced the round-4 wording "carry an equal", which the recording could not support.)
+- `TestKernelEqualFailureProbes` is the third review's pair of probes (two calls that fail with equal `Missing` values; two children whose Waits return equal values) as a kernel program, built and run, then recorded, written and queried. With zero-size values the query states no origin and names both occurrences; with values stored on their own each reason names its own occurrence. In every variant no reason names another reason's occurrence.
+- The reviewer's round-3 native harness, rerun at round 4: all five modes pass, including `two-failures` and `two-child-failures` (`round-4-receipts/native-*.log`).
