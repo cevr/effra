@@ -70,3 +70,14 @@ func VariantOps(src string) (int, []Diagnostic) {
 	}
 	return c.variantOps, diags
 }
+
+// InstancesMade checks src and returns the generic instances it created
+// (round-6 M5: linear in the source for a default-only switch over
+// distinct instantiations of a generic union), with the diagnostics.
+func InstancesMade(src string) (int, []Diagnostic) {
+	c, diags := checkFor(src)
+	if c == nil {
+		return -1, diags
+	}
+	return c.instancesMade, diags
+}

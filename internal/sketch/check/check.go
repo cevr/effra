@@ -85,7 +85,11 @@ type checker struct {
 	// that resolve type-switch cases: linear in the source (round-5 M2),
 	// and bounded by a test.
 	variantOps int
-	mono       monoState // the instantiation graph (instantiation cycles)
+	// instancesMade counts the generic instances created: a default-only
+	// switch over generic unions creates none (round-6 M5), bounded by a
+	// test.
+	instancesMade int
+	mono          monoState // the instantiation graph (instantiation cycles)
 
 	errorTypes map[*Named]syntax.Pos // origin error types named in an error row of this package
 	funcs      []*Func               // every package function and method, in source order

@@ -25,7 +25,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 	}
 	n := len(s.Subjects)
 	subj := make([]Type, n)
-	unions := make([]*Union, n)
+	unions := make([]*switchUnion, n)
 	valid := true
 	for i, g := range s.Subjects {
 		op := c.valueExpr(g.X, nil)
@@ -33,7 +33,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 			valid = false
 			continue
 		}
-		u := asUnion(op.typ)
+		u := c.subjectUnion(op.typ)
 		if u == nil {
 			c.errorf(g, CodeType, "a type switch's subject must be a union, not %s (rows.md, Totality 1)", op.typ)
 			valid = false
@@ -52,7 +52,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 	sizes := make([]int, n)
 	for i, u := range unions {
 		if u != nil {
-			sizes[i] = len(u.Variants)
+			sizes[i] = u.len()
 		}
 	}
 	// The case rows, resolved once, in source order: rowOf[clause][item]
@@ -139,7 +139,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 					}
 				}
 				if same && len(tuples) > 0 && cl.List != nil {
-					bt = unions[j].Variants[first]
+					bt = unions[j].at(first)
 				}
 			}
 			v := &Var{Name: b.Name, Type: bt, Pos: b.Pos(), group: groups[j], used: true}
@@ -187,7 +187,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 	case missing:
 		parts := make([]string, n)
 		for j, idx := range w {
-			parts[j] = unions[j].Variants[idx].String()
+			parts[j] = unions[j].at(idx).String()
 		}
 		what := parts[0]
 		if n > 1 {
@@ -198,31 +198,6 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 	// Reported or proved: the switch counts as total for the flow, so no
 	// missing-return diagnostic follows from an S103 (D3; round-2 N1).
 	c.totalSwitch[s] = true
-}
-
-// caseVariant resolves a case type to its variant index in the union, -1
-// for _, or -2 on an error (reported).
-func (c *checker) caseVariant(e syntax.Expr, u *Union, subj Type) int {
-	if id, ok := e.(*syntax.Ident); ok && id.Name == "_" {
-		return -1
-	}
-	t := c.typExpr0(e, c.localTypeCtx())
-	if isInvalid(t) {
-		return -2
-	}
-	// A keyed lookup, not a scan: resolving the cases stays linear before
-	// the solvers' counters (round-5 M2; D16 as amended in round 5).
-	if i := u.variant(t, &c.variantOps); i >= 0 {
-		return i
-	}
-	if !u.Bad {
-		what := t.String()
-		if n, ok := t.(*Named); ok && n.Orig == nil && len(n.TParams) > 0 {
-			what = n.Obj.Name
-		}
-		c.errorf(e, CodeType, "%s is not a variant of %s (rows.md, Totality 1)", what, subj)
-	}
-	return -2
 }
 
 // totalityBudget bounds the steps of each of a switch's two solvers, one for

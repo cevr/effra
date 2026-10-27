@@ -738,6 +738,7 @@ func (c *checker) instantiate(orig *Named, targs []Type) *Named {
 	}
 	inst.ctx = c
 	c.instance[key] = inst
+	c.instancesMade++
 	return inst
 }
 
