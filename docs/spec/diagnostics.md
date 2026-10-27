@@ -68,6 +68,7 @@ The checker does not restrict `main`'s capability row; the build refuses what th
 - A `catch` without `try` omits an error of the caught row (`reject/catch-not-total.sketch`, `catch-not-total`).
 - A type switch over a union names neither every variant nor `default` (`type-switch-not-total`).
 - A multi-subject type switch leaves a tuple of variants unhandled; `_` matches any variant. Totality is decided by a usefulness check over the case matrix, never by enumerating the product (`product-not-total`). The message names one missing tuple.
+- A multi-subject type switch whose proof needs more than the fixed solver budget: "too many cases to prove this switch total; split it or add default". The checker never accepts a switch it has not proved total ([rows: totality](rows.md#totality) 5). No missing-return diagnostic follows an S103 for the same switch (D3).
 
 ### S104: unknown name
 
@@ -103,7 +104,9 @@ The checker does not restrict `main`'s capability row; the build refuses what th
 | A field and a method of one type share a name | `probes/field-method-name.sketch` |
 | A receiver is not a struct type declared in the package | `receiver-not-local` |
 | A union variant is not a struct type declared in the package | `union-variant-interface` |
-| A struct contains itself by value, also through an instance of a generic struct (`type U struct{ F Wrap[U] }`) or an instance that grows without end | `recursive-struct`; checker review tests (M7) |
+| A struct contains itself by value, also through an instance of a generic struct (`type U struct{ F Wrap[U] }`), at any depth; one report per cycle | `recursive-struct`; checker domain tests (`TestFiniteChains`) |
+| An instantiation cycle: a generic type or function instantiates itself, through any path, with an argument that grows (`type T[A any] struct{ F *T[[]A] }`, `func f[T any]() { f[[]T]() }`), so its instances never end (Go's rule, `go/types` "instantiation cycle"); reported once, before rows are inferred | checker domain tests (`TestExpandingInstantiation`) |
+| An initialization cycle: a package `var`'s initializer refers to itself through vars, functions or methods (Go's initialization order, `go/types` initorder). The cycle's vars become invalid, so no capability or error diagnostic follows from them | checker domain tests (`TestRowGraphDomain`) |
 | A value of one type where another is expected: an assignment, an argument, a return, a field or an element | `var-mismatch`, `argument-mismatch`, `return-mismatch` |
 | A type does not implement an interface, or its method's rows are wider (interface assignability) | `interface-missing-method`, `interface-wider-row` |
 | A keyed literal omits a field that has no zero value; `var x T` of a type with no zero value | `keyed-literal-nondefaultable`, `var-nondefaultable` |
@@ -112,9 +115,9 @@ The checker does not restrict `main`'s capability row; the build refuses what th
 | An operator on operands it is not defined for; `==` on values that are not comparable or of different types | `equality-mismatch`, `plus-on-bool` |
 | An untyped integer where a `duration` is expected (only a duration literal is a duration) | `untyped-integer-as-duration` |
 | A constant that overflows its type; an integer literal with a leading zero; an invalid escape; a duration that overflows `int64` nanoseconds. A typed `float32`, `float64`, `complex64` or `complex128` constant holds its type's rounded value, so `1/int(float32(16777217)-float32(16777216))` divides by zero | `constant-overflow`, `probes/decimal-leading-zero.sketch`, `probes/string-escape.sketch`, `probes/duration-overflow.sketch`; checker review tests (M12) |
-| A constant index, slice bound or `make` size is negative; a constant index or bound is out of range of an array or a constant string; constant slice bounds are out of order; a constant `make` length exceeds its capacity (Go's rules) | checker review tests (M11) |
+| A constant index overflows `int`; a constant index, slice bound or `make` size is negative; a constant index or bound is out of range of an array or a constant string; constant slice bounds are out of order; a constant `make` length exceeds its capacity (Go's rules) | checker review tests (M11) |
 | A constant key appears twice in a map literal, compared after conversion to the key type | checker review tests (N3) |
-| `:=` declares no new name, or repeats a name on its left; a name already declared in the block is assigned, not redeclared (Go's rule) | checker review tests (M9) |
+| `:=` declares no new name, or repeats a name on its left (reported once per name, and then no "no new names" follows); a name already declared in the block is assigned, not redeclared (Go's rule) | checker domain tests (`TestDefineTargetsDomain`) |
 | `try` or `catch` on an expression that cannot fail; a caught type not in the row or caught twice | `try-infallible`, `catch-arm-not-in-row` |
 | A type argument that cannot be inferred; a constraint the argument does not satisfy, written, inferred or given by explicit instantiation `Id[int]`; a parameter used as a type and as a row; a method that would have type parameters of its own; a function with implicit parameters used as a value without a call | `type-argument-not-inferred`, `constraint-unsatisfied`, `parameter-kind-conflict`, `method-type-parameter` |
 | `*T` outside a parameter or receiver type | `borrow-in-field` |
