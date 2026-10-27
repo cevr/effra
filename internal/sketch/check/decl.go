@@ -35,6 +35,10 @@ func (c *checker) run(files []*syntax.File) *Package {
 		c.cur = f.file
 		c.funcSig(f)
 	}
+	// Expanding instantiations in signatures, a method's receiver
+	// parameters included, are rejected before any row is inferred
+	// (round-4 M1).
+	c.checkInstantiationCycles()
 	c.collectBodyErrorRows()
 	c.checkEntry()
 	// Bodies converge first: a machine's initial value and the named wires
@@ -1115,6 +1119,14 @@ func (c *checker) funcSig(f *Func) *Signature {
 		ctx.reported = new(bool)
 		c.bindReceiverParams(f, ctx)
 	}
+	// The bracket parameters are declared before any constraint resolves,
+	// so the instantiations in the constraints and the signature are
+	// attributed to them (round-4 M1).
+	type pending struct {
+		tp *TypeParam
+		x  syntax.Expr
+	}
+	var constraints []pending
 	if d.TypeParams != nil {
 		for _, field := range d.TypeParams.List {
 			for _, name := range field.Names {
@@ -1123,7 +1135,7 @@ func (c *checker) funcSig(f *Func) *Signature {
 				case field.Type != nil && isErrorName(field.Type):
 					tp.Kind = KindErrors
 				case field.Type != nil:
-					tp.Constraint = c.constraint(field.Type, ctx)
+					constraints = append(constraints, pending{tp, field.Type})
 				}
 				if _, dup := ctx.params[name.Name]; dup {
 					c.errorf(name, CodeType, "type parameter %s is declared twice", name.Name)
@@ -1133,16 +1145,35 @@ func (c *checker) funcSig(f *Func) *Signature {
 			}
 		}
 	}
+	// A signature instantiates generic types with the declaration's
+	// parameters, a method's receiver parameters included, as its body does:
+	// they own those instantiations, so a growing one is an instantiation
+	// cycle before rows are inferred (round-4 M1; go/types mono.go records
+	// signature instances too).
+	var owner []*TypeParam
+	if f.Recv != nil {
+		owner = append(owner, f.Recv.TParams...)
+	}
+	owner = append(owner, tparams...)
+	restore := c.monoOwner(owner)
+	for _, p := range constraints {
+		p.tp.Constraint = c.constraint(p.x, ctx)
+	}
 	nbracket := len(tparams)
+	var implicit []string
 	if d.Recv == nil {
 		c.prescanImplicit(d.Type, ctx)
+		implicit = implicitOrder(d.Type, ctx)
+		for _, name := range implicit {
+			owner = append(owner, ctx.implicit[name])
+		}
+		c.mono.owner = owner
 	}
 	sig := c.signature(d.Type, ctx)
+	restore()
 	sig.NBracket = nbracket
-	if d.Recv == nil {
-		for _, name := range implicitOrder(d.Type, ctx) {
-			tparams = append(tparams, ctx.implicit[name])
-		}
+	for _, name := range implicit {
+		tparams = append(tparams, ctx.implicit[name])
 	}
 	sig.TParams = tparams
 	f.Sig = sig

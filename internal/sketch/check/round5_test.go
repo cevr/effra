@@ -1,0 +1,87 @@
+package check
+
+import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"strings"
+	"testing"
+)
+
+// TestInstantiationCycleSignatures: a method's signature instantiates its
+// receiver's generic type like its body does. A growing instantiation in a
+// parameter, a result, a bodiless declaration, an interface-typed parameter
+// or a constraint, through renamed receiver parameters or across two
+// receiver types, is an instantiation cycle (S108), as go/types reports
+// (round-4 M1). The non-growing control stays clean.
+func TestInstantiationCycleSignatures(t *testing.T) {
+	cases := []struct {
+		name, src string
+		cycle     bool
+	}{
+		{"parameter", `type R[P any] struct{}
+func (R[P]) M(x R[[]P]) {}`, true},
+		{"result-bodiless", `type R[P any] struct{}
+func (R[P]) M() R[[]P]`, true},
+		{"interface-parameter", `type R[P any] struct{}
+func (R[P]) M(x interface{ F(R[[]P]) }) {}`, true},
+		{"renamed-receiver", `type R[P any] struct{}
+func (R[Q]) M(x R[[]Q]) {}`, true},
+		{"cross-receiver", `type R[P any] struct{}
+type S[Q any] struct{}
+func (R[P]) M(x S[[]P]) {}
+func (S[Q]) N(x R[Q]) {}`, true},
+		{"function-signature-and-method-body", `type R[P any] struct{}
+func F[T any](x R[[]T]) {}
+func (R[P]) M() { var r R[P]; _ = r; F[P](R[[]P]{}) }`, true},
+		{"nongrowing-control", `type R[P any] struct{}
+func (R[P]) M(x R[P]) {}`, false},
+		{"nongrowing-cross-control", `type R[P any] struct{}
+type S[Q any] struct{}
+func (R[P]) M(x S[P]) {}
+func (S[Q]) N(x R[Q]) {}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "package p\n\n" + tc.src + "\n"
+			_, diags := CheckSource(src)
+			var ds []string
+			for _, d := range diags {
+				ds = append(ds, d.String())
+			}
+			if got := mentions(ds, "instantiation cycle"); got != tc.cycle {
+				t.Fatalf("ergo reports an instantiation cycle = %v, want %v; diagnostics: %q", got, tc.cycle, ds)
+			}
+			if !tc.cycle && len(ds) > 0 {
+				t.Fatalf("the control has diagnostics: %q", ds)
+			}
+			g := goErrors(src)
+			if got := mentions(g, "instantiation cycle"); got != tc.cycle || !tc.cycle && len(g) > 0 {
+				t.Fatalf("go/types disagrees with the case: %q", g)
+			}
+		})
+	}
+}
+
+// goErrors checks src with go/types and returns its errors.
+func goErrors(src string) []string {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "p.go", src, 0)
+	if err != nil {
+		return []string{err.Error()}
+	}
+	var errs []string
+	conf := types.Config{Error: func(e error) { errs = append(errs, e.Error()) }}
+	_, _ = conf.Check("p", fset, []*ast.File{file}, nil)
+	return errs
+}
+
+func mentions(ds []string, sub string) bool {
+	for _, d := range ds {
+		if strings.Contains(d, sub) {
+			return true
+		}
+	}
+	return false
+}
