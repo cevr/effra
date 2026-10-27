@@ -60,8 +60,8 @@ func TestRefusedForms(t *testing.T) {
 		{"local type", "package p\nfunc f() {\n\ttype T struct{}\n}\n", "package level"},
 		{"catch default", "package p\nfunc f() {\n\tx := g() catch {\n\tdefault:\n\t}\n}\n", "default is not allowed"},
 		{"error row as a parameter", "package p\nfunc f(e error[E]) {}\n", "result list"},
-		{"paren uses on a declaration", "package p\nfunc f() uses (A, B) {}\n", "inside a list"},
-		{"unparenthesised uses in a list", "package p\nfunc f(g func() uses A, B) {}\n", "parameter type"},
+		{"paren needs on a declaration", "package p\nfunc f() needs (A, B) {}\n", "inside a list"},
+		{"unparenthesised needs in a list", "package p\nfunc f(g func() needs A, B) {}\n", "parameter type"},
 		{"variadic result", "package p\nfunc f() (...int) {}\n", "variadic"},
 		{"variadic not last", "package p\nfunc f(a ...int, b int) {}\n", "variadic"},
 		{"if header newline", "package p\nfunc f() {\n\tif x\n\t{\n\t}\n}\n", "newline"},
@@ -169,7 +169,7 @@ func TestAdmittedForms(t *testing.T) {
 		t.Fatalf("params %#v", params)
 	}
 	// Bodiless declaration and the go import.
-	f := parse("package p\nimport (\n\tgo \"net/url\"\n\t. \"html\"\n)\n//ef:go net/url.Parse\nfunc parse(raw string) (url.URL, error[go.Error]) uses go.Foreign\n")
+	f := parse("package p\nimport (\n\tgo \"net/url\"\n\t. \"html\"\n)\n//ef:go net/url.Parse\nfunc parse(raw string) (url.URL, error[go.Error]) needs go.Foreign\n")
 	imp := f.Decls[0].(*ImportDecl)
 	if imp.Specs[0].Kind != ImportGo || imp.Specs[1].Kind != ImportDot {
 		t.Fatal("import kinds")
@@ -181,13 +181,13 @@ func TestAdmittedForms(t *testing.T) {
 	if _, ok := fn.Type.Results.List[1].Type.(*ErrorRow); !ok {
 		t.Fatal("error row")
 	}
-	// uses (A, B) in a function type inside a parameter list.
-	run := parse("package p\nfunc run(f func() uses (A, B), g func() uses R) uses A, B, R {}\n").Decls[0].(*FuncDecl)
-	if u := run.Type.Params.List[0].Type.(*FuncType).Uses; len(u.Names) != 2 || !u.Lparen.IsValid() {
-		t.Fatal("parenthesised uses")
+	// needs (A, B) in a function type inside a parameter list.
+	run := parse("package p\nfunc run(f func() needs (A, B), g func() needs R) needs A, B, R {}\n").Decls[0].(*FuncDecl)
+	if u := run.Type.Params.List[0].Type.(*FuncType).Needs; len(u.Names) != 2 || !u.Lparen.IsValid() {
+		t.Fatal("parenthesised needs")
 	}
-	if len(run.Type.Uses.Names) != 3 {
-		t.Fatal("declaration uses")
+	if len(run.Type.Needs.Names) != 3 {
+		t.Fatal("declaration needs")
 	}
 	// Grouped struct fields, several wire keys, an unconstrained parameter.
 	g := parse("package p\ntype P[T] struct {\n\tA, B T\n}\nwire W {\n\tC, D = X{}\n\treplace E = Y{}\n\tShared\n}\n")

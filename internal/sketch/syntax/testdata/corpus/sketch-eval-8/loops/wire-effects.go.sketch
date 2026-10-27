@@ -35,15 +35,15 @@ func (p Postgres) Close() error[CloseFailed] {
 	return p.pool.Close()
 }
 
-// A constructor is an ordinary function. Its uses row is resolved from the
+// A constructor is an ordinary function. Its needs row is resolved from the
 // same wire graph, and its error row joins the startup errors of every with().
-func OpenPostgres() (Postgres, error[ConnectFailed]) uses Config, Clock, Scheduler {
+func OpenPostgres() (Postgres, error[ConnectFailed]) needs Config, Clock, Scheduler {
 	url := Config.String("DATABASE_URL")
 	pool := try retry.On[ConnectFailed](retry.Exponential(200ms).Times(5)) { sql.Open(url) }
 	return Postgres{pool, go keepWarm(pool)}
 }
 
-func keepWarm(pool sql.Pool) uses Clock {
+func keepWarm(pool sql.Pool) needs Clock {
 	for range Clock.Tick(30s) {
 		pool.Ping()
 	}
@@ -52,20 +52,20 @@ func keepWarm(pool sql.Pool) uses Clock {
 // The constructor picks an implementation at build time, as Effect's
 // Layer.unwrapEffect does. wire closes whichever value it returned if that
 // value has a Close method.
-func OpenOrders() (Orders, error[ConnectFailed]) uses Config, Clock, Scheduler {
+func OpenOrders() (Orders, error[ConnectFailed]) needs Config, Clock, Scheduler {
 	if Config.String("ORDERS") == "memory" {
 		return MemoryOrders{}
 	}
 	return try OpenPostgres()
 }
 
-wire Live uses Orders {
+wire Live needs Orders {
 	Config = EnvConfig{}
 	Orders = OpenOrders // effectful: runs during the build
 }
 
 // Built once for the whole server, not per request.
-func main() error[ConnectFailed | CloseFailed] uses Clock, Scheduler, Console {
+func main() error[ConnectFailed | CloseFailed] needs Clock, Scheduler, Console {
 	return with(Live) {
 		serve(time.Minute)
 	}

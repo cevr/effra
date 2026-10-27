@@ -12,7 +12,7 @@ import (
 // actor.Start runs a machine as an actor: one task that owns the state and
 // reads a bounded mailbox, one message at a time. The actor is a linear
 // handle like a Task: it must be stopped or awaited before main returns.
-func main() (string, error[ProbeUnavailable]) uses Console {
+func main() (string, error[ProbeUnavailable]) needs Console {
 	return with(wire{ Probe = HealthyProbe{} }) {
 		b := actor.Start(CircuitBreaker{}, 16)
 		defer b.Stop()
@@ -33,7 +33,7 @@ func main() (string, error[ProbeUnavailable]) uses Console {
 // The Set sits inside the Probe binding, so every restart and the final
 // shutdown happen while Probe is still provided. The factory captures
 // nothing linear, so it can run again.
-func supervised() uses Console, Clock, Scheduler {
+func supervised() needs Console, Clock, Scheduler {
 	with(wire{ Probe = HealthyProbe{} }) {
 		set := tasks.Set(tasks.Restart(schedule.Exponential(1s).UpTo(5)))
 		defer set.Stop()

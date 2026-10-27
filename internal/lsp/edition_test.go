@@ -244,8 +244,8 @@ func TestFormattingFollowsTheEdition(t *testing.T) {
 		t.Fatal(err)
 	}
 	uri := "file://" + filepath.ToSlash(filepath.Join(root, "main.ef"))
-	unformatted := "package main\n\nfunc main()  uses Console {\nConsole.Println(\"a\")\n}\n"
-	formatted := "package main\n\nfunc main() uses Console {\n\tConsole.Println(\"a\")\n}\n"
+	unformatted := "package main\n\nfunc main()  needs Console {\nConsole.Println(\"a\")\n}\n"
+	formatted := "package main\n\nfunc main() needs Console {\n\tConsole.Println(\"a\")\n}\n"
 	legacySource := "fn ok() -> string { \"ok\" }\n"
 
 	s := startSession(t)

@@ -3,10 +3,10 @@ package checkout
 
 // Scheduler.Sleep takes a duration (a literal such as 2s), not an integer.
 
-func wait() uses Scheduler {
+func wait() needs Scheduler {
 	Scheduler.Sleep(2)
 }
 
-func main() uses Console {
+func main() needs Console {
 	Console.Println("unreachable")
 }

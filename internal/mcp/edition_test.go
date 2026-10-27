@@ -170,8 +170,8 @@ func TestCodeFormatFollowsTheEdition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	unformatted := "package main\n\nfunc main()  uses Console {\nConsole.Println(\"a\")\n}\n"
-	formatted := "package main\n\nfunc main() uses Console {\n\tConsole.Println(\"a\")\n}\n"
+	unformatted := "package main\n\nfunc main()  needs Console {\nConsole.Println(\"a\")\n}\n"
+	formatted := "package main\n\nfunc main() needs Console {\n\tConsole.Println(\"a\")\n}\n"
 	for rel, text := range map[string]string{
 		"go.mod":           "module workspace\n",
 		"legacy.ef":        "fn ok() -> string { \"ok\" }\n",

@@ -584,8 +584,8 @@ func (p *parser) parseFuncDecl(doc *CommentGroup) *FuncDecl {
 func (p *parser) parseWireDecl(doc *CommentGroup) *WireDecl {
 	d := &WireDecl{Doc: doc, Wire: p.want(WIRE)}
 	d.Name = p.parseIdent()
-	if p.tok.tok == USES {
-		d.Uses = p.parseUses(false)
+	if p.tok.tok == NEEDS {
+		d.Needs = p.parseNeeds(false)
 	}
 	if p.tok.tok != LBRACE {
 		p.errorf("expected \"{\", found %s", p.found())
@@ -640,8 +640,8 @@ const (
 	paramReceiver                  // a receiver
 )
 
-// parseSignature parses parameters, results and a uses clause. list is true
-// for a function type inside a list, where an unparenthesised uses clause
+// parseSignature parses parameters, results and a needs clause. list is true
+// for a function type inside a list, where an unparenthesised needs clause
 // takes one name (grammar.md D8).
 func (p *parser) parseSignature(funcPos Pos, list bool) *FuncType {
 	t := &FuncType{Func: funcPos}
@@ -653,8 +653,8 @@ func (p *parser) parseSignature(funcPos Pos, list bool) *FuncType {
 		r := p.parseResultType(list)
 		t.Results = &FieldList{Opening: NoPos, List: []*Field{{Type: r}}, Closing: NoPos}
 	}
-	if p.tok.tok == USES {
-		t.Uses = p.parseUses(list)
+	if p.tok.tok == NEEDS {
+		t.Needs = p.parseNeeds(list)
 	}
 	return t
 }
@@ -673,11 +673,11 @@ func (p *parser) startsType() bool {
 	return false
 }
 
-func (p *parser) parseUses(list bool) *UsesClause {
-	u := &UsesClause{Uses: p.want(USES), Lparen: NoPos, Rparen: NoPos}
+func (p *parser) parseNeeds(list bool) *NeedsClause {
+	u := &NeedsClause{Needs: p.want(NEEDS), Lparen: NoPos, Rparen: NoPos}
 	if p.tok.tok == LPAREN {
 		if !list {
-			p.errorf("a parenthesised uses list belongs to a function type inside a list")
+			p.errorf("a parenthesised needs list belongs to a function type inside a list")
 		}
 		u.Lparen = p.tok.pos
 		p.next()
@@ -849,7 +849,7 @@ func (p *parser) backtrack(i int) {
 // ---------------------------------------------------------------- types
 
 // parseType parses a type. list is true inside a comma-separated list, where
-// a function type's unparenthesised uses clause takes one name.
+// a function type's unparenthesised needs clause takes one name.
 func (p *parser) parseType(list bool) Expr {
 	p.enter()
 	defer p.leave()

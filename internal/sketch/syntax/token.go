@@ -14,7 +14,7 @@ func (p Pos) IsValid() bool { return p >= 0 }
 type Token int
 
 // The tokens. Keywords are the 27 of docs/spec/grammar.md (Keywords): Go's
-// 25 without goto, fallthrough and const, plus try, catch, uses, wire and
+// 25 without goto, fallthrough and const, plus try, catch, needs, wire and
 // machine. replace, initial and step are contextual and lex as IDENT.
 const (
 	ILLEGAL Token = iota
@@ -106,7 +106,7 @@ const (
 	VAR
 	TRY
 	CATCH
-	USES
+	NEEDS
 	WIRE
 	MACHINE
 	keywordEnd
@@ -140,7 +140,7 @@ var tokens = [...]string{
 	IF: "if", IMPORT: "import", INTERFACE: "interface", MAP: "map", PACKAGE: "package",
 	RANGE: "range", RETURN: "return", SELECT: "select", STRUCT: "struct", SWITCH: "switch",
 	TYPE: "type", VAR: "var",
-	TRY: "try", CATCH: "catch", USES: "uses", WIRE: "wire", MACHINE: "machine",
+	TRY: "try", CATCH: "catch", NEEDS: "needs", WIRE: "wire", MACHINE: "machine",
 }
 
 // String is the token's spelling for operators and keywords, and its class

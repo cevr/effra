@@ -18,8 +18,8 @@ func TestReviewNamePositions(t *testing.T) {
 		{"wire", `wire NAME{}; func main(){}`},
 		{"parameter", `func f(NAME string){}; func main(){}`},
 		{"receiver", `type Box struct{}; func (NAME Box) F(){}; func main(){}`},
-		{"local", `func main() uses Console{ NAME := "ok"; Console.Println(NAME) }`},
-		{"switch", `type A struct{ Value string }; type U interface{ A }; func makeU() U { return A{} }; func main() uses Console { switch NAME := makeU().(type) { case A: Console.Println(NAME.Value) } }`},
+		{"local", `func main() needs Console{ NAME := "ok"; Console.Println(NAME) }`},
+		{"switch", `type A struct{ Value string }; type U interface{ A }; func makeU() U { return A{} }; func main() needs Console { switch NAME := makeU().(type) { case A: Console.Println(NAME.Value) } }`},
 	}
 	names := append([]string{}, types.Universe.Names()...)
 	for kind := gotoken.BREAK; kind <= gotoken.VAR; kind++ {
@@ -48,15 +48,15 @@ func TestReviewNamePositions(t *testing.T) {
 
 func TestReviewSafeNameScopes(t *testing.T) {
 	positions := []string{
-		`type NAME struct{}; func main() uses Console { Console.Println("ok") }`,
-		`func NAME() string { return "ok" }; func main() uses Console { Console.Println(NAME()) }`,
-		`type Box struct{ NAME string }; func main() uses Console { Console.Println(Box{NAME: "ok"}.NAME) }`,
-		`type Cap interface{ NAME() string }; type Box struct{}; func (Box) NAME() string{return "ok"}; func main() uses Console { with(wire{Cap=Box{}}){Console.Println(Cap.NAME())} }`,
-		`wire NAME{}; func main() uses Console { with(NAME){Console.Println("ok")} }`,
-		`func f(NAME string) string{return NAME}; func main() uses Console{Console.Println(f("ok"))}`,
-		`type Box struct{Value string}; type Cap interface{Get() string}; func(NAME Box) Get() string{return NAME.Value}; func main() uses Console{with(wire{Cap=Box{Value:"ok"}}){Console.Println(Cap.Get())}}`,
-		`func main() uses Console{NAME:="ok";Console.Println(NAME)}`,
-		`type A struct{Value string};type U interface{A};func makeU() U{return A{Value:"ok"}};func main() uses Console{switch NAME:=makeU().(type){case A:Console.Println(NAME.Value)}}`,
+		`type NAME struct{}; func main() needs Console { Console.Println("ok") }`,
+		`func NAME() string { return "ok" }; func main() needs Console { Console.Println(NAME()) }`,
+		`type Box struct{ NAME string }; func main() needs Console { Console.Println(Box{NAME: "ok"}.NAME) }`,
+		`type Cap interface{ NAME() string }; type Box struct{}; func (Box) NAME() string{return "ok"}; func main() needs Console { with(wire{Cap=Box{}}){Console.Println(Cap.NAME())} }`,
+		`wire NAME{}; func main() needs Console { with(NAME){Console.Println("ok")} }`,
+		`func f(NAME string) string{return NAME}; func main() needs Console{Console.Println(f("ok"))}`,
+		`type Box struct{Value string}; type Cap interface{Get() string}; func(NAME Box) Get() string{return NAME.Value}; func main() needs Console{with(wire{Cap=Box{Value:"ok"}}){Console.Println(Cap.Get())}}`,
+		`func main() needs Console{NAME:="ok";Console.Println(NAME)}`,
+		`type A struct{Value string};type U interface{A};func makeU() U{return A{Value:"ok"}};func main() needs Console{switch NAME:=makeU().(type){case A:Console.Println(NAME.Value)}}`,
 	}
 	for _, name := range []string{"envc", "e", "plain", "Item", "v", "Env"} {
 		for i, body := range positions {

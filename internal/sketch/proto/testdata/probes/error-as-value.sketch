@@ -3,4 +3,4 @@ package demo
 type Fault struct{}
 func fallible() error[Fault] { return Fault{} }
 func identity(value Fault) Fault { return value }
-func main() uses Console { Console.Println(identity(Fault{})) }
+func main() needs Console { Console.Println(identity(Fault{})) }

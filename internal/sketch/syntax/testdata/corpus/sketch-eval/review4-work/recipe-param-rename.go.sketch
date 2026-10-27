@@ -4,7 +4,7 @@ type Transient struct{}
 
 type Attempt[T] struct {
 	Label string
-	Work  func() (T, error[Transient]) uses Console // a recipe: runs fresh on every call
+	Work  func() (T, error[Transient]) needs Console // a recipe: runs fresh on every call
 }
 
 type RetryPolicy[T] struct {
@@ -12,7 +12,7 @@ type RetryPolicy[T] struct {
 	Backup  Option[Attempt[T]]
 }
 
-func probe(name string) (string, error[Transient]) uses Console {
+func probe(name string) (string, error[Transient]) needs Console {
 	Console.Log("probe " + name)
 	if name == "flaky" {
 		return Transient{}
@@ -20,14 +20,14 @@ func probe(name string) (string, error[Transient]) uses Console {
 	return name + " ok"
 }
 
-func attempt(item Attempt[string]) string uses Console {
+func attempt(item Attempt[string]) string needs Console {
 	return item.Work() catch {
 	case Transient:
 		item.Label + " failed"
 	}
 }
 
-func retry(policy RetryPolicy[string]) string uses Console {
+func retry(policy RetryPolicy[string]) string needs Console {
 	first := attempt(policy.Primary)
 	switch b := policy.Backup.(type) {
 	case None:
@@ -37,7 +37,7 @@ func retry(policy RetryPolicy[string]) string uses Console {
 	}
 }
 
-func main() uses Console {
+func main() needs Console {
 	policy := RetryPolicy[string]{
 		Primary: Attempt[string]{Label: "flaky", Work: func() { return probe("flaky") }},
 		Backup:  Some{V: Attempt[string]{Label: "stable", Work: func() { return probe("stable") }}},

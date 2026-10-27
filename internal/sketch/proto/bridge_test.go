@@ -58,7 +58,7 @@ func TestBridgeRefusesOutsideTheSubset(t *testing.T) {
 // source parses, and the bridge refuses it with S109 on the marked line.
 func TestBridgeRefusals(t *testing.T) {
 	for name, src := range map[string]string{
-		"wire uses":         "package p\nwire App uses A {\n\tStore = M{}\n}\n// LINE 2",
+		"wire needs":        "package p\nwire App needs A {\n\tStore = M{}\n}\n// LINE 2",
 		"wire two keys":     "package p\nwire App {\n\tA, B = M{}\n}\n// LINE 3",
 		"wire embed":        "package p\nwire App {\n\tShared\n}\n// LINE 3",
 		"wire replace":      "package p\nwire App {\n\treplace A = M{}\n}\n// LINE 3",
@@ -125,14 +125,14 @@ var bridgeTable = []struct {
 	src  string
 	line int
 }{
-	{"for-loop", "package p\n\nfunc main() uses Console {\n\tfor i := 0; i < 3; i++ {\n\t\tConsole.Println(\"x\")\n\t}\n}\n", 4},
-	{"defer", "package p\n\nfunc main() uses Console {\n\tdefer Console.Println(\"done\")\n\tConsole.Println(\"x\")\n}\n", 4},
-	{"local-var", "package p\n\nfunc main() uses Console {\n\tvar s = \"x\"\n\tConsole.Println(s)\n}\n", 4},
-	{"go-task", "package p\n\nfunc work() uses Console {\n\tConsole.Println(\"w\")\n}\n\nfunc main() uses Console {\n\tt := go work()\n\tt.Stop()\n}\n", 8},
-	{"generic-function", "package p\n\nfunc same[T comparable](x T) T {\n\treturn x\n}\n\nfunc main() uses Console {\n\tConsole.Println(same(\"x\"))\n}\n", 3},
-	{"machine", "package p\n\ntype State interface{ Idle | Busy }\ntype Idle struct{}\ntype Busy struct{}\ntype Event interface{ Start | Halt }\ntype Start struct{}\ntype Halt struct{}\n\nfunc step(s State, e Event) string {\n\treturn \"x\"\n}\n\ntype M machine[State, Event] {\n\tinitial Idle{}\n\tstep    step\n}\n\nfunc main() uses Console {\n\tConsole.Println(\"x\")\n}\n", 14},
-	{"catch-binding", "package p\n\ntype NotFound struct{ Name string }\n\nfunc find() (string, error[NotFound]) {\n\treturn NotFound{Name: \"x\"}\n}\n\nfunc main() uses Console {\n\tline := find() catch e {\n\tcase NotFound:\n\t\te.Name\n\t}\n\tConsole.Println(line)\n}\n", 10},
-	{"func-literal", "package p\n\nfunc main() uses Console {\n\tf := func() string { return \"x\" }\n\tConsole.Println(f())\n}\n", 4},
-	{"assignment", "package p\n\nfunc main() uses Console {\n\ts := \"a\"\n\ts = \"b\"\n\tConsole.Println(s)\n}\n", 5},
-	{"multi-subject-switch", "package p\n\ntype A interface{ X | Y }\ntype X struct{}\ntype Y struct{}\n\nfunc pair(a A, b A) string {\n\tswitch p, q := a.(type), b.(type) {\n\tcase (X, X):\n\t\treturn \"xx\"\n\tcase (_, _):\n\t\treturn \"other\"\n\t}\n}\n\nfunc main() uses Console {\n\tConsole.Println(pair(X{}, Y{}))\n}\n", 8},
+	{"for-loop", "package p\n\nfunc main() needs Console {\n\tfor i := 0; i < 3; i++ {\n\t\tConsole.Println(\"x\")\n\t}\n}\n", 4},
+	{"defer", "package p\n\nfunc main() needs Console {\n\tdefer Console.Println(\"done\")\n\tConsole.Println(\"x\")\n}\n", 4},
+	{"local-var", "package p\n\nfunc main() needs Console {\n\tvar s = \"x\"\n\tConsole.Println(s)\n}\n", 4},
+	{"go-task", "package p\n\nfunc work() needs Console {\n\tConsole.Println(\"w\")\n}\n\nfunc main() needs Console {\n\tt := go work()\n\tt.Stop()\n}\n", 8},
+	{"generic-function", "package p\n\nfunc same[T comparable](x T) T {\n\treturn x\n}\n\nfunc main() needs Console {\n\tConsole.Println(same(\"x\"))\n}\n", 3},
+	{"machine", "package p\n\ntype State interface{ Idle | Busy }\ntype Idle struct{}\ntype Busy struct{}\ntype Event interface{ Start | Halt }\ntype Start struct{}\ntype Halt struct{}\n\nfunc step(s State, e Event) string {\n\treturn \"x\"\n}\n\ntype M machine[State, Event] {\n\tinitial Idle{}\n\tstep    step\n}\n\nfunc main() needs Console {\n\tConsole.Println(\"x\")\n}\n", 14},
+	{"catch-binding", "package p\n\ntype NotFound struct{ Name string }\n\nfunc find() (string, error[NotFound]) {\n\treturn NotFound{Name: \"x\"}\n}\n\nfunc main() needs Console {\n\tline := find() catch e {\n\tcase NotFound:\n\t\te.Name\n\t}\n\tConsole.Println(line)\n}\n", 10},
+	{"func-literal", "package p\n\nfunc main() needs Console {\n\tf := func() string { return \"x\" }\n\tConsole.Println(f())\n}\n", 4},
+	{"assignment", "package p\n\nfunc main() needs Console {\n\ts := \"a\"\n\ts = \"b\"\n\tConsole.Println(s)\n}\n", 5},
+	{"multi-subject-switch", "package p\n\ntype A interface{ X | Y }\ntype X struct{}\ntype Y struct{}\n\nfunc pair(a A, b A) string {\n\tswitch p, q := a.(type), b.(type) {\n\tcase (X, X):\n\t\treturn \"xx\"\n\tcase (_, _):\n\t\treturn \"other\"\n\t}\n}\n\nfunc main() needs Console {\n\tConsole.Println(pair(X{}, Y{}))\n}\n", 8},
 }

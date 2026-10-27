@@ -26,7 +26,7 @@ func (p Postgres) Find(id string) (Order, error[OrderNotFound]) {
 	return p.pool.QueryOrder(id)
 }
 
-// A constructor is an ordinary function. Its uses row is resolved from the
+// A constructor is an ordinary function. Its needs row is resolved from the
 // same wire graph, and its error row joins the startup errors of with().
 // build.Scope is the build's scope (Effect Scope, Go's t.Cleanup):
 //   - Scope.Acquire runs open and registers close in one uninterruptible
@@ -34,8 +34,8 @@ func (p Postgres) Find(id string) (Order, error[OrderNotFound]) {
 //     one even if an earlier one failed. The value is the build's: it can be
 //     copied inside the build, but its type cannot escape the with().
 //   - Scope.Go starts a task the build owns and stops at release.
-// Both charge their uses rows to the constructor, so with() sees them.
-func OpenPostgres() (Postgres, error[ConnectFailed]) uses Config, Clock, Scheduler, build.Scope {
+// Both charge their needs rows to the constructor, so with() sees them.
+func OpenPostgres() (Postgres, error[ConnectFailed]) needs Config, Clock, Scheduler, build.Scope {
 	url := Config.String("DATABASE_URL")
 	open := func() (sql.Pool, error[ConnectFailed]) {
 		return retry.On[ConnectFailed](retry.Exponential(200ms).Times(5)) { sql.Open(url) }
@@ -53,7 +53,7 @@ func OpenPostgres() (Postgres, error[ConnectFailed]) uses Config, Clock, Schedul
 	return Postgres{pool}
 }
 
-func keepWarm(pool sql.Pool) uses Clock {
+func keepWarm(pool sql.Pool) needs Clock {
 	for range Clock.Tick(30s) {
 		pool.Ping()
 	}
@@ -61,21 +61,21 @@ func keepWarm(pool sql.Pool) uses Clock {
 
 // The constructor picks an implementation at build time. Its cleanups were
 // registered inside OpenPostgres, so the interface result hides nothing.
-func OpenOrders() (Orders, error[ConnectFailed]) uses Config, Clock, Scheduler, build.Scope {
+func OpenOrders() (Orders, error[ConnectFailed]) needs Config, Clock, Scheduler, build.Scope {
 	if Config.String("ORDERS") == "memory" {
 		return MemoryOrders{}
 	}
 	return try OpenPostgres()
 }
 
-wire Live uses Orders {
+wire Live needs Orders {
 	Config = EnvConfig{}
 	Orders = OpenOrders // effectful: runs during the build
 }
 
 // Built once for the whole server. A defect in a release and a failure in
 // keepWarm are both kept in the exit cause.
-func main() error[ConnectFailed] uses Clock, Scheduler, Console {
+func main() error[ConnectFailed] needs Clock, Scheduler, Console {
 	return with(Live) {
 		serve(time.Minute)
 	}

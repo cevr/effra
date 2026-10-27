@@ -53,7 +53,7 @@ The fixtures are `sketchtest.MalformedTable` and the `TestRefusedForms` cases in
 ### S102: missing capability
 
 - A body calls a capability its `uses` row does not list (`reject/missing-capability.sketch`).
-- A callee needs a capability that no `with` provides (`reject/unprovided.sketch`, `probes/function-uses-control.sketch`).
+- A callee needs a capability that no `with` provides (`reject/unprovided.sketch`, `probes/function-needs-control.sketch`).
 - A provider expression of an inline wire needs a capability of its own wire (`probes/wire-sibling.sketch`) or one the enclosing function lacks (`probes/wire-initializer.sketch`).
 - A named wire needs a capability from its caller (`probes/named-wire-requirement.sketch`; README Gap 6).
 - `timeout.After` without `Scheduler` (`sketch/sketch_test.go`, "timeout requires Scheduler").
@@ -116,7 +116,7 @@ The fixtures are `sketchtest.MalformedTable` and the `TestRefusedForms` cases in
 | A wire that needs itself, directly or through provider methods | `probes/cyclic-wire.sketch`, `wire-method-cycle` |
 | An operator other than `==` and `+`, or `==` on a type other than `string`, `int64` and `bool`, including `duration` (README Gaps 10, 26) | `probes/operators.sketch` |
 | A method call on a value, such as `S{}.M()`, or on an interface-typed parameter (README Gaps 27, 29) | the checker's "unsupported call" message |
-| A `uses` clause on a capability method or method; a capability call in a provider method | `probes/capability-method-uses.sketch` |
+| A `uses` clause on a capability method or method; a capability call in a provider method | `probes/capability-method-needs.sketch` |
 | `main` is called, takes parameters, returns a value or is missing | `probes/main-call.sketch`, `main-parameter` |
 | A source name is reserved by the prototype's Go output: Go's predeclared names, `rt`, `time`, `fmt`, `init`, `Error`, `timeout`, `duration`, names with `__` or ending in `_` | `probes/predeclared-error.sketch`, `predeclared-local`, `predeclared-panic`, `function-reserved`, `init-name`, `timeout-capability`, `duration-type-name`, `wire-predeclared-name`, `capability-parameter-name` |
 | A field or method name collides with generated names (`Error`, marker methods) | `probes/marker-field.sketch`, `marker-method`, `error-method` |

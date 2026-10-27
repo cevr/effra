@@ -11,7 +11,7 @@ import (
 //
 // A type's wire form is found by name, as Go finds Test and Fuzz functions:
 // ParseX(w) decodes and x.Wire() encodes (Go's netip.ParseAddr and String pair).
-// Their error and uses rows join every codec that contains X.
+// Their error and needs rows join every codec that contains X.
 
 type InvalidQuantity struct{ Units int64 }
 type UnknownMember struct{ Handle string }
@@ -80,14 +80,14 @@ type Audit interface {
 	Note(handle string) error[AuditRefused]
 }
 
-func ParseMember(w MemberWire) (Member, error[UnknownMember | DirectoryDown]) uses Directory {
+func ParseMember(w MemberWire) (Member, error[UnknownMember | DirectoryDown]) needs Directory {
 	if !try Directory.Known(w.Handle) {
 		return UnknownMember{w.Handle}
 	}
 	return Member{w.Handle, w.Sponsor}
 }
 
-func (m Member) Wire() (MemberWire, error[AuditRefused]) uses Audit {
+func (m Member) Wire() (MemberWire, error[AuditRefused]) needs Audit {
 	try Audit.Note(m.Handle)
 	return MemberWire{m.Handle, m.Sponsor}
 }
@@ -112,12 +112,12 @@ var settingsJSON = json.Codec[Settings]{MaxBytes: 512, MaxDepth: 2}
 
 type Env interface{ Get(name string) string }
 
-func reencodeOrder(stored string) (string, error[json.DecodeFailed | json.EncodeFailed | InvalidQuantity | UnknownMember | DirectoryDown | AuditRefused]) uses Directory, Audit {
+func reencodeOrder(stored string) (string, error[json.DecodeFailed | json.EncodeFailed | InvalidQuantity | UnknownMember | DirectoryDown | AuditRefused]) needs Directory, Audit {
 	order := try orderJSON.Decode(stored)
 	return orderJSON.Encode(order)
 }
 
-func loadSettings() (Settings, error[json.DecodeFailed]) uses Env {
+func loadSettings() (Settings, error[json.DecodeFailed]) needs Env {
 	return settingsJSON.Decode(Env.Get("ORDER_SETTINGS"))
 }
 
@@ -155,20 +155,20 @@ wire Down {
 
 var stored = `{"buyer":"u-7","member":{"handle":"ada","sponsor":"u-1"},"quantity":"3","status":{"_tag":"Enabled"}}`
 
-func TestNominalRoundTrips() error[json.DecodeFailed | json.EncodeFailed] uses testing.T {
+func TestNominalRoundTrips() error[json.DecodeFailed | json.EncodeFailed] needs testing.T {
 	id := try json.Decode[UserId](`"u-42"`)
 	T.Equal(id.Wire(), "u-42")
 	T.Equal(try json.Encode(id), `"u-42"`)
 }
 
-func TestNormalizingCanonicalizes() error[json.DecodeFailed | json.EncodeFailed] uses testing.T {
+func TestNormalizingCanonicalizes() error[json.DecodeFailed | json.EncodeFailed] needs testing.T {
 	legacy := try json.Decode[Status](`{"_tag":"Enabled"}`)
 	T.Equal(try json.Encode(legacy), `{"_tag":"Active"}`)
 	suspended := try json.Decode[Status](try json.Encode(Suspended{}))
 	T.Equal(suspended, Suspended{})
 }
 
-func TestRefinementRejectsOnDecode() error[json.DecodeFailed] uses testing.T {
+func TestRefinementRejectsOnDecode() error[json.DecodeFailed] needs testing.T {
 	refused := json.Decode[Quantity](`"-1"`) catch {
 	case InvalidQuantity:
 		Quantity{99}
@@ -176,7 +176,7 @@ func TestRefinementRejectsOnDecode() error[json.DecodeFailed] uses testing.T {
 	T.Equal(refused, Quantity{99})
 }
 
-func TestEncodeSideRejection() error[json.EncodeFailed] uses testing.T {
+func TestEncodeSideRejection() error[json.EncodeFailed] needs testing.T {
 	written := json.Encode(Quantity{-5}) catch {
 	case InvalidQuantity:
 		"refused"
@@ -184,12 +184,12 @@ func TestEncodeSideRejection() error[json.EncodeFailed] uses testing.T {
 	T.Equal(written, "refused")
 }
 
-func TestNestedRoundTrip() error[json.DecodeFailed | json.EncodeFailed | InvalidQuantity | UnknownMember | DirectoryDown | AuditRefused] uses testing.T {
+func TestNestedRoundTrip() error[json.DecodeFailed | json.EncodeFailed | InvalidQuantity | UnknownMember | DirectoryDown | AuditRefused] needs testing.T {
 	written := try with(Healthy) { reencodeOrder(stored) }
 	T.Equal(written, `{"buyer":"u-7","member":{"handle":"ada","sponsor":"u-1"},"quantity":"3","status":{"_tag":"Active"}}`)
 }
 
-func TestNestedFailureKeepsItsType() error[json.DecodeFailed | json.EncodeFailed | InvalidQuantity | DirectoryDown | AuditRefused] uses testing.T {
+func TestNestedFailureKeepsItsType() error[json.DecodeFailed | json.EncodeFailed | InvalidQuantity | DirectoryDown | AuditRefused] needs testing.T {
 	ghost := `{"buyer":"u-7","member":{"handle":"ghost","sponsor":"u-1"},"quantity":"1","status":{"_tag":"Active"}}`
 	outcome := try with(Healthy) { reencodeOrder(ghost) } catch {
 	case UnknownMember:
@@ -198,7 +198,7 @@ func TestNestedFailureKeepsItsType() error[json.DecodeFailed | json.EncodeFailed
 	T.Equal(outcome, "unknown member")
 }
 
-func TestMalformedInputNeverReachesAService() error[json.EncodeFailed | InvalidQuantity | UnknownMember | DirectoryDown | AuditRefused] uses testing.T {
+func TestMalformedInputNeverReachesAService() error[json.EncodeFailed | InvalidQuantity | UnknownMember | DirectoryDown | AuditRefused] needs testing.T {
 	malformed := `{"buyer":"u-7","member":{"handle":"ada","sponsor":"u-1"},"quantity":3,"status":{"_tag":"Active"}}`
 	outcome := try with(Down) { reencodeOrder(malformed) } catch {
 	case json.DecodeFailed:
@@ -207,7 +207,7 @@ func TestMalformedInputNeverReachesAService() error[json.EncodeFailed | InvalidQ
 	T.Equal(outcome, "malformed")
 }
 
-func TestServiceFailureIsNotMalformedInput() error[json.DecodeFailed | json.EncodeFailed | InvalidQuantity | UnknownMember | AuditRefused] uses testing.T {
+func TestServiceFailureIsNotMalformedInput() error[json.DecodeFailed | json.EncodeFailed | InvalidQuantity | UnknownMember | AuditRefused] needs testing.T {
 	outcome := try with(Down) { reencodeOrder(stored) } catch {
 	case DirectoryDown:
 		"directory down"
@@ -216,7 +216,7 @@ func TestServiceFailureIsNotMalformedInput() error[json.DecodeFailed | json.Enco
 }
 
 // Encoding needs Audit and never Directory: the row says so.
-func TestEncodeRunsOnlyEncodeServices() error[json.EncodeFailed | InvalidQuantity] uses testing.T {
+func TestEncodeRunsOnlyEncodeServices() error[json.EncodeFailed | InvalidQuantity] needs testing.T {
 	order := Order{UserId{"u-7"}, Member{"sealed", UserId{"u-1"}}, Quantity{1}, Active{}}
 	outcome := try with(wire{ Audit = Ledger{} }) { orderJSON.Encode(order) } catch {
 	case AuditRefused:
@@ -225,7 +225,7 @@ func TestEncodeRunsOnlyEncodeServices() error[json.EncodeFailed | InvalidQuantit
 	T.Equal(outcome, "audit refused")
 }
 
-func TestConfigurationSharesTheWireForms() error[json.DecodeFailed | json.EncodeFailed] uses testing.T {
+func TestConfigurationSharesTheWireForms() error[json.DecodeFailed | json.EncodeFailed] needs testing.T {
 	settings := try with(wire{ Env = StoredSettings{} }) { loadSettings() }
 	T.Equal(try settingsJSON.Encode(settings), `{"owner":"u-1","defaultStatus":{"_tag":"Active"}}`)
 }

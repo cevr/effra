@@ -5,7 +5,7 @@ type Holder struct{ Value string }
 func (h Holder) Get() string { return h.Value }
 func build() string { return "provider" }
 wire W { Store = Holder{Value: build()} }
-func main() uses Console {
+func main() needs Console {
   build := "local"
   value := with(W) { Store.Get() }
   Console.Println(build, value)

@@ -25,7 +25,7 @@ func describe(state State) string {
 	}
 }
 
-func main() uses Console {
+func main() needs Console {
 	request := Request{id: "42", name: "Ada"}
 	state := Running{requestId: request.id}
 	Console.Println(describe(state))

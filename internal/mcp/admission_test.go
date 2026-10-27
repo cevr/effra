@@ -126,7 +126,7 @@ func retargetInsideTheWorkspace(t *testing.T, stage string) {
 	if err := os.WriteFile(filepath.Join(root, "inside", "effra.json"), []byte(`{"edition":"2026"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "inside", "main.ef"), []byte("package p\n\nfunc main() uses Console {\n\tConsole.Println(\"ok\")\n}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "inside", "main.ef"), []byte("package p\n\nfunc main() needs Console {\n\tConsole.Println(\"ok\")\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	legacy := filepath.Join(root, "old", "main.ef")

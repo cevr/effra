@@ -3,7 +3,7 @@ package demo
 type Node struct{ Next Link }
 type End struct{}
 type Link interface{ Node | End }
-func main() uses Console {
+func main() needs Console {
   node := Node{Next: End{}}
   Console.Println(node)
 }

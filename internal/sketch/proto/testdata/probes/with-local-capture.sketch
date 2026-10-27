@@ -1,6 +1,6 @@
 // out: outer inner outer
 package demo
-func main() uses Console {
+func main() needs Console {
   x := "outer"
   value := with(wire{}) { x := x + " inner"; x }
   Console.Println(value, x)

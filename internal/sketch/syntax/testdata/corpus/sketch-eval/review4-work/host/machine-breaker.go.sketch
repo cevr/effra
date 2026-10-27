@@ -29,7 +29,7 @@ func tripped(endpoint string) Breaker {
 	return Open{Endpoint: endpoint}
 }
 
-func breakerStep(state Breaker, signal Signal) (Decision[Breaker, string], error[ProbeUnavailable]) uses Probe {
+func breakerStep(state Breaker, signal Signal) (Decision[Breaker, string], error[ProbeUnavailable]) needs Probe {
 	switch s, e := state.(type), signal.(type) {
 	case (Closed, Failure):
 		if s.Failures >= 2 {

@@ -22,7 +22,7 @@ type Sink interface {
 }
 
 // The ticker stops when the loop ends. A full channel blocks the send.
-func poll(out chan Reading) uses Source, Clock, Console {
+func poll(out chan Reading) needs Source, Clock, Console {
 	for at := range Clock.Tick(1s) {
 		v := Source.Read() catch {
 		case SourceDown:
@@ -33,7 +33,7 @@ func poll(out chan Reading) uses Source, Clock, Console {
 	}
 }
 
-func batch(in chan Reading, size int) error[FlushFailed] uses Sink {
+func batch(in chan Reading, size int) error[FlushFailed] needs Sink {
 	var buf []Reading
 	for r := range in {
 		buf = append(buf, r)
@@ -48,7 +48,7 @@ func batch(in chan Reading, size int) error[FlushFailed] uses Sink {
 }
 
 // A flush failure exits Run, and that exit stops the producer.
-func Run(d time.Duration) error[FlushFailed] uses Source, Sink, Clock, Scheduler, Console {
+func Run(d time.Duration) error[FlushFailed] needs Source, Sink, Clock, Scheduler, Console {
 	ch := make(chan Reading, 16)
 	producer := go {
 		defer close(ch)

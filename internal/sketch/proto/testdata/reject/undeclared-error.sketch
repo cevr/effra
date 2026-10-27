@@ -33,11 +33,11 @@ func (FakeGateway) Charge(order Order) (string, error[GatewayDown]) {
 }
 
 // OrderNotFound can escape through try, but the signature does not declare it.
-func pay(id string) (string, error[GatewayDown]) uses Orders, Gateway {
+func pay(id string) (string, error[GatewayDown]) needs Orders, Gateway {
 	order := try Orders.Find(id)
 	return Gateway.Charge(order)
 }
 
-func main() uses Console {
+func main() needs Console {
 	Console.Println("unused")
 }

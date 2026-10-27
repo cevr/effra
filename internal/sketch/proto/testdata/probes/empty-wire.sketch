@@ -1,6 +1,6 @@
 // out: ok
 package demo
-func main() uses Console {
+func main() needs Console {
   value := with(wire{}) { "ok" }
   Console.Println(value)
 }

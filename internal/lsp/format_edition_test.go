@@ -29,7 +29,7 @@ func TestFormattingRefusesAnEditionChangedWhileFormatting(t *testing.T) {
 			}
 			manifest := filepath.Join(root, edition.ManifestName)
 			path := filepath.Join(root, "main.ef")
-			unformatted := "package main\n\nfunc main()  uses Console {\nConsole.Println(\"a\")\n}\n"
+			unformatted := "package main\n\nfunc main()  needs Console {\nConsole.Println(\"a\")\n}\n"
 			for file, text := range map[string]string{manifest: `{"edition":"2026"}`, path: unformatted} {
 				if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
 					t.Fatal(err)

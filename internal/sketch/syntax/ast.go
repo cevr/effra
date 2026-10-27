@@ -3,7 +3,7 @@ package syntax
 // The AST follows go/ast: types are expressions, every node has Pos and End,
 // and comments live in File.Comments in source order with a Doc group on the
 // nodes that carry documentation. Effra's constructs have dedicated nodes
-// (ErrorRow, UsesClause, TryExpr, CatchExpr, TypeSwitchStmt, MachineType,
+// (ErrorRow, NeedsClause, TryExpr, CatchExpr, TypeSwitchStmt, MachineType,
 // WireDecl, WireLit, GoExpr, CallExpr.Trailing). The parser resolves no
 // names: with(…) and timeout.After(…) are ordinary calls.
 
@@ -150,13 +150,13 @@ type FuncDecl struct {
 	Body       *BlockStmt
 }
 
-// WireDecl is `wire Name [uses A, B] { entries }`.
+// WireDecl is `wire Name [needs A, B] { entries }`.
 type WireDecl struct {
-	Doc  *CommentGroup
-	Wire Pos
-	Name *Ident
-	Uses *UsesClause
-	Body *WireBody
+	Doc   *CommentGroup
+	Wire  Pos
+	Name  *Ident
+	Needs *NeedsClause
+	Body  *WireBody
 }
 
 func (d *ImportDecl) Pos() Pos { return d.Import }
@@ -300,18 +300,18 @@ func (l *FieldList) End() Pos {
 	return l.List[len(l.List)-1].End()
 }
 
-// UsesClause is a capability row: `uses A, B`, or `uses (A, B)` in a
+// NeedsClause is a capability row: `needs A, B`, or `needs (A, B)` in a
 // function type inside a list (grammar.md D8). Lparen is NoPos without
 // parentheses.
-type UsesClause struct {
-	Uses   Pos
+type NeedsClause struct {
+	Needs  Pos
 	Lparen Pos
 	Names  []Expr
 	Rparen Pos
 }
 
-func (u *UsesClause) Pos() Pos { return u.Uses }
-func (u *UsesClause) End() Pos {
+func (u *NeedsClause) Pos() Pos { return u.Needs }
+func (u *NeedsClause) End() Pos {
 	if u.Rparen.IsValid() {
 		return u.Rparen + 1
 	}
@@ -498,7 +498,7 @@ type (
 		Func    Pos
 		Params  *FieldList
 		Results *FieldList
-		Uses    *UsesClause
+		Needs   *NeedsClause
 	}
 
 	// StructType is `struct{ fields }`.
@@ -655,8 +655,8 @@ func (x *FuncType) Pos() Pos {
 }
 func (x *FuncType) End() Pos {
 	switch {
-	case x.Uses != nil:
-		return x.Uses.End()
+	case x.Needs != nil:
+		return x.Needs.End()
 	case x.Results != nil:
 		return x.Results.End()
 	}

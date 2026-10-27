@@ -1,6 +1,6 @@
 // want S104
 package demo
 func fail() error[LiveScheduler] { return LiveScheduler{} }
-func main() uses Console {
+func main() needs Console {
   fail() catch { case LiveScheduler: Console.Println("handled") }
 }

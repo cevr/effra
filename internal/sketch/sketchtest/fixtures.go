@@ -33,9 +33,9 @@ func use() int64 {
 	return Max[int64](1, 2) + On[Failed | timeout.Expired](3)
 }
 `},
-	{"function-type-uses-row", `package p
+	{"function-type-needs-row", `package p
 
-func run(f func() uses (Clock, Console), g func(), h func(int64) (int64, error[E]) uses R) error[E] uses Clock, Console, R {
+func run(f func() needs (Clock, Console), g func(), h func(int64) (int64, error[E]) needs R) error[E] needs Clock, Console, R {
 	f()
 	g()
 	try h(1)
@@ -49,11 +49,11 @@ wire Test {
 	Gateway = OpenGateway
 }
 
-wire App uses Account, Invoice {
+wire App needs Account, Invoice {
 	Store = MemoryStore{}
 }
 
-func main() uses Console {
+func main() needs Console {
 	with(wire{ http.Client = FakeClient{} }) { serve() }
 	with(Test, trace.Span("t")) {
 		serve()
@@ -198,11 +198,11 @@ type Shape interface{ Circle | Square }
 
 type Store interface {
 	Get(key string) (string, error[NotFound])
-	Put(key string, v string) uses Clock
+	Put(key string, v string) needs Clock
 }
 
 //ef:go net/url.Parse
-func parseURL(raw string) (url.URL, error[go.Error]) uses go.Foreign
+func parseURL(raw string) (url.URL, error[go.Error]) needs go.Foreign
 
 func (t *Tally) Bump(xs ...int64) (int64, bool) {
 	r := 'x' /* a rune */

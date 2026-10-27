@@ -32,12 +32,12 @@ func (FakeGateway) Charge(order Order) (string, error[GatewayDown]) {
 	return "auth-7"
 }
 
-// The body calls Gateway, but the uses clause lists only Orders.
-func pay(id string) (string, error[OrderNotFound | GatewayDown]) uses Orders {
+// The body calls Gateway, but the needs clause lists only Orders.
+func pay(id string) (string, error[OrderNotFound | GatewayDown]) needs Orders {
 	order := try Orders.Find(id)
 	return Gateway.Charge(order)
 }
 
-func main() uses Console {
+func main() needs Console {
 	Console.Println("unused")
 }

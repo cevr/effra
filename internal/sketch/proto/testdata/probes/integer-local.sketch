@@ -3,7 +3,7 @@ package demo
 type Fault struct{}
 func unused() error[Fault] { return Fault{} }
 func f(n int64) int64 { return n }
-func main() uses Console {
+func main() needs Console {
   n := 1
   Console.Println(f(n))
 }

@@ -5,7 +5,7 @@ Status: **designed, not yet implemented**. The prototype has no resources. This 
 The guarantee is Effect's `acquireRelease`: if an acquisition succeeds, its release runs, once, on every exit. The spelling is Go's: no `defer` to write and none to forget.
 
 ```go
-func copyFile(src, dst string) error[NotFound | WriteFailed] uses FS {
+func copyFile(src, dst string) error[NotFound | WriteFailed] needs FS {
 	in := try FS.Open(src)
 	out := try FS.Create(dst) // if this fails, in is still closed
 	try io.Copy(out, in)      // lends out and in
@@ -72,7 +72,7 @@ type Postgres struct {
 	refresh Task[struct{}] // declared after pool: stopped and drained first
 }
 
-func OpenPostgres() (Postgres, error[ConnectFailed]) uses Config, Clock, Scheduler {
+func OpenPostgres() (Postgres, error[ConnectFailed]) needs Config, Clock, Scheduler {
 	pool := try retry.On[ConnectFailed](retry.Exponential(200ms).Times(5)) {
 		sql.Open(Config.String("DATABASE_URL"))
 	}
@@ -162,7 +162,7 @@ func goodTask() {
 4. **R33.** Every other escaping capture of a resource is an error. *Prior art:* Swift does not let an escaping closure capture a `borrowing` parameter of non-copyable type; Rust requires `move` closures to own what they capture, or a lifetime that outlives them.
 
 ```go
-func run(signals chan Signal) uses Probe, Clock, Scheduler {
+func run(signals chan Signal) needs Probe, Clock, Scheduler {
 	b := actor.Start(Breaker{}, 16)
 	set := tasks.Set(tasks.Restart(schedule.Exponential(1s).UpTo(5))) // bound after b
 	set.Go(func() { actor.Pump(b, signals) })                          // structured lend of b (R31)

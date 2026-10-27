@@ -29,7 +29,7 @@ var editionCodes = regexp.MustCompile(`\b(EFL?[0-9]{3}|S[0-9]{3})\b`)
 
 const sketchCleanSource = `package p
 
-func main() uses Console {
+func main() needs Console {
 	Console.Println("ok")
 }
 `
@@ -435,8 +435,8 @@ func TestDiagnosticsRouteByEditionAcrossSurfaces(t *testing.T) {
 		clean             bool
 	}{
 		{"new/legacy-syntax.ef", legacyCleanSource, "S", false},
-		{"new/unknown-name.ef", "package p\n\nfunc main() uses Console {\n\tConsole.Println(\"🌍 ü\" + mïssing)\n}\n", "S", false},
-		{"new/lexer.ef", "package p\n\n// ünïcode\nfunc main() uses Console { Console.Println(\"日本\") $ }\n", "S", false},
+		{"new/unknown-name.ef", "package p\n\nfunc main() needs Console {\n\tConsole.Println(\"🌍 ü\" + mïssing)\n}\n", "S", false},
+		{"new/lexer.ef", "package p\n\n// ünïcode\nfunc main() needs Console { Console.Println(\"日本\") $ }\n", "S", false},
 		{"new/clean.ef", sketchCleanSource, "", true},
 		{"old/sketch-syntax.ef", sketchCleanSource, "EF", false},
 		{"old/clean.ef", legacyCleanSource, "", true},

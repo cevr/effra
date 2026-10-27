@@ -59,9 +59,9 @@ func (p *printer) decl(d syntax.Decl) {
 		p.token(d.Wire, "wire")
 		p.space()
 		p.ident(d.Name)
-		if d.Uses != nil {
+		if d.Needs != nil {
 			p.space()
-			p.uses(d.Uses)
+			p.needs(d.Needs)
 		}
 		p.space()
 		p.wireBody(d.Body)
@@ -306,14 +306,14 @@ func (p *printer) signature(t *syntax.FuncType) {
 			p.typ(r.List[0].Type)
 		}
 	}
-	if t.Uses != nil {
+	if t.Needs != nil {
 		p.space()
-		p.uses(t.Uses)
+		p.needs(t.Needs)
 	}
 }
 
-func (p *printer) uses(u *syntax.UsesClause) {
-	p.token(u.Uses, "uses")
+func (p *printer) needs(u *syntax.NeedsClause) {
+	p.token(u.Needs, "needs")
 	if u.Lparen.IsValid() {
 		p.space()
 		p.list(u.Lparen, "(", nodes(u.Names), func(i int) { p.typ(u.Names[i]) }, u.Rparen, ")")

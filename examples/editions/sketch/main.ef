@@ -22,7 +22,7 @@ wire Live {
 	Greeter = Friends{}
 }
 
-func greet(name string) uses Console {
+func greet(name string) needs Console {
 	line := with(Live) { Greeter.Greet(name) } catch {
 	case NotFound:
 		"no friend named " + name
@@ -30,7 +30,7 @@ func greet(name string) uses Console {
 	Console.Println(line)
 }
 
-func main() uses Console {
+func main() needs Console {
 	greet("Ada")
 	greet("Bob")
 }

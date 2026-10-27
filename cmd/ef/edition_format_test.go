@@ -14,7 +14,7 @@ import (
 )
 
 // sketchUnformatted formats to sketchCleanSource.
-const sketchUnformatted = "package p\n\n\n\nfunc main()  uses Console {\n        Console.Println(\"ok\")\n}\n"
+const sketchUnformatted = "package p\n\n\n\nfunc main()  needs Console {\n        Console.Println(\"ok\")\n}\n"
 
 // TestFmtFormatsEachFileWithItsEditionsFormatter: one ef fmt request with a
 // 2026 file and a legacy file formats each with its own edition's

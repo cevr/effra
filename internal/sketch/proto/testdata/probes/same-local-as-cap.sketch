@@ -3,7 +3,7 @@ package demo
 type Store interface{ Get() string }
 type Holder struct{ Value string }
 func (h Holder) Get() string { return h.Value }
-func main() uses Console {
+func main() needs Console {
   Store := Holder{Value: "local"}
   Console.Println(Store.Value)
 }

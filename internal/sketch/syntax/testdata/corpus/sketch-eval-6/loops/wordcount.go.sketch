@@ -8,7 +8,7 @@ type WordCount struct {
 }
 
 // Lines opens the file and closes it when the loop ends, on every exit.
-func topWords(path string, n int) ([]WordCount, error[NotFound | ReadFailed]) uses Files {
+func topWords(path string, n int) ([]WordCount, error[NotFound | ReadFailed]) needs Files {
 	var counts map[string]int
 	for line in try Files.Lines(path) {
 		for w in strings.Fields(strings.Lower(line)) {
@@ -23,7 +23,7 @@ func topWords(path string, n int) ([]WordCount, error[NotFound | ReadFailed]) us
 	return words.Take(n)
 }
 
-func main() error[NotFound | ReadFailed] uses Files, Console, Args {
+func main() error[NotFound | ReadFailed] needs Files, Console, Args {
 	for w in try topWords(Args.Get(1), 5) {
 		Console.Log(w.Word, w.Count)
 	}

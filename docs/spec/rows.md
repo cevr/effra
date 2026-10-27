@@ -9,7 +9,7 @@ Every function has two rows besides its result: an error row, `error[...]`, and 
 Status: **implemented in prototype**.
 
 ```go
-func pay(id string) (string, error[OrderNotFound | GatewayDown]) uses Orders, Gateway {
+func pay(id string) (string, error[OrderNotFound | GatewayDown]) needs Orders, Gateway {
 	order := try Orders.Find(id)
 	return Gateway.Charge(order)
 }

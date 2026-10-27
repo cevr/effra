@@ -24,19 +24,19 @@ func TestSketchCheckReportsPrototypeDiagnostics(t *testing.T) {
 		{
 			// The lexer refuses `$` after non-ASCII text on its line.
 			name:   "lexer S001",
-			source: "package p\n\n// héllo 🌍\nfunc main() uses Console {\n\tConsole.Println(\"日本🌍\") $\n}\n",
+			source: "package p\n\n// héllo 🌍\nfunc main() needs Console {\n\tConsole.Println(\"日本🌍\") $\n}\n",
 			code:   "S001", at: "$", token: "$",
 		},
 		{
 			// The parser refuses the second, stray `)` after non-ASCII text.
 			name:   "parser S001",
-			source: "package p\n\nfunc main() uses Console {\n\tConsole.Println(\"ü€\"))\n}\n",
+			source: "package p\n\nfunc main() needs Console {\n\tConsole.Println(\"ü€\"))\n}\n",
 			code:   "S001", at: ")\n}", token: ")",
 		},
 		{
 			// The checker reports an unknown name after an astral character.
 			name:   "checker S104",
-			source: "package p\n\nfunc main() uses Console {\n\tConsole.Println(\"🌍🌍\" + mïssing)\n}\n",
+			source: "package p\n\nfunc main() needs Console {\n\tConsole.Println(\"🌍🌍\" + mïssing)\n}\n",
 			code:   "S104", at: "mïssing", token: "mïssing",
 		},
 	}
@@ -104,8 +104,8 @@ func TestSketchCheckReportsPrototypeDiagnostics(t *testing.T) {
 // TestFormat: the 2026 formatter keeps the legacy result shape, reports a
 // syntax error as a located S001 failure, and honours the output limit.
 func TestFormat(t *testing.T) {
-	source := "package p\n\nfunc main()  uses Console {\nConsole.Println(\"a\")\n}\n"
-	want := "package p\n\nfunc main() uses Console {\n\tConsole.Println(\"a\")\n}\n"
+	source := "package p\n\nfunc main()  needs Console {\nConsole.Println(\"a\")\n}\n"
+	want := "package p\n\nfunc main() needs Console {\n\tConsole.Println(\"a\")\n}\n"
 	result, err := Format(source, 0)
 	if err != nil {
 		t.Fatal(err)

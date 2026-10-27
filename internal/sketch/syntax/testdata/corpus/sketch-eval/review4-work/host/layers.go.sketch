@@ -31,7 +31,7 @@ layer Invoices {
 	Invoice = InvoiceLive
 }
 
-layer App uses Account, Invoice { // exposes two; Store stays hidden, built once
+layer App needs Account, Invoice { // exposes two; Store stays hidden, built once
 	Accounts
 	Invoices
 }
@@ -41,7 +41,7 @@ layer Fixture {
 	replace Store = Memory{Text: "fixture"}
 }
 
-func labels() string uses Account, Invoice {
+func labels() string needs Account, Invoice {
 	return Account.Label() + ":" + Invoice.Label()
 }
 

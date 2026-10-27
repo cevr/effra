@@ -2,7 +2,7 @@
 package demo
 import "timeout"
 type Mem struct{}
-func main() uses Console {
+func main() needs Console {
   x := with(wire{ Scheduler = Mem{} }) {
     timeout.After(1s) { "ok" }
   } catch { case timeout.Expired: "late" }

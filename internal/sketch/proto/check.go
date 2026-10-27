@@ -110,10 +110,10 @@ func Check(f *File) (*Checked, []Diagnostic) {
 		// it, so its providers must be closed: they require no capability from the
 		// caller and let no failure escape. They may still use capabilities they
 		// provide to themselves and handle their own failures.
-		fc := &fnCtx{escapes: []map[string]Pos{{}}, uses: map[string]Pos{}, scopes: []map[string]*local{{}}}
+		fc := &fnCtx{escapes: []map[string]Pos{{}}, needs: map[string]Pos{}, scopes: []map[string]*local{{}}}
 		c.wireEntries(w.Entries, fc)
-		for _, u := range sortedKeys(fc.uses) {
-			c.errorf(fc.uses[u], codeMissingCap, "wire %s requires %s to build a provider; build it in an inline wire instead", w.Name, u)
+		for _, u := range sortedKeys(fc.needs) {
+			c.errorf(fc.needs[u], codeMissingCap, "wire %s requires %s to build a provider; build it in an inline wire instead", w.Name, u)
 		}
 		for _, e := range sortedKeys(fc.escapes[0]) {
 			c.errorf(fc.escapes[0][e], codeUndeclaredError, "wire %s can fail with %s while building a provider; build it in an inline wire instead", w.Name, e)
@@ -220,8 +220,8 @@ func (c *checker) declare() {
 			c.checkParams(m, nil)
 			// M5 (round 3): a provider method gets only the task, so a capability
 			// method cannot carry its own requirements.
-			if len(m.Uses) > 0 {
-				c.errorf(m.Pos, codeUnsupported, "a capability method with a uses clause is outside this prototype")
+			if len(m.Needs) > 0 {
+				c.errorf(m.Pos, codeUnsupported, "a capability method with a needs clause is outside this prototype")
 			}
 		}
 		fields := map[string]bool{}
@@ -256,7 +256,7 @@ func (c *checker) declare() {
 				c.ErrorTypes[name] = true
 			}
 		}
-		for _, q := range s.Uses {
+		for _, q := range s.Needs {
 			if d := c.Types[q.String()]; d == nil || d.Kind != kindCapability {
 				c.errorf(q.Pos, codeUnknownName, "unknown capability %s", q)
 			}
@@ -501,7 +501,7 @@ type fnCtx struct {
 	sig      *Sig
 	method   bool
 	escapes  []map[string]Pos // the innermost failure target: the function or a timeout block
-	uses     map[string]Pos
+	needs    map[string]Pos
 	provided []map[string]bool
 	scopes   []map[string]*local
 	unused   func(*local)
@@ -554,13 +554,13 @@ func (fc *fnCtx) use(pos Pos, cap string) {
 			return
 		}
 	}
-	if _, ok := fc.uses[cap]; !ok {
-		fc.uses[cap] = pos
+	if _, ok := fc.needs[cap]; !ok {
+		fc.needs[cap] = pos
 	}
 }
 
 func (c *checker) funcBody(fn *FuncDecl) {
-	fc := &fnCtx{sig: &fn.Sig, method: fn.Recv != nil, escapes: []map[string]Pos{{}}, uses: map[string]Pos{}}
+	fc := &fnCtx{sig: &fn.Sig, method: fn.Recv != nil, escapes: []map[string]Pos{{}}, needs: map[string]Pos{}}
 	fc.unused = func(l *local) { c.errorf(l.pos, codeUnused, "%s declared and not used", l.name) }
 	fc.push()
 	if fn.Recv != nil {
@@ -571,8 +571,8 @@ func (c *checker) funcBody(fn *FuncDecl) {
 			c.checkLocalName(fn.Recv.Pos, fn.Recv.Name)
 			fc.bind(&local{pos: fn.Recv.Pos, name: fn.Recv.Name, typ: fn.Recv.Type, used: true})
 		}
-		if len(fn.Uses) > 0 {
-			c.errorf(fn.Pos, codeUnsupported, "methods with a uses clause are outside this prototype")
+		if len(fn.Needs) > 0 {
+			c.errorf(fn.Pos, codeUnsupported, "methods with a needs clause are outside this prototype")
 		}
 	}
 	for _, p := range fn.Params {
@@ -593,16 +593,16 @@ func (c *checker) funcBody(fn *FuncDecl) {
 		}
 	}
 	allowed := map[string]bool{}
-	for _, q := range fn.Uses {
+	for _, q := range fn.Needs {
 		allowed[q.String()] = true
 	}
-	for _, u := range sortedKeys(fc.uses) {
+	for _, u := range sortedKeys(fc.needs) {
 		if !allowed[u] {
-			c.errorf(fc.uses[u], codeMissingCap, "%s requires %s, which its uses clause does not list and no with provides", fn.Name, u)
+			c.errorf(fc.needs[u], codeMissingCap, "%s requires %s, which its needs clause does not list and no with provides", fn.Name, u)
 		}
 	}
 	if fn.Name == "main" && fn.Recv == nil {
-		for _, q := range fn.Uses {
+		for _, q := range fn.Needs {
 			if !hostProvided[q.String()] {
 				c.errorf(q.Pos, codeMissingCap, "main requires %s, which the host does not provide", q)
 			}
@@ -1038,7 +1038,7 @@ func (c *checker) call(e *Call, fc *fnCtx) info {
 			return info{typ: "?"}
 		}
 		c.args(e, fn.Params, fc)
-		for _, q := range fn.Uses {
+		for _, q := range fn.Needs {
 			fc.use(e.Pos, q.String())
 		}
 		return sigInfo(&fn.Sig)

@@ -13,7 +13,7 @@ type Insufficient struct{}
 // only sync.Atomically provides. A transaction can re-run, so its parameter
 // is replayable: its footprint may hold nothing but sync.Tx, and it may not
 // assign captured locals, use channels or consume linear values.
-func move(from, to sync.TxRef[int64], amount int64) error[Insufficient] uses sync.Tx {
+func move(from, to sync.TxRef[int64], amount int64) error[Insufficient] needs sync.Tx {
 	if from.Load() < amount {
 		return Insufficient{}
 	}
@@ -68,7 +68,7 @@ wire Live {
 }
 
 // 100 concurrent Find calls: one query when all arrive within the window.
-func names(ids []string) ([]string, error[NotFound]) uses Users {
+func names(ids []string) ([]string, error[NotFound]) needs Users {
 	return tasks.Map(ids, 100, func(id string) (string, error[NotFound]) {
 		u := try Users.Find(id)
 		return u.Name

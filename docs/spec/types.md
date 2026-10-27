@@ -175,7 +175,7 @@ Status: **designed, not yet implemented**.
 Status: **designed, not yet implemented**. The spelling is provisional until [#135](https://github.com/cevr/effra/issues/135) decides it (README Gap 23).
 
 ```go
-func Map(xs []A, limit int64, f func(A) (B, error[E]) uses R) ([]B, error[E]) uses R
+func Map(xs []A, limit int64, f func(A) (B, error[E]) needs R) ([]B, error[E]) needs R
 ```
 
 1. Type parameters are implicit. `[T any]` is not written. A parameter may range over types (`A`, `B`), error rows (`E`) or `uses` rows (`R`).
@@ -202,7 +202,7 @@ func LawRoundTrip(q Quantity) bool {
 	return ParseQuantity(q.Wire()) == q
 }
 
-func LawFindAfterPut(id string, v Order) bool uses Store {
+func LawFindAfterPut(id string, v Order) bool needs Store {
 	Store.Put(id, v)
 	return Store.Find(id) == v
 }

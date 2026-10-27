@@ -30,7 +30,7 @@ func TestIdentifierRunesMatchGo(t *testing.T) {
 // S001 at the offending byte, wherever it falls in the name.
 func TestIdentifierBytes(t *testing.T) {
 	for _, name := range []string{"x\xff", "\xffx", "x\xe2\xaa", "x\xc0\x80"} {
-		src := "package demo\nfunc main() uses Console {\n  " + name + " := \"ok\"\n}\n"
+		src := "package demo\nfunc main() needs Console {\n  " + name + " := \"ok\"\n}\n"
 		_, err := Parse(src)
 		var e *Error
 		if !errors.As(err, &e) || e.Code != CodeSyntax || e.Line != 3 {

@@ -64,7 +64,7 @@ payment := try timeout.After(500ms) { Gateway.Authorize(order) }
 **Classification.** `timeout.After` is an ordinary library function in the `timeout` package, not a construct. Under the owner's rules, constructs get keywords, a dot form is library, and kernel primitives are functions (owner, 2026-10-12). Its kernel primitives are task start (`go`), `Task.Stop` and `Task.Wait`, and the `Scheduler` capability. Its designed signature, in the provisional generic spelling of [types.md](types.md#generics):
 
 ```go
-func After(d duration, body func() (T, error[E]) uses R) (T, error[E | Expired]) uses Scheduler, R
+func After(d duration, body func() (T, error[E]) needs R) (T, error[E | Expired]) needs Scheduler, R
 ```
 
 The callback type carries `uses R`, so the requirements of the block appear in `After`'s own row. A trailing block is the `body` argument ([grammar.md](grammar.md#expressions)). *Prior art:* Effect's `Effect.timeout` is an ordinary combinator over fibers and the clock; Go's `context.WithTimeout` is a library function.
@@ -137,7 +137,7 @@ Status: **designed, not yet implemented** ([#57](https://github.com/cevr/effra/i
 type State interface{ Closed | Open | HalfOpen }
 type Signal interface{ Failure | Success | Retry }
 
-func step(s State, sig Signal) (Decision[State, string], error[ProbeDown]) uses Probe {
+func step(s State, sig Signal) (Decision[State, string], error[ProbeDown]) needs Probe {
 	switch s, sig := s.(type), sig.(type) {
 	case (Closed, Failure):
 		return Enter{Open{sig.Endpoint}}

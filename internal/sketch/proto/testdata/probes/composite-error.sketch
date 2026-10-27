@@ -3,7 +3,7 @@ package demo
 type Fault struct{}
 type Box struct{ Value string }
 func fail() (string, error[Fault]) { return Fault{} }
-func main() uses Console {
+func main() needs Console {
   b := Box{Value: fail()}
   Console.Println(b.Value)
 }

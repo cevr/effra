@@ -5,7 +5,7 @@ type Box struct {
   len int64
   init string
 }
-func main() uses Console {
+func main() needs Console {
   value := Box{string: "ok", len: 1, init: "field"}
   Console.Println(value.string, value.len, value.init)
 }

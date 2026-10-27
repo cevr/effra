@@ -2,11 +2,11 @@
 package demo
 type Fault struct{}
 func unused() error[Fault] { return Fault{} }
-func tick() bool uses Console {
+func tick() bool needs Console {
   Console.Println("wrong side effect")
   return "a" == "a"
 }
-func main() uses Console {
+func main() needs Console {
   x := ("a" == "b") && tick()
   Console.Println(x)
 }

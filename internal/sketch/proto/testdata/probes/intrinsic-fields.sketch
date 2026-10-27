@@ -10,7 +10,7 @@ type Box struct {
   LiveScheduler string
   Scheduler string
 }
-func main() uses Console {
+func main() needs Console {
   value := Box{"Console", "Println", "with", "timeout", "After", "duration", "LiveScheduler", "Scheduler"}
   Console.Println(value.Console, value.Println, value.with, value.timeout, value.After, value.duration, value.LiveScheduler, value.Scheduler)
 }

@@ -1,5 +1,5 @@
 // want S108
 package demo
-func main() uses Console {
+func main() needs Console {
   Console.Println(Console.Println("inner"), "outer")
 }

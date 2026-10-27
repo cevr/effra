@@ -21,12 +21,12 @@ func welcome(name string) string {
 	return "Hello, " + name
 }
 
-func greeting(id string) (string, error[NotFound]) uses Users {
+func greeting(id string) (string, error[NotFound]) needs Users {
 	user := try Users.Get(id)
 	return welcome(user)
 }
 
-func main() uses Console {
+func main() needs Console {
 	found := with(wire{ Users = MemoryUsers{} }) { greeting("42") } catch {
 	case NotFound:
 		"Unknown user"

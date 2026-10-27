@@ -2,7 +2,7 @@
 package demo
 type Fault struct{}
 func unused() error[Fault] { return Fault{} }
-func main() uses Console {
+func main() needs Console {
   v_1 := "visible"
   v_1
   Console.Println("done")

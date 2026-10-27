@@ -17,12 +17,12 @@ var nestedChains = []struct{ name, src string }{
 	{"selector call index chain", "package p\n\nfunc f() {\n\tx := a.b(c, d)[e].g(h...)[i:j].k[l:m:n]\n}\n"},
 	{"array, map and chan types", "package p\n\nvar xs [N][]map[string][2]chan<- <-chan int\n\nvar ys = [...]int{1, 2}\n"},
 	{"nested literals", "package p\n\nvar m = map[string][]T{\"a\": {{X: 1, Y: []int{2, 3}}, {X: 4}}, \"b\": nil}\n"},
-	{"func types and results", "package p\n\nfunc f(a, b int, g func(x, y int) (int, error[E | go.Error]) uses (A, B)) (r int, e error[E]) uses C, D {\n\treturn g(a, b)\n}\n"},
+	{"func types and results", "package p\n\nfunc f(a, b int, g func(x, y int) (int, error[E | go.Error]) needs (A, B)) (r int, e error[E]) needs C, D {\n\treturn g(a, b)\n}\n"},
 	{"union and error rows", "package p\n\ntype U interface{ A | b.B | C[T, U] }\n\nfunc f() error[A | b.B] { return nil }\n"},
 	{"type params and instantiation", "package p\n\ntype Pair[K comparable, V any] struct {\n\tk, l K\n\tv    V\n}\n\nvar p = Pair[string, int]{k: \"a\", v: 1}\n"},
 	{"catch and type switch tuples", "package p\n\nfunc f() {\n\tr := try g(a, b) catch e {\n\tcase A, b.B:\n\t\tlog(e)\n\t}\n\tswitch x, y := r.(type), s.(type) {\n\tcase (A, _), (B, C):\n\tdefault:\n\t}\n}\n"},
 	{"statements", "package p\n\nfunc f() {\nL:\n\tfor i := 0; i < n; i++ {\n\t\tif a, b := g(); a {\n\t\t\tcontinue L\n\t\t} else if b {\n\t\t\tbreak\n\t\t}\n\t}\n\tfor k, v := range m {\n\t\tch <- k\n\t\tx += v\n\t}\n\tselect {\n\tcase v, ok := <-ch:\n\t\t_ = v\n\tcase (<-done):\n\t}\n\tdefer close(ch)\n\tgo f(x)\n}\n"},
-	{"wire and machine", "package p\n\nwire W uses A, B {\n\tC, D = X{}\n\treplace e.E = Y{a, b}\n\tShared\n}\n\ntype M machine[S, E] {\n\tinitial Idle{}\n\tstep f\n}\n"},
+	{"wire and machine", "package p\n\nwire W needs A, B {\n\tC, D = X{}\n\treplace e.E = Y{a, b}\n\tShared\n}\n\ntype M machine[S, E] {\n\tinitial Idle{}\n\tstep f\n}\n"},
 	{"imports and vars", "package p\n\nimport (\n\t\"a\"\n\tb \"c\"\n\t. \"d\"\n\tgo \"net/url\"\n)\n\nvar (\n\tx, y = 1, 2\n\tz    = f(x, y)\n)\n"},
 }
 

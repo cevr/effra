@@ -4,6 +4,6 @@ type Timer interface{ After(value string) string }
 type Plain struct{}
 func (Plain) After(value string) string { return "ordinary " + value }
 func Println(value string) string { return "helper " + value }
-func main() uses Console {
+func main() needs Console {
   with(wire{ Timer = Plain{} }) { Console.Println(Println(Timer.After("ok"))) }
 }

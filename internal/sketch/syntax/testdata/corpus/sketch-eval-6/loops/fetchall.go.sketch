@@ -15,7 +15,7 @@ type Result struct {
 }
 
 // Get reads the whole body and releases the connection before it returns.
-func fetchOnce(url string) (int, error[Unauthorized | Failed | Timeout]) uses Http, Scheduler {
+func fetchOnce(url string) (int, error[Unauthorized | Failed | Timeout]) needs Http, Scheduler {
 	resp := try timeout.After(2s) { Http.Get(url) }
 	if resp.Status == 401 {
 		return Unauthorized{}
@@ -27,7 +27,7 @@ func fetchOnce(url string) (int, error[Unauthorized | Failed | Timeout]) uses Ht
 }
 
 // retry.On retries only the listed errors; Unauthorized passes straight through.
-func fetch(url string) (Result, error[Unauthorized]) uses Http, Scheduler {
+func fetch(url string) (Result, error[Unauthorized]) needs Http, Scheduler {
 	n := try retry.On[Failed | Timeout](retry.Exponential(100ms).Times(3)) { fetchOnce(url) } catch {
 	case Failed, Timeout:
 		return Result{URL: url}
@@ -37,11 +37,11 @@ func fetch(url string) (Result, error[Unauthorized]) uses Http, Scheduler {
 
 // At most 8 fetches run at once. The first Unauthorized exits fetchAll,
 // and that exit interrupts and drains the fetches still running.
-func fetchAll(urls []string) ([]Result, error[Unauthorized]) uses Http, Scheduler {
+func fetchAll(urls []string) ([]Result, error[Unauthorized]) needs Http, Scheduler {
 	return tasks.Map(urls, 8) { url in fetch(url) }
 }
 
-func main() error[Unauthorized] uses Http, Scheduler, Console, Args {
+func main() error[Unauthorized] needs Http, Scheduler, Console, Args {
 	results := try fetchAll(Args.Rest())
 	var ok, total = 0, 0
 	for r in results {

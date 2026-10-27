@@ -64,8 +64,8 @@ func (c *converter) file(f *syntax.File) *File {
 				out.Funcs = append(out.Funcs, fn)
 			}
 		case *syntax.WireDecl:
-			if d.Uses != nil {
-				c.refuse(d.Uses, "a wire's uses clause")
+			if d.Needs != nil {
+				c.refuse(d.Needs, "a wire's needs clause")
 				continue
 			}
 			out.Wires = append(out.Wires, &WireDecl{Pos: c.pos(d.Wire), Name: d.Name.Name, Entries: c.wireEntries(d.Body)})
@@ -176,7 +176,7 @@ func (c *converter) params(l *syntax.FieldList, what string) []Param {
 	return out
 }
 
-// signature converts parameters, results and the uses clause into s. The
+// signature converts parameters, results and the needs clause into s. The
 // prototype's results are nothing, T, error[E] or (T, error[E]).
 func (c *converter) signature(s *Sig, t *syntax.FuncType) {
 	s.Params = c.params(t.Params, "parameter")
@@ -202,11 +202,11 @@ func (c *converter) signature(s *Sig, t *syntax.FuncType) {
 			c.refuse(r, "this result list")
 		}
 	}
-	if t.Uses != nil {
-		if t.Uses.Lparen.IsValid() {
-			c.refuse(t.Uses, "a parenthesised uses list")
+	if t.Needs != nil {
+		if t.Needs.Lparen.IsValid() {
+			c.refuse(t.Needs, "a parenthesised needs list")
 		} else {
-			s.Uses = c.qnames(t.Uses.Names, "this capability")
+			s.Needs = c.qnames(t.Needs.Names, "this capability")
 		}
 	}
 }

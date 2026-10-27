@@ -3,7 +3,7 @@ package demo
 import "timeout"
 type Fault struct{}
 func delay() error[Fault] { return Fault{} }
-func main() uses Console {
+func main() needs Console {
   with(wire{ Scheduler = LiveScheduler{} }) {
     Console.Println(timeout.After(1s) { "ok" } catch { case timeout.Expired: "late" })
   }
