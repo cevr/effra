@@ -100,7 +100,9 @@ type Resolution struct {
 // ResolveDocument, which walk the same rule from a physical path and
 // validate what they read.
 func Resolve(dir string) Resolution {
-	return walk(dir).resolution
+	walked := walk(dir)
+	walked.close()
+	return walked.resolution
 }
 
 // manifestResolution decides the edition from a manifest's bytes: exactly

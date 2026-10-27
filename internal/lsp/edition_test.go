@@ -3,6 +3,7 @@ package lsp
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -169,5 +170,62 @@ func TestEditionRequest(t *testing.T) {
 	s.send(call("exit", nil, nil))
 	if err := <-s.done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// An unsaved buffer at R/missing/nested/unsaved.ef, in a legacy module with
+// no manifest. A 2026 manifest appears in the missing suffix during the
+// admission, before or after the walk. The buffer is never accepted through
+// the legacy compiler: the publication holds the EF146 refusal, and the
+// next change event admits the new chain. Ported from the round 4 review
+// probe.
+func TestUnsavedBufferIsRefusedWhenItsMissingSuffixAppears(t *testing.T) {
+	for _, stage := range []string{edition.StageOpened, edition.StageResolving, edition.StageWalked} {
+		t.Run(stage, func(t *testing.T) {
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module scratch\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			dir := filepath.Join(root, "missing", "nested")
+			path := filepath.Join(dir, "unsaved.ef")
+			fired := false
+			restore := edition.SetAdmissionHook(func(reached string) {
+				if reached != stage || fired {
+					return
+				}
+				fired = true
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, edition.ManifestName), []byte(`{"edition":"2026"}`), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			})
+			messages, sessionErr := runSession(t, initialize(), initialized(), open("file://"+filepath.ToSlash(path), "fn ok() -> string { \"ok\" }\n", 1), shutdown(), call("exit", nil, nil))
+			restore()
+			if sessionErr != nil {
+				t.Fatal(sessionErr)
+			}
+			if fresh := edition.ResolveDocument(path); !fired || fresh.Edition != edition.E2026 {
+				t.Fatalf("invalid control: fired=%v fresh=%s", fired, fresh.JSON())
+			}
+			published := 0
+			for _, message := range messages {
+				if message["method"] != "textDocument/publishDiagnostics" {
+					continue
+				}
+				published++
+				diagnostics := message["params"].(map[string]any)["diagnostics"].([]any)
+				if len(diagnostics) != 1 || !strings.Contains(fmt.Sprint(diagnostics[0]), edition.CodeAdmission) {
+					t.Fatalf("published %v, want the %s refusal alone", diagnostics, edition.CodeAdmission)
+				}
+			}
+			if published == 0 {
+				t.Fatal("no diagnostic publication")
+			}
+		})
 	}
 }

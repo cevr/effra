@@ -1,6 +1,7 @@
 package edition
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -141,7 +142,7 @@ func ResolveFile(file *os.File, path string) (*Source, error) {
 	var physical string
 	var resolution Resolution
 	if err == nil {
-		physical, resolution, err = admit(file, info, path, false)
+		physical, resolution, err = admit(file, info, path, false, nil)
 	}
 	if err != nil {
 		file.Close()
@@ -152,8 +153,11 @@ func ResolveFile(file *os.File, path string) (*Source, error) {
 
 // admit runs the steps of an admission for an open anchor: a source file,
 // whose walk starts at its directory, or (directory true) an existing
-// directory, whose walk starts at itself.
-func admit(anchor *os.File, info os.FileInfo, spelled string, directory bool) (string, Resolution, error) {
+// directory, whose walk starts at itself. absent lists paths relative to a
+// directory anchor that were missing when the admission began (the missing
+// suffix of an unsaved document); the snapshot holds only if they are still
+// missing at validation.
+func admit(anchor *os.File, info os.FileInfo, spelled string, directory bool, absent []string) (string, Resolution, error) {
 	runHook(StageOpened)
 	physical, err := physicalPath(anchor, info, spelled)
 	if err != nil {
@@ -165,6 +169,8 @@ func admit(anchor *os.File, info os.FileInfo, spelled string, directory bool) (s
 		start = filepath.Dir(physical)
 	}
 	walked := walk(start)
+	defer walked.close()
+	walked.absent = absent
 	runHook(StageWalked)
 	again, err := physicalPath(anchor, info, spelled)
 	if err != nil {
@@ -205,17 +211,33 @@ func physicalPath(anchor *os.File, info os.FileInfo, spelled string) (string, er
 }
 
 // snapshot is the record of one walk: every directory visited, nearest
-// first, and the resolution chosen from them.
+// first, and the resolution chosen from them. The walked directories stay
+// open until close, so validation reads through the same directory handles.
+// absent lists paths, relative to the first directory, that must still be
+// missing at validation.
 type snapshot struct {
 	dirs       []dirRecord
 	resolution Resolution
+	absent     []string
+}
+
+// close releases the directory handles of the walk.
+func (s snapshot) close() {
+	for _, dir := range s.dirs {
+		if dir.root != nil {
+			dir.root.Close()
+		}
+	}
 }
 
 // dirRecord is what one directory contributed to a walk.
 type dirRecord struct {
 	path string
 	// missing: the directory did not exist (only Resolve walks such paths).
-	missing  bool
+	missing bool
+	// root is the directory as the walk opened it, held until the snapshot
+	// is closed.
+	root     *os.Root
 	info     os.FileInfo
 	manifest manifestRecord
 	// goMod is the go.mod that ends the walk here, or nil.
@@ -233,12 +255,38 @@ type manifestRecord struct {
 	targetDir os.FileInfo
 	// file is the opened manifest's status, when it was opened.
 	file os.FileInfo
+	// data is the manifest's bytes, when they were read within
+	// MaxManifestBytes. The edition was decided from exactly these bytes.
+	data []byte
+}
+
+// same reports whether a manifest read again at validation is the one the
+// walk recorded: the same link target and target directory, the same file
+// status, and the same bytes. Equal status alone does not prove equal
+// bytes: a rewrite can keep the size, the mode and the modification time.
+func (r manifestRecord) same(again manifestRecord) bool {
+	if r.target != again.target || !sameIdentity(r.targetDir, again.targetDir) {
+		return false
+	}
+	if (r.file == nil) != (again.file == nil) || r.file != nil && !sameContent(r.file, again.file) {
+		return false
+	}
+	return (r.data == nil) == (again.data == nil) && bytes.Equal(r.data, again.data)
+}
+
+// sameIdentity reports whether two optional statuses are both absent or of
+// the same file.
+func sameIdentity(before, after os.FileInfo) bool {
+	if before == nil || after == nil {
+		return before == nil && after == nil
+	}
+	return os.SameFile(before, after)
 }
 
 // walk records the directories from start upward. At each directory, an
 // effra.json decides; the walk ends after the first directory that holds a
 // go.mod, or at the file-system root. A missing directory contributes
-// nothing.
+// nothing. The caller closes the snapshot.
 func walk(start string) snapshot {
 	absolute, err := filepath.Abs(start)
 	if err != nil {
@@ -265,8 +313,8 @@ func walk(start string) snapshot {
 	return walked
 }
 
-// inspect records one directory. decided is true when its manifest decides
-// the edition (or cannot be inspected).
+// inspect records one directory and keeps it open in the record. decided is
+// true when its manifest decides the edition (or cannot be inspected).
 func inspect(dir string) (dirRecord, Resolution, bool) {
 	record := dirRecord{path: dir}
 	manifestPath := filepath.Join(dir, ManifestName)
@@ -278,7 +326,7 @@ func inspect(dir string) (dirRecord, Resolution, bool) {
 	if err != nil {
 		return record, refuse(manifestPath, fmt.Sprintf("cannot be inspected: %v", err)), true
 	}
-	defer root.Close()
+	record.root = root
 	if record.info, err = root.Stat("."); err != nil {
 		return record, refuse(manifestPath, fmt.Sprintf("cannot be inspected: %v", err)), true
 	}
@@ -301,7 +349,8 @@ func inspect(dir string) (dirRecord, Resolution, bool) {
 // MaxManifestBytes holding exactly one JSON object {"edition": "<id>"}. The
 // bytes are read through a descriptor opened relative to the manifest's
 // directory: dir, or the directory of a link's physical target. A FIFO or a
-// device is refused before it is opened, so a resolution never blocks.
+// device is refused before it is opened, so a resolution never blocks. The
+// record keeps what was found, the bytes included.
 func readManifest(dir *os.Root, path string, record *manifestRecord) Resolution {
 	holder, name := dir, ManifestName
 	if record.entry.Mode()&fs.ModeSymlink != 0 {
@@ -356,11 +405,15 @@ func readManifest(dir *os.Root, path string, record *manifestRecord) Resolution 
 	if len(data) > MaxManifestBytes {
 		return refuse(path, fmt.Sprintf("exceeds %d bytes", MaxManifestBytes))
 	}
+	record.data = data
 	return manifestResolution(path, data)
 }
 
 // changed checks every recorded fact again and names the first one that no
-// longer holds, or returns "".
+// longer holds, or returns "". Each walked directory must still be at its
+// path; its manifest is read again through the directory handle the walk
+// held, with the same link and file checks, and its bytes must be equal;
+// its go.mod must be the same; and every absent path must still be missing.
 func (s snapshot) changed() string {
 	for _, dir := range s.dirs {
 		if dir.missing {
@@ -376,7 +429,7 @@ func (s snapshot) changed() string {
 			return "directory " + dir.path
 		}
 		manifestPath := filepath.Join(dir.path, ManifestName)
-		entry, err := os.Lstat(manifestPath)
+		entry, err := dir.root.Lstat(ManifestName)
 		if !dir.manifest.present {
 			if !errors.Is(err, fs.ErrNotExist) {
 				return "manifest " + manifestPath
@@ -385,22 +438,10 @@ func (s snapshot) changed() string {
 			if err != nil || !sameContent(dir.manifest.entry, entry) {
 				return "manifest " + manifestPath
 			}
-			if dir.manifest.target != "" {
-				target, err := filepath.EvalSymlinks(manifestPath)
-				if err == nil {
-					target, err = filepath.Abs(target)
-				}
-				if err != nil || target != dir.manifest.target {
-					return "manifest " + manifestPath
-				}
-				if now, err := os.Stat(filepath.Dir(target)); err != nil || !os.SameFile(dir.manifest.targetDir, now) {
-					return "manifest " + manifestPath
-				}
-			}
-			if dir.manifest.file != nil {
-				if now, err := os.Stat(manifestPath); err != nil || !sameContent(dir.manifest.file, now) {
-					return "manifest " + manifestPath
-				}
+			again := manifestRecord{present: true, entry: entry}
+			readManifest(dir.root, manifestPath, &again)
+			if !dir.manifest.same(again) {
+				return "manifest " + manifestPath
 			}
 			// A manifest decides; no go.mod at or above it was consulted.
 			continue
@@ -409,6 +450,16 @@ func (s snapshot) changed() string {
 		boundary := err == nil && !goMod.IsDir()
 		if boundary != (dir.goMod != nil) || boundary && !os.SameFile(dir.goMod, goMod) {
 			return "go.mod in " + dir.path
+		}
+	}
+	if len(s.absent) > 0 {
+		if len(s.dirs) == 0 || s.dirs[0].root == nil {
+			return "the directory of the missing paths"
+		}
+		for _, missing := range s.absent {
+			if _, err := s.dirs[0].root.Lstat(missing); !errors.Is(err, fs.ErrNotExist) {
+				return filepath.Join(s.dirs[0].path, missing)
+			}
 		}
 	}
 	return ""
@@ -425,8 +476,11 @@ func sameContent(before, after os.FileInfo) bool {
 // ResolveFile admits a source, and the file is not read. A document with no
 // file yet, such as an unsaved buffer, resolves at the path the file system
 // would create (PhysicalPath): its deepest existing directory is opened and
-// admitted the same way, with the walk starting there, since the missing
-// directories below it hold no manifest. Any other failure to admit the
+// admitted the same way, with the walk starting there. The missing suffix
+// below it (each missing directory, the go.mod and effra.json it would
+// hold, and the document) is part of the snapshot: it must still be missing
+// when the snapshot is validated, or the document is refused with EF146 and
+// resolves afresh at its next admission. Any other failure to admit the
 // path, such as a directory, a FIFO or a source changed during admission, is
 // the EF146 refusal; it never falls back to another directory.
 func ResolveDocument(path string) Resolution {
@@ -450,6 +504,10 @@ func ResolveDocument(path string) Resolution {
 	if err != nil {
 		return refusedDocument(path, err)
 	}
+	suffix, err := missingSuffix(existing, physical)
+	if err != nil {
+		return refusedDocument(path, err)
+	}
 	anchor, err := OpenSource(existing)
 	if err != nil {
 		return refusedDocument(path, err)
@@ -462,7 +520,7 @@ func ResolveDocument(path string) Resolution {
 	if err != nil {
 		return refusedDocument(path, err)
 	}
-	resolved, resolution, err := admit(anchor, info, existing, true)
+	resolved, resolution, err := admit(anchor, info, existing, true, suffix)
 	if err == nil && resolved != existing {
 		err = admissionError("document %s: directory %s moved to %s while it was admitted", path, existing, resolved)
 	}
@@ -470,6 +528,24 @@ func ResolveDocument(path string) Resolution {
 		return refusedDocument(path, err)
 	}
 	return resolution
+}
+
+// missingSuffix lists the paths, relative to existing, that must stay
+// missing for physical to resolve as it did: each missing directory between
+// existing and the document, the go.mod and effra.json that directory would
+// hold, and the document itself.
+func missingSuffix(existing, physical string) ([]string, error) {
+	relative, err := filepath.Rel(existing, physical)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return nil, admissionError("document %s is not below its existing directory %s", physical, existing)
+	}
+	parts := strings.Split(relative, string(filepath.Separator))
+	var absent []string
+	for end := 1; end < len(parts); end++ {
+		dir := filepath.Join(parts[:end]...)
+		absent = append(absent, dir, filepath.Join(dir, "go.mod"), filepath.Join(dir, ManifestName))
+	}
+	return append(absent, relative), nil
 }
 
 // deepestExisting returns dir or its nearest existing ancestor, which must

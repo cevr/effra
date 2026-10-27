@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"effra.local/prototype/internal/edition"
 )
@@ -196,5 +197,72 @@ func TestCheckNeverAcceptsLegacySourceInADirectoryMovedDuringAdmission(t *testin
 			t.Fatalf("%s: ef check accepted legacy source that stayed under a 2026 manifest", stage)
 		}
 		t.Logf("%s: %v", stage, err)
+	}
+}
+
+// The deciding manifest, ordinary or behind a link, is rewritten in place
+// after the walk from legacy to 2026 with the same length, inode and mode:
+// as an ordinary write, with its original modification time restored, or
+// with a different one (the control). The manifest bytes differ, so ef check
+// refuses with EF146 in every case and never checks the legacy source under
+// the old legacy edition. Ported from the round 4 review probe.
+func TestCheckRefusesAManifestWhoseBytesChangeDuringAdmission(t *testing.T) {
+	for _, linked := range []bool{false, true} {
+		for _, stamp := range []string{"ordinary", "preserve-time", "different-time"} {
+			t.Run(map[bool]string{false: "regular", true: "symlink"}[linked]+"/"+stamp, func(t *testing.T) {
+				root := editionWorkspace(t)
+				source := filepath.Join(root, "main.ef")
+				editionWrite(t, source, legacyCleanSource)
+				manifest := filepath.Join(root, edition.ManifestName)
+				backing := manifest
+				if linked {
+					backing = filepath.Join(root, "config.json")
+					if err := os.Symlink(backing, manifest); err != nil {
+						t.Fatal(err)
+					}
+				}
+				editionWrite(t, backing, `{"edition":"legacy"}`)
+				before, err := os.Stat(backing)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fired := false
+				restore := edition.SetAdmissionHook(func(reached string) {
+					if reached != edition.StageWalked || fired {
+						return
+					}
+					fired = true
+					if err := os.WriteFile(backing, []byte(`{"edition":"2026"}  `), 0o644); err != nil {
+						t.Fatal(err)
+					}
+					switch stamp {
+					case "preserve-time":
+						if err := os.Chtimes(backing, before.ModTime(), before.ModTime()); err != nil {
+							t.Fatal(err)
+						}
+					case "different-time":
+						later := before.ModTime().Add(time.Minute)
+						if err := os.Chtimes(backing, later, later); err != nil {
+							t.Fatal(err)
+						}
+					}
+				})
+				err = runCommand("check", source)
+				restore()
+				after, statErr := os.Stat(backing)
+				if statErr != nil {
+					t.Fatal(statErr)
+				}
+				fresh := edition.ResolveDocument(source)
+				if !fired || !os.SameFile(before, after) || before.Size() != after.Size() || before.Mode() != after.Mode() ||
+					stamp == "preserve-time" && !before.ModTime().Equal(after.ModTime()) ||
+					stamp == "different-time" && before.ModTime().Equal(after.ModTime()) || fresh.Edition != edition.E2026 {
+					t.Fatalf("invalid control: fired=%v fresh=%s", fired, fresh.JSON())
+				}
+				if err == nil || !strings.HasPrefix(err.Error(), edition.CodeAdmission+": ") {
+					t.Fatalf("ef check: %v; want the %s refusal for the changed manifest bytes", err, edition.CodeAdmission)
+				}
+			})
+		}
 	}
 }

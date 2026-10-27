@@ -2,6 +2,7 @@ package edition
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -224,6 +225,34 @@ func TestAdmissionValidatesTheSnapshot(t *testing.T) {
 		_, err := admitPath(t, source)
 		wantAdmissionRefusal(t, err)
 	})
+	// Equal length, same inode, same mode and the original modification
+	// time: only the bytes differ, and that is still a changed snapshot.
+	for _, linked := range []bool{false, true} {
+		t.Run(fmt.Sprintf("manifest bytes rewritten with equal status after the walk (linked=%v)", linked), func(t *testing.T) {
+			root, source, _ := snapshotWorkspace(t)
+			backing := filepath.Join(root, "pkg", ManifestName)
+			if linked {
+				backing = filepath.Join(root, "config.json")
+				if err := os.Remove(filepath.Join(root, "pkg", ManifestName)); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(backing, filepath.Join(root, "pkg", ManifestName)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write(t, backing, `{"edition":"2026"}    `)
+			before, err := os.Stat(backing)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer hookAt(StageWalked, func() { rewriteKeepingStatus(t, backing, `{"edition":"legacy"}  `, before) })()
+			_, err = admitPath(t, source)
+			if after, statErr := os.Stat(backing); statErr != nil || !sameContent(before, after) {
+				t.Fatalf("invalid control: the rewrite changed the status (%v)", statErr)
+			}
+			wantAdmissionRefusal(t, err)
+		})
+	}
 	t.Run("manifest added below the deciding one after the walk", func(t *testing.T) {
 		root, source, _ := snapshotWorkspace(t)
 		defer hookAt(StageWalked, func() {
@@ -265,6 +294,73 @@ func TestUnsavedDocumentAdmissionValidatesTheSnapshot(t *testing.T) {
 			t.Fatalf("a directory moved at %s: %s, want the %s refusal", stage, got.JSON(), CodeAdmission)
 		}
 	}
+}
+
+// rewriteKeepingStatus writes text over path in place, the same length as
+// before, and restores the original modification time, so only the bytes
+// differ.
+func rewriteKeepingStatus(t *testing.T, path, text string, before os.FileInfo) {
+	t.Helper()
+	if int64(len(text)) != before.Size() {
+		t.Fatalf("rewrite of %d bytes over %d", len(text), before.Size())
+	}
+	if err := os.WriteFile(path, []byte(text), before.Mode().Perm()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, before.ModTime(), before.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The missing suffix of an unsaved document is part of its snapshot. A
+// directory, a manifest, a go.mod or the document appearing in it during
+// the admission, before or after the walk, is the EF146 refusal; the next
+// admission resolves the new chain. Without a change the document resolves
+// through its existing directory.
+func TestUnsavedDocumentMissingSuffixIsPartOfTheSnapshot(t *testing.T) {
+	setup := func(t *testing.T) (root, document string) {
+		root = workspace(t)
+		write(t, filepath.Join(root, "go.mod"), "module m\n")
+		return root, filepath.Join(root, "missing", "nested", "unsaved.ef")
+	}
+	appear := map[string]func(t *testing.T, root string){
+		"manifest in a new directory": func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "missing", "nested", ManifestName), `{"edition":"2026"}`)
+		},
+		"go.mod in a new directory": func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "missing", "go.mod"), "module inner\n")
+		},
+		"empty directory": func(t *testing.T, root string) { mkdir(t, filepath.Join(root, "missing")) },
+		"document": func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "missing", "nested", "unsaved.ef"), "text\n")
+		},
+	}
+	for _, stage := range []string{StageOpened, StageResolving, StageWalked} {
+		for name, change := range appear {
+			t.Run(stage+"/"+name, func(t *testing.T) {
+				root, document := setup(t)
+				restore := hookAt(stage, func() { change(t, root) })
+				got := ResolveDocument(document)
+				restore()
+				if got.Diagnostic == nil || got.Diagnostic.Code != CodeAdmission {
+					t.Fatalf("%s appeared at %s: %s, want the %s refusal", name, stage, got.JSON(), CodeAdmission)
+				}
+			})
+		}
+	}
+	t.Run("next admission resolves the new chain", func(t *testing.T) {
+		root, document := setup(t)
+		appear["manifest in a new directory"](t, root)
+		if got := ResolveDocument(document); got.Diagnostic != nil || got.Edition != E2026 {
+			t.Fatalf("after the manifest appeared: %s, want 2026", got.JSON())
+		}
+	})
+	t.Run("no change", func(t *testing.T) {
+		_, document := setup(t)
+		if got := ResolveDocument(document); got.Diagnostic != nil || got.Edition != Legacy {
+			t.Fatalf("unchanged missing suffix: %s, want legacy", got.JSON())
+		}
+	})
 }
 
 // An editor document with no file resolves at the path the file system
