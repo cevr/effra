@@ -11,6 +11,22 @@ go run ./cmd/sketchc build testdata/checkout.sketch -out /tmp/gen -o /tmp/checko
 ./bench.sh    # build-time receipt
 ```
 
+## Kernel mode and traces (#188)
+
+```sh
+go run ./cmd/sketchc build -rt kernel testdata/trace/timeout.sketch -out /tmp/gen -o /tmp/timeout
+/tmp/timeout                                  # records nothing
+EFFRA_TRACE=/tmp/timeout.jsonl /tmp/timeout   # records the run as JSON Lines
+go run ./cmd/sketchc trace testdata/trace/timeout.sketch /tmp/timeout.jsonl
+go run ./cmd/sketchc trace -json testdata/trace/timeout.sketch /tmp/timeout.jsonl
+```
+
+- **`-rt kernel`** links the merged kernel runtime, `effra.local/prototype/runtime/rt`, instead of copying the embedded prototype runtime. The emitted `go.mod` replaces that module with the repository checkout. `sketchc` finds the checkout above the file or the working directory, or `-rtroot` names it. The default mode (`-rt embedded`) is unchanged. For all 40 accepted programs in `testdata/checkout.sketch` and `testdata/probes`, its `main.go` is byte-identical to the base `854f21e7` output.
+- **Definition IDs come from the checker.** `NewModel` (`sketch/defs.go`) derives every ID from the checked declarations. A declaration is `<package>.<Name>`, a method is `<package>.<Type>.<Method>`, and a block is `<enclosing>/<construct>#<n>` (for example `latency.checkout/timeout.After#1`). Host definitions are `host.Console.Println`, `host.Scheduler.Sleep` and `timeout.Expired`. The emitter writes the IDs it uses as constants (`def__N`), with the source revision (SHA-256 of the file) and a site table for the task definitions. It writes no ID by hand and computes none at run time.
+- **Events.** The kernel runtime raises the task events. Before each capability call, the emitted code raises `call` with the callee's ID and the call site. In every frame the interruption point is the `if t__.Stopped()` form, so it can raise `interrupt` at its site. A `with` raises `construct` with the wire's ID, and a catch arm raises `handler` with the handled error's ID. `main` reads `EFFRA_TRACE`. When it is unset, the root has no tracer and the program writes no file.
+- **`sketchc trace [-json] FILE TRACE`** checks the trace against the model of FILE. It refuses a trace with the wrong revision, an unknown definition ID, a task event whose site is not its definition's, a point event the model has no point for, a parent that never started, or a header count that does not match the trace. It prints the task tree, every event resolved to its enclosing definition, the cause trace of the root exit and the named omissions. `-json` prints the `trace-evidence-1` envelope (`schema`, `producer`, `revision`, `budgets`, `omissions`, `fingerprint`, then the tasks, the events and the cause trace).
+- **Subset extension: `Scheduler.Sleep(d)`.** The timeout example needs a gateway slower than its deadline. A provider method cannot use a capability in this subset (S109), so the latency is in an ordinary function that `uses Scheduler`. `Sleep` takes a `duration` and has no error row, because an interruption is not a typed failure. Both runtimes lower it to `rt.Sleep(t, scheduler, d)`, which returns `Interrupted` when the task stops while it waits; the emitted code passes that on like any other interruption. Its argument type is checked by the existing S108 rule. `testdata/reject/sleep-not-duration.sketch` rejects an integer argument, and `testdata/probes/sleep-timeout.sketch` runs it under both outcomes of a timeout.
+
 ## What it proves
 
 - **The rows check by hand-written rules in about 800 lines.**

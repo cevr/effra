@@ -77,7 +77,9 @@ type checker struct {
 func prelude() []*TypeDecl {
 	return []*TypeDecl{
 		{Name: "Console", Kind: kindCapability, Methods: []*Sig{{Name: "Println"}}},
-		{Name: "Scheduler", Kind: kindCapability},
+		// Sleep waits a duration on the scheduler, or until the task is stopped. It
+		// has no error row: an interruption is not a typed failure.
+		{Name: "Scheduler", Kind: kindCapability, Methods: []*Sig{{Name: "Sleep", Params: []Param{{Name: "d", Type: "duration"}}}}},
 		{Name: "LiveScheduler", Kind: kindStruct},
 	}
 }
