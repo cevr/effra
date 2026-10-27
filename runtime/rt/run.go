@@ -1,0 +1,38 @@
+package rt
+
+// settle is the one finalization step shared by every task boundary (Run, so
+// child tasks and the root alike) and every scope end, empty or not. It
+// records a recovered panic, then applies stop-wins (runtime.md, Exit causes
+// rule 5): when t can observe a stop, interruption joins the exit and beats a
+// body's success. A stop that arrives during a release is observed here, after
+// the release mask closes.
+func (t *Task) settle(c *Cause, p any) {
+	if p != nil {
+		c.recovered(t, p, false)
+	}
+	if t.Stopped() {
+		c.AddInterruption()
+	}
+}
+
+// Run runs body as the body of task t on the calling goroutine, inside the
+// task boundary every child started by Go also runs in: a panic becomes a
+// defect with t's chain, a stop beats success, and the exit comes back in
+// canonical form with a zero value. Emitted main calls it for the root task:
+//
+//	_, err := rt.Run(rt.Root("main"), mainBody)
+//	os.Exit(rt.ExitCode(err))
+//
+// A law adapter (#124) drives the runtime through the same entry.
+func Run[T any](t *Task, body func(*Task) (T, error)) (v T, err error) {
+	defer func() {
+		var c Cause
+		c.Add(err)
+		t.settle(&c, recover())
+		if err = c.Err(); err != nil {
+			var zero T
+			v = zero
+		}
+	}()
+	return body(t)
+}
