@@ -525,9 +525,25 @@ func (e *emitter) call(x *Call) (val, err string) {
 		}
 		args := append([]string{"t__"}, e.args(x.Args)...)
 		e.interruptCheck()
+		if recv == "Scheduler" && fun.Sel == "Sleep" {
+			e.sleep(args[1])
+			return "", ""
+		}
 		return e.bindCall(e.envVal+"."+recv+"."+fun.Sel+"("+strings.Join(args, ", ")+")", in)
 	}
 	panic("emit: unchecked call")
+}
+
+// sleep lowers Scheduler.Sleep(d) to rt.Sleep, which returns Interrupted when
+// the task is stopped while it waits (ported from prototypes/sketch9 at #188,
+// without its kernel-mode trace events).
+func (e *emitter) sleep(d string) {
+	err := e.temp("e")
+	e.line("if %s := rt.Sleep(t__, %s.Scheduler, %s); %s != nil {", err, e.envVal, d, err)
+	e.depth++
+	e.fail(err)
+	e.depth--
+	e.line("}")
 }
 
 func (e *emitter) interruptCheck() {
