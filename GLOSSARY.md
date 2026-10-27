@@ -207,6 +207,16 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Exit accumulator** (designed): The runtime record that combines a body's outcome with release defects and interruption into one exit cause, so a release never hides a failure.
 
+**Definition ID** (designed): The stable name of one checked definition, derived by the checker from the declaration: `<package>.<Name>`, `<package>.<Type>.<Method>`, or `<enclosing ID>/<construct>#<n>` for a block such as a timeout. It is meaningful only with the source revision it was computed from. Runtime traces, defect chains and `ef inspect` share this ID space ([traceability](docs/research/traceability.md)).
+
+**Source revision** (designed): The SHA-256 digest of a source file, the revision that qualifies its definition IDs. A trace header carries it once, and a trace query refuses a trace whose revision differs from the file.
+
+**Trace event** (designed): One record of a run. It has a kind from the runtime-law vocabulary (#124) or the two additions `call` and `interrupt`, a task and its parent, a definition ID and a source site. It names failures and defects by type and never records argument or result values.
+
+**Point event** (designed): A trace event that emitted code raises at its own source site: a capability `call`, an `interrupt` at an interruption point, a wire `construct` or a catch `handler`. The runtime raises the other kinds for a task, keyed by the task's definition ID.
+
+**Trace evidence** (designed): The answer of a trace query (`sketchc trace`, later `ef trace` and MCP `code.trace`): the `trace-evidence-1` envelope with the fields of the review evidence schema (#156), then the tasks, the resolved events and the cause trace.
+
 ## Earlier `.ef` language
 
 These terms describe the `.ef` language that `internal/compiler` and `runtime/effra` implement today, with its `effect fn`, `run`, `raises` and `service` forms. The Go-shaped language replaces it; where a term has a counterpart above, the entry says so.

@@ -69,13 +69,13 @@ Reading the numbers (measured unless labeled):
 
 ### Tracing off and on (#188)
 
-Machine and toolchain as above (go1.27.0, 16 vCPU EPYC 9554P, shared; load average 3–11 during the run). Command: `go test -run '^$' -bench 'Poll|SpawnWait|AcquireRelease' -benchmem -count 2 ./runtime/rt/`, five rounds, interleaved with the same command on a `git archive` copy of base `854f21e7` in a scratch directory. Raw output: `bench-r1.txt` in the unit directory. Ten samples per row; read the minimum.
+Machine and toolchain as above (go1.27.0, 16 vCPU EPYC 9554P, shared; load average 6–13 during the run). Command: `go test -run '^$' -bench 'Poll|SpawnWait|AcquireRelease' -benchmem -count 2 ./runtime/rt/`, five rounds, interleaved with the same command on a `git archive` copy of base `854f21e7` in a scratch directory. Raw output: `bench-r1.txt` in the unit directory. Ten samples per row; read the minimum.
 
 | Operation | base `854f21e7` (min / median ns/op) | tracing off (min / median ns/op) | allocs/op, B/op (base, off) | tracing on (min / median ns/op) | allocs/op, B/op on | events per op |
 | --- | --- | --- | --- | --- | --- | --- |
-| Poll on a running task | 1.476 / 1.536 | 1.465 / 1.635 | 0, 0 and 0, 0 | 1.166 / 1.285 | 0, 0 | 0 |
-| Spawn + wait of an empty task | 776.3 / 906.1 | 815.2 / 897.9 | 3, 320 and 3, 320 | 1160 / 1234 | 3, 320 | 4 |
-| Acquire + release of a no-op resource | 31.72 / 33.63 | 31.25 / 34.42 | 0, 0 and 0, 0 | 89.40 / 96.00 | 0, 0 | 1 |
+| Poll on a running task | 1.522 / 1.766 | 1.516 / 1.819 | 0, 0 and 0, 0 | 1.456 / 1.631 | 0, 0 | 0 |
+| Spawn + wait of an empty task | 769.3 / 929.2 | 793.1 / 899.8 | 3, 320 and 3, 320 | 1090 / 1295 | 3, 320 | 4 |
+| Acquire + release of a no-op resource | 29.59 / 36.49 | 30.05 / 35.30 | 0, 0 and 0, 0 | 93.89 / 110.70 | 0, 0 | 1 |
 
-- Measured: tracing off allocates exactly what base allocates. Off/base ratios are 0.99 / 1.06 (poll), 1.05 / 0.99 (spawn+wait) and 0.99 / 1.02 (acquire+release), by min / median. The spawn+wait context baseline runs the same code in both trees, and its ratio was 1.07 / 1.08. So the box's noise band is wider than every off/base difference. Inferred: tracing off costs no measurable time. The code adds one or two pointer compares per spawn and per release, and none to the poll.
-- Measured: one recorded event costs about 60 ns (acquire+release on against off, by minimum). `BenchmarkTraceCallOn` measured 62.9 / 66.3 ns, and `BenchmarkTraceCallOff` measured 1.28 / 1.47 ns, which is about the cost of the poll loop (`bench-calls-r1.txt`). A CPU profile of the traced acquire put about 25% of samples in the recorder's clock read (`runtime.nanotime`).
+- Measured: tracing off allocates exactly what base allocates. Off/base ratios are 1.00 / 1.03 (poll), 1.03 / 0.97 (spawn+wait) and 1.02 / 0.97 (acquire+release), by min / median. The spawn+wait context baseline runs the same code in both trees, and its ratio was 1.11 / 0.97. So the box's noise band is wider than every off/base difference. Inferred: tracing off costs no measurable time. The code adds one or two pointer compares per spawn and per release, and none to the poll.
+- Measured: one recorded event costs about 60 to 65 ns (acquire+release on against off, by minimum: 30.05 to 93.89 ns). `BenchmarkTraceCallOn` measured 62.88 / 66.26 ns, and `BenchmarkTraceCallOff` measured 1.28 / 1.46 ns, which is about the cost of the poll loop (`bench-calls-r1.txt`). A CPU profile of the traced acquire put about 25% of samples in the recorder's clock read (`runtime.nanotime`).

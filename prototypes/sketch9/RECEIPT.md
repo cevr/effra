@@ -211,3 +211,34 @@ Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-6-findings.md` (1 M
 | M1 identifier tested one byte at a time | The lexer decodes each code point (`utf8.DecodeRuneInString`) and applies Go's identifier rule to the rune: a letter or `_` to start, and a letter, digit or `_` after that. A non-identifier rune or invalid UTF-8 in identifier position is S001. Number suffixes are decoded the same way. String literals keep their own path. |
 
 The 2 round-6 programs join `testdata/probes/` (103 in all): `nonletter-name` (`x⪪`, S001) and `letter-name` (`xª`, builds and prints `ok`). `sketch/lex_test.go` sweeps every non-ASCII code point, first and later in a name, against `go/token.IsIdentifier`, and rejects four invalid UTF-8 names with S001. These tests fail on the round-6 lexer. The sweep also shows that the old lexer rejected valid letters such as `À`. `accept.sh` exit 0 (`accept-r7.log`).
+
+# trace-188: kernel mode and traces (#188)
+
+Host: shared exe workbox, AMD EPYC 9554P, 16 vCPU, load average 6–13; go1.27.0 linux/amd64. Unit directory: `/home/exedev/.cache/baton/wf10/trace-188`. The research note is `docs/research/traceability.md`.
+
+## Commands and exit codes
+
+| Command (from the worktree root) | Exit |
+| --- | --- |
+| `bash /home/exedev/.cache/baton/wf10/trace-188/accept.sh` | 0 (`ACCEPT OK`, `accept-r1.log`) |
+| `prototypes/sketch9/accept.sh` | 0 (`ACCEPT OK`) |
+| `cd prototypes/sketch9 && go vet ./... && go test -count=1 ./...` | 0 |
+
+## What changed
+
+- `sketchc build -rt kernel` links `effra.local/prototype/runtime/rt`. `sketchc trace [-json]` reads a recorded run against the checked model (README, "Kernel mode and traces").
+- `sketch/defs.go`: `NewModel`, the definition table and the trace points, derived from the checked declarations. `sketch/emit_kernel.go`: the kernel `main`, the constants, the site table and the point events. `sketch/trace.go`: the query and its refusals.
+- `Scheduler.Sleep(d)` joins the prelude. Both runtimes lower it to `rt.Sleep`. `testdata/reject/sleep-not-duration.sketch` (S108) and `testdata/probes/sleep-timeout.sketch` (both outcomes of a timeout, embedded mode) cover it.
+- Default mode: for the 40 accepted programs (`testdata/checkout.sketch` and the accepted probes), the base `854f21e7` `sketchc` and this branch emit byte-identical `main.go`. The embedded `rt/rt.go` gains only `Sleep`.
+
+## The three traced examples (`examples-r1.txt`)
+
+25 runs off and 25 on, interleaved; wall time includes process start.
+
+| Example | Output | Events | Trace bytes | Wall median off / on (ms) | Binary, kernel with switch / without / embedded (bytes) |
+| --- | --- | --- | --- | --- | --- |
+| `testdata/trace/checkout.sketch` | `paid auth-7` | 9 | 1,269 | 3.29 / 2.75 | 2,649,099 / 2,586,999 / 2,548,752 |
+| `testdata/trace/timeout.sketch` | `gateway timed out` | 13 | 1,818 | 105.41 / 104.73 | 2,650,345 / 2,588,197 / 2,549,423 |
+| `testdata/trace/failure.sketch` | `no such order` | 9 | 1,297 | 3.13 / 2.95 | 2,644,650 / 2,582,278 / 2,544,050 |
+
+The "without" binary is the same emitted program with the trace switch removed by a scratch script, to measure the switch alone: about 62 KB. A first writer that used `encoding/json` made the switch cost 1.48 MB.
