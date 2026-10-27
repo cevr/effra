@@ -27,7 +27,19 @@ Status: **implemented in prototype** for struct literals; **designed** for the r
    - a composite literal of the type, including the empty literal `Quantity{}`;
    - an implicit zero value: `var q Quantity` with no value, `make([]Quantity, n)` with `n > 0`, a zero-filled field of type `Quantity` in an enclosing struct's literal or zero value, and the zero value of a map lookup that misses (use `m.Lookup(k)`, which returns `Option`).
 
-   Inside the declaring package all of these are allowed. Values from outside come only from the functions the package exports, so `ParseQuantity` is the only way to build a `Quantity` and its check cannot be bypassed. Exports stay by capitalisation. *Prior art:* Rust forbids constructing a struct with private fields outside its module and gives it no `Default` unless the module derives or implements one; Gleam's `opaque` types hide constructors; Go leaves this hole open: a two-package probe builds `Quantity{}` and `make([]Quantity, 1)` from another package and reads `units=0` for both (review round 2 receipt).
+   Inside the declaring package, the construction-authority restriction is lifted, and the ordinary rules 1 to 4 still apply. A struct with an unexported field of a non-defaultable type stays non-defaultable in its own package:
+
+   ```go
+   type State interface{ Idle | Running }
+   type Idle struct{}
+   type Running struct{ Since int64 }
+   type Box struct{ state State }
+
+   func newBox() Box { return Box{state: Idle{}} } // allowed: a literal inside the package
+   func zeroBox() Box { var b Box; return b }       // error even inside the package: State is a union, so Box is not defaultable (rule 3)
+   ```
+
+   Values from outside come only from the functions the package exports, so `ParseQuantity` is the only way to build a `Quantity` and its check cannot be bypassed. Exports stay by capitalisation. *Prior art:* Rust forbids constructing a struct with private fields outside its module and gives it no `Default` unless the module derives or implements one; Gleam's `opaque` types hide constructors; Go leaves this hole open: a two-package probe builds `Quantity{}` and `make([]Quantity, 1)` from another package and reads `units=0` for both (review round 2 receipt).
 
 ## Structs
 

@@ -53,13 +53,17 @@ A move transfers ownership. After a move, the source binding is unusable, and us
 
 A task may use a resource that it does not own when the task is certain to be stopped and drained before the borrow of that resource ends.
 
-1. **R27. Borrow lifetime.** `go f(x)`, or a `go` block that captures `x`, **lends** `x` to the task, instead of moving it, when the resulting `Task` is guaranteed to be released (stopped and drained) before the borrow of `x` ends, on every exit:
-   - **`x` is owned by the current scope.** The borrow ends when `x` is released. The `Task` is bound after `x` in the same owner scope, so reverse acquisition order (R5) stops and drains the task first; or the `Task` is stored in a struct field declared after `x`'s field, so the generated `Close` (R3), which releases fields in reverse declaration order, stops and drains the task first.
-   - **`x` is lent to the current function** (a parameter, or a value the function borrows by R16, R30 or R35). The borrow ends when the function returns. Every `Task` owned by a scope local to the function satisfies this, because that scope releases the task at the latest when the function returns. Moving or returning such a `Task` out of the function is an error.
+1. **R27. Borrow lifetime.** `go f(x)`, or a `go` block that captures `x`, **lends** `x` to the task, instead of moving it, when the resulting `Task` is guaranteed to be released (stopped and drained) before the borrow of `x` ends, on every exit. The borrow's end is fixed by the root owner of `x`:
+   - **Root owner.** The checker keeps, for every borrowed value, its root owner and that owner's release point. A local resource is its own root, owned by the scope that binds it. A value reached by indexing (R35), by a field of an owned aggregate, or by capture in a non-escaping closure (R30) inherits the root owner of the value it was reached from: `files[0]` has the root owner of `files`. A borrow ends at the root owner's release point, which is the lexical end of the root owner's scope (R5), or the release of the enclosing aggregate (R3, R37).
+   - **Incoming borrows.** A parameter (R16), and a value reached from it, has a root owner outside the call, which outlives the call. As seen from the callee, its borrow ends when the function returns. Only incoming borrows take this bound. Inside a non-escaping closure, a captured borrow is an incoming borrow of the closure, bounded by the closure's return.
+   - **Release before the end.** The `Task` must be owned by a scope or aggregate that is released before the borrow's end on every exit, including the automatic release edges of R5 and R3 on normal completion, `return`, failure, defect and interruption. Each of these satisfies the condition: the `Task` is bound after the root owner in the same owner scope, so reverse acquisition order (R5) stops and drains it first; the `Task` is owned by a scope nested inside the root owner's scope, which ends first; the `Task` is stored in a struct field declared after the root owner's field, so the generated `Close` (R3) stops and drains it first; or the `Task` is stored in a container or aggregate whose own owner satisfies one of these conditions. For an incoming borrow, every scope local to the function qualifies, because each one is released before the function returns.
+   - Moving or returning the `Task` to an owner that does not satisfy the condition is an error.
 
-   Otherwise the capture moves `x` when the function owns `x` (R12), and is an error when `x` is lent (R17).
-2. **R28.** While a task holds a structured lend of `x`, `x` must not be consumed, moved alone or converted. Consuming the task first (`t.Stop()`, `t.Wait()`) ends the lend. Moving `x` and the task together into one aggregate keeps the lend when the aggregate preserves their order (R27).
-3. **Lossless wrapping.** Because a lent parameter supports the same structured lends as an owned local, moving code that starts and drains a task into a helper function never turns a valid program into an invalid one. This keeps the owner's composability rule ([glossary](../../GLOSSARY.md), "Composability checks"). *Prior art:* Swift task groups end every child before `withTaskGroup` returns, so children may use the caller's borrowed values; Rust's `std::thread::scope` lets scoped threads borrow from the enclosing function because they are joined before `scope` returns.
+   Otherwise the capture moves `x` when the function owns `x` (R12), and is an error when `x` is lent to the function (R17) or borrowed through an index or a field, since a borrow cannot move its element out (R35, R36).
+
+   *Prior art:* Rust's `std::thread::scope` requires the borrowed environment (`'env`) to outlive the thread scope (`'scope`), so every scoped thread is joined before the borrowed data can be dropped. R27 is that inequality, checked against the root owner's release point instead of a written lifetime.
+2. **R28.** While a task holds a structured lend of `x`, `x` and its root owner must not be consumed, moved alone or converted. Consuming the task first (`t.Stop()`, `t.Wait()`) ends the lend. Moving `x` and the task together into one aggregate keeps the lend when the aggregate preserves their order (R27).
+3. **Lossless wrapping.** A helper receives `x` as an incoming borrow whose root owner outlives the call, so any task that the helper releases before it returns satisfies R27. Moving code that starts and drains a task into a helper function therefore never turns a valid program into an invalid one. This keeps the owner's composability rule ([glossary](../../GLOSSARY.md), "Composability checks"). *Prior art:* Swift task groups end every child before `withTaskGroup` returns, so children may use the caller's borrowed values; Rust's `std::thread::scope` lets scoped threads borrow from the enclosing function because they are joined before `scope` returns.
 4. **R29.** Inside one composite literal, a field value may be a `go` expression that lends a resource given to an earlier field of the same literal. The elements are evaluated in order, and the literal satisfies R27 when it completes.
 
 ```go
@@ -98,6 +102,16 @@ func leak(p Pool) Task[struct{}] {
 	t := go poll(p) // p is lent to leak
 	return t        // error: the task would outlive the borrow of p (R27)
 }
+
+func bad() {
+	running := map[int64]Task[struct{}]{} // owned by bad's scope
+	with(wire{}) {
+		files := []File{open()}            // root owner of files[0]: this block
+		running[0] = go read(files[0])     // error: running is released at the end of bad,
+		"done"                             // after files is released at the end of this block (R27)
+	}
+	waitForChildRead()
+}
 ```
 
 A lent parameter, allowed:
@@ -106,6 +120,28 @@ A lent parameter, allowed:
 func useOnce(p Pool) {
 	t := go poll(p) // structured lend: t is owned by useOnce's scope, released before useOnce returns
 	t.Stop()
+}
+```
+
+The corrected forms of `bad`, allowed:
+
+```go
+func good() {
+	with(wire{}) {
+		files := []File{open()}
+		running := map[int64]Task[struct{}]{} // bound after files in the same block
+		running[0] = go read(files[0])         // running is released first (R5, R37)
+		"done"
+	}
+}
+
+func goodTask() {
+	with(wire{}) {
+		files := []File{open()}
+		t := go read(files[0]) // t is owned by the block, bound after files
+		watch(t)               // lends t; the block stops and drains t before it closes files (R5)
+		"done"
+	}
 }
 ```
 
@@ -121,7 +157,7 @@ func useOnce(p Pool) {
 ## Closures
 
 1. **R30.** A non-escaping closure, including a trailing block, lends every resource it captures for the duration of the call it is passed to.
-2. **R31.** An escaping closure may capture a resource only under the structured-lend rule: the owner that keeps the closure must be released before the borrow of the captured resource ends (R27), that is, before the resource is released when the scope owns it, or before the function returns when the resource is lent to it. In `set.Go(func() { actor.Pump(b, signals) })`, the Set keeps the literal, so `set` must be released before `b`: `set` is bound after `b` in the same owner scope.
+2. **R31.** An escaping closure may capture a resource only under the structured-lend rule: the owner that keeps the closure must be released before the borrow of each captured resource ends, on every exit (R27). The end is the release point of the resource's root owner, or the function's return for an incoming borrow; a resource reached by indexing or through a field has the root owner of its container or aggregate. In `set.Go(func() { actor.Pump(b, signals) })`, the Set keeps the literal, so `set` must be released before `b`: `set` is bound after `b` in the same owner scope.
 3. **R32.** While such a closure may still run, consuming the captured resource is an error. `b.Stop()` before `set` is consumed is an error.
 4. **R33.** Every other escaping capture of a resource is an error. *Prior art:* Swift does not let an escaping closure capture a `borrowing` parameter of non-copyable type; Rust requires `move` closures to own what they capture, or a lifetime that outlives them.
 
@@ -139,7 +175,7 @@ The 2026-10-26 sketch bound `set` before `b`; that order is an error under R31, 
 ## Containers
 
 1. **R34.** A slice, array or map whose element type is a resource is itself a resource.
-2. **R35.** Copying such a container moves it (R15). Indexing it, `xs[i]`, lends the element. Calling a consuming method through an index (`xs[i].Close()`, `running[j].Wait()`, `ts[k].Stop()`) is an error.
+2. **R35.** Copying such a container moves it (R15). Indexing it, `xs[i]`, lends the element; the element's borrow keeps the root owner of `xs` (R27). Calling a consuming method through an index (`xs[i].Close()`, `running[j].Wait()`, `ts[k].Stop()`) is an error.
 3. **R36.** A standard-library removal moves the element out: `slices.Take(xs, i)` for a slice, and the map's delete-and-return (`m.Take(k)`). The element then has the caller's scope as owner.
 4. **R37.** Releasing a container releases its remaining elements: a slice or array in reverse index order, a map in unspecified order. Each release runs even when an earlier one had a defect (R9).
 5. **R40. Resource map keys.** A map whose key type is a resource is an error in v0 (S112, designed). Only map values may be resources. README Gap 32 records a later owned-key rule.
