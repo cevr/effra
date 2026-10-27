@@ -4,8 +4,8 @@ import (
 	"errors"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // waitUntil yields until cond holds. Tests use it instead of sleeping.
@@ -13,6 +13,26 @@ func waitUntil(cond func() bool) {
 	for !cond() {
 		runtime.Gosched()
 	}
+}
+
+// waitGroupWithin waits for wg, failing the test after limit. Only a broken
+// runtime makes it wait that long.
+func waitGroupWithin(t *testing.T, wg *sync.WaitGroup, limit time.Duration, what string) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(limit):
+		t.Fatalf("%s did not happen within %v", what, limit)
+	}
+}
+
+// endScope ends s as a body with an error row does and returns the exit.
+func endScope(s *Scope) error {
+	var err error
+	s.End(&err)
+	return err
 }
 
 func blockUntilStopped(t *Task) (int, error) {
@@ -23,17 +43,26 @@ func blockUntilStopped(t *Task) (int, error) {
 func TestStopPropagatesToDescendants(t *testing.T) {
 	const fan = 3
 	const total = 1 + fan + fan*fan
-	for _, via := range []string{"handle Stop", "root Interrupt"} {
+	for _, via := range []string{"task Interrupt", "root Interrupt"} {
 		t.Run(via, func(t *testing.T) {
 			root := Root("main")
 			s := NewScope(root)
-			var started sync.WaitGroup
+			var started, observed sync.WaitGroup
 			started.Add(total)
-			var observed atomic.Int32
+			observed.Add(total)
+			var mu sync.Mutex
+			var tasks []*Task
+			// hold keeps every body, and so every scope, open after the stop:
+			// no scope end can stop a descendant, only Interrupt's own walk.
+			hold := make(chan struct{})
 			observe := func(task *Task) (int, error) {
+				mu.Lock()
+				tasks = append(tasks, task)
+				mu.Unlock()
 				started.Done()
 				<-task.Done()
-				observed.Add(1)
+				observed.Done()
+				<-hold
 				return 0, Interrupted
 			}
 			top := Go(&s, "top", func(task *Task) (int, error) {
@@ -52,25 +81,27 @@ func TestStopPropagatesToDescendants(t *testing.T) {
 				})
 			})
 			started.Wait()
-			switch via {
-			case "handle Stop":
-				if err := top.Stop(); err != nil {
-					t.Fatalf("Stop returned %v, want nil", err)
-				}
-			case "root Interrupt":
+			if via == "task Interrupt" {
+				top.Task().Interrupt()
+			} else {
 				root.Interrupt()
-				if _, err := top.Wait(); err != Interrupted {
-					t.Fatalf("Wait returned %v, want Interrupted", err)
+			}
+			waitGroupWithin(t, &observed, 10*time.Second, "every descendant observing the stop")
+			mu.Lock()
+			for _, task := range tasks {
+				if !task.StopRequested() {
+					t.Errorf("task #%d %s is not stopped", task.ID(), task.Span())
 				}
 			}
-			// Stop and Wait return only after the whole subtree has drained.
-			if got := observed.Load(); got != total {
-				t.Fatalf("%d of %d tasks observed the stop before the drain finished", got, total)
+			mu.Unlock()
+			close(hold)
+			if _, err := top.Wait(); err != Interrupted {
+				t.Fatalf("Wait returned %v, want Interrupted", err)
 			}
 			if top.task.first != nil || root.first != nil {
 				t.Fatal("finished tasks stayed linked to their parents")
 			}
-			s.End(nil)
+			_ = endScope(&s)
 		})
 	}
 }
@@ -79,7 +110,7 @@ func TestConcurrentStopAndChildAdmission(t *testing.T) {
 	for range 50 {
 		root := Root("main")
 		parent := &Task{}
-		parent.init(root, "parent")
+		parent.init(root, "parent", false)
 		start := make(chan struct{})
 		children := make([]*Task, 16)
 		var workers sync.WaitGroup
@@ -87,7 +118,7 @@ func TestConcurrentStopAndChildAdmission(t *testing.T) {
 			workers.Go(func() {
 				<-start
 				children[i] = &Task{}
-				children[i].init(parent, "child")
+				children[i].init(parent, "child", false)
 			})
 		}
 		for range 4 {
@@ -147,7 +178,7 @@ func TestPollObservesStop(t *testing.T) {
 	if _, err := checker.Wait(); err != Interrupted {
 		t.Fatalf("Check exit %v, want Interrupted", err)
 	}
-	s.End(nil)
+	_ = endScope(&s)
 }
 
 func TestMaskDefersStopUntilUnmask(t *testing.T) {
@@ -209,10 +240,85 @@ func TestMaskDefersStopUntilUnmask(t *testing.T) {
 	if !releaseMasked || releaseSawStop {
 		t.Fatalf("release masked=%v sawStop=%v, want masked and no stop", releaseMasked, releaseSawStop)
 	}
-	s.End(nil)
+	_ = endScope(&s)
 }
 
-func TestChildOfMaskedRegionInheritsMask(t *testing.T) {
+// Reviewer probe (round 1, M2): a child started inside an acquisition starts
+// interruptible, so it observes a parent stop once the acquisition ends.
+func TestChildStartedInAcquireObservesParentStop(t *testing.T) {
+	root := Root("main")
+	s := NewScope(root)
+	proceed := make(chan struct{})
+	observed := make(chan bool, 1)
+	var h *Handle[int]
+	_, _ = Acquire(&s, func() (int, error) {
+		h = Go(&s, "background", func(child *Task) (int, error) {
+			<-proceed
+			observed <- child.Stopped()
+			return 0, nil
+		})
+		return 0, nil
+	}, func(int) {})
+	root.Interrupt()
+	close(proceed)
+	if !<-observed {
+		t.Fatal("a child started during an acquisition cannot observe the parent's stop")
+	}
+	if _, err := h.Wait(); err != Interrupted {
+		t.Fatalf("Wait returned %v, want Interrupted", err)
+	}
+	_ = endScope(&s)
+}
+
+func TestGoMaskedDefersStopUntilRestore(t *testing.T) {
+	for _, exit := range []string{"restore", "unmask"} {
+		t.Run(exit, func(t *testing.T) {
+			root := Root("main")
+			s := NewScope(root)
+			ready := make(chan struct{})
+			fail := func(msg string) (string, error) { return "", errors.New(msg) }
+			h := GoMasked(&s, "flush", func(task *Task, restore Mask) (string, error) {
+				close(ready)
+				waitUntil(task.StopRequested)
+				if task.Stopped() || task.Done() != nil {
+					return fail("the stop was observable in the masked body")
+				}
+				if exit == "unmask" {
+					restore.Unmask()
+					if !task.Stopped() {
+						return fail("unmask did not expose the stop")
+					}
+					return "", Interrupted
+				}
+				var saw bool
+				restore.Interruptible(func() { saw = task.Stopped() && task.Done() != nil })
+				if !saw {
+					return fail("restore did not expose the stop")
+				}
+				if task.Stopped() {
+					return fail("restore did not mask the body again")
+				}
+				return "flushed", nil
+			})
+			<-ready
+			h.Task().Interrupt()
+			v, err := h.Wait()
+			switch exit {
+			case "restore":
+				if v != "flushed" || err != nil {
+					t.Fatalf("got %q, %v; a stop the masked body never observed replaced its result", v, err)
+				}
+			case "unmask":
+				if err != Interrupted {
+					t.Fatalf("got %q, %v; want Interrupted", v, err)
+				}
+			}
+			_ = endScope(&s)
+		})
+	}
+}
+
+func TestChildOfMaskedStoppedParentStartsLive(t *testing.T) {
 	root := Root("main")
 	m := root.Mask()
 	root.Interrupt()
@@ -226,9 +332,11 @@ func TestChildOfMaskedRegionInheritsMask(t *testing.T) {
 	v, err := h.Wait()
 	m.Unmask()
 	if v != "flushed" || err != nil {
-		t.Fatalf("got %q, %v: a task started in a masked region was interrupted", v, err)
+		t.Fatalf("got %q, %v: a child started where the parent cannot observe its stop was stopped", v, err)
 	}
-	s.End(nil)
+	if err := endScope(&s); err != Interrupted {
+		t.Fatalf("scope end of a stopped root returned %v, want Interrupted", err)
+	}
 }
 
 func TestChildInheritsContextValues(t *testing.T) {
@@ -244,5 +352,5 @@ func TestChildInheritsContextValues(t *testing.T) {
 	if root.Value(key{}) != nil {
 		t.Fatal("End did not restore the outer values")
 	}
-	s.End(nil)
+	_ = endScope(&s)
 }

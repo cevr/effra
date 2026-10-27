@@ -93,12 +93,15 @@ func (s *Scope) Defer(f func()) { s.push(entry{run: callFunc{f}}) }
 // End ends the scope; defer it directly, as `defer s.End(&err)`. It recovers a
 // panic of the body as a defect, combines it with *err, then runs every
 // release in reverse order, masked, recording each release defect (R5, R9).
+// Last it applies stop-wins, as a task boundary does (Run): a stop the task
+// can observe, including one that arrived during a release, makes the exit
+// an interruption.
 // With a non-nil err it stores the exit in canonical form; with a nil err (a
 // body with no error row) it panics with the exit, and the next boundary
 // recovers it.
 func (s *Scope) End(err *error) {
 	p := recover()
-	if p == nil && s.n == 0 {
+	if p == nil && s.n == 0 && !s.task.Stopped() {
 		return
 	}
 	var c Cause
@@ -109,6 +112,7 @@ func (s *Scope) End(err *error) {
 		c.recovered(s.task, p, false)
 	}
 	s.release(&c)
+	s.task.settle(&c, nil)
 	exit := c.Err()
 	if err != nil {
 		*err = exit

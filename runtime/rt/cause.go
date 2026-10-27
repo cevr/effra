@@ -221,6 +221,19 @@ func OnlyInterruption(err error) bool {
 	return true
 }
 
+// ExitCode is the process status for main's exit (runtime.md, Exit causes rule
+// 6): 0 on success, 130 when every reason is an interruption, 1 otherwise.
+func ExitCode(err error) int {
+	switch {
+	case err == nil:
+		return 0
+	case OnlyInterruption(err):
+		return 130
+	default:
+		return 1
+	}
+}
+
 // defectsOf keeps only the defects of err: the part of an abandoned task's
 // exit that may never be dropped (laws R3, R6, R8).
 func defectsOf(err error) error {

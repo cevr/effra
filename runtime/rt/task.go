@@ -20,7 +20,6 @@ type Task struct {
 	// no atomic read-modify-write.
 	stopped atomic.Bool
 	mask    uint32
-	base    uint32 // mask depth inherited at start; a stop is never observable under it
 	id      uint64
 	span    string
 	parent  *Task
@@ -39,20 +38,22 @@ func Root(span string) *Task {
 	return &Task{id: nextID.Add(1), span: span}
 }
 
-// init links t as a child of parent. A child of a stopped parent starts
-// stopped; a child started inside a masked region starts masked (it inherits
-// the region, as a ZIO or Effect fiber inherits its parent's interruptibility),
-// so a release that starts a task still runs to completion.
-func (t *Task) init(parent *Task, span string) {
+// init links t as a child of parent. A child starts interruptible, wherever it
+// is started (pinned Effect 4: fork is interruptible unless asked to inherit);
+// masked starts the child inside one masked region, for GoMasked. A child
+// starts stopped when its parent can observe a stop; a parent inside a masked
+// region has not observed its stop, so a child it starts there (for example a
+// timeout inside a release) runs until its owner scope stops it.
+func (t *Task) init(parent *Task, span string, masked bool) {
 	t.id = nextID.Add(1)
 	t.span = span
 	t.parent = parent
 	t.values = parent.values
-	if parent.mask != 0 {
-		t.mask, t.base = 1, 1
+	if masked {
+		t.mask = 1
 	}
 	parent.mu.Lock()
-	if parent.stopped.Load() {
+	if parent.stopped.Load() && parent.mask == 0 {
 		t.stopped.Store(true)
 	}
 	t.next = parent.first
@@ -63,7 +64,10 @@ func (t *Task) init(parent *Task, span string) {
 	parent.mu.Unlock()
 }
 
-// detach unlinks a finished child from its parent (runtime.md Tasks, rule 1).
+// detach unlinks a finished child from its parent (runtime.md Tasks, rule 1)
+// and drops its reference to the parent, so a finished task retains no
+// ancestors (G2, rule 3). Every descendant has finished by now, so no chain
+// walk can still pass through t.
 func (t *Task) detach() {
 	p := t.parent
 	p.mu.Lock()
@@ -77,6 +81,7 @@ func (t *Task) detach() {
 	}
 	t.prev, t.next = nil, nil
 	p.mu.Unlock()
+	t.parent = nil
 }
 
 // ID is the task's number, unique in the process.
@@ -85,10 +90,13 @@ func (t *Task) ID() uint64 { return t.id }
 // Span is the span or definition ID the task was started under (G2).
 func (t *Task) Span() string { return t.span }
 
-// Parent is the task that started t, or nil for a root.
+// Parent is the task that started t while t runs, and nil for a root or a
+// finished task. It is a live link, not a record: a defect keeps its ancestry
+// as copied frames.
 func (t *Task) Parent() *Task { return t.parent }
 
-// Chain lists t and its ancestors, from t to the root, bounded at 32 frames.
+// Chain copies t and its live ancestors as frames, from t to the root, at
+// most 32. Call it from t's goroutine while t runs; a defect records it then.
 func (t *Task) Chain() []Frame {
 	var frames []Frame
 	for x := t; x != nil && len(frames) < maxChain; x = x.parent {

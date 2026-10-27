@@ -59,7 +59,7 @@ func TestExitKeepsEveryCause(t *testing.T) {
 	if !errors.Is(err, errBody) || !errors.Is(err, Interrupted) {
 		t.Fatal("errors.Is does not see the failure and the interruption")
 	}
-	s.End(nil)
+	_ = endScope(&s)
 }
 
 func TestReleaseDefectDoesNotSkipLaterReleases(t *testing.T) {
@@ -133,7 +133,7 @@ func TestScopeReleasesReverseOnEveryExit(t *testing.T) {
 			if !slices.Equal(released, []string{"c", "b", "a"}) {
 				t.Fatalf("released %v, want [c b a]", released)
 			}
-			s.End(nil)
+			_ = endScope(&s)
 		})
 	}
 }
@@ -168,7 +168,7 @@ func TestAcquireHasNoInterruptionWindow(t *testing.T) {
 		if opens != 1 || closes != 1 {
 			t.Fatalf("opened %d, closed %d; want exactly one release", opens, closes)
 		}
-		s.End(nil)
+		_ = endScope(&s)
 	})
 	t.Run("concurrent stops", func(t *testing.T) {
 		for range 50 {
@@ -198,7 +198,7 @@ func TestAcquireHasNoInterruptionWindow(t *testing.T) {
 			if opens.Load() != closes.Load() {
 				t.Fatalf("opened %d, closed %d", opens.Load(), closes.Load())
 			}
-			s.End(nil)
+			_ = endScope(&s)
 		}
 	})
 }

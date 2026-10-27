@@ -43,7 +43,7 @@ func TestChildDefectCarriesChain(t *testing.T) {
 	if _, lone := Failure(err); lone {
 		t.Fatal("a catch would match a defect")
 	}
-	s.End(nil)
+	_ = endScope(&s)
 }
 
 func TestWaitReturnsValueOrFailure(t *testing.T) {
@@ -57,7 +57,7 @@ func TestWaitReturnsValueOrFailure(t *testing.T) {
 	if v, err := failed.Wait(); v != "" || err != errBody {
 		t.Fatalf("got %q, %v; want the lone typed failure as itself", v, err)
 	}
-	s.End(nil)
+	_ = endScope(&s)
 }
 
 func TestWaitIsAnInterruptionPoint(t *testing.T) {
@@ -80,7 +80,43 @@ func TestWaitIsAnInterruptionPoint(t *testing.T) {
 	if !drained {
 		t.Fatal("an interrupted Wait returned before its task drained")
 	}
-	s.End(nil)
+	_ = endScope(&s)
+
+	// Reviewer probe (round 1, M3): the owner's stop is checked before the
+	// completion fast path, and the finished task's defect is kept.
+	for _, tc := range []struct {
+		name string
+		body func(*Task) (int, error)
+		want []Kind
+	}{
+		{"finished value", func(*Task) (int, error) { return 42, nil }, nil},
+		{"finished failure", func(*Task) (int, error) { return 0, errBody }, nil},
+		{"finished defect", func(*Task) (int, error) { panic("child defect") }, []Kind{KindDefect}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := Root("main")
+			s := NewScope(root)
+			h := Go(&s, "done", tc.body)
+			<-h.done
+			root.Interrupt()
+			v, err := h.Wait()
+			if v != 0 || !errors.Is(err, Interrupted) {
+				t.Fatalf("a stopped owner joined a finished task: %d, %v", v, err)
+			}
+			if c, ok := err.(*Cause); ok {
+				var kinds []Kind
+				for _, r := range c.Reasons {
+					kinds = append(kinds, r.Kind)
+				}
+				if !slices.Equal(kinds, append(tc.want, KindInterruption)) {
+					t.Fatalf("reasons %v, want %v then the interruption", kinds, tc.want)
+				}
+			} else if tc.want != nil {
+				t.Fatalf("exit %v dropped the task's defect", err)
+			}
+			_ = endScope(&s)
+		})
+	}
 }
 
 func TestStopKeepsDefect(t *testing.T) {
@@ -98,7 +134,7 @@ func TestStopKeepsDefect(t *testing.T) {
 	if again := h.Stop(); again != nil {
 		t.Fatalf("a second Stop returned %v", again)
 	}
-	s.End(nil)
+	_ = endScope(&s)
 }
 
 func TestStopWinsOverSuccess(t *testing.T) {
@@ -116,5 +152,5 @@ func TestStopWinsOverSuccess(t *testing.T) {
 	if v, err := h.Wait(); v != 0 || !errors.Is(err, Interrupted) {
 		t.Fatalf("got %d, %v; want the interruption", v, err)
 	}
-	s.End(nil)
+	_ = endScope(&s)
 }

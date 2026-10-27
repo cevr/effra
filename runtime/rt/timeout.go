@@ -15,34 +15,70 @@ import "time"
 //   - t is stopped first or while the body runs: the child is stopped and
 //     drained, and the exit is the child's defects with an interruption.
 //
-// A defect in the child is kept on every path (Exit causes, rule 3).
-func After[T any](t *Task, s Scheduler, d time.Duration, body func(*Task) (T, error)) (T, error) {
-	var zero T
+// Every exit of After, including a panic in the Scheduler or Timer provider,
+// passes one unwind boundary. It stops and drains a child that is still
+// running, stops the timer, and adds each cleanup defect after the exit it
+// already holds, so a defect in the child is kept on every path (Exit causes,
+// rules 3 and 4).
+func After[T any](t *Task, s Scheduler, d time.Duration, body func(*Task) (T, error)) (v T, err error) {
 	if t.Stopped() {
-		return zero, Interrupted
+		return v, Interrupted
 	}
-	timer := s.NewTimer(d)
-	defer timer.Stop()
-	h := spawn(t, "timeout.After", body)
-	var c Cause
+	var (
+		c      Cause
+		timer  Timer
+		h      *Handle[T]
+		joined bool // the child's exit is in c
+	)
+	defer func() {
+		if p := recover(); p != nil {
+			c.recovered(t, p, false)
+		}
+		m := t.Mask()
+		if h != nil && !joined {
+			h.task.Interrupt()
+			<-h.done
+			c.Add(defectsOf(h.err))
+		}
+		if timer != nil {
+			stopTimer(t, timer, &c)
+		}
+		m.Unmask()
+		t.settle(&c, nil)
+		if err = c.Err(); err != nil {
+			var zero T
+			v = zero
+		}
+	}()
+	timer = s.NewTimer(d)
+	h = spawn(t, "timeout.After", false, body)
 	select {
 	case <-h.done:
+		joined = true
 		c.Add(h.err)
+		v = h.value
 	case <-timer.C():
 		h.task.Interrupt()
 		<-h.done
+		joined = true
 		c.Add(defectsOf(h.err))
 		c.AddFailure(Expired{})
 	case <-t.Done():
 		h.task.Interrupt()
 		<-h.done
+		joined = true
 		c.Add(defectsOf(h.err))
 	}
-	if t.Stopped() {
-		c.AddInterruption()
-	}
-	if err := c.Err(); err != nil {
-		return zero, err
-	}
-	return h.value, nil
+	return v, nil
+}
+
+// stopTimer disarms a timer as a release: a panic in the provider's Stop is a
+// release defect.
+func stopTimer(t *Task, timer Timer, c *Cause) {
+	defer func() {
+		if p := recover(); p != nil {
+			c.recovered(t, p, true)
+		}
+	}()
+	timer.Stop()
 }

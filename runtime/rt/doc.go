@@ -23,10 +23,19 @@
 //   - A [Scope] owns resources and tasks. [Acquire] registers a release in the
 //     same masked step as the acquisition. [Scope.End] releases in reverse
 //     order on success, failure, panic and stop.
-//   - [Go] starts a task owned by a scope and returns a [Handle]. [Handle.Wait]
-//     returns the value or the cause; [Handle.Stop] stops and drains it. A
-//     scope stops and drains an unconsumed handle before it releases the
-//     resources acquired earlier, which is what makes a structured lend safe.
+//   - [Go] starts a task owned by a scope and returns a [Handle]. The child
+//     starts interruptible, even inside a masked region (pinned Effect 4
+//     fork default); [GoMasked] is the explicit inherit mode, whose body gets
+//     a restore for interruptible sub-regions (ZIO uninterruptibleMask).
+//     [Handle.Wait] returns the value or the cause; [Handle.Stop] stops and
+//     drains it. A scope stops and drains an unconsumed handle before it
+//     releases the resources acquired earlier, which is what makes a
+//     structured lend safe.
+//   - [Run] is the task boundary shared by every child and the root: emitted
+//     main runs its body through it and exits with [ExitCode]. It and
+//     [Scope.End] apply stop-wins: a stop the task can observe beats success.
+//   - A finished task drops its parent link, so ancestry retention is
+//     bounded (G2); a defect keeps its chain as at most 32 copied frames.
 //   - [Clock] and [Scheduler] are the time capabilities, with a [Live] and a
 //     deterministic [Virtual] implementation. [After] is the timeout, written
 //     as an ordinary library function over [Go]-style tasks and a [Scheduler].
@@ -52,6 +61,7 @@
 //     at the join with the chain of tasks that led to it.
 //   - Tokio cooperative budget: the poll pattern. Interruption is cooperative
 //     and checked at points the compiler inserts, not forced by preemption.
-//   - Cats Effect MonadCancel and ZIO: masks nest, a restore returns to the
-//     outer region's state, and a child forked in a masked region inherits it.
+//   - Cats Effect MonadCancel and ZIO: masks nest and a restore returns to the
+//     outer region's state. Effect 4 forks interruptible by default and
+//     inherits only on request, which GoMasked provides.
 package rt

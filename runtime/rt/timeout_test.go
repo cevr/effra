@@ -39,7 +39,7 @@ func TestVirtualClockDrivesTimeout(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > time.Minute {
 		t.Fatalf("a one-hour virtual timeout took %v of wall time", elapsed)
 	}
-	s.End(nil)
+	_ = endScope(&s)
 }
 
 func TestVirtualFiresInDeadlineOrder(t *testing.T) {
@@ -79,7 +79,7 @@ func TestLiveSchedulerTimeout(t *testing.T) {
 	if err := Sleep(root, Live{}, time.Microsecond); err != nil {
 		t.Fatalf("Sleep returned %v", err)
 	}
-	s.End(nil)
+	_ = endScope(&s)
 }
 
 // afterCase runs After as the body of a task, so a test can stop the caller.
@@ -113,7 +113,7 @@ func TestAfterStopsAndDrainsChild(t *testing.T) {
 		if !slices.Equal(log, []string{"child released", "After returned"}) {
 			t.Fatalf("order %v", log)
 		}
-		s.End(nil)
+		_ = endScope(&s)
 	})
 	t.Run("deadline keeps a defect", func(t *testing.T) {
 		v := NewVirtual(epoch)
@@ -129,7 +129,7 @@ func TestAfterStopsAndDrainsChild(t *testing.T) {
 		if !ok || len(c.Reasons) != 2 || c.Reasons[0].Value != "cleanup defect" || c.Reasons[1].Err != (Expired{}) {
 			t.Fatalf("exit %v, want the defect then Expired", err)
 		}
-		s.End(nil)
+		_ = endScope(&s)
 	})
 	t.Run("parent stop interrupts and keeps a defect", func(t *testing.T) {
 		v := NewVirtual(epoch)
@@ -150,7 +150,7 @@ func TestAfterStopsAndDrainsChild(t *testing.T) {
 		if errors.Is(err, Expired{}) {
 			t.Fatal("a parent stop reported Expired")
 		}
-		s.End(nil)
+		_ = endScope(&s)
 	})
 	t.Run("ancestor stop after the body finished", func(t *testing.T) {
 		v := NewVirtual(epoch)
@@ -163,7 +163,7 @@ func TestAfterStopsAndDrainsChild(t *testing.T) {
 		if _, err := h.Wait(); err != Interrupted {
 			t.Fatalf("exit %v, want Interrupted", err)
 		}
-		s.End(nil)
+		_ = endScope(&s)
 	})
 	t.Run("body result", func(t *testing.T) {
 		v := NewVirtual(epoch)
@@ -177,6 +177,6 @@ func TestAfterStopsAndDrainsChild(t *testing.T) {
 		if v.Pending() != 0 {
 			t.Fatal("a finished After left its deadline armed")
 		}
-		s.End(nil)
+		_ = endScope(&s)
 	})
 }
