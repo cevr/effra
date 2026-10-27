@@ -161,8 +161,9 @@ func build(file, out, bin string, kernel bool, rtRoot string) error {
 // findKernelRoot finds the checkout that holds the kernel runtime: the
 // nearest checkout (sketch.FindCheckout) above file, or else above the
 // working directory, whose go.mod declares module sketch.KernelModule
-// (ergo.local/prototype). A checkout that declares another module is named in
-// the error, so a renamed root module reads as a mismatch.
+// (ergo.local/prototype). A checkout that declares another module, or whose
+// go.mod is missing, unreadable or declares no module, is named in the error,
+// so a renamed or broken root module reads as itself, not as no checkout.
 func findKernelRoot(file string) (string, error) {
 	var starts []string
 	if abs, err := filepath.Abs(file); err == nil {
@@ -173,15 +174,20 @@ func findKernelRoot(file string) (string, error) {
 	}
 	var mismatch error
 	for _, dir := range starts {
-		root, mod, ok := sketch.FindCheckout(dir)
-		if !ok {
+		c, found, err := sketch.FindCheckout(dir)
+		if !found {
 			continue
 		}
-		if mod == sketch.KernelModule {
-			return root, nil
+		if err == nil && c.Module == sketch.KernelModule {
+			return c.Root, nil
 		}
-		if mismatch == nil {
-			mismatch = fmt.Errorf("the checkout at %s declares module %s, but kernel mode links %s; pass -rtroot", root, mod, sketch.KernelModule)
+		if mismatch != nil {
+			continue
+		}
+		if err != nil {
+			mismatch = fmt.Errorf("%w; kernel mode links %s; pass -rtroot", err, sketch.KernelModule)
+		} else {
+			mismatch = fmt.Errorf("the checkout at %s declares module %s, but kernel mode links %s; pass -rtroot", c.Root, c.Module, sketch.KernelModule)
 		}
 	}
 	if mismatch != nil {
