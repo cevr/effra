@@ -1,7 +1,8 @@
-// Command checkout is the checkout example in plain Go, for the README comparison.
-// The gate vets it with the rest of the module, and TestReadmeSmoke (cmd/ergo) runs it and
-// compares its output with the Ergo version. checkout.ts beside it is text
-// for the README comparison only; nothing runs it.
+// Command checkout is the checkout example in plain Go, from the earlier
+// language's README comparison with examples/checkout.ef. The gate vets it
+// with the rest of the module; no test runs it since the README presents the
+// 2026 edition. checkout.ts beside it is text only. Both go with the earlier
+// language (#205).
 package main
 
 import (

@@ -1,213 +1,209 @@
 package main
 
 import (
-	"bytes"
+	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"reflect"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
+
+	"ergo.local/prototype/internal/sketch/format"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
-// Ported from scripts/readme_smoke.py: README.md stays truthful. Every code
-// block it shows compiles, is a verbatim excerpt of a named file, or is
-// labelled as a sketch; the three checkout programs print the same thing; and
-// the comparison table quotes real diagnostics.
+// TestReadmeSmoke keeps README.md truthful, as Rust doctests and Go Example
+// tests keep documentation executable. The README presents the 2026 edition
+// (docs/spec), whose checker is in progress, so each claim is held to what
+// runs today:
+//
+//   - every go block parses and is canonical under the 2026 parser and
+//     formatter, with a package clause added, and uses no form the
+//     specification removed: `uses` (#217), `nil` (types.md) or a prefix
+//     catch (rows.md);
+//   - the quoted S102 line is what `ergo diagnostics` prints for
+//     readmeSmokeS102Source;
+//   - each `./bin/ergo` command under "Working in this repo" exits 0 and
+//     prints the output its comment names.
 
 var (
-	readmeSmokeBlock   = regexp.MustCompile("(?ms)^```(rust|ts|go)\n(.*?)^```$")
-	readmeSmokeExcerpt = regexp.MustCompile(`^// From (\S+)$`)
+	readmeSmokeGoBlock = regexp.MustCompile("(?ms)^```go\n(.*?)^```$")
+	// readmeSmokeDiagnostics is the console block that quotes the S102 line.
+	readmeSmokeDiagnostics = regexp.MustCompile("(?ms)^```console\n\\$ ergo diagnostics pay\\.ef\n(.*?)^```$")
+	// readmeSmokeShBlock is the shell block of "Working in this repo".
+	readmeSmokeShBlock = regexp.MustCompile("(?ms)^## Working in this repo\n.*?^```sh\n(.*?)^```$")
+	// readmeSmokeCommand is one `./bin/ergo` line, with an optional
+	// comment; text after the comment's first ": " is the expected output,
+	// one line per " / ".
+	readmeSmokeCommand = regexp.MustCompile(`^\./bin/ergo ([^#]*?)\s*(?:#\s*(.*))?$`)
 )
 
-const readmeSmokeCheckoutOutput = "paid auth-7\nno such order\n"
+// readmeSmokeMinBlocks matches the acceptance check of the README unit.
+const readmeSmokeMinBlocks = 5
 
-type readmeSmokeBlockInfo struct {
-	language, body, first, rest string
+// readmeSmokeS102Source is the 2026-edition file behind the README's quoted
+// diagnostic: pay calls Gateway, which its needs clause does not list.
+const readmeSmokeS102Source = `package checkout
+
+type OrderNotFound struct{ ID string }
+type GatewayDown struct{}
+
+type Order struct {
+	ID    string
+	Total int64
 }
 
-func readmeSmokeBlocks(readme string) []readmeSmokeBlockInfo {
-	var blocks []readmeSmokeBlockInfo
-	for _, match := range readmeSmokeBlock.FindAllStringSubmatch(readme, -1) {
-		first, rest, _ := strings.Cut(match[2], "\n")
-		blocks = append(blocks, readmeSmokeBlockInfo{match[1], match[2], first, rest})
+type Orders interface {
+	Find(id string) (Order, error[OrderNotFound])
+}
+
+type Gateway interface {
+	Charge(order Order) (string, error[GatewayDown])
+}
+
+func pay(id string) (string, error[OrderNotFound | GatewayDown]) needs Orders {
+	order := try Orders.Find(id)
+	return Gateway.Charge(order)
+}
+
+func main() needs Console {
+	Console.Println("unused")
+}
+`
+
+// readmeBlockProblem reports why one README go block is not admissible
+// 2026-edition source, or nil when it is.
+func readmeBlockProblem(body string) error {
+	const header = "package readme\n\n"
+	source := header + body
+	file, err := syntax.Parse(source)
+	if err != nil {
+		// S001 covers `uses` as a clause, since it is not a keyword, and a
+		// prefix catch, which no production admits. The line is the
+		// block's own.
+		if located, ok := err.(*syntax.Error); ok {
+			return fmt.Errorf("line %d, column %d: %s %s", located.Line-strings.Count(header, "\n"), located.Column, located.Code, located.Message)
+		}
+		return err
 	}
-	return blocks
+	var refused []string
+	syntax.Inspect(file, func(n syntax.Node) bool {
+		ident, ok := n.(*syntax.Ident)
+		if !ok {
+			return true
+		}
+		line := strings.Count(source[:int(ident.NamePos)], "\n") + 1 - strings.Count(header, "\n")
+		switch ident.Name {
+		case "nil":
+			refused = append(refused, fmt.Sprintf("line %d: Ergo has no nil (docs/spec/types.md)", line))
+		case "uses":
+			refused = append(refused, fmt.Sprintf("line %d: `uses` was replaced by `needs` and `provides` (#217)", line))
+		}
+		return true
+	})
+	if len(refused) > 0 {
+		return fmt.Errorf("%s", strings.Join(refused, "; "))
+	}
+	if formatted := format.File(file); formatted != source {
+		return fmt.Errorf("not canonical; ergo fmt prints:\n%s", strings.TrimPrefix(formatted, header))
+	}
+	return nil
 }
 
-// readmeSmokeWorkspace copies README.md, every file a README block quotes,
-// and the examples the comparison runs.
-func readmeSmokeWorkspace(t *testing.T) (string, string) {
-	t.Helper()
+func TestReadmeSmoke(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths := []string{"README.md", "examples", "go.mod", "ergo.bindings.json"}
-	for _, block := range readmeSmokeBlocks(string(data)) {
-		if excerpt := readmeSmokeExcerpt.FindStringSubmatch(block.first); excerpt != nil {
-			paths = append(paths, excerpt[1])
-		}
-	}
-	workspace := smokeWorkspace(t, paths...)
-	readme, err := os.ReadFile(filepath.Join(workspace, "README.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return workspace, string(readme)
-}
-
-// readmeSmokeTool runs a non-Ergo tool in the workspace with the
-// environment the test process started with.
-func readmeSmokeTool(t *testing.T, workspace string, argv ...string) string {
-	t.Helper()
-	command := exec.Command(argv[0], argv[1:]...)
-	command.Dir = workspace
-	command.Env = testCLI.environment
-	var stdout, stderr bytes.Buffer
-	command.Stdout, command.Stderr = &stdout, &stderr
-	if err := command.Run(); err != nil {
-		t.Fatalf("%v: %v\nstdout=%s\nstderr=%s", argv, err, stdout.Bytes(), stderr.Bytes())
-	}
-	return stdout.String()
-}
-
-// readmeSmokeEf runs the CLI in the workspace and checks its exit status.
-func readmeSmokeEf(t *testing.T, binary, workspace, input string, success bool, args ...string) []byte {
-	t.Helper()
-	stdout, stderr, code := runTestCLIDir(t, binary, workspace, input, args...)
-	if (code == 0) != success {
-		t.Fatalf("ergo %v exit %d\nstdout=%s\nstderr=%s", args, code, stdout, stderr)
-	}
-	return stdout
-}
-
-func TestReadmeSmoke(t *testing.T) {
-	binary := buildTestCLI(t)
-	workspace, readme := readmeSmokeWorkspace(t)
-	showcaseData, err := os.ReadFile(filepath.Join(workspace, "examples", "checkout.ef"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	showcase := string(showcaseData)
+	readme := string(data)
 
 	t.Run("blocks", func(t *testing.T) {
 		t.Parallel()
-		scratch := t.TempDir()
-		counts := map[string]int{"checked": 0, "excerpt": 0, "sketch": 0, "showcase": 0}
-		for index, block := range readmeSmokeBlocks(readme) {
-			if block.language == "rust" && strings.HasPrefix(block.first, "// Sketch") {
-				counts["sketch"]++
-				continue
-			}
-			if excerpt := readmeSmokeExcerpt.FindStringSubmatch(block.first); excerpt != nil {
-				source, err := os.ReadFile(filepath.Join(workspace, filepath.FromSlash(excerpt[1])))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !strings.Contains(string(source), block.rest) {
-					t.Fatalf("README block %d is not a verbatim excerpt of %s", index, excerpt[1])
-				}
-				counts["excerpt"]++
-				continue
-			}
-			if block.language != "rust" {
-				t.Fatalf("README %s block %d must name its gated source with // From", block.language, index)
-			}
-			snippet := filepath.Join(scratch, "snippet"+strconv.Itoa(index)+".ef")
-			if err := os.WriteFile(snippet, []byte(block.body), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			report := smokeJSON(t, readmeSmokeEf(t, binary, workspace, "", true, "check", snippet))
-			if report["checked"] != true {
-				t.Fatalf("README block %d does not check: %v", index, report["diagnostics"])
-			}
-			if strings.Contains(block.body, "effect fn checkout(") {
-				// The checkout program is the README's headline claim: after the
-				// canonical formatter it must be a verbatim part of the gated
-				// showcase, so the README cannot drift from examples/checkout.ef.
-				formatted := strings.TrimSpace(string(readmeSmokeEf(t, binary, workspace, block.body, true, "fmt", "--stdin")))
-				if !strings.Contains(showcase, formatted) {
-					t.Fatalf("README checkout block %d is not a substring of examples/checkout.ef after ergo fmt", index)
-				}
-				counts["showcase"]++
-			}
-			counts["checked"]++
+		blocks := readmeSmokeGoBlock.FindAllStringSubmatch(readme, -1)
+		if len(blocks) < readmeSmokeMinBlocks {
+			t.Fatalf("README has %d go blocks, want at least %d", len(blocks), readmeSmokeMinBlocks)
 		}
-		if counts["checked"] < 3 || counts["excerpt"] < 6 || counts["sketch"] < 1 || counts["showcase"] != 1 {
-			t.Fatalf("README block counts = %v", counts)
+		for index, block := range blocks {
+			if problem := readmeBlockProblem(block[1]); problem != nil {
+				t.Errorf("README go block %d: %v", index+1, problem)
+			}
 		}
 	})
 
-	// README: the Ergo showcase and its Go comparison print the same thing.
-	for _, program := range []struct {
-		name string
-		run  func(t *testing.T) string
-	}{
-		{"ef-run-go", func(t *testing.T) string {
-			return string(readmeSmokeEf(t, binary, workspace, "", true, "run", "examples/checkout.ef", "--target", "go"))
-		}},
-		{"go-run", func(t *testing.T) string {
-			return readmeSmokeTool(t, workspace, "go", "run", "./examples/compare/go")
-		}},
-	} {
-		t.Run(program.name, func(t *testing.T) {
-			t.Parallel()
-			if output := program.run(t); output != readmeSmokeCheckoutOutput {
-				t.Fatalf("output = %q, want %q", output, readmeSmokeCheckoutOutput)
-			}
-		})
-	}
-
-	t.Run("checkout-contract", func(t *testing.T) {
+	// The check refuses the removed forms; each mutant is one a README
+	// edit could reintroduce.
+	t.Run("refuses-removed-forms", func(t *testing.T) {
 		t.Parallel()
-		report := smokeJSON(t, readmeSmokeEf(t, binary, workspace, "", true, "inspect", "examples/checkout.ef", "checkout"))
-		symbol, _ := report["symbol"].(map[string]any)
-		contract, _ := symbol["contract"].(map[string]any)
-		if want := []any{"GatewayDown", "OrderNotFound", "Timeout"}; !reflect.DeepEqual(contract["failures"], want) {
-			t.Fatalf("failures = %v, want %v", contract["failures"], want)
+		for _, mutant := range []struct{ name, body, want string }{
+			{"uses clause", "func f() uses Console {\n\tConsole.Println(\"x\")\n}\n", "S001"},
+			{"uses name", "func f() {\n\tuses := 1\n\tg(uses)\n}\n", "`uses` was replaced"},
+			{"nil comparison", "func f(x Order) bool {\n\treturn x == nil\n}\n", "no nil"},
+			{"nil value", "func f() Order {\n\treturn nil\n}\n", "no nil"},
+			{"prefix catch of a type", "func f() Receipt {\n\treturn catch Declined {\n\t\tReceipt{}\n\t}\n}\n", "S001"},
+			{"prefix catch of a call", "func f() Receipt {\n\tr := catch Charge(c, 1) {\n\tcase Declined:\n\t\tReceipt{}\n\t}\n\treturn r\n}\n", "S001"},
+			{"not canonical", "func f()   {\n}\n", "not canonical"},
+		} {
+			problem := readmeBlockProblem(mutant.body)
+			if problem == nil || !strings.Contains(problem.Error(), mutant.want) {
+				t.Errorf("%s: got %v, want a refusal naming %q:\n%s", mutant.name, problem, mutant.want, mutant.body)
+			}
 		}
-		if want := []any{"Gateway", "Orders", "Scheduler"}; !reflect.DeepEqual(contract["requirements"], want) {
-			t.Fatalf("requirements = %v, want %v", contract["requirements"], want)
+		control := "func f(x Order) (Receipt, error[Declined]) needs Payments {\n\treturn Payments.Charge(x)\n}\n"
+		if problem := readmeBlockProblem(control); problem != nil {
+			t.Errorf("control block refused: %v", problem)
 		}
 	})
 
-	// Each row of "Same mistakes, three compilers" applies one edit to the
-	// showcase and quotes the resulting diagnostic; both the edit's effect and
-	// the quote are checked.
-	for index, mistake := range []struct{ before, after, quoted string }{
-		{"        Payment.Declined { reason } => \"declined: \" + reason\n", "",
-			"EF117: missing match arm for Payment.Declined"},
-		{"raises { OrderNotFound, GatewayDown, Timeout }", "raises { OrderNotFound, GatewayDown }",
-			"EF107: undeclared failures: Timeout"},
-		{"        .catch<Timeout>(\"gateway timed out\")\n", "",
-			"EF107: undeclared failures: Timeout"},
-		{"    Gateway = FakeGateway(\"auth-7\")\n", "",
-			"EF108: missing service requirements: Gateway"},
-		{"                id,\n                total: 1999\n", "                id\n",
-			"EF114: missing payload field total"},
-		{"        Payment.Authorized {\n            authId\n        }",
-			"        Payment.Authorized {\n            auth: authId\n        }",
-			"EF114: unknown payload field auth"},
-	} {
-		t.Run("mistake-"+strconv.Itoa(index), func(t *testing.T) {
-			t.Parallel()
-			if count := strings.Count(showcase, mistake.before); count != 1 {
-				t.Fatalf("showcase holds %d copies of %q", count, mistake.before)
-			}
-			mutated := filepath.Join(t.TempDir(), "mistake"+strconv.Itoa(index)+".ef")
-			if err := os.WriteFile(mutated, []byte(strings.ReplaceAll(showcase, mistake.before, mistake.after)), 0o644); err != nil {
+	t.Run("diagnostic", func(t *testing.T) {
+		t.Parallel()
+		quoted := readmeSmokeDiagnostics.FindStringSubmatch(readme)
+		if quoted == nil {
+			t.Fatal("README has no `$ ergo diagnostics pay.ef` console block")
+		}
+		binary := buildTestCLI(t)
+		dir := t.TempDir()
+		for name, content := range map[string]string{"ergo.json": "{\"edition\": \"2026\"}\n", "pay.ef": readmeSmokeS102Source} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			output := string(readmeSmokeEf(t, binary, workspace, "", false, "diagnostics", mutated))
-			if !strings.Contains(output, "error "+mistake.quoted) {
-				t.Fatalf("diagnostics lack %q:\n%s", mistake.quoted, output)
+		}
+		stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, dir, "", "diagnostics", "pay.ef")
+		if code == 0 {
+			t.Fatalf("ergo diagnostics pay.ef exited 0\n%s", stdout)
+		}
+		if string(stdout) != quoted[1] {
+			t.Fatalf("ergo diagnostics pay.ef printed %q, README quotes %q\n%s", stdout, quoted[1], stderr)
+		}
+	})
+
+	t.Run("working-in-this-repo", func(t *testing.T) {
+		t.Parallel()
+		block := readmeSmokeShBlock.FindStringSubmatch(readme)
+		if block == nil {
+			t.Fatal("README has no sh block under \"Working in this repo\"")
+		}
+		binary := buildTestCLI(t)
+		workspace := smokeWorkspace(t, "examples/editions", "go.mod", "ergo.bindings.json")
+		commands := 0
+		for _, line := range strings.Split(block[1], "\n") {
+			command := readmeSmokeCommand.FindStringSubmatch(line)
+			if command == nil {
+				continue
 			}
-			if !strings.Contains(readme, "`"+mistake.quoted+"`") {
-				t.Fatalf("README does not quote %s", mistake.quoted)
+			commands++
+			stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, workspace, "", strings.Fields(command[1])...)
+			if code != 0 {
+				t.Errorf("ergo %s: exit %d\n%s%s", command[1], code, stdout, stderr)
+				continue
 			}
-		})
-	}
+			if _, output, ok := strings.Cut(command[2], ": "); ok {
+				if want := strings.ReplaceAll(output, " / ", "\n") + "\n"; string(stdout) != want {
+					t.Errorf("ergo %s printed %q, README says %q", command[1], stdout, want)
+				}
+			}
+		}
+		if commands == 0 {
+			t.Fatal("README runs no ./bin/ergo command under \"Working in this repo\"")
+		}
+	})
 }
