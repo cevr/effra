@@ -238,8 +238,8 @@ func TestTraceHandlerLinksTheFailedCall(t *testing.T) {
 	if ids[badExit].Cause == nil || ids[ok].Kind != rt.TraceCall {
 		t.Fatalf("records %+v", recs)
 	}
-	if exit, _ := find(recs, rt.TraceBodyExit, root.ID()); exit.Link != 0 {
-		t.Fatalf("successful body-exit links %d; want 0", exit.Link)
+	if exit, _ := find(recs, rt.TraceBodyExit, root.ID()); exit.Link != 0 || exit.Origins != nil {
+		t.Fatalf("successful body-exit links %d, origins %v; want none", exit.Link, exit.Origins)
 	}
 }
 
@@ -329,8 +329,11 @@ func TestTraceChildFailureLinksThroughBodyExit(t *testing.T) {
 	if exit.Kind != rt.TraceBodyExit || exit.Task != child {
 		t.Fatalf("handler links %+v; want the body-exit of task %d", exit, child)
 	}
-	if ce := ids[exit.Link]; ce.Kind != rt.TraceCallExit || ce.Link != call {
-		t.Fatalf("child body-exit links %+v; want the call-exit of call %d", ce, call)
+	if len(exit.Origins) != 1 || exit.Link != 0 {
+		t.Fatalf("child body-exit origins %v, link %d; want one origin", exit.Origins, exit.Link)
+	}
+	if ce := ids[exit.Origins[0]]; ce.Kind != rt.TraceCallExit || ce.Link != call {
+		t.Fatalf("child body-exit failure origin %+v; want the call-exit of call %d", ce, call)
 	}
 }
 
@@ -354,8 +357,8 @@ func TestTraceDefectClosesTheOpenCall(t *testing.T) {
 	if ce.Kind != rt.TraceCallExit || ce.Link != call || ce.Defect == nil {
 		t.Fatalf("panic links %+v; want the call-exit of call %d with the defect", ce, call)
 	}
-	if exit, _ := find(recs, rt.TraceBodyExit, root.ID()); exit.Link != p.ID {
-		t.Fatalf("body-exit links %d; want the panic %d", exit.Link, p.ID)
+	if exit, _ := find(recs, rt.TraceBodyExit, root.ID()); len(exit.Origins) != 1 || exit.Origins[0] != p.ID {
+		t.Fatalf("body-exit origins %v; want the panic %d", exit.Origins, p.ID)
 	}
 }
 

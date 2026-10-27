@@ -18,17 +18,21 @@ import (
 //
 // The query states a causal link only where the runtime recorded it: an
 // event's link names the occurrence it refers to (a handler the failure it
-// caught, a body-exit the occurrence its exit carries, a call-exit its call).
-// Where no link was recorded the answer says so and lists candidates by type,
-// labelled as candidates. Before it explains anything the query validates
-// the trace: every definition and site against the model, every task
-// against its start, the parent graph, every link and every defect frame. A
-// trace that fails is refused with the reason, never explained.
+// caught, a call-exit its call, a panic the call it left), and each reason
+// of a body-exit names its own origin (a typed failure the failed call-exit,
+// deadline or child exit it came from, a defect its panic, an interruption
+// its cancel-request). A reason with no recorded origin is answered "origin
+// not recorded", with candidates by type, labelled as candidates; another
+// reason's origin never stands in for it. Before it explains anything the
+// query validates the trace: every definition and site against the model,
+// every task against its start, the parent graph, every link and origin and
+// every defect frame. A trace that fails is refused with the reason, never
+// explained.
 
 const (
 	// TraceSchema is the JSON Lines format a kernel program records
 	// (runtime/rt/rttrace).
-	TraceSchema = "effra-trace-2"
+	TraceSchema = "effra-trace-3"
 	// TraceEvidenceSchema is the envelope a query answers with. Its envelope
 	// fields are those of the review evidence schema (#156): schema,
 	// producer, revision, budgets, omissions and fingerprint.
@@ -64,12 +68,15 @@ type TraceHeader struct {
 }
 
 // TraceReason is one reason of an exit or a call outcome, by type name.
+// Origin, on a body-exit reason only, is the occurrence the runtime recorded
+// as that reason's origin, 0 when none was recorded.
 type TraceReason struct {
 	Reason    string       `json:"reason"`
 	Name      string       `json:"name,omitempty"`
 	Def       string       `json:"def,omitempty"` // the failure's definition ID, resolved by the query
 	InRelease bool         `json:"inRelease,omitempty"`
 	Chain     []TraceFrame `json:"chain,omitempty"`
+	Origin    uint64       `json:"origin,omitempty"`
 }
 
 // TraceFrame is one task of a defect chain.
@@ -373,6 +380,9 @@ func validateTrace(m *Model, h TraceHeader, events []TraceEvent) (*traceIndex, e
 		if err := x.checkLink(&events[i]); err != nil {
 			return nil, fmt.Errorf("event seq %d: %w", events[i].Seq, err)
 		}
+		if err := x.checkOrigins(&events[i]); err != nil {
+			return nil, fmt.Errorf("event seq %d: %w", events[i].Seq, err)
+		}
 	}
 	for i := range events {
 		if err := x.checkFrames(&events[i]); err != nil {
@@ -430,6 +440,9 @@ func (x *traceIndex) resolve(e *TraceEvent) error {
 		}
 		if len(r.Chain) > 0 && r.Reason != "defect" {
 			return fmt.Errorf("a %s reason carries a defect chain", r.Reason)
+		}
+		if r.Origin != 0 && e.Kind != "body-exit" {
+			return fmt.Errorf("a %s reason carries an origin; only a body-exit's reasons do", e.Kind)
 		}
 	}
 	return nil
@@ -505,7 +518,10 @@ func (x *traceIndex) checkLink(e *TraceEvent) error {
 		}
 		return nil
 	}
-	if !slices.Contains([]string{"call-exit", "handler", "body-exit", "observe", "panic"}, e.Kind) {
+	if e.Kind == "body-exit" {
+		return fmt.Errorf("a body-exit carries no link; each of its reasons carries its own origin")
+	}
+	if !slices.Contains([]string{"call-exit", "handler", "observe", "panic"}, e.Kind) {
 		return fmt.Errorf("a %s event carries no link", e.Kind)
 	}
 	if e.Link >= e.ID {
@@ -544,15 +560,6 @@ func (x *traceIndex) checkLink(e *TraceEvent) error {
 			}
 			x.caught[t.ID] = e
 		}
-	case "body-exit":
-		switch {
-		case len(e.Cause) == 0:
-			return fmt.Errorf("a successful body-exit links occurrence %d", t.ID)
-		case t.Task == e.Task:
-			ok = t.Kind == "interrupt" || t.Kind == "panic" || (t.Kind == "call-exit" && len(t.Cause) > 0)
-		case x.isChild(t.Task, e.Task):
-			ok = t.Kind == "deadline" || (t.Kind == "body-exit" && len(t.Cause) > 0)
-		}
 	case "observe":
 		ok = t.Kind == "body-exit" && t.Task == e.Task
 	case "panic":
@@ -560,6 +567,56 @@ func (x *traceIndex) checkLink(e *TraceEvent) error {
 	}
 	if !ok {
 		return fmt.Errorf("%s of task #%d links the %s of task #%d (seq %d), which it cannot refer to", e.Kind, e.Task, t.Kind, t.Task, t.Seq)
+	}
+	return nil
+}
+
+// checkOrigins validates the origin of each reason of e against the reason
+// it explains: a typed failure's origin is a failed call-exit of the same
+// task with that failure, the deadline of a child (for timeout.Expired) or a
+// child's exit with that failure; a defect's origin is the panic of the
+// task that heads its chain, with the same panic type; an interruption's
+// origin is a cancel-request of the same task. Two reasons never share an
+// origin.
+func (x *traceIndex) checkOrigins(e *TraceEvent) error {
+	used := map[uint64]int{}
+	for j, r := range e.Cause {
+		if r.Origin == 0 {
+			continue
+		}
+		if k, dup := used[r.Origin]; dup {
+			return fmt.Errorf("reasons %d and %d of the body-exit name the same origin %d", k, j, r.Origin)
+		}
+		used[r.Origin] = j
+		if r.Origin >= e.ID {
+			return fmt.Errorf("reason %d of the body-exit (id %d) names origin %d, which was raised after it", j, e.ID, r.Origin)
+		}
+		t := x.byID[r.Origin]
+		if t == nil {
+			if !x.dropped {
+				return fmt.Errorf("reason %d of the body-exit names origin %d, which is not in the trace", j, r.Origin)
+			}
+			x.omit = append(x.omit, TraceOmission{Kind: "unresolvedLink", Task: e.Task, Detail: fmt.Sprintf("reason %d of the body-exit at seq %d names origin %d, which the recorder dropped", j, e.Seq, r.Origin)})
+			continue
+		}
+		ok := false
+		switch r.Reason {
+		case "failure":
+			switch {
+			case t.Task == e.Task:
+				ok = t.Kind == "call-exit" && hasFailure(t.Cause, r.Def)
+			case x.isChild(t.Task, e.Task):
+				ok = (t.Kind == "deadline" && r.Def == expiredType) || (t.Kind == "body-exit" && hasFailure(t.Cause, r.Def))
+			}
+		case "defect":
+			ok = t.Kind == "panic" && len(r.Chain) > 0 && t.Task == r.Chain[0].Task &&
+				len(t.Cause) == 1 && t.Cause[0].Name == r.Name && t.Cause[0].InRelease == r.InRelease
+		case "interrupted":
+			ok = t.Kind == "cancel-request" && t.Task == e.Task
+		}
+		if !ok {
+			return fmt.Errorf("the %s reason of task #%d's body-exit names the %s of task #%d (seq %d) as its origin, which cannot raise it", r.Reason, e.Task, t.Kind, t.Task, t.Seq)
+		}
 	}
 	return nil
 }
@@ -705,25 +762,8 @@ func (x *traceIndex) calls() []TraceCallSpan {
 func (x *traceIndex) causeTrace(root *TraceTask) []string {
 	c := &causeWriter{x: x, seen: map[uint64]bool{}}
 	c.say(0, "task #%d %s (%s, %s) exited with %s", root.Task, root.Def, root.DefKind, root.Site, exitText(root.Exit, root.Exited))
-	exit := x.exit[root.Task]
-	for _, r := range root.Exit {
-		switch r.Reason {
-		case "failure":
-			c.say(1, "failure %s", r.Def)
-			c.carried(exit, r.Def, 2)
-		case "defect":
-			c.say(1, "defect %s, chain:", r.Name)
-			for _, f := range r.Chain {
-				d, _ := x.m.Def(f.Def)
-				c.say(2, "task #%d %s at %s", f.Task, f.Def, d.Site)
-			}
-			if l := x.byID[exit.Link]; exit.Link != 0 && (l == nil || l.Kind == "panic") {
-				c.origin(exit.Link, 2, "carried ")
-			}
-		case "interrupted":
-			c.say(1, "interrupted")
-			c.stopFacts(root.Task, 2)
-		}
+	if exit := x.exit[root.Task]; exit != nil {
+		c.reasons(exit, 1)
 	}
 	for i := range x.events {
 		e := &x.events[i]
@@ -732,12 +772,56 @@ func (x *traceIndex) causeTrace(root *TraceTask) []string {
 		}
 		c.say(1, "handled %s at %s in %s (task #%d, seq %d)", e.Def, e.Site, e.In, e.Task, e.Seq)
 		if e.Link != 0 {
-			c.origin(e.Link, 2, "caught ")
+			c.origin(e.Link, e.Def, 2, "caught ")
 			continue
 		}
 		c.unrecorded(e.Task, e.Def, e.ID, 2)
 	}
 	return c.out
+}
+
+// reasons explains each reason of body-exit e from that reason's own
+// recorded origin, and says "origin not recorded" where it has none.
+func (c *causeWriter) reasons(e *TraceEvent, depth int) {
+	for _, r := range e.Cause {
+		switch r.Reason {
+		case "failure":
+			c.say(depth, "failure %s", r.Def)
+			c.reasonOrigin(e, r, depth+1)
+		case "defect":
+			in := ""
+			if r.InRelease {
+				in = " in a release"
+			}
+			c.say(depth, "defect %s%s, chain:", r.Name, in)
+			for _, f := range r.Chain {
+				d, _ := c.x.m.Def(f.Def)
+				c.say(depth+1, "task #%d %s at %s", f.Task, f.Def, d.Site)
+			}
+			c.reasonOrigin(e, r, depth+1)
+		case "interrupted":
+			c.say(depth, "interrupted")
+			c.reasonOrigin(e, r, depth+1)
+			c.stopFacts(e.Task, depth+1)
+		}
+	}
+}
+
+// reasonOrigin explains the recorded origin of reason r of body-exit e.
+func (c *causeWriter) reasonOrigin(e *TraceEvent, r TraceReason, depth int) {
+	if r.Origin != 0 {
+		verb := map[string]string{"failure": "carried ", "defect": "raised by ", "interrupted": "requested by "}[r.Reason]
+		c.origin(r.Origin, r.Def, depth, verb)
+		return
+	}
+	switch r.Reason {
+	case "failure":
+		c.unrecorded(e.Task, r.Def, e.ID, depth)
+	case "defect":
+		c.say(depth, "origin not recorded: no event links this defect")
+	case "interrupted":
+		c.say(depth, "origin not recorded: no event links the stop request")
+	}
 }
 
 // causeWriter writes cause-trace lines. seen guards every traversal: an
@@ -752,21 +836,9 @@ func (c *causeWriter) say(depth int, format string, args ...any) {
 	c.out = append(c.out, strings.Repeat("  ", depth)+fmt.Sprintf(format, args...))
 }
 
-// carried explains the occurrence a failed exit e carries for failure def.
-func (c *causeWriter) carried(e *TraceEvent, def string, depth int) {
-	switch {
-	case e == nil:
-		c.say(depth, "the body-exit is not in the trace")
-	case e.Link != 0:
-		c.origin(e.Link, depth, "carried ")
-	default:
-		c.unrecorded(e.Task, def, e.ID, depth)
-	}
-}
-
-// origin explains occurrence id, which a recorded link named.
-// origin explains occurrence id, which a recorded link named.
-func (c *causeWriter) origin(id uint64, depth int, verb string) {
+// origin explains occurrence id, which a recorded link or origin named for
+// failure def ("" for a reason that is not a typed failure).
+func (c *causeWriter) origin(id uint64, def string, depth int, verb string) {
 	x := c.x
 	e := x.byID[id]
 	if e == nil {
@@ -793,22 +865,24 @@ func (c *causeWriter) origin(id uint64, depth int, verb string) {
 	case "body-exit":
 		d, _ := x.m.Def(e.Def)
 		c.say(depth, "%sthe exit of task #%d %s (%s at %s) with %s (seq %d)", verb, e.Task, e.Def, d.Kind, d.Site, exitText(e.Cause, true), e.Seq)
-		if e.Link != 0 {
-			c.origin(e.Link, depth+1, "carried ")
-		} else {
-			for _, r := range e.Cause {
-				if r.Reason == "failure" {
-					c.unrecorded(e.Task, r.Def, e.ID, depth+1)
-				}
+		// The child's failure def reached the owner: explain that reason of
+		// the child's exit from its own origin.
+		for _, r := range e.Cause {
+			if r.Reason == "failure" && r.Def == def {
+				c.reasonOrigin(e, r, depth+1)
+				break
 			}
 		}
-	case "interrupt":
-		c.say(depth, "%sthe stop task #%d observed in %s at %s (seq %d)", verb, e.Task, e.In, e.Site, e.Seq)
-		c.stopFacts(e.Task, depth+1)
+	case "cancel-request":
+		c.say(depth, "%sthe cancel-request of task #%d (seq %d)", verb, e.Task, e.Seq)
 	case "panic":
-		c.say(depth, "%sthe defect %s in task #%d (seq %d)", verb, exitText(e.Cause, true), e.Task, e.Seq)
+		in := ""
+		if len(e.Cause) == 1 && e.Cause[0].InRelease {
+			in = " in a release"
+		}
+		c.say(depth, "%sthe panic %s%s in task #%d (seq %d)", verb, exitText(e.Cause, true), in, e.Task, e.Seq)
 		if e.Link != 0 {
-			c.origin(e.Link, depth+1, "left ")
+			c.origin(e.Link, "", depth+1, "left ")
 		}
 	}
 }
@@ -916,6 +990,17 @@ func (ev *TraceEvidence) Text() string {
 		extra := e.In
 		if len(e.Cause) > 0 {
 			extra = strings.TrimSpace(extra + " -> " + exitText(e.Cause, true))
+		}
+		var origins []string
+		for _, r := range e.Cause {
+			if r.Origin != 0 {
+				origins = append(origins, fmt.Sprint(r.Origin))
+			} else if e.Kind == "body-exit" {
+				origins = append(origins, "-")
+			}
+		}
+		if len(origins) > 0 {
+			extra += " (origins " + strings.Join(origins, ", ") + ")"
 		}
 		link := ""
 		if e.Link != 0 {

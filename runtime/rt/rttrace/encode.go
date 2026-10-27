@@ -92,6 +92,10 @@ func (r Reason) appendJSON(b []byte) []byte {
 		}
 		b = append(b, ']')
 	}
+	if r.Origin != 0 {
+		b = append(b, `,"origin":`...)
+		b = strconv.AppendUint(b, r.Origin, 10)
+	}
 	return append(b, '}')
 }
 

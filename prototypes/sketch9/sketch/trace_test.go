@@ -126,6 +126,23 @@ var (
 	interrupted = TraceReason{Reason: "interrupted"}
 )
 
+// origin returns r with its recorded origin set to id.
+func origin(r TraceReason, id uint64) TraceReason {
+	r.Origin = id
+	return r
+}
+
+// mainDefect is a string defect raised in the root task.
+func mainDefect(inRelease bool) TraceReason {
+	return TraceReason{Reason: "defect", Name: "string", InRelease: inRelease, Chain: []TraceFrame{{Task: 1, Def: "latency.main"}}}
+}
+
+// cleanup is the panic event of a string defect raised by a release of the
+// root task.
+func cleanup(id uint64) TraceEvent {
+	return task(id, 0, "panic", 1, 0, TraceReason{Reason: "defect", Name: "string", InRelease: true})
+}
+
 // The query accepts the valid partial orders the runtime produces, including
 // a stop requested before a task starts, and reads only recorded links.
 func TestQueryTraceAcceptsValidOrders(t *testing.T) {
@@ -228,7 +245,17 @@ func TestQueryTraceRefuses(t *testing.T) {
 		{"handler of another type", "cannot refer to", recorded(src, 0, start, call, failed, point(4, 3, "handler", 1, 0, "latency.GatewayDown", "timeout.sketch:73:2"))},
 		{"handler of an ok call", "cannot refer to", recorded(src, 0, start, call, point(3, 2, "call-exit", 1, 0, findID, findSite), point(4, 3, "handler", 1, 0, "latency.OrderNotFound", "timeout.sketch:71:2"))},
 		{"two handlers, one failure", "caught by two handlers", recorded(src, 0, start, call, failed, handler, point(5, 3, "handler", 1, 0, "latency.OrderNotFound", "timeout.sketch:71:2"))},
-		{"successful exit with a link", "successful body-exit", recorded(src, 0, start, call, failed, handler, task(5, 3, "body-exit", 1, 0))},
+		{"body-exit with a link", "a body-exit carries no link", recorded(src, 0, start, call, failed, handler, task(5, 3, "body-exit", 1, 0))},
+		// Round-2 M1: each reason's origin must be able to raise that reason.
+		{"failure origin is a cleanup panic", "cannot raise it", recorded(src, 0, start, call, failed, cleanup(4), task(5, 0, "body-exit", 1, 0, origin(notFound, 4), origin(mainDefect(true), 0)))},
+		{"failure origin is an ok call", "cannot raise it", recorded(src, 0, start, call, point(3, 2, "call-exit", 1, 0, findID, findSite), task(4, 0, "body-exit", 1, 0, origin(notFound, 3)))},
+		{"defect origin of another type", "cannot raise it", recorded(src, 0, start, task(2, 0, "panic", 1, 0, TraceReason{Reason: "defect", Name: "int"}), task(3, 0, "body-exit", 1, 0, origin(mainDefect(false), 2)))},
+		{"defect origin is a call-exit", "cannot raise it", recorded(src, 0, start, call, failed, task(4, 0, "body-exit", 1, 0, origin(mainDefect(false), 3)))},
+		{"interruption origin of another task", "cannot raise it", recorded(src, 0, start, child, task(3, 0, "cancel-request", 2, 1), task(4, 0, "body-exit", 1, 0, origin(interrupted, 3)))},
+		{"two reasons, one origin", "the same origin", recorded(src, 0, start, call, failed, task(4, 0, "body-exit", 1, 0, origin(notFound, 3), origin(notFound, 3)))},
+		{"origin on a call-exit reason", "only a body-exit's reasons", recorded(src, 0, start, call, point(3, 2, "call-exit", 1, 0, findID, findSite, origin(notFound, 2)))},
+		{"origin raised after the exit", "raised after it", recorded(src, 0, start, call, task(3, 0, "body-exit", 1, 0, origin(notFound, 4)), point(4, 2, "call-exit", 1, 0, findID, findSite, notFound))},
+		{"origin not in the trace", "not in the trace", recorded(src, 0, start, task(3, 0, "body-exit", 1, 0, origin(notFound, 2)))},
 		{"link on a kind without links", "carries no link", recorded(src, 0, start, point(2, 1, "construct", 1, 0, "latency.Live", "timeout.sketch:70:13"))},
 		{"unknown failure type", "not an error type", recorded(src, 0, start, call, point(3, 2, "call-exit", 1, 0, findID, findSite, TraceReason{Reason: "failure", Name: "Ghost"}))},
 		// M3: a valid outer event with an invalid nested frame.
@@ -293,6 +320,67 @@ func TestQueryTraceStatesOnlyRecordedLinks(t *testing.T) {
 			if s.Exit == 0 || s.DurationNs <= 0 {
 				t.Errorf("%s: call %+v has no recorded span", tc.name, s)
 			}
+		}
+	}
+}
+
+// Each reason of a compound exit is explained from its own origin (round-2
+// M1): the failure from its failed call-exit, each cleanup defect from its own
+// panic, the interruption from its cancel-request. A reason without an origin
+// is "origin not recorded", even when another reason of the exit has one.
+func TestQueryTraceExplainsEachReason(t *testing.T) {
+	c, src := loadFile(t, "../testdata/trace/timeout.sketch")
+	m := NewModel(c)
+	start := task(1, 0, "start", 1, 0)
+	call := point(2, 0, "call", 1, 0, findID, findSite)
+	failed := point(3, 2, "call-exit", 1, 0, findID, findSite, notFound)
+	failedLine := "    carried the failure latency.OrderNotFound of call latency.Orders.Find at timeout.sketch:38:15 in latency.checkout, whose row is error[latency.OrderNotFound] (call seq 1, call-exit seq 2)"
+	for _, tc := range []struct {
+		name string
+		evs  []TraceEvent
+		want []string
+	}{
+		{"failure and two cleanup defects", []TraceEvent{start, call, failed, cleanup(4), cleanup(5),
+			task(6, 0, "body-exit", 1, 0, origin(notFound, 3), origin(mainDefect(true), 4), origin(mainDefect(true), 5))}, []string{
+			"task #1 latency.main (func, timeout.sketch:81:1) exited with failure latency.OrderNotFound, defect string, defect string",
+			"  failure latency.OrderNotFound",
+			failedLine,
+			"  defect string in a release, chain:",
+			"    task #1 latency.main at timeout.sketch:81:1",
+			"    raised by the panic defect string in a release in task #1 (seq 3)",
+			"  defect string in a release, chain:",
+			"    task #1 latency.main at timeout.sketch:81:1",
+			"    raised by the panic defect string in a release in task #1 (seq 4)",
+		}},
+		// The reviewer's compound case with the failure's origin unrecorded:
+		// the cleanup defect's panic is never offered as its origin.
+		{"failure without origin beside a cleanup defect", []TraceEvent{start, call, failed, cleanup(4),
+			task(5, 0, "body-exit", 1, 0, notFound, origin(mainDefect(true), 4))}, []string{
+			"task #1 latency.main (func, timeout.sketch:81:1) exited with failure latency.OrderNotFound, defect string",
+			"  failure latency.OrderNotFound",
+			"    origin not recorded: no event links the occurrence of latency.OrderNotFound",
+			"      candidate by type only: call latency.Orders.Find at timeout.sketch:38:15 ended failure latency.OrderNotFound (call-exit seq 2)",
+			"  defect string in a release, chain:",
+			"    task #1 latency.main at timeout.sketch:81:1",
+			"    raised by the panic defect string in a release in task #1 (seq 3)",
+		}},
+		{"failure and interruption", []TraceEvent{start, task(2, 0, "cancel-request", 1, 0), point(3, 0, "call", 1, 0, findID, findSite), point(4, 3, "call-exit", 1, 0, findID, findSite, notFound),
+			task(5, 0, "body-exit", 1, 0, origin(notFound, 4), origin(interrupted, 2))}, []string{
+			"task #1 latency.main (func, timeout.sketch:81:1) exited with failure latency.OrderNotFound, interrupted",
+			"  failure latency.OrderNotFound",
+			"    carried the failure latency.OrderNotFound of call latency.Orders.Find at timeout.sketch:38:15 in latency.checkout, whose row is error[latency.OrderNotFound] (call seq 2, call-exit seq 3)",
+			"  interrupted",
+			"    requested by the cancel-request of task #1 (seq 1)",
+			"    cancel-request of task #1 (seq 1)",
+			"    task #1 exited with failure latency.OrderNotFound, interrupted (seq 4)",
+		}},
+	} {
+		ev, err := QueryTrace(m, Revision(src), recorded(src, 0, tc.evs...))
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if !slices.Equal(ev.CauseTrace, tc.want) {
+			t.Errorf("%s: cause trace\n%s\nwant\n%s", tc.name, strings.Join(ev.CauseTrace, "\n"), strings.Join(tc.want, "\n"))
 		}
 	}
 }

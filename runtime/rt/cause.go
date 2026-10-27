@@ -138,9 +138,14 @@ func (c *Cause) recovered(t *Task, p any, inRelease bool) {
 }
 
 func (c *Cause) defect(t *Task, p any, inRelease bool) {
-	c.Reasons = append(c.Reasons, Reason{Kind: KindDefect, Value: p, Chain: t.Chain(), InRelease: inRelease})
+	chain := t.Chain()
+	c.Reasons = append(c.Reasons, Reason{Kind: KindDefect, Value: p, Chain: chain, InRelease: inRelease})
 	if t.trace != nil {
-		t.traceDefect(p, inRelease)
+		var left uint64
+		if !inRelease {
+			left = t.traceUnwind(p, 0)
+		}
+		t.traceDefect(p, inRelease, left, &chain[0])
 	}
 }
 

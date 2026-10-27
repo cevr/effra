@@ -62,12 +62,12 @@ func TestTraceRecorderIsBounded(t *testing.T) {
 // quotes, control characters, non-ASCII text and invalid UTF-8.
 func TestEncodeRoundTripsThroughEncodingJSON(t *testing.T) {
 	want := Line{Seq: 7, Time: -3, ID: 9, Link: 4, Kind: "body-exit", Task: 2, Parent: 1, Def: "a\"b\\c\n\x01é→", Site: "s.sketch:1:2",
-		Cause: []Reason{{Reason: "defect", Name: "x\x7f", InRelease: true, Chain: []Frame{{Task: 2, Def: "d"}, {Task: 1, Def: "e"}}}, {Reason: "interrupted"}}}
+		Cause: []Reason{{Reason: "defect", Name: "x\x7f", InRelease: true, Chain: []Frame{{Task: 2, Def: "d"}, {Task: 1, Def: "e"}}}, {Reason: "interrupted", Origin: 5}}}
 	var got Line
 	if err := json.Unmarshal(want.appendJSON(nil), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Def != want.Def || got.Seq != 7 || got.Time != -3 || got.ID != 9 || got.Link != 4 || len(got.Cause) != 2 || !got.Cause[0].InRelease || len(got.Cause[0].Chain) != 2 || got.Cause[0].Name != "x\x7f" {
+	if got.Def != want.Def || got.Seq != 7 || got.Time != -3 || got.ID != 9 || got.Link != 4 || len(got.Cause) != 2 || !got.Cause[0].InRelease || len(got.Cause[0].Chain) != 2 || got.Cause[0].Name != "x\x7f" || got.Cause[1].Origin != 5 || got.Cause[0].Origin != 0 {
 		t.Fatalf("round trip: %+v; want %+v", got, want)
 	}
 	var bad Line

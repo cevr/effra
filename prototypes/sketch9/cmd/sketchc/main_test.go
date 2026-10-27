@@ -48,7 +48,7 @@ func TestTraceByteBudgetBeforeRead(t *testing.T) {
 // A trace within the budget is read whole, byte for byte.
 func TestReadTraceWithinBudget(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "small.jsonl")
-	want := "{\"schema\":\"effra-trace-2\"}\n"
+	want := "{\"schema\":\"effra-trace-3\"}\n"
 	if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
 		t.Fatal(err)
 	}

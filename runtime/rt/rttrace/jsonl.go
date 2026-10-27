@@ -10,7 +10,7 @@ import (
 )
 
 // Schema names the JSON Lines format WriteJSONL writes.
-const Schema = "effra-trace-2"
+const Schema = "effra-trace-3"
 
 // Header is the first line of a JSON Lines trace. The revision is written
 // once here; events carry plain definition IDs, which the revision qualifies.
@@ -43,12 +43,17 @@ type Line struct {
 // Reason is one reason of a body-exit cause, the outcome of a call-exit, or
 // the defect of a panic event. It names types, never values: a typed failure
 // by its type name, a defect by the type of its panic value. A call-exit with
-// no reason returned ok.
+// no reason returned ok. Origin, on a body-exit reason only, is the
+// occurrence the runtime recorded as that reason's origin (rt.Event.Origins):
+// the failed call-exit, deadline or child body-exit of a typed failure, the
+// panic of a defect, the cancel-request of an interruption; 0 when none was
+// recorded.
 type Reason struct {
 	Reason    string  `json:"reason"` // failure, defect or interrupted
 	Name      string  `json:"name,omitempty"`
 	InRelease bool    `json:"inRelease,omitempty"`
 	Chain     []Frame `json:"chain,omitempty"`
+	Origin    uint64  `json:"origin,omitempty"`
 }
 
 // Frame is one task of a defect's chain (G2).
@@ -80,6 +85,11 @@ func Lines(recs []Record, sites map[string]string) []Line {
 		switch r.Kind {
 		case rt.TraceBodyExit:
 			l.Cause = Reasons(r.Cause)
+			for j := range l.Cause {
+				if j < len(r.Origins) {
+					l.Cause[j].Origin = r.Origins[j]
+				}
+			}
 		case rt.TraceCallExit:
 			if r.Defect != nil {
 				l.Cause = []Reason{{Reason: "defect", Name: typeName(r.Defect)}}
