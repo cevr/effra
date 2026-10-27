@@ -4,28 +4,28 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"effra.local/prototype/internal/sketch/sketchtest"
 )
 
 // FuzzParse: Parse never panics, and every error is a located S001 whose
 // line and column agree with its byte offset. The corpus, the spec fences
 // and the fixture tables are the seeds.
 func FuzzParse(f *testing.F) {
-	v0, superseded := corpusFiles(f)
-	for _, src := range v0 {
-		f.Add(src)
+	positive, err := sketchtest.Positive()
+	if err != nil {
+		f.Fatal(err)
 	}
-	for _, src := range superseded {
-		f.Add(src)
+	_, superseded, err := sketchtest.Corpus()
+	if err != nil {
+		f.Fatal(err)
 	}
-	for _, src := range specFences(f) {
-		f.Add(src)
+	for _, in := range append(positive, superseded...) {
+		f.Add(in.Src)
 	}
-	for _, g := range grammarFixtures {
-		f.Add(g.src)
-	}
-	for _, m := range malformedTable {
-		if m.generate == nil {
-			f.Add(m.src)
+	for _, m := range sketchtest.MalformedTable {
+		if m.Generate == nil {
+			f.Add(m.Src)
 		}
 	}
 	f.Fuzz(func(t *testing.T, src string) {

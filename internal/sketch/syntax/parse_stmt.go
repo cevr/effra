@@ -238,7 +238,10 @@ func (p *parser) parseIfStmt() *IfStmt {
 		p.errorf("expected \"{\", found %s", p.found())
 	}
 	s.Body = p.parseBlock()
-	if p.got(ELSE) {
+	s.ElsePos = NoPos
+	if p.tok.tok == ELSE {
+		s.ElsePos = p.tok.pos
+		p.next()
 		switch p.tok.tok {
 		case IF:
 			s.Else = p.parseIfStmt()

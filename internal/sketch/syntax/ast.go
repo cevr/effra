@@ -772,11 +772,12 @@ type (
 	// IfStmt is `if [init;] cond { } [else …]`; Else is an *IfStmt or a
 	// *BlockStmt.
 	IfStmt struct {
-		If   Pos
-		Init Stmt
-		Cond Expr
-		Body *BlockStmt
-		Else Stmt
+		If      Pos
+		Init    Stmt
+		Cond    Expr
+		Body    *BlockStmt
+		ElsePos Pos // NoPos without else
+		Else    Stmt
 	}
 
 	// SwitchStmt is an expression switch.

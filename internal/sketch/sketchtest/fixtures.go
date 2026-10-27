@@ -1,4 +1,4 @@
-package syntax
+package sketchtest
 
 import "strings"
 
@@ -6,11 +6,11 @@ import "strings"
 // (grammar fixtures and malformed inputs), so the parser and printer tests
 // run them at the public seam without the CLI.
 
-// grammarFixtures are designed forms of docs/spec/grammar.md, the Go
+// GrammarFixtures are designed forms of docs/spec/grammar.md, the Go
 // fallback and the decided extensions (spec D8) that the corpus and the
 // spec fences do not all cover. Each must parse, format idempotently and
 // canonically, and keep its comments and tokens.
-var grammarFixtures = []struct{ name, src string }{
+var GrammarFixtures = []struct{ Name, Src string }{
 	{"constraints-and-instantiation", `package p
 
 import "cmp"
@@ -237,47 +237,47 @@ func build() {
 `},
 }
 
-type malformed struct {
-	name     string
-	src      string
-	generate func() string
-	lines    []int // acceptable lines of the first diagnostic
+type Malformed struct {
+	Name     string
+	Src      string
+	Generate func() string
+	Lines    []int // acceptable lines of the first diagnostic
 }
 
-// malformedTable: each input must give a located, registered syntax
+// MalformedTable: each input must give a located, registered syntax
 // diagnostic (S0xx in docs/spec/diagnostics.md) on one of the listed lines;
 // ef fmt must exit 2, name the code and leave the file unchanged.
-var malformedTable = []malformed{
-	{name: "enum-type", src: "package p\n\ntype Payment enum {\n\tPending\n}\n", lines: []int{3}},
-	{name: "const-removed", src: "package p\n\nconst limit = 3\n", lines: []int{3}},
-	{name: "goto-removed", src: "package p\n\nfunc f() {\nagain:\n\tgoto again\n}\n", lines: []int{5}},
-	{name: "fallthrough-removed", src: "package p\n\nfunc f(x int64) {\n\tswitch x {\n\tcase 1:\n\t\tfallthrough\n\tdefault:\n\t}\n}\n", lines: []int{6}},
-	{name: "unterminated-string", src: "package p\n\nfunc f() {\n\tx := \"abc\n}\n", lines: []int{4}},
-	{name: "unterminated-raw-string", src: "package p\n\nvar s = `abc\n", lines: []int{3}},
-	{name: "unterminated-block-comment", src: "package p\n\n/* open\nfunc f() {}\n", lines: []int{3}},
-	{name: "nonletter-identifier", src: "package p\n\nfunc f() {\n\tx⪪ := 1\n}\n", lines: []int{4}},
-	{name: "invalid-utf8", src: "package p\n\nfunc f() {\n\t\xff := 1\n}\n", lines: []int{4}},
-	{name: "unknown-number-suffix", src: "package p\n\nvar d = 5kg\n", lines: []int{3}},
-	{name: "mixed-keyed-positional", src: "package p\n\nvar o = Order{ID: \"1\", 2}\n", lines: []int{3}},
-	{name: "missing-package", src: "func f() {}\n", lines: []int{1}},
-	{name: "import-after-declaration", src: "package p\n\nfunc f() {}\n\nimport \"strings\"\n", lines: []int{5}},
-	{name: "unclosed-brace", src: "package p\n\nfunc f() {\n\tg()\n", lines: []int{4, 5}},
-	{name: "stray-paren", src: "package p\n\nfunc f() {\n\tg())\n}\n", lines: []int{4}},
-	{name: "union-trailing-bar", src: "package p\n\ntype U interface{ A | }\n", lines: []int{3}},
-	{name: "multi-subject-arity", src: "package p\n\nfunc f(a A, b B) {\n\tswitch x, y := a.(type) {\n\tcase (A, B):\n\t}\n}\n", lines: []int{4}},
-	{name: "tuple-case-in-single-switch", src: "package p\n\nfunc f(a A) {\n\tswitch x := a.(type) {\n\tcase (A, B):\n\t\tuse(x)\n\t}\n}\n", lines: []int{5}},
-	{name: "machine-unknown-entry", src: "package p\n\ntype M machine[S, E] {\n\tinitial Idle{}\n\tstart step\n}\n", lines: []int{5}},
-	{name: "go-without-call", src: "package p\n\nfunc f() {\n\tgo x\n}\n", lines: []int{4}},
-	{name: "type-guard-outside-switch", src: "package p\n\nfunc f(v V) {\n\tt := v.(type)\n\tuse(t)\n}\n", lines: []int{4}},
-	{name: "bare-try", src: "package p\n\nfunc f() {\n\tx := try\n}\n", lines: []int{4, 5}},
-	{name: "catch-binding-not-a-name", src: "package p\n\nfunc f() {\n\tx := g() catch 1 {\n\t}\n}\n", lines: []int{4}},
-	{name: "end-of-statement", src: "package p\n\nfunc f() {\n\tx := 1 2\n}\n", lines: []int{4}},
-	{name: "two-receivers", src: "package p\n\nfunc (a A, b B) M() {}\n", lines: []int{3}},
-	{name: "unexpected-character", src: "package p\n\nfunc f() {\n\tx := 1 # 2\n}\n", lines: []int{4}},
-	{name: "defer-non-simple", src: "package p\n\nfunc f() {\n\tdefer if true {}\n}\n", lines: []int{4}},
-	{name: "empty-type-parameters", src: "package p\n\nfunc f[]() {}\n", lines: []int{3}},
-	{name: "parenless-trailing-block", src: "package p\n\nfunc f() {\n\tsync.Atomically {\n\t\tmove()\n\t}\n}\n", lines: []int{5}},
-	{name: "deep-nesting", generate: func() string {
+var MalformedTable = []Malformed{
+	{Name: "enum-type", Src: "package p\n\ntype Payment enum {\n\tPending\n}\n", Lines: []int{3}},
+	{Name: "const-removed", Src: "package p\n\nconst limit = 3\n", Lines: []int{3}},
+	{Name: "goto-removed", Src: "package p\n\nfunc f() {\nagain:\n\tgoto again\n}\n", Lines: []int{5}},
+	{Name: "fallthrough-removed", Src: "package p\n\nfunc f(x int64) {\n\tswitch x {\n\tcase 1:\n\t\tfallthrough\n\tdefault:\n\t}\n}\n", Lines: []int{6}},
+	{Name: "unterminated-string", Src: "package p\n\nfunc f() {\n\tx := \"abc\n}\n", Lines: []int{4}},
+	{Name: "unterminated-raw-string", Src: "package p\n\nvar s = `abc\n", Lines: []int{3}},
+	{Name: "unterminated-block-comment", Src: "package p\n\n/* open\nfunc f() {}\n", Lines: []int{3}},
+	{Name: "nonletter-identifier", Src: "package p\n\nfunc f() {\n\tx⪪ := 1\n}\n", Lines: []int{4}},
+	{Name: "invalid-utf8", Src: "package p\n\nfunc f() {\n\t\xff := 1\n}\n", Lines: []int{4}},
+	{Name: "unknown-number-suffix", Src: "package p\n\nvar d = 5kg\n", Lines: []int{3}},
+	{Name: "mixed-keyed-positional", Src: "package p\n\nvar o = Order{ID: \"1\", 2}\n", Lines: []int{3}},
+	{Name: "missing-package", Src: "func f() {}\n", Lines: []int{1}},
+	{Name: "import-after-declaration", Src: "package p\n\nfunc f() {}\n\nimport \"strings\"\n", Lines: []int{5}},
+	{Name: "unclosed-brace", Src: "package p\n\nfunc f() {\n\tg()\n", Lines: []int{4, 5}},
+	{Name: "stray-paren", Src: "package p\n\nfunc f() {\n\tg())\n}\n", Lines: []int{4}},
+	{Name: "union-trailing-bar", Src: "package p\n\ntype U interface{ A | }\n", Lines: []int{3}},
+	{Name: "multi-subject-arity", Src: "package p\n\nfunc f(a A, b B) {\n\tswitch x, y := a.(type) {\n\tcase (A, B):\n\t}\n}\n", Lines: []int{4}},
+	{Name: "tuple-case-in-single-switch", Src: "package p\n\nfunc f(a A) {\n\tswitch x := a.(type) {\n\tcase (A, B):\n\t\tuse(x)\n\t}\n}\n", Lines: []int{5}},
+	{Name: "machine-unknown-entry", Src: "package p\n\ntype M machine[S, E] {\n\tinitial Idle{}\n\tstart step\n}\n", Lines: []int{5}},
+	{Name: "go-without-call", Src: "package p\n\nfunc f() {\n\tgo x\n}\n", Lines: []int{4}},
+	{Name: "type-guard-outside-switch", Src: "package p\n\nfunc f(v V) {\n\tt := v.(type)\n\tuse(t)\n}\n", Lines: []int{4}},
+	{Name: "bare-try", Src: "package p\n\nfunc f() {\n\tx := try\n}\n", Lines: []int{4, 5}},
+	{Name: "catch-binding-not-a-name", Src: "package p\n\nfunc f() {\n\tx := g() catch 1 {\n\t}\n}\n", Lines: []int{4}},
+	{Name: "end-of-statement", Src: "package p\n\nfunc f() {\n\tx := 1 2\n}\n", Lines: []int{4}},
+	{Name: "two-receivers", Src: "package p\n\nfunc (a A, b B) M() {}\n", Lines: []int{3}},
+	{Name: "unexpected-character", Src: "package p\n\nfunc f() {\n\tx := 1 # 2\n}\n", Lines: []int{4}},
+	{Name: "defer-non-simple", Src: "package p\n\nfunc f() {\n\tdefer if true {}\n}\n", Lines: []int{4}},
+	{Name: "empty-type-parameters", Src: "package p\n\nfunc f[]() {}\n", Lines: []int{3}},
+	{Name: "parenless-trailing-block", Src: "package p\n\nfunc f() {\n\tsync.Atomically {\n\t\tmove()\n\t}\n}\n", Lines: []int{5}},
+	{Name: "deep-nesting", Generate: func() string {
 		return "package p\n\nvar x = " + strings.Repeat("(", 200000) + "1" + strings.Repeat(")", 200000) + "\n"
-	}, lines: []int{3}},
+	}, Lines: []int{3}},
 }
