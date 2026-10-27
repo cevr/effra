@@ -1,17 +1,19 @@
 # Actors as an ordinary library (#101)
 
-**Status:** spike record for [#101](https://github.com/cevr/effra/issues/101), round 2, 2026-10-27. Round 1 started from `main` at `48daf248`; round 2 merges `main` at `1ddc2b02` and answers the round-1 review. It changes no compiler behaviour. The examples are in [actor-library/examples](actor-library/examples/), labelled **Proposed**. The Go lowering is [`prototypes/actorlib`](../../prototypes/actorlib/doc.go).
+**Status:** spike record for [#101](https://github.com/cevr/effra/issues/101), round 3, 2026-10-27. Round 1 started from `main` at `48daf248`; round 2 merged `main` at `1ddc2b02` and answered the round-1 review; round 3 answers the round-2 review. It changes no compiler behaviour. The examples are in [actor-library/examples](actor-library/examples/), labelled **Proposed**. The Go lowering is [`prototypes/actorlib`](../../prototypes/actorlib/doc.go).
 
 **Owner direction, 2026-10-27, on #101:** "Let's see if we can make actor a library mechanism." **Owner decision, 2026-10-27, on the agent form:** "Okay, I like that recommendation": no variadic generics; one `actor.Call` that takes a function literal on a lent `*S`; function-literal parameter types inferred from the expected type later ([#214](https://github.com/cevr/effra/issues/214), blocked by [#196](https://github.com/cevr/effra/issues/196)).
 
 ## Verdict
 
-**Route 1 holds for every part. The std `actor` package is ordinary library code.** It needs no compiler projection, no compiler-known `Actor` identity and no actor syntax. Route 2 is not needed for any guarantee. It would buy only brevity for handler actors, measured on the same programs: route 1 takes 2.65x to 3.38x the tokens (2.68x for the agent form) of a hypothetical actor syntax for the counter and the roster, and 1.06x for the machine-backed breaker (table in Q5). Against a hand-written Go actor with the same contract, the library costs 1.02x for an agent call, 1.20x for `Ask`, 1.31x for `Send`, 1.56x for start and stop and 1.66x for a machine-backed `Ask` (medians, Q8). It allocates no more than that baseline, except one allocation for the machine's event envelope and one for the actor's task. Part of the time is the prototype's run-time copy decision, which a compiler removes.
+**Route 1 holds for every part. The std `actor` package is ordinary library code.** It needs no compiler projection, no compiler-known `Actor` identity and no actor syntax. Route 2 is not needed for any guarantee. It would buy only brevity, measured on the same programs: an agent used inline takes 1.66x the tokens of a hypothetical actor syntax (1.54x with #214), a message-union handler actor 2.65x to 3.38x, and the machine-backed breaker 1.06x (tables in Q5). Against a hand-written Go actor with the same contract, the library costs 0.91x for an agent call, 1.12x for `Ask`, 1.24x for start and stop, 1.26x for `Send` and 1.46x for a machine-backed `Ask` (medians under heavy load, Q8). It allocates no more than that baseline, except one allocation for the machine's event envelope and one for the actor's task. Part of the time is the prototype's run-time copy decision, which a compiler removes.
+
+**One guarantee waits on a runtime rule.** "An answer nobody can receive is released exactly once" holds on every path the library controls, including an answer that is ready when the asker's stop is. It does not yet hold when the asker's task takes the answer and is stopped before its task boundary: `rt.Run` then discards the result by stop-wins without releasing it. That rule is A13, for #13 and #207 (Q2). Every other guarantee in this note goes through rt's public exit path: the actor's exit is recorded by `rt.Scope.End` and `rt.Run`, so no runtime change is needed for causes to keep their kind and order (Q6).
 
 The evidence is in three classes. Each claim below carries one of these labels:
 
 - **Measured (Go lowering).** Go's own type checker or a `-race` test in `prototypes/actorlib` shows it. Typed Ask is in this class: a wrong reply type does not compile (Q1).
-- **Designed (awaits #196/#197).** A spec rule gives it in checked source. Twelve of those rules are not in `docs/spec` yet. They are general rules, and each serves clients other than actors: Gaps A1 to A12 below, which are spec README Gaps 35 to 46. Without them the guarantee falls back to its runtime form.
+- **Designed (awaits #196/#197).** A spec rule gives it in checked source. Thirteen of those rules are not in `docs/spec` yet. They are general rules, and each serves clients other than actors: Gaps A1 to A13 below, which are spec README Gaps 35 to 47. One of them, A13, is a runtime rule for #13 and #207. Without them the guarantee falls back to its runtime form.
 - **Runtime.** The library code checks it at run time, and a test shows it.
 
 Three findings change the plan:
@@ -57,7 +59,7 @@ func Count(c actor.Address[CounterMsg]) (int64, error[actor.Stopped | actor.NoRe
 }
 ```
 
-The Go lowering is `actorlib.Ask[M, T any, E error]` ([actor.go:268](../../prototypes/actorlib/actor.go)). `TestReplyTypingIsCheckedByGo` ([compile_test.go:17](../../prototypes/actorlib/compile_test.go)) adds each testdata file to the examples package through a `go build -overlay`. It requires the exact Go type error, and a control file must compile:
+The Go lowering is `actorlib.Ask[M, T any, E error]` ([actor.go:285](../../prototypes/actorlib/actor.go)). `TestReplyTypingIsCheckedByGo` ([compile_test.go:17](../../prototypes/actorlib/compile_test.go)) adds each testdata file to the examples package through a `go build -overlay`. It requires the exact Go type error, and a control file must compile:
 
 | Negative case | Go's refusal |
 | --- | --- |
@@ -79,9 +81,14 @@ Methods cannot introduce type parameters in Go, so `Ask` is a function, not a me
 | At most once, lowering | the slot's first answer wins, and a later one is released: [actor.go:101](../../prototypes/actorlib/actor.go) | Runtime: `TestFirstAnswerWins`, `TestAnsweredButUnreceivedReplyIsReleased` |
 | At least once, or a cause | a dropped reply is released at its owner's scope end (R5); its `Close` answers `NoReply`, or `Stopped` once the stop is requested | Designed (A1 to A5, A8) |
 | At least once, lowering | the handler's emitted release: `TestDroppedReplyAnswersNoReply`, `TestHandlerDefectAnswersNoReplyThenStopped`, `TestStopAnswersInFlightAndQueuedStopped` | Runtime |
-| Detached caller | a caller stopped while it waits detaches; an answer nobody can receive is released exactly once, for `Ask` and `Call`, on cancel, stop and drain | Designed (A3, receiving half); Runtime: `TestDetachedResourceReplyIsReleased`, `TestDetachedAgentResultIsReleased`, `TestInterruptedAskerDetaches` |
+| Detached caller | a caller stopped while it waits detaches; an answer nobody can receive is released exactly once, for `Ask` and `Call`, on cancel, stop and drain, including an answer that is ready when the stop is | Designed (A3, receiving half); Runtime: `TestDetachedResourceReplyIsReleased`, `TestDetachedAgentResultIsReleased`, `TestCanceledReadyReplyReleasesResource` (4,096 rounds), `TestInterruptedAskerDetaches` |
+| Answer taken, then the caller's task stops before its boundary | the task boundary discards a successful result when the stop wins | **Pending a runtime rule (A13, #13, #207)** |
 
-The general rule for the detached caller is the channel rule's receiving half (A3): when the last owner of a channel releases it, its buffered values are released. A reply slot is a channel that the asker and the reply share. When the asker detaches, its share is released; the answer, sent before or after, is released with the last share. So a value nobody can receive is released, and a counted `Close` on it runs once. The lowering has no channel reference count, so the slot carries a one-shot state, open, answered or abandoned ([actor.go:83-130](../../prototypes/actorlib/actor.go)): `answer` delivers only from open, `abandon` takes and releases an answer that arrived first, and `receive` abandons on interruption. Tokio's `oneshot` has the same two halves: `Sender::send` returns the value when the receiver is gone (`tokio/src/sync/oneshot.rs:622`), and the receiver's `Drop` drops a completed value (`oneshot.rs:1238`).
+The general rule for the detached caller is the channel rule's receiving half (A3): when the last owner of a channel releases it, its buffered values are released. A reply slot is a channel that the asker and the reply share. When the asker detaches, its share is released; the answer, sent before or after, is released with the last share. So a value nobody can receive is released, and a counted `Close` on it runs once. The lowering has no channel reference count, so the slot carries a one-shot state, open, answered or abandoned ([actor.go:83-145](../../prototypes/actorlib/actor.go)): `answer` delivers only from open, and `abandon` takes and releases an answer that arrived first. Tokio's `oneshot` has the same two halves: `Sender::send` returns the value when the receiver is gone (`tokio/src/sync/oneshot.rs:622`), and the receiver's `Drop` drops a completed value (`oneshot.rs:1238`).
+
+**Ownership passes only to a live receiver (round-2 review M1).** A stop and an answer can be ready together. A `select` then may take the answer for a task that is already stopped, and that task's boundary (`rt.Run`) discards the value by stop-wins without releasing it: the round-2 probe lost 30 of 64 resources. `receive` now checks the stop before it waits and again after it takes an answer, and releases a taken answer that it cannot deliver ([actor.go:118-145](../../prototypes/actorlib/actor.go)). One window remains: a stop that arrives after that second check and before the receiving task's boundary. The value has then reached user code, which returns it as the task's result, and the boundary drops it. That is not an actor rule. It is the general task rule A13:
+
+- **A13. A task boundary releases a result it discards.** runtime.md Exit causes rule 5 makes a stop beat a body's success, and `rt.Run` then returns the zero value. When that discarded result is a resource, or holds one, nobody releases it. *Recommendation:* the boundary that applies stop-wins releases the discarded result, as an owner scope releases what it owns (R5). Until #13 and #207 adopt it, "an answer nobody can receive is released exactly once" holds for every path except this window.
 
 The runtime does not raise a defect for a dropped reply. Dropping is legal under automatic release: Effra resources are affine with a release, not linear. The caller gets `NoReply` as a typed failure. A rule that forbade the drop would need a "must consume" marker, which is a new linearity mode with no second client yet.
 
@@ -148,34 +155,50 @@ An interface's methods cannot become messages without a projection or a code gen
 
 `f` changes the state in place. A typed failure does not roll back what `f` changed before it failed; `Room.Join` checks before it changes anything.
 
-**Empty `uses` is not purity (review M5).** `Call`'s `f` has an empty `uses` row. A caller that is stopped while it waits detaches, and its call may still run after the caller's `with` has released the providers that `f` would use. So `f` must not need a capability. An empty row still admits waits: a channel receive, a timer, a `sync` wait ([types.md](../spec/types.md#function-values) Function values rule 1: a function type carries requirements only, never purity). `f` runs on the agent's task, so each of its waits is an interruption point of the agent (I1), and `Stop` interrupts it; the caller then gets `Stopped`. In the Go lowering `Call` passes the agent's task to `f`: `f func(t *rt.Task, s *S) (T, error)` ([agent.go:58](../../prototypes/actorlib/agent.go)). `TestAgentChannelWaitObservesStop` blocks `f` on a channel and checks that `Stop` returns without the channel being closed.
+**`Call` decides by the kind of `f`'s exit (round-2 review M5).** In source, `Call`'s `catch` handles only a typed failure `E` (rows.md, catch rule 6), so only a lone typed failure is the caller's failure, and the agent goes on. An interruption or a defect passes through the catch and ends the agent with that cause: the active caller gets `NoReply` (or `Stopped` once the stop is requested), queued callers get `Stopped`, and `Stop` returns the cause without a stop's interruption. The lowering makes the same test with `rt.Failure`, which matches only a lone typed failure ([agent.go:67-87](../../prototypes/actorlib/agent.go)), so a defect cause that `f` returns from a nested scope (`defer local.End(&err)`) is the agent's defect, not a value. Tests: `TestAgentStopsOnManagedCallbackDefect`, `TestAgentCallbackDefectIsADefect`, `TestManagedInterruptionIsNotADefect`.
+
+**The agent owns its state on every exit (round-2 review M3).** A call only borrows the state. In source the handler owns `s`, so R5 releases it when a call unwinds. In the lowering the loop keeps owning an agent's state while a call runs ([actor.go:377](../../prototypes/actorlib/actor.go), `lends`), so a panic or an agent-ending exit in `f` leaves the state to the loop's release, which runs once, after the queue. `TestAgentStateReleasedOnCallbackDefect` panics in `f` and counts one `Close` of a resource state.
+
+**Empty `uses` is not purity (review M5).** `Call`'s `f` has an empty `uses` row. A caller that is stopped while it waits detaches, and its call may still run after the caller's `with` has released the providers that `f` would use. So `f` must not need a capability. An empty row still admits waits: a channel receive, a timer, a `sync` wait ([types.md](../spec/types.md#function-values) Function values rule 1: a function type carries requirements only, never purity). `f` runs on the agent's task, so each of its waits is an interruption point of the agent (I1), and `Stop` interrupts it; the caller then gets `Stopped`. In the Go lowering `Call` passes the agent's task to `f`: `f func(t *rt.Task, s *S) (T, error)` ([agent.go:67](../../prototypes/actorlib/agent.go)). `TestAgentChannelWaitObservesStop` blocks `f` on a channel and checks that `Stop` returns without the channel being closed.
 
 Measured size of the same programs, `go run ./prototypes/actorlib/cmd/sketchsize docs/research/actor-library/examples/*.go.sketch` (code lines exclude blanks and comment-only lines; tokens are Go scanner tokens without comments and inserted semicolons). The agent form is the round-2 form A with spelled literal types:
 
 | Program | Route 1, message union | Route 1, agent (form A) | Route 2 (hypothetical syntax) | Route 1 / route 2, tokens |
 | --- | --- | --- | --- | --- |
 | Counter | 22 lines, 199 tokens | — | 11 lines, 75 tokens | 2.65x |
-| Roster (3 requests, 3 reply types, 1 failure) | 49 lines, 439 tokens | 34 lines, 348 tokens | 22 lines, 130 tokens | 3.38x (union), 2.68x (agent) |
+| Roster (3 requests, 3 reply types, 1 failure) | 49 lines, 439 tokens | 34 lines, 348 tokens | 22 lines, 130 tokens | 3.38x (union), 2.68x (agent, named facade) |
 | Breaker (machine-backed) | 53 lines, 406 tokens | — | 52 lines, 383 tokens | 1.06x |
+
+The agent row above measures one chosen API: `roster-agent.go.sketch` declares three named client functions, `JoinRoom`, `LeaveRoom` and `RoomMembers`, and route 2 needs none. Those wrappers are optional; a caller can use `actor.Call` inline. So the agent is measured at four scopes (round-2 review m1; [sizes](actor-library/examples/sizes/)), and **the headline is the inline-call scope**, the like-for-like program:
+
+| Scope | What each side contains | Route 1, agent | Route 2 | Ratio, tokens |
+| --- | --- | --- | --- | --- |
+| **Definitions plus an inline caller (headline)** | the state, its methods, start, and one exported `Use` that runs all three operations inline | 30 lines, 291 tokens | 27 lines, 175 tokens | **1.66x** |
+| Same, with #214 literals | as above, with `func(r) { r.Join(name) }` | 30 lines, 270 tokens | 27 lines, 175 tokens | 1.54x |
+| Definitions only | the state, its methods and start; no caller | 25 lines, 177 tokens | 22 lines, 130 tokens | 1.36x |
+| Named facade | definitions plus the three named client functions (route 2 derives them) | 34 lines, 348 tokens | 22 lines, 130 tokens | 2.68x |
+
+Command: `go run ./prototypes/actorlib/cmd/sketchsize docs/research/actor-library/examples/roster-agent.go.sketch docs/research/actor-library/examples/route2-roster.go.sketch docs/research/actor-library/examples/sizes/*.go.sketch`. The callers spell their rows; route 1's row names `actor.NoReply` and route 2's does not.
 
 Reading the numbers:
 
 - For a machine, the two routes are the same size. The machine declaration carries the protocol, so actor syntax saves only `actor.StartMachine(Breaker{}, 16)` against `spawn Breaker{} cap 16`.
 - For a handler actor, route 2 is much shorter. Route 1 spends its tokens on the message union, the reply fields, the spelled parameter types of each request function, and the spelled rows of each exported client function (rows.md, Capability rows rule 6).
-- The agent's form A is the same size as round 1's state-passing form (34 lines and 348 tokens against 33 and 345): the `*Room` receivers remove the returned `Room` from each method and each literal, and the added `Members` method costs one line. With #214, the three literals shrink to `func(r) { r.Join(name) }`: 34 lines and 327 tokens, 2.52x route 2 (measured on a scratch copy of the sketch with only the literals changed).
+- For an agent used inline, route 1 is 1.66x route 2's tokens, and 1.54x with #214. The definitions alone are 1.36x: the `*Room` receivers, the `r.` field prefixes and the spelled `actor.StartAgent`. The named facade's 2.68x mostly measures the three optional wrappers, whose spelled signatures and rows route 2 derives.
+- The agent's form A is the same size as round 1's state-passing form at the facade scope (34 lines and 348 tokens against 33 and 345): the `*Room` receivers remove the returned `Room` from each method and each literal, and the added `Members` method costs one line.
 - Inferred, not measured: two general features would recover part of the remaining gap without actor syntax. One is #214, function literals whose parameter types come from the expected type (Go proposal 21498). The other is a named error row such as `type Asked = actor.Stopped | actor.NoReply`. Both serve every higher-order library. They are ergonomic follow-ups, not gaps, because no guarantee depends on them.
 
 ### Q6. Address split
 
 **Yes: ordinary types plus resources. Designed; measured in the lowering.** This resolves runtime.md item 7.
 
-- `Actor[M, E]` holds the actor's `Task`, so it is a resource by R1 and R14 with no actor-specific rule. Its owner scope stops it at scope end, and `Stop` consumes it. Lowering: `Start` registers the task's handle with the owner scope ([actor.go:309](../../prototypes/actorlib/actor.go)); `TestOwnerScopeStopsTheActorAndReleasesItsState`.
+- `Actor[M, E]` holds the actor's `Task`, so it is a resource by R1 and R14 with no actor-specific rule. Its owner scope stops it at scope end, and `Stop` consumes it. Lowering: `Start` registers the task's handle with the owner scope ([actor.go:334](../../prototypes/actorlib/actor.go)); `TestOwnerScopeStopsTheActorAndReleasesItsState`.
 - `Address[M]` holds only channels and the shared control. It has no `Close`, so it is not a resource. It copies into tasks under runtime.md Tasks rule 6, and it does not keep the actor alive.
 - **Send to a stopped actor fails with `Stopped`**, a typed failure. A sender that is waiting on a full mailbox wakes with `Stopped`. `Ask` gets `Stopped` before admission and for a queued request discarded by the stop. Tests: `TestStopAnswersInFlightAndQueuedStopped`, `TestBlockedSenderWakesOnStopAndReleasesItsMessage`, `TestEndReleasesStateAndRefusesLaterSends`. *Prior art:* Erlang's send to a dead pid succeeds silently and Akka sends to dead letters; Effect's `Queue.offer` returns `false` after shutdown. Effra takes Effect's choice and types it.
-- **Admission is linearizable with `Stop` (review M2).** `Stop` closes admission before it interrupts the actor ([actor.go:335](../../prototypes/actorlib/actor.go)). Closing wakes waiting senders, then takes the admission lock exclusively once and sets `closed` ([actor.go:187](../../prototypes/actorlib/actor.go)). A sender holds the lock shared while it admits and refuses when `closed` is set or the actor's stop is requested ([actor.go:228](../../prototypes/actorlib/actor.go)). So a `Send`, `Ask` or `Call` that starts after the stop is requested returns `Stopped`, and none succeeds into a mailbox that will not run. `TestStopRefusesAdmissionBeforeHandlerFinishes` holds the handler, waits until the stop is requested, sends, and requires `Stopped`. The loop also refuses a message it dequeues after the stop request and releases it as a queued request.
+- **Admission is linearizable with `Stop` (review M2).** `Stop` closes admission before it interrupts the actor ([actor.go:360](../../prototypes/actorlib/actor.go)). Closing wakes waiting senders, then takes the admission lock exclusively once and sets `closed` ([actor.go:204](../../prototypes/actorlib/actor.go)). A sender holds the lock shared while it admits and refuses when `closed` is set or the actor's stop is requested ([actor.go:245](../../prototypes/actorlib/actor.go)). So a `Send`, `Ask` or `Call` that starts after the stop is requested returns `Stopped`, and none succeeds into a mailbox that will not run. `TestStopRefusesAdmissionBeforeHandlerFinishes` holds the handler, waits until the stop is requested, sends, and requires `Stopped`. The loop also refuses a message it dequeues after the stop request and releases it as a queued request.
 - Residual window: a stop that does not come from `Stop` (an ancestor's stop, the owner scope's end) reaches the actor's task first. A sender that starts after it is refused, because the refusal also reads the task's stop request. A sender that was already waiting on a full mailbox may complete its send until the loop closes admission at its exit; the drain then releases that message as a queued request, so it is still released once and its request is answered `Stopped`.
 - Every admitted message is released once. `TestEveryMessageReleasedOnceUnderConcurrentStop` admits 1,600 counted messages from 8 tasks while the actor stops. It checks one release for each message, whether handled, drained or refused, under `-race`.
-- **The drain keeps every cause (review M4).** The loop's exit keeps the body's exit, a body panic and each release defect, in order, each release defect marked `InRelease`. Every release runs even after an earlier one panicked, and the state is released last ([actor.go:383-463](../../prototypes/actorlib/actor.go)). A clean stop builds no cause. `TestDrainKeepsAllDefectsAndReleasesState` queues two messages whose `Close` panics and checks both defects, in order, three message releases and one state release.
+- **The drain keeps every cause, through rt's own exit path (review M4, rounds 1 and 2).** The library classifies no recovered panic itself; rt does, on its public path ([actor.go:425-495](../../prototypes/actorlib/actor.go)). When the loop has something to release, `drain` registers each release in an rt owner scope, `defer rs.End(err)`, and raises the body's panic, if any, inside it: `Scope.End` records the body's exit, then the panic, then runs every release masked and records each release cause. When there is nothing to release, a body panic is raised again for the task boundary (`rt.Run`), which classifies it the same way. So the `rt.Interrupted` sentinel and an exit carried out of a nested scope (`Scope.End(nil)`) keep their kind, and only other panic values become defects. The drain releases the held message, the queue in admission order and last the state; every release runs even after an earlier one panicked, and each release cause keeps its kind, its `InRelease` mark and its order. A clean stop with nothing to release builds no scope and allocates nothing here. Round 2's hand-written recovery turned a managed interruption into a defect and wrapped a nested scope's two defects in one; the round-2 probes are now tests: `TestManagedInterruptionIsNotADefect`, `TestDrainPreservesNestedManagedCauses`, with `TestDrainKeepsAllDefectsAndReleasesState`. rt's public `Scope` gives this boundary, so no runtime change is needed for it.
 
 Runtime.md Tasks rule 6 names "actor handles" among the shared handles. Under route 1 the rule can be structural: a value whose fields are all synchronised handles is shared by copy (A10).
 
@@ -185,56 +208,61 @@ Runtime.md Tasks rule 6 names "actor handles" among the shared handles. Under ro
 
 - A send moves a resource: A1 plus A3. A message with no resource copies, as every value copies into a task (runtime.md Tasks rule 6).
 - A borrowed value cannot be sent: R17 (a lent resource must not be sent) and types.md Borrows rule 1 (a borrow is never sent). These rules hold for channels, queues (#64) and tasks alike.
-- **Every value that crosses the actor boundary is a copy (review M3).** The rule is the one for values copied into a task (runtime.md Tasks rule 6), with value semantics (types.md Structs rule 6: a copy is a snapshot). It applies wherever a value leaves one task for another: a message, a reply, an agent result, a machine's state snapshot and its decision. For Go, which shares slices and maps by reference, the lowering must clone each reachable slice and map. The spec does not yet say so for crossings other than `go` captures: **A11. The copy at a task boundary.** The compiler would emit the clone per static type, nothing for a type without a slice or map, and skip it on a last use. The prototype has no static types in generic code, so [snapshot.go](../../prototypes/actorlib/snapshot.go) decides per type at run time from a cached plan and clones by reflection; a resource moves and is not copied. `Address.Send`, `Reply.Send`, `Call`'s result and the machine's `State` and decision go through it. No path returns an alias: `TestMachineStateIsASnapshot`, `TestBoundaryCopiesMessagesAndReplies`, `TestSnapshotSharesNoMutableStorage`. Its cost is in Q8. The general cost of copying `[]T` and `map[K]V` is a value-semantics cost for #81 and #211, not an actor cost.
+- **Every value that crosses the actor boundary is a copy (review M3).** The rule is the one for values copied into a task (runtime.md Tasks rule 6), with value semantics (types.md Structs rule 6: a copy is a snapshot). It applies wherever a value leaves one task for another: an actor's or agent's initial state, a message, a reply's value and its typed failure, an agent result and its typed failure, a handler's typed failure, a machine's state snapshot and its decision. For Go, which shares slices and maps by reference, the lowering must clone each reachable slice and map. The spec does not yet say so for crossings other than `go` captures: **A11. The copy at a task boundary.** The compiler would emit the clone per static type, nothing for a type without a slice or map, and skip it on a last use. The prototype has no static types in generic code, so [snapshot.go](../../prototypes/actorlib/snapshot.go) decides per type at run time from a cached plan and clones by reflection. `Start`, `StartAgent`, `Address.Send`, `Reply.Send`, `Reply.Fail`, `Call`'s value and failure, a handler's failure and the machine's `State` and decision go through it.
+- **A message that holds a resource is still copied, field by field (round-2 review M2).** A message with a `Reply` is a resource, and round 2 returned it as it was, so its ordinary fields stayed shared while it waited in the queue. A resource moves, and a move must not duplicate its identity. In this lowering a resource's identity is always a handle: a pointer, a channel or a function, such as a `Reply`'s slot. Handles are shared, so the move keeps them; the ordinary fields beside them are values, which the struct literal copied in source, and are cloned. A lowered resource whose identity were a slice or a map would need the compiler to mark it; none exists here. Tests (the round-2 probes): `TestAgentInitialValueIsCopied`, `TestQueuedReplyBearingMessageIsCopied`, `TestFailurePayloadIsCopied`, with `TestAgentFailurePayloadIsCopied`, `TestMachineStateIsASnapshot`, `TestBoundaryCopiesMessagesAndReplies` and `TestSnapshotSharesNoMutableStorage`. Its cost is in Q8. The general cost of copying `[]T` and `map[K]V` is a value-semantics cost for #81 and #211, not an actor cost.
 
 ### Q8. Cost
 
-**Measured.** Machine: AMD EPYC 9554P (16 vCPU visible), Linux 6.12.93, go1.27.0 linux/amd64, `GOMAXPROCS=16`. The box was shared with other agents; see the load note under each table. Command: `go test -run '^$' -bench . -count 10 ./prototypes/actorlib/` (every benchmark calls `ReportAllocs`). Raw output: `bench-r1b.txt` (round 1) and `bench-r2.txt` (round 2) in the unit directory.
+**Measured.** Machine: AMD EPYC 9554P (16 vCPU visible), Linux 6.12.93, go1.27.0 linux/amd64, `GOMAXPROCS=16`. The box was shared with other agents; see the load note under each table. Command: `go test -run '^$' -bench . -count 10 ./prototypes/actorlib/` (every benchmark calls `ReportAllocs`). Raw output: `bench-r1b.txt` (round 1), `bench-r2.txt` (round 2) and `bench-r3.txt` (round 3) in the unit directory.
 
 There are two baselines ([bench_test.go](../../prototypes/actorlib/bench_test.go), [bench_matched_test.go](../../prototypes/actorlib/bench_matched_test.go)):
 
 - **Raw:** the actor a Go programmer writes first: a goroutine, a buffered channel, a reply channel per request and `context` cancellation. It gives less: a send after stop blocks until the sender's own context ends, queued requests are not answered on stop, a dropped reply hangs the caller, and a message admitted during the stop is never released.
-- **Matched (review M6):** hand-written Go with the library's contract: an admission fence (an `RWMutex`, a closed flag and a stopping channel), a one-shot reply slot with an atomic state that completes a dropped reply and releases an unreceivable one, a drain that answers queued requests "stopped", a recovered panic, and a stop that waits. The machine baseline runs the same Breaker step logic and returns the same decision values. Neither baseline copies at the boundary: `int64` and the breaker's states need no copy, which a compiler knows statically. The library's run-time copy decision is measured on its own below.
+- **Matched (review M6, rounds 1 and 2):** hand-written Go with the library's contract. A sender whose context is already cancelled is refused before it admits (I1). Admission is fenced (an `RWMutex`, a closing flag and a stopping channel). A one-shot reply slot with an atomic state completes a dropped reply, "no reply" while the actor runs and "stopped" once it stops, and releases an unreceivable answer, checking the receiver's context before and after it waits. An agent callback receives the actor's context, so its waits observe the stop. The drain answers queued requests "stopped" and recovers each release's panic, in order; the loop's panic is recovered too, and stop waits. The machine baseline runs the same Breaker step logic, releases each event after its step and returns the same decision values. [bench_matched_contract_test.go](../../prototypes/actorlib/bench_matched_contract_test.go) checks each clause, including the round-2 probes `TestMatchedSendRejectsCanceledCaller` and `TestMatchedAgentCallbackObservesStop`. Neither baseline copies at the boundary: `int64` and the breaker's states need no copy, which a compiler knows statically. The library's run-time copy decision is measured on its own below.
 
-Round 2, at `aa3482a9`, load average 3.3 to 3.6 during the run. Library and matched baseline, min / median ns/op over 10 runs:
+Round 3, at `4a6df7ce`. Load average was 6.6 to 18.6 during the run, so the minimum is the better estimate. Library and matched baseline, min / median ns/op over 10 runs:
 
 | Operation | Library | Library allocs/op, B/op | Matched baseline | Matched allocs/op, B/op | Median ratio (min ratio) |
 | --- | --- | --- | --- | --- | --- |
-| Send of a message with no reply, handled | 124.8 / 132.2 | 0, 0 | 91.9 / 100.6 | 0, 0 | 1.31x (1.36x) |
-| Ask round trip (counter `Get`) | 737.4 / 796.7 | 2, 152 | 600.2 / 664.2 | 3, 160 | 1.20x (1.23x) |
-| Start and Stop of an idle actor | 2458 / 2903.5 | 11, 3344 | 1722 / 1855.5 | 10, 2904 | 1.56x (1.43x) |
-| Machine-backed Ask (breaker, `Success`) | 1028 / 1166 | 5, 224 | 671.6 / 703.1 | 4, 192 | 1.66x (1.53x) |
-| Agent Call | 806.5 / 842.8 | 4, 200 | 711.2 / 825.5 | 4, 192 | 1.02x (1.13x) |
+| Send of a message with no reply, handled | 126.4 / 146.6 | 0, 0 | 108.9 / 116.1 | 0, 0 | 1.26x (1.16x) |
+| Ask round trip (counter `Get`) | 782.9 / 860.0 | 2, 152 | 703.2 / 767.2 | 3, 168 | 1.12x (1.11x) |
+| Start and Stop of an idle actor | 2655 / 3686 | 11, 3360 | 2293 / 2967 | 10, 2936 | 1.24x (1.16x) |
+| Machine-backed Ask (breaker, `Success`) | 1133 / 1159.5 | 5, 224 | 782.9 / 795.1 | 4, 200 | 1.46x (1.45x) |
+| Agent Call | 796.4 / 834.9 | 4, 200 | 800.6 / 913.2 | 4, 200 | 0.91x (0.99x) |
 
-The same library numbers against the raw baseline, with round 1 for comparison (round 1 at `1ddd50c2`, `bench-r1b.txt`, load 11.6 to 13.2):
+Round 2's matched ratios, against the weaker round-2 baseline, were 1.31x, 1.20x, 1.56x, 1.66x and 1.02x (`bench-r2.txt`, load 3.3 to 3.6). The round-3 baseline does more work (the cancelled-sender check, the refusal kind, per-release recovery, the context passed to callbacks), so its times rose and the ratios fell; the two runs ran under different load, so compare ratios within a run.
 
-| Operation | Raw baseline, round 2 | Library / raw, round 2 (median) | Library, round 1 | Library / raw, round 1 (median) |
+The same library numbers against the raw baseline, by round:
+
+| Operation | Raw baseline, round 3 | Library / raw, round 3 | Round 2 | Round 1 |
 | --- | --- | --- | --- | --- |
-| Send | 98.9 / 106.5 ns/op, 0 allocs/op | 1.24x | 101.3 / 108.4 ns/op, 0 allocs/op | 0.86x |
-| Ask | 553.2 / 573.7 ns/op, 1 allocs/op, 128 B/op | 1.39x | 731.4 / 769.9 ns/op, 2 allocs/op, 144 B/op | 1.15x |
-| Ask, raw reply that carries an `error` | 550.2 / 589.0 ns/op, 2 allocs/op, 136 B/op | 1.35x | | 1.04x |
-| Start and Stop | 1746 / 1891 ns/op, 6 allocs/op, 2576 B/op | 1.54x | 3318 / 3699 ns/op, 11 allocs/op, 3328 B/op | 1.52x |
-| Machine-backed Ask, against the raw Ask | 573.7 ns/op median | 2.03x | 919.0 / 967.7 ns/op, 4 allocs/op, 208 B/op | 1.45x |
-| Agent Call, against the raw Ask | 573.7 ns/op median | 1.47x | 880.0 / 920.7 ns/op, 4 allocs/op, 216 B/op | 1.38x |
+| Send | 106.7 / 123.9 ns/op, 0 allocs/op | 1.18x | 1.24x | 0.86x |
+| Ask | 598.1 / 646.2 ns/op, 1 allocs/op, 128 B/op | 1.33x | 1.39x | 1.15x |
+| Ask, raw reply that carries an `error` | 628.6 / 670.3 ns/op, 2 allocs/op, 136 B/op | 1.28x | 1.35x | 1.04x |
+| Start and Stop | 1463 / 1884.5 ns/op, 6 allocs/op, 2576 B/op | 1.96x | 1.54x | 1.52x |
+| Machine-backed Ask, against the raw Ask | 646.2 ns/op median | 1.79x | 2.03x | 1.45x |
+| Agent Call, against the raw Ask | 646.2 ns/op median | 1.29x | 1.47x | 1.38x |
 
-The two rounds ran under different load, so compare ratios within a round, not times across rounds. Round 2 pays for M1 to M5 on every request: a slot state, an admission check that also reads the stop request, and a copy decision at each crossing. It also lost one allocation: a clean stop no longer builds an exit cause, which had made the actor's goroutine grow its stack (Start and Stop measured 6.1 µs/op before that change and 2.7 µs/op after, in a 3-run spot check).
+Median ratios. Round 1 (`1ddd50c2`, load 11.6 to 13.2) had none of the round-2 and round-3 guarantees. Start and Stop is the noisiest row: its round-3 library median is 1.39x its minimum.
+
+A first round-3 version ran the whole loop exit through an rt owner scope. It cost two allocations and a stack growth on every stop (Start and Stop 13 allocs/op, 5343 / 6473 ns/op, in a run under load 10.8 to 15.4). The committed version enters the scope only when there is a panic or something to release, and an agent call skips the copy decision, because a call holds only handles (5 to 4 allocs/op).
 
 The copy rule's cost (review M3), measured on its own. The "static" rows are the copy a compiler emits for the same static type:
 
 | Value | Run-time copy (`snapshot`) | Static copy |
 | --- | --- | --- |
-| `int64` | 12.2 / 12.8 ns/op, 0 allocs/op | none: 0 ns |
-| counter message union holding `Inc` | 26.2 / 27.4 ns/op, 0 allocs/op | none: 0 ns |
-| `[]string` of 8 | 301.4 / 327.6 ns/op, 3 allocs/op, 176 B/op | `slices.Clone`: 74.6 / 88.5 ns/op, 1 allocs/op, 128 B/op |
-| struct with an `int64` and that slice | 383.4 / 470.5 ns/op, 4 allocs/op, 216 B/op | field copy and `slices.Clone`: 63.2 / 72.7 ns/op, 1 allocs/op, 128 B/op |
+| `int64` | 15.7 / 19.0 ns/op, 0 allocs/op | none: 0 ns |
+| counter message union holding `Inc` | 31.4 / 38.1 ns/op, 0 allocs/op | none: 0 ns |
+| `[]string` of 8 | 333.1 / 406.3 ns/op, 3 allocs/op, 176 B/op | `slices.Clone`: 95.7 / 132.3 ns/op, 1 allocs/op, 128 B/op |
+| struct with an `int64` and that slice | 444.0 / 484.0 ns/op, 4 allocs/op, 216 B/op | field copy and `slices.Clone`: 104.6 / 132.4 ns/op, 1 allocs/op, 128 B/op |
 
 Where the library's extra time against the matched baseline is, by allocation profile and by the copy table (measured, except where marked):
 
-- **Send, +32 ns.** The run-time copy decision for the message union is 27 ns; the compiler emits no copy for `Inc`. The rest is the stop-request check (inferred).
-- **Ask, +133 ns, one allocation fewer.** Two copy decisions (the message and the `int64` reply, about 40 ns), and `rt`'s task operations on the asker's side (inferred). `Reply` is one pointer, so `Get{Reply}` boxes into the `CounterMsg` interface without an allocation, and the slot's outcome holds no pointer, so its channel is one allocation; the matched baseline's slot holds an `error` and allocates its buffer apart.
+- **Send, +30 ns (median).** The run-time copy decision for the message union is 31 to 38 ns; the compiler emits no copy for `Inc`.
+- **Ask, +93 ns, one allocation fewer.** Two copy decisions (the message and the `int64` reply, about 50 ns), and `rt`'s task operations on the asker's side (inferred). `Reply` is one pointer, so `Get{Reply}` boxes into the `CounterMsg` interface without an allocation, and the slot's outcome holds no pointer, so its channel is one allocation; the matched baseline's slot holds an `error` and allocates its buffer apart.
 - **Start and Stop, one allocation more.** The actor's scope and `rt`'s task handle, done channel and stop channel against the baseline's goroutine and `context`; and the interruption reason that `rt` appends when the stopped task ends. The last one is a runtime finding for #13 and #207: a lone interruption could be a flag, not an appended reason.
 - **Machine-backed Ask, one allocation more.** The event travels in the machine's private envelope union, boxed into an interface (the matched baseline sends a concrete struct). Two copy decisions walk the event and the decision by reflection, because both are unions.
-- **Agent Call** matches the baseline's allocations; the time is within the run's noise.
+- **Agent Call** matches the baseline's allocations and measures at or below it.
 
 Candidate optimizations, not measured: a per-task reusable reply slot with a sequence number would remove the slot allocations from `Ask` (pillar 7); a compiler that knows the static types removes every copy decision above; lowering a one-type error row to that concrete Go type, as this prototype does for `Reply`, keeps outcomes pointer-free.
 
@@ -267,8 +295,9 @@ Every feature the library uses, and where the spec has it.
 | The copy at every task boundary, and its lowering for slices and maps | messages, replies, agent results, machine snapshots | runtime.md Tasks rule 6 covers `go` captures | **Gap A11** (#196, #81, #211) |
 | Shared handles by structure | `Address` copies into tasks | runtime.md Tasks rule 6 names actor handles | **Gap A10** (#196) |
 | The type of a machine value | `StartMachine` reads `O`, `F`, `R` | runtime.md item 1 has `machine[S, E]` | **Gap A12** (#196, #57) |
+| A task boundary releases a result it discards by stop-wins | an answer taken just before the asker's task stops | runtime.md Exit causes rule 5 says only that stop wins | **Gap A13** (#13, #207) |
 
-A8 in detail: the drain and the loop's state release handle a value of type `M` or `S` that may be a resource. The checker must treat a type parameter's value as possibly a resource. The lowering here checks for `Close` dynamically, on the cold drain path ([actor.go:447](../../prototypes/actorlib/actor.go)), and on the reply path only to release an answer nobody received. Go's GC-shape stenciling has no per-type drop glue, so a hot generic release would need the dictionary or an extra function argument.
+A8 in detail: the drain and the loop's state release handle a value of type `M` or `S` that may be a resource. The checker must treat a type parameter's value as possibly a resource. The lowering here checks for `Close` dynamically, on the cold drain path ([actor.go:472](../../prototypes/actorlib/actor.go)), and on the reply path only to release an answer nobody received. Go's GC-shape stenciling has no per-type drop glue, so a hot generic release would need the dictionary or an extra function argument.
 
 ## Route 2: what it adds and what route 1 loses
 
@@ -277,21 +306,21 @@ A8 in detail: the drain and the loop's state release handle a value of type `M` 
 | Typed Ask | the message's reply type; Go's checker rejects a wrong reply (measured) | derived from method signatures |
 | Reply exactly once | resource rules A1 to A5 (designed); runtime first-answer-wins, release-answers and release of an unreceivable answer (measured); agents by construction | by construction: the method's return is the reply |
 | Interface-shaped protocol | agent calls on a lent `*S` (code, not data) or a written message union | derived message union (data) |
-| Source size, handler actor | 2.65x to 3.38x route 2's tokens; 2.68x for the agent, 2.52x with #214 | baseline |
+| Source size, handler actor | message union 2.65x to 3.38x route 2's tokens; agent used inline 1.66x (1.54x with #214), definitions only 1.36x, named facade 2.68x | baseline |
 | Source size, machine actor | 1.06x | baseline |
 | New syntax | none | an `actor` declaration, `spawn`, `post`, and field assignment inside methods |
 | Compiler knowledge | none | message derivation, client generation, reply plumbing |
 | Userland providers | any library can write another `actor`-like package on the same features (lawful-protocol rule) | only the compiler's form |
-| New general rules | A1 to A12, each with clients beyond actors: tasks in channels, queues (#64), `tasks.Set`, RPC replies (#53), batch waiters (#68), every `go` capture (A11), every machine provider (A12) | none for replies; still needs A3 and A11 for other messages |
+| New general rules | A1 to A13, each with clients beyond actors: tasks in channels, queues (#64), `tasks.Set`, RPC replies (#53), batch waiters (#68), every `go` capture (A11), every machine provider (A12), every task result (A13) | none for replies; still needs A3 and A11 for other messages |
 
-Route 2's only unique gain is brevity for handler actors. Under construct admission ([GLOSSARY](../../GLOSSARY.md), "Construct admission"), a construct must make bad code unrepresentable where a library cannot. Every bad case here is rejected by the library route: a wrong reply type (measured), a wrong failure type (measured), a double answer (designed, R20), a dropped answer (answered `NoReply`), a send after the stop request (`Stopped`, measured), a leaked message on stop (released once, measured), a leaked late answer (released once, measured), an aliased snapshot (copied, measured) and an escaping borrow of agent state (designed, Borrows rules 1 and 4). So route 2 does not pass admission for any part.
+Route 2's only unique gain is brevity for handler actors. Under construct admission ([GLOSSARY](../../GLOSSARY.md), "Construct admission"), a construct must make bad code unrepresentable where a library cannot. Every bad case here is rejected by the library route: a wrong reply type (measured), a wrong failure type (measured), a double answer (designed, R20), a dropped answer (answered `NoReply`), a send after the stop request (`Stopped`, measured), a leaked message on stop (released once, measured), a leaked late answer (released once, measured, except the task-boundary window that A13 closes), an aliased snapshot (copied, measured) and an escaping borrow of agent state (designed, Borrows rules 1 and 4). So route 2 does not pass admission for any part.
 
 ## Decision table
 
 | Option | Guarantees | Cost | Choose? |
 | --- | --- | --- | --- |
-| 1a. Library, message union with `Reply` resource | all, with A1 to A12 | 2.65x to 3.38x tokens of route 2 for handler actors; Ask 1.20x the matched Go baseline, with one allocation fewer | **Yes**, default for data protocols |
-| 1b. Library, agent: methods on a lent `*S` and one `Call(a, func(r *S) (T, error[E]))` | all; reply once by construction; needs no resource gap | calls are code, not data; `f` has an empty `uses` row but may wait; 2.68x tokens of route 2 (2.52x with #214); Call 1.02x the matched baseline | **Yes**, for method protocols (owner, 2026-10-27) |
+| 1a. Library, message union with `Reply` resource | all, with A1 to A13 | 2.65x to 3.38x tokens of route 2 for handler actors; Ask 1.12x the matched Go baseline, with one allocation fewer | **Yes**, default for data protocols |
+| 1b. Library, agent: methods on a lent `*S` and one `Call(a, func(r *S) (T, error[E]))` | all; reply once by construction; needs no resource gap | calls are code, not data; `f` has an empty `uses` row but may wait; used inline, 1.66x tokens of route 2 (1.54x with #214); Call 0.91x the matched baseline (0.99x by minimum) | **Yes**, for method protocols (owner, 2026-10-27) |
 | 1c. Library, `Reply` as a plain value (no A1 to A5) | typed Ask; a dropped reply hangs the caller until the actor stops or the caller's timeout (Gleam's behaviour) | weaker; no new rules | Fallback only if #197 rejects A1 to A5 |
 | 1d. Agent methods as values: `actor.Call(room, (*Room).Join, name)` with variadic generics over the argument list | as 1b | checker pack expansion; no Go lowering except one copy per arity (monomorphisation) or boxing the arguments; harder signatures to read and to show in errors (pillars 3 and 6); TypeScript still types Effect's `pipe` with overloads despite variadic tuple types; Gleam, ReScript, Elixir and Go have none | **No** (owner, 2026-10-27). #214 removes the spelled literal types instead |
 | 1e. Fixed-arity overloads `Call0`, `Call1`, `Call2` | as 1b | one function per arity, a ceiling on arguments, and no gain over a literal once #214 lands | No |
@@ -299,11 +328,11 @@ Route 2's only unique gain is brevity for handler actors. Under construct admiss
 
 ## Gaps handed on
 
-A1 to A12 are spec README Gaps 35 to 46 ([README](../spec/README.md#gaps)).
+A1 to A13 are spec README Gaps 35 to 47 ([README](../spec/README.md#gaps)).
 
 - **#197 (linearity):** A1 consuming parameters and receivers, A2 resource unions, A3 channels of resources with both halves, A4 consuming a resource field in place, A5 owned parameters in function types (with #196), A8 release of a type-parameter value.
 - **#196 (checker):** A6 generic types with row parameters and empty-row elision (with #135), A7 failures as values (`Exit[T, E]`), A10 the escaping function-parameter spelling and the structural shared-handle rule, A11 the copy at every task boundary (with #81 and #211 for its cost), A12 the type of a machine value (with #57).
-- **#13 and #207 (runtime):** A9 `Task.Stop`'s result. `rt.Handle.Stop` drops the typed failure of a task that ended before the stop; `actorlib` uses `Task.Interrupt` and `Handle.Wait` instead. Also: a lone interruption allocates a cause reason, one allocation per stopped task.
+- **#13 and #207 (runtime):** A13 a task boundary releases a result it discards by stop-wins; the reply guarantee waits on it for one window (Q2). A9 `Task.Stop`'s result. `rt.Handle.Stop` drops the typed failure of a task that ended before the stop; `actorlib` uses `Task.Interrupt` and `Handle.Wait` instead. Also: a lone interruption allocates a cause reason, one allocation per stopped task.
 - **#214 (checker):** function-literal parameter types from the expected type, which shortens every agent call.
 
 ## Prior art
@@ -327,6 +356,7 @@ Pins are the commits read on 2026-10-27. Paths are relative to each repository.
 - No Effra checker accepts these sketches yet. Each sketch is **Proposed**. The Go lowering stands in for the emitted code.
 - No route-2 syntax is proposed. The route-2 sketches exist only to measure size.
 - The run-time copy in `snapshot.go` is a stand-in for per-type emitted copies. Its numbers bound the cost from above; they are not the compiler's cost.
+- An answer taken by an asker whose task is stopped before its boundary is not yet released: that needs the runtime rule A13 (#13, #207).
 - No supervision, durable address, persistence or distribution. `actor.Run` under `tasks.Set` keeps its runtime.md item 6 meaning and is not prototyped here.
 - No byte budgets (`docs/specs/actors.md` earlier plan). The mailbox has an item capacity only.
 - Self-call deadlock (a handler that asks its own actor) is not detected. It is a #13 item.

@@ -45,7 +45,8 @@ func (r Reply[T, E]) Send(v T) {
 	r.Close() // the answer is buffered or taken, so this refusal is never read
 }
 
-// Fail answers with the typed failure e (Gap A7: a failure as a value).
+// Fail answers with the typed failure e (Gap A7: a failure as a value). e
+// leaves the actor's task, so it is a copy, as v is (Gap A11).
 func (r Reply[T, E]) Fail(e E) {
 	select {
 	case r.slot <- Fail(e):
@@ -95,7 +96,10 @@ func (a Address[M]) Send(m M) error[Stopped] {
 // Ask builds a message around a fresh reply address and waits for the
 // answer. T and E come from request's parameter type alone. The receive is
 // an interruption point: a stopped caller detaches, Ask's scope releases its
-// share of the slot, and a late answer is released by the reply's (A3).
+// share of the slot, and a late answer is released by the reply's (A3). An
+// answer taken while the caller is being stopped is the caller's to release;
+// when the stop wins at the caller's task boundary, the boundary must release
+// the discarded result (Gap A13, a runtime rule).
 func Ask(to Address[M], request func(Reply[T, E]) M) (T, error[E | Stopped | NoReply]) {
 	slot := make(chan Exit[T, E | Stopped | NoReply], 1)
 	try to.Send(request(Reply[T, E]{slot, to.control}))
@@ -226,8 +230,10 @@ func StartMachine(m Machine[S, E, O, F, R], capacity int64) MachineActor[S, E, O
 					}
 			}
 			next := apply(s, d)
-			if r, ok := msg.reply.Take(); ok {
-				r.Send(d)
+			switch r := msg.reply.(type) {
+			case Some:
+				r.Value.Send(d)
+			case None: // a Send: nobody asked
 			}
 			return next
 		}
@@ -274,7 +280,8 @@ func (a Agent[S]) Stop()                    { a.actor.Stop() }
 
 func StartAgent(initial S, capacity int64) Agent[S] {
 	return Agent[S]{Start(initial, capacity, func(s S, c call[S]) Next[S] {
-		c.run(&s) // lends s to f for the call (types.md Borrows)
+		c.run(&s) // lends s to f for the call (types.md Borrows); on unwind the
+		//           handler still owns s, so its scope releases s (R5)
 		return Continue(s)
 	})}
 }
@@ -294,6 +301,12 @@ func StartAgent(initial S, capacity int64) Agent[S] {
 // is an interruption point of the agent (I1), and Stop interrupts it; the
 // caller then gets Stopped. f's result leaves the agent's task, so it is a
 // copy, never an alias of the state (Gap A11).
+//
+// The catch handles only a typed failure E (rows.md, catch rule 6): that is
+// the caller's failure, and the agent goes on. An interruption or a defect
+// passes through the catch, unwinds the handler and ends the agent with that
+// cause; the call's release answers the caller NoReply, or Stopped once the
+// stop is requested, and the drain answers queued callers Stopped.
 func Call(a AgentAddress[S], f func(s *S) (T, error[E])) (T, error[E | Stopped | NoReply]) {
 	slot := make(chan Exit[T, E | Stopped | NoReply], 1)
 	answer := func(x Exit[T, E | Stopped | NoReply]) {
