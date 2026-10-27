@@ -38,7 +38,7 @@ The parser `internal/sketch/syntax` ([#195](https://github.com/cevr/effra/issues
 - A Go form the grammar does not admit: a type alias or another defined type (`type A = B`, `type A B`, `type A []T`), a type assertion `x.(T)`, `x.(type)` outside a type switch subject, a local type declaration, an error row outside a result list, an embedded struct field, a `~` constraint, a method with type parameters, `default` in a `catch`, a trailing block without the call's parentheses (`sync.Atomically { … }`), `[...]T` outside a composite literal, a non-name on the left of `:=` (`for a.x := range xs`), a type that is not a type name in an error row, a catch arm or a union (`error[[]int]`, `case *E:`, `interface{ []int | B }`).
 - A malformed construct: a multi-subject type switch without bindings, a tuple case whose arity differs from the subjects, a tuple case in a single-subject switch, an unknown or duplicate machine entry, a machine without `step`, a union interface with a method, `uses (A, B)` on a declaration, a variadic parameter that is not last.
 - An unterminated string or block comment, a newline inside an interpreted string, an unknown number suffix (`5kg`), an unexpected character, an import after a declaration, a union with a trailing `|`.
-- Nesting deeper than 1000 levels ([grammar](grammar.md#parser) rule 6).
+- A tree higher than 1000 levels, in any composition of chains, operators, parentheses, types, statements and blocks ([grammar](grammar.md#parser) rule 6).
 
 The fixtures are `sketchtest.MalformedTable` and the `TestRefusedForms` cases in `internal/sketch/syntax`.
 
