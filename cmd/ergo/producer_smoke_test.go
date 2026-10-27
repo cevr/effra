@@ -320,7 +320,7 @@ func producerSmokeInstall(t *testing.T, source, target string) {
 }
 
 // producerSmokeOverlays builds one ergo per named replacement of source,
-// concurrently, with Go build overlays over this repository's cmd/ef.
+// concurrently, with Go build overlays over this repository's cmd/ergo.
 func producerSmokeOverlays(t *testing.T, root, directory, source string, replacements map[string]string) map[string]string {
 	t.Helper()
 	binaries := map[string]string{}
