@@ -33,7 +33,7 @@ func Go[T any](s *Scope, span string, body func(*Task) (T, error)) *Handle[T] {
 // while the body runs; it must not escape the callback.
 func GoMasked[T any](s *Scope, span string, body func(t *Task, restore Mask) (T, error)) *Handle[T] {
 	h := spawn(s.task, span, true, func(t *Task) (T, error) {
-		return body(t, Mask{t: t, outer: 0})
+		return body(t, Mask{t: t, index: 0})
 	})
 	s.push(entry{run: closeResource{}, v: h})
 	return h

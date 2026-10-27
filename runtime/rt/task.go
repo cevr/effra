@@ -15,18 +15,15 @@ var nextID atomic.Uint64
 // that masks it, reads its context values or starts children from it; any
 // goroutine may interrupt it.
 type Task struct {
-	// stopped is the stop flag, set by Interrupt from any goroutine. mask is the
-	// mask depth; only the owner goroutine reads or writes it, so masking costs
-	// no atomic read-modify-write.
+	// stopped is the stop flag, set by Interrupt from any goroutine.
 	stopped atomic.Bool
-	mask    uint32
-	// acquiring counts the mask regions that are Acquire's registration step
-	// (I2 item 4), not releases; owner goroutine only.
-	acquiring uint32
-	id        uint64
-	span      string
-	parent    atomic.Pointer[Task] // live link; cleared when t finishes
-	values    *values              // G1 context; owner goroutine only
+	// regions is the stack of open mask regions (regions.go). Only the owner
+	// goroutine reads or writes it, so masking costs no atomic operation.
+	regions regionStack
+	id      uint64
+	span    string
+	parent  atomic.Pointer[Task] // live link; cleared when t finishes
+	values  *values              // G1 context; owner goroutine only
 
 	// shielded is fixed before t is linked: t was started while its owner was
 	// inside a masked region, so the owner's ambient stop does not cascade
@@ -50,10 +47,10 @@ func Root(span string) *Task {
 // Effect 4: fork is interruptible unless asked to inherit); masked starts it
 // inside one masked region, for GoMasked.
 //
-// A child started while parent is inside a masked region (a release, a defer
-// body, a GoMasked body), other than Acquire's registration step, is
-// release-owned and shielded: the ambient stop that
-// cascades from parent does not reach it, whether the stop came before or
+// A child is release-owned and shielded when the nearest enclosing masked
+// region of parent that is not a restore is a protecting one: a release, a
+// defer body or a GoMasked body, but not Acquire's registration step
+// (regions.go). The ambient stop that cascades from parent does not reach it, whether the stop came before or
 // after the start, so the release runs to completion (I2, R9). Its handle's
 // Stop, a timeout and its scope's drain still interrupt it directly. This is
 // Trio's shielded cancel scope and Effect's uninterruptible finalizer. Any
@@ -63,9 +60,9 @@ func (t *Task) init(parent *Task, span string, masked bool) {
 	t.span = span
 	t.parent.Store(parent)
 	t.values = parent.values
-	t.shielded = parent.mask > parent.acquiring
+	t.shielded = parent.regions.shields()
 	if masked {
-		t.mask = 1
+		t.regions.push(protecting)
 	}
 	parent.mu.Lock()
 	if !t.shielded && parent.stopped.Load() {
@@ -145,20 +142,20 @@ func (t *Task) Interrupt() {
 
 // Stopped is the interruption point (I1): it reports whether t was asked to
 // stop and is not masked. While no stop is requested it costs one atomic load;
-// the mask depth it reads after that is owner-local.
-func (t *Task) Stopped() bool { return t.stopped.Load() && t.mask == 0 }
+// the region state it reads after that is owner-local.
+func (t *Task) Stopped() bool { return t.stopped.Load() && t.regions.top == interruptible }
 
 // StopRequested reports whether a stop was requested, masked or not.
 func (t *Task) StopRequested() bool { return t.stopped.Load() }
 
 // Masked reports whether t is inside a masked region. Call it from the task's
 // own goroutine.
-func (t *Task) Masked() bool { return t.mask != 0 }
+func (t *Task) Masked() bool { return t.regions.top != interruptible }
 
 // Check is the interruption point for code with no error row: it panics with
 // Interrupted when Stopped would return true. The task boundary recovers it.
 func (t *Task) Check() {
-	if t.stopped.Load() && t.mask == 0 {
+	if t.stopped.Load() && t.regions.top == interruptible {
 		panic(Interrupted)
 	}
 }
@@ -168,7 +165,7 @@ func (t *Task) Check() {
 // region it returns nil, so the wait is uninterruptible (I2). Call it from the
 // task's own goroutine.
 func (t *Task) Done() <-chan struct{} {
-	if t.mask != 0 {
+	if t.regions.top != interruptible {
 		return nil
 	}
 	t.mu.Lock()
@@ -181,36 +178,4 @@ func (t *Task) Done() <-chan struct{} {
 	ch := t.stop
 	t.mu.Unlock()
 	return ch
-}
-
-// Mask is an open masked region of one task (I2).
-type Mask struct {
-	t     *Task
-	outer uint32 // mask depth outside this region
-}
-
-// Mask opens a masked region. Close it with Unmask on every path. Regions
-// nest: closing an inner one restores the outer depth, never an unmasked one.
-func (t *Task) Mask() Mask {
-	t.mask++
-	return Mask{t: t, outer: t.mask - 1}
-}
-
-// Unmask closes the region. A stop requested while it was open is observed at
-// the next poll, unless an outer region is still open.
-func (m Mask) Unmask() {
-	if m.t.mask == 0 {
-		panic("rt: Unmask without Mask")
-	}
-	m.t.mask--
-}
-
-// Interruptible runs f with the mask depth this region had outside it: the
-// poll pattern of Cats Effect, the restore of Effect's uninterruptibleMask. If
-// the region is nested in another open region, f stays masked.
-func (m Mask) Interruptible(f func()) {
-	inner := m.t.mask
-	m.t.mask = m.outer
-	defer func() { m.t.mask = inner }()
-	f()
 }

@@ -34,9 +34,11 @@
 //   - [Run] is the task boundary shared by every child and the root: emitted
 //     main runs its body through it and exits with [ExitCode]. It and
 //     [Scope.End] apply stop-wins: a stop the task can observe beats success.
-//   - A child started inside a release (a masked region other than
-//     Acquire's registration step) is shielded: the ambient stop cascade
-//     does not reach it, so the release completes (Trio shielded cancel
+//   - Mask regions are an explicit owner-local stack of kinds: protecting
+//     (a release, a defer body, a GoMasked body), acquiring (Acquire's
+//     registration step) and the restores between them. A child started
+//     where the nearest non-restore region is protecting is shielded: the
+//     ambient stop cascade does not reach it, so the release completes (Trio shielded cancel
 //     scopes, Effect uninterruptible finalizers, Go context.WithoutCancel).
 //     Its handle's Stop, a timeout and its scope's drain still stop it.
 //   - A finished task drops its atomic parent link, so ancestry retention is

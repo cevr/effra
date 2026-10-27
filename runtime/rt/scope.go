@@ -74,12 +74,7 @@ func (c callFunc) release(any) { c.f() }
 // registration is observed only after the release is registered, at the next
 // poll. A failed open registers nothing.
 func Acquire[R any](s *Scope, open func() (R, error), close func(R)) (R, error) {
-	m := s.task.Mask()
-	s.task.acquiring++
-	defer func() {
-		s.task.acquiring--
-		m.Unmask()
-	}()
+	defer s.task.regions.truncate(s.task.acquire())
 	r, err := open()
 	if err == nil {
 		s.push(entry{run: closeWith[R]{close}, v: r})
