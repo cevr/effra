@@ -2,11 +2,11 @@
 
 Status: **designed, not yet implemented**, except `timeout.After` and the prelude's `Console` and `Scheduler`, which the prototype has ([runtime.md](runtime.md#timeouts)).
 
-The standard library is the "Effect for Go" track, [#206](https://github.com/cevr/ergo/issues/206). Its module map is the contract: each family states the Effect modules it covers, the construct it uses and its tier. Modules are restated in Effra's idioms, not ported API for API. Effect is prior art for the guarantees, not a dependency (owner, 2026-10-26). Go names are kept wherever Go has one. Definitions are in the [glossary](../../GLOSSARY.md).
+The standard library is the "Effect for Go" track, [#206](https://github.com/cevr/ergo/issues/206). Its module map is the contract: each family states the Effect modules it covers, the construct it uses and its tier. Modules are restated in Ergo's idioms, not ported API for API. Effect is prior art for the guarantees, not a dependency (owner, 2026-10-26). Go names are kept wherever Go has one. Definitions are in the [glossary](../../GLOSSARY.md).
 
 **Tiers.**
 - **kernel**: a checker or runtime rule the module needs.
-- **library**: ordinary Effra code over the kernel, with no compiler branch keyed on its identity.
+- **library**: ordinary Ergo code over the kernel, with no compiler branch keyed on its identity.
 - **host**: a host package, the only code that calls Go.
 
 ## Module map
@@ -89,7 +89,7 @@ func OrderRow(o Order) Node {
 3. Escaping is decided by type. `Text` escapes its string; only an `html.Node` is inserted as markup. `Href` and `Src` take a `url.Safe`, not a string. `Raw` takes an `html.Trusted`, which only `html.Trust` builds, so `ergo inspect` lists every trust site.
 4. **Lowering.** `html.Node` is a render function that writes to a buffered writer; `Text` escapes at write time, so no intermediate string is built. Folding static subtrees at compile time is a later, measured optimisation. `http.HTML(status, node)` renders a node into a response.
 
-*Prior art:* Gleam Lustre (`html.td([], [text(name)])`), whose surface Effra takes; Elm `Html`, which escapes by type with separate attribute and child lists, merged here into one `...Child` union to keep Go's call shape; templ (Go), whose render-function representation Effra takes, not its syntax; Phoenix HEEx (Elixir), whose compile-time validation Effra gets from closed types instead of a parser.
+*Prior art:* Gleam Lustre (`html.td([], [text(name)])`), whose surface Ergo takes; Elm `Html`, which escapes by type with separate attribute and child lists, merged here into one `...Child` union to keep Go's call shape; templ (Go), whose render-function representation Ergo takes, not its syntax; Phoenix HEEx (Elixir), whose compile-time validation Ergo gets from closed types instead of a parser.
 
 ## Host packages
 

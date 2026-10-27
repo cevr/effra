@@ -1,6 +1,6 @@
 # Runtime rules
 
-The runtime gives Effect's guarantees on Go's scheduler: structured tasks, cooperative interruption, release that always completes, and typed exits. Go supplies goroutines, the garbage collector and preemption; Effra adds no scheduler of its own. Definitions are in the [glossary](../../GLOSSARY.md).
+The runtime gives Effect's guarantees on Go's scheduler: structured tasks, cooperative interruption, release that always completes, and typed exits. Go supplies goroutines, the garbage collector and preemption; Ergo adds no scheduler of its own. Definitions are in the [glossary](../../GLOSSARY.md).
 
 Status summary: the prototype's runtime (`prototypes/sketch9/sketch/rt`) implements the task tree, stop propagation, the stop check before each capability call, `timeout.After` and defect propagation. Every other rule here is **designed, not yet implemented**.
 
@@ -27,7 +27,7 @@ Status: **implemented in prototype** for capability calls; **designed, not yet i
 4. A loop with an empty footprint has no interruption point. Such a loop cannot be stopped until it ends, as with Effect on JavaScript. Go preemption keeps the scheduler fair but does not stop the loop.
 5. A blocking runtime primitive waits for either its event or the stop, so a stopped task never stays parked.
 
-*Prior art:* the `select` on `ctx.Done()` Go programmers write by hand; Effect checks interruption between steps; BEAM processes are preempted and can be killed outright, which Effra does not do.
+*Prior art:* the `select` on `ctx.Done()` Go programmers write by hand; Effect checks interruption between steps; BEAM processes are preempted and can be killed outright, which Ergo does not do.
 
 ## I2. Automatic masks
 
@@ -48,7 +48,7 @@ Status: **partly implemented in prototype**.
 
 1. A task ends with one exit: a success value, or a cause. A cause holds one or more of: a typed failure from the error row, a defect, and an interruption.
 2. **Interruption is not a typed error.** No error row names it, and every `catch` passes it on ([rows.md](rows.md#catch)). In a function with no error row, interruption still propagates as part of the exit, not through the row (README Gap 2). Prototype: such a function panics with `rt.Interrupted`, and the nearest task boundary recovers it.
-3. **Defects.** A Go panic in Effra code is a defect. A defect in a child re-raises in the parent at the join, on every path, including the timeout and stop paths. Prototype: implemented for `timeout.After`.
+3. **Defects.** A Go panic in Ergo code is a defect. A defect in a child re-raises in the parent at the join, on every path, including the timeout and stop paths. Prototype: implemented for `timeout.After`.
 4. **Release defects.** A defect or an interruption during a release joins the cause beside the body's outcome. No cause is dropped.
 5. **Stop wins.** When a task is stopped while its body runs, interruption wins over the body's success.
 6. **Entry.** When `main`'s exit is a cause, the program prints each reason and exits with status 130 when every reason is an interruption, and 1 otherwise, as the current [entry failure report](../design.md#entry-failure-report) does. Prototype: an interruption that reaches `main` exits 130; a defect prints `defect: …` and exits 2.
@@ -126,7 +126,7 @@ Status: **designed, not yet implemented** ([#64](https://github.com/cevr/ergo/is
 1. `chan T` is Go's channel. There are no nil channels and no direction types.
 2. Values copy into a channel. A channel whose element type is a resource is an error in v0 ([resources.md](resources.md#channels); README Gap 30).
 3. Send and receive are interruption points.
-4. A send on a closed channel interrupts the sender instead of panicking. This is Effra's own policy, not Effect parity: Effect's `Queue.offer` returns `false` after shutdown.
+4. A send on a closed channel interrupts the sender instead of panicking. This is Ergo's own policy, not Effect parity: Effect's `Queue.offer` returns `false` after shutdown.
 5. `ch.Receive()` returns `Option[T]` when `T` is not defaultable ([types.md](types.md#zero-values-and-definite-initialisation)).
 
 ## Machines and actors
@@ -171,5 +171,5 @@ These notes are not normative; they record the prototype's lowering, which the m
 - A function takes a hidden environment pointer (one field per capability) and the task handle.
 - Each interruption point is `if t.Stopped() { return zero, rt.Interrupted }`, or `t.Check()` in a function with no error row.
 - `main` defers `rt.Recover`, which turns an interruption into exit 130.
-- Source positions are carried with `//line` directives, so Go panics, pprof, delve and the race detector point at Effra lines.
-- *Prior art:* Effra's earlier Go emitter built a closure per effect step and measured a 47.8 s `go build` for 1,024 sequential operations; direct calls rebuilt in 2.08 s in the same measurement. Gleam source maps and ReScript's readable output follow the same "erase to idiomatic host code" goal.
+- Source positions are carried with `//line` directives, so Go panics, pprof, delve and the race detector point at Ergo lines.
+- *Prior art:* Ergo's earlier Go emitter built a closure per effect step and measured a 47.8 s `go build` for 1,024 sequential operations; direct calls rebuilt in 2.08 s in the same measurement. Gleam source maps and ReScript's readable output follow the same "erase to idiomatic host code" goal.

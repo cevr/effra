@@ -31,7 +31,7 @@ go run ./conformance/size/matrix -out /tmp/ergo-size [-record conformance/size/r
 
 `--receipt` refuses a path that names the build's source or one of its artifacts, including aliases through symbolic or hard links and spellings where `..` follows a link, and any path inside `dist/go/apps`. It publishes the receipt atomically inside the directory it admitted.
 
-The matrix builds with `CGO_ENABLED=0`, an empty `GOFLAGS` and `-trimpath -mod=readonly -buildvcs=false`, and builds a `-ldflags=-s -w` companion for every unstripped binary. Effra rows are the `ergo build --receipt` receipts; controls and counterfactuals are measured with the same `internal/receipt` functions. The matrix fails if any program's output differs from the expected output.
+The matrix builds with `CGO_ENABLED=0`, an empty `GOFLAGS` and `-trimpath -mod=readonly -buildvcs=false`, and builds a `-ldflags=-s -w` companion for every unstripped binary. Ergo rows are the `ergo build --receipt` receipts; controls and counterfactuals are measured with the same `internal/receipt` functions. The matrix fails if any program's output differs from the expected output.
 
 The all-source counterfactual rebuilds the minimal, managed and codec generations with every runtime source the compiler distributes. It measures what source selection removes that the Go linker's own dead-code elimination does not.
 

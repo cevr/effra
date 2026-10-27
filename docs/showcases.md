@@ -1,6 +1,6 @@
 # An effect-native language in practice
 
-Effra's direction is **Go-like directness, algebraic data types, and explicit Effect-style contracts**. A function tells you what it returns, how it can fail and what services it needs. An owning scope tells you who must finish before it can return.
+Ergo's direction is **Go-like directness, algebraic data types, and explicit Effect-style contracts**. A function tells you what it returns, how it can fail and what services it needs. An owning scope tells you who must finish before it can return.
 
 These examples come from reading real Effect application and infrastructure code. They use generic domains and original examples. The [source review](research/effect-native-showcases.md) records the snapshots, comparisons and boundaries.
 
@@ -14,11 +14,11 @@ The [contender roadmap](contender-roadmap.md) turns those patterns into concrete
 | Decoded event types and codecs | Proposed; runtime validation remains essential |
 | Owned replay/live streams | Proposed library and stream support |
 | Durable command processing | Proposed application services, not an automatic language guarantee |
-| Infrastructure outputs and provider graphs | Design exploration; no Effra deployment framework exists |
+| Infrastructure outputs and provider graphs | Design exploration; no Ergo deployment framework exists |
 
 Code below labeled **proposed** remains design notation; the records, enums and match examples in the data section use accepted prototype syntax. Proposed service names describe application ports, not an existing standard library.
 
-| In Effect application code | Effra surface | Obligation that remains |
+| In Effect application code | Ergo surface | Obligation that remains |
 | --- | --- | --- |
 | Effect type parameters, generators and yielded calls | `effect fn`, `raises`, `uses`, `run` | Checked contracts and lazy execution |
 | Context.Service and provider composition | `service`, `impl`, explicit provision | Nominal identity, replaceable behavior and initialization lifetime |
@@ -42,7 +42,7 @@ effect fn welcome(id: string) -> string
 }
 ```
 
-Effect applications express this with service tags, `Effect<A, E, R>`, generator bodies and provider composition. Effra makes the success, failures and dependencies a source contract. Each `run` is an execution boundary; constructing `welcome("42")` is still lazy.
+Effect applications express this with service tags, `Effect<A, E, R>`, generator bodies and provider composition. Ergo makes the success, failures and dependencies a source contract. Each `run` is an execution boundary; constructing `welcome("42")` is still lazy.
 
 The full example supplies three demo providers at the entry point, handles each admitted failure, and prints successful and denied outcomes. It sends no real mail. Omitting a provider produces EF108; omitting an admitted failure from the contract produces EF107. An Access requirement exposes a dependency; the provider must still implement the actual authorization policy.
 
@@ -148,7 +148,7 @@ Cancellation remains cooperative. Child failures and cleanup defects remain obse
 
 ## 5. A readable consumer of an owned event stream
 
-**Proposed.** A replay/live stream needs subscription ordering, buffering, duplicate filtering, acknowledgements and overflow handling. Effra could simplify its consumer:
+**Proposed.** A replay/live stream needs subscription ordering, buffering, duplicate filtering, acknowledgements and overflow handling. Ergo could simplify its consumer:
 
 ```rust
 effect fn forward(cursor: i64) -> void
@@ -189,7 +189,7 @@ effect fn submit(command: Command) -> Admission
 
 Journal.admit is an application operation with an explicit contract: validate identity and input; atomically record the command receipt, authoritative events, projections and outbox work; return an existing receipt for an identical retry; reject a conflicting retry. A worker delivers outbox work under stable idempotency keys. Remote delivery may still be at least once unless the receiver deduplicates.
 
-Scopes manage running work and cleanup. They do not supply durable transactions, first-answer-wins, crash recovery or exactly-once side effects. Effra should make the dependency and admission result readable while preserving that service boundary. This proposal combines patterns from the inspected applications; it is not a claim that every source uses this exact storage protocol.
+Scopes manage running work and cleanup. They do not supply durable transactions, first-answer-wins, crash recovery or exactly-once side effects. Ergo should make the dependency and admission result readable while preserving that service boundary. This proposal combines patterns from the inspected applications; it is not a claim that every source uses this exact storage protocol.
 
 ## 7. Infrastructure has a different kind of laziness
 

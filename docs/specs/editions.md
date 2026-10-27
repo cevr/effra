@@ -2,7 +2,7 @@
 
 Ticket [#194](https://github.com/cevr/ergo/issues/194), part of the compiler track [#192](https://github.com/cevr/ergo/issues/192). Status: implemented.
 
-Two Effra languages live in one repository until [#205](https://github.com/cevr/ergo/issues/205) retires the earlier one: the earlier `.ef` language that `internal/compiler` implements, and the Go-shaped language of [`docs/spec/`](../spec/README.md) v0. An [edition](../../GLOSSARY.md) names the language a source file is written in, and so the front-end that reads it. Files of both editions keep the `.ef` extension. Owner decision O13 on [#173](https://github.com/cevr/ergo/issues/173): "per-package edition in the manifest; compiler flag until a manifest exists". The basis is [`docs/research/primitives.md`](../research/primitives.md) §9: the edition is never inferred from file content, with Go's `go` directive as the precedent.
+Two Ergo languages live in one repository until [#205](https://github.com/cevr/ergo/issues/205) retires the earlier one: the earlier `.ef` language that `internal/compiler` implements, and the Go-shaped language of [`docs/spec/`](../spec/README.md) v0. An [edition](../../GLOSSARY.md) names the language a source file is written in, and so the front-end that reads it. Files of both editions keep the `.ef` extension. Owner decision O13 on [#173](https://github.com/cevr/ergo/issues/173): "per-package edition in the manifest; compiler flag until a manifest exists". The basis is [`docs/research/primitives.md`](../research/primitives.md) §9: the edition is never inferred from file content, with Go's `go` directive as the precedent.
 
 ## Edition ids
 
@@ -104,10 +104,10 @@ The earlier front-end retires in four phases, each keyed to a ticket rather than
 How other compile-to-host languages select or evolve a language version per package. None infers the version from file content.
 
 - **Rust editions.** `edition = "2021"` per crate in `Cargo.toml`. Crates of different editions link in one build. `cargo fix --edition` migrates. A missing key means 2015. `rustc --edition` exists for builds without Cargo.
-- **Go `go` directive.** `go 1.22` in `go.mod` sets the language version per module, so the 1.22 per-iteration loop variables apply only to modules that declare 1.22 or later. A `//go:build go1.N` line can lower one file's version. Effra keeps no per-file override (O13: never from content).
+- **Go `go` directive.** `go 1.22` in `go.mod` sets the language version per module, so the 1.22 per-iteration loop variables apply only to modules that declare 1.22 or later. A `//go:build go1.N` line can lower one file's version. Ergo keeps no per-file override (O13: never from content).
 - **Gleam.** The `gleam = ">= 1.x"` key in `gleam.toml` is a compiler-version constraint, not an edition. Gleam evolves one language with deprecation warnings; before v1 it shipped `gleam fix` to rewrite breaking syntax changes, and the command is now a no-op.
 - **ReScript.** `rescript.json` (JSON, formerly `bsconfig.json`). ReScript 11's `"uncurried"` key was a project-wide language-mode switch with a migration path, which is the closest analogue to an edition.
 - **Elixir.** The `elixir: "~> 1.17"` key in `mix.exs` is a version requirement. There are no editions; deprecations run warning first, removal later.
 - **MoonBit.** The `moon.mod.json` JSON manifest has no edition field. Breaking changes ship as deprecation warnings and are migrated with tooling.
 
-Effra takes Rust's model (a per-package id independent of the compiler version, mixed editions in one build) with Go's module-root walk, and ReScript's and MoonBit's JSON manifest form.
+Ergo takes Rust's model (a per-package id independent of the compiler version, mixed editions in one build) with Go's module-root walk, and ReScript's and MoonBit's JSON manifest form.

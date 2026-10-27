@@ -10,7 +10,7 @@ Preserve argument evaluation count and order, lazy recipe construction, repeated
 
 Every lowering candidate uses a semantic equivalence baseline: the same
 validation, failure/service rows, ownership, cancellation and completed cleanup
-must be observable in the Effra program, an explicit Go program and an explicit
+must be observable in the Ergo program, an explicit Go program and an explicit
 TypeScript/Effect program. Record whether the candidate erases the abstraction,
 directly lowers it or retains a runtime representation, then measure emitted
 source, retained dependencies, executable bytes, allocation, dispatch and
@@ -73,4 +73,4 @@ Acceptance requires identical observable conformance, full gates, race checks fo
 
 ## Prior art: MoonBit
 
-MoonBit's pinned compiler runs a fixed per-package pass chain (`src/driver_util.ml:L68-L94` at `d4ada10d`). It covers single-use join inlining, async elimination, contification, alias removal, record scalarization, loop-parameter unboxing, constructor propagation, lambda lifting and dead-code removal. Contification turns a local function called only in tail position into a join point and self tail calls into loops (`src/pass_contification.ml:L24-L278`), and a layout pass unboxes `Option` (`src/pass_layout.ml:L98-L155`). The chain has no general inliner or constant-folding pass. Effra currently rewrites only pure self tail calls ([design](../design.md)); join points for tail-called local functions are a candidate under the same measurement rules, not an adopted lowering. The checkout builds only wasm-gc, so it says nothing about JS output. Pins are in [PRIOR_ART](../../PRIOR_ART.md#moonbit).
+MoonBit's pinned compiler runs a fixed per-package pass chain (`src/driver_util.ml:L68-L94` at `d4ada10d`). It covers single-use join inlining, async elimination, contification, alias removal, record scalarization, loop-parameter unboxing, constructor propagation, lambda lifting and dead-code removal. Contification turns a local function called only in tail position into a join point and self tail calls into loops (`src/pass_contification.ml:L24-L278`), and a layout pass unboxes `Option` (`src/pass_layout.ml:L98-L155`). The chain has no general inliner or constant-folding pass. Ergo currently rewrites only pure self tail calls ([design](../design.md)); join points for tail-called local functions are a candidate under the same measurement rules, not an adopted lowering. The checkout builds only wasm-gc, so it says nothing about JS output. Pins are in [PRIOR_ART](../../PRIOR_ART.md#moonbit).

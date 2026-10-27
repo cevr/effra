@@ -132,4 +132,4 @@ The S109 rules are prototype limits, not language rules (README Gaps 4, 6, 7, 10
 - A type-switch binding is read in no case.
 - An expression statement is not a call, `try` or `catch` (`probes/unused-expression.sketch`, `temp-collision`).
 
-*Prior art:* Go rejects unused locals and unused expression values; Rust and Gleam warn instead. Effra keeps Go's errors because its output is Go and because an unread value usually hides a dropped result.
+*Prior art:* Go rejects unused locals and unused expression values; Rust and Gleam warn instead. Ergo keeps Go's errors because its output is Go and because an unread value usually hides a dropped result.

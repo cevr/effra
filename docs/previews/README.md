@@ -1,6 +1,6 @@
 # Language evolution previews
 
-A preview is a dated, reviewable snapshot of how an Effra construct or syntax looks at one point in the language's history. Read in date order, previews show how the language evolves. The owner asked for them on 2026-10-08 ("also use sideshow to proviide language construct and syrnax sketfhes as we gonso we can see how things evolve") and listed them in the 2026-10-09 map goal ("and language evolution previews").
+A preview is a dated, reviewable snapshot of how an Ergo construct or syntax looks at one point in the language's history. Read in date order, previews show how the language evolves. The owner asked for them on 2026-10-08 ("also use sideshow to proviide language construct and syrnax sketfhes as we gonso we can see how things evolve") and listed them in the 2026-10-09 map goal ("and language evolution previews").
 
 This directory is the record. A rendered copy, such as a Sideshow post, is a view of a preview file and may be published from it, but the Markdown file here is what reviewers read and what later previews compare against.
 
@@ -26,7 +26,8 @@ This directory is the record. A rendered copy, such as a Sideshow post, is a vie
 | 2026-10-27 | [The Go-shaped language ("Effect for Go")](2026-10-27-go-sketch.md) | Checked (prototype), Proposed |
 | 2026-10-27 | [Why did this request time out? An agent reads a trace](2026-10-27-traceability.md) | Checked (prototype), Proposed |
 | 2026-10-27 | [`needs` and `provides`](2026-10-27-needs-provides.md) | Tested candidate, Proposed |
+| 2026-10-27 | [The language is Ergo](2026-10-27-ergo.md) | Tested candidate |
 
 ## Earlier sketches
 
-The 2026-10-08 sketches (language evolution, generalized `run` and progress) were rendered as HTML outside the repository. They carry a private host address and status claims tied to that day, so they are not copied here. The first index entry records the Effra snippet from the language-evolution sketch again, checked against the current compiler.
+The 2026-10-08 sketches (language evolution, generalized `run` and progress) were rendered as HTML outside the repository. They carry a private host address and status claims tied to that day, so they are not copied here. The first index entry records the Ergo snippet from the language-evolution sketch again, checked against the current compiler.

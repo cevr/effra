@@ -55,11 +55,11 @@ case OrderNotFound:
 1. **Arms.** `e catch { case T, U: v … }` handles failures of the fallible expression `e`. `catch` on an expression that cannot fail is an error (S108).
 2. Each type in an arm must be in `e`'s row (S108). A type may appear in only one arm (S108).
 3. **Value.** When `e` has a value of type `T`, each arm's value must be assignable to `T` (S108), and the catch expression has type `T`. When `e` has no value, an arm must have no value (S108). An arm's value whose own failure is not handled is S105.
-4. **Total catch (S103).** A `catch` without `try` must handle every error type in `e`'s row. *Prior art:* Rust and Gleam exhaustive `match` on an error enum; Swift propagates an error that no `catch` clause matches to the enclosing scope, and a non-throwing function must handle every error; Effra's total catch is the same obligation stated per error type.
+4. **Total catch (S103).** A `catch` without `try` must handle every error type in `e`'s row. *Prior art:* Rust and Gleam exhaustive `match` on an error enum; Swift propagates an error that no `catch` clause matches to the enclosing scope, and a non-throwing function must handle every error; Ergo's total catch is the same obligation stated per error type.
 5. **Partial catch.** `try e catch { … }` handles the named types and escapes the rest through `try`. The rest escapes to the enclosing failure target and is checked against its row (rules 4 and 5 of [Error rows](#error-rows); fixture `try … catch` in `sketch/sketch_test.go`, "partial catch under try still needs the rest declared", S101).
 6. **Typed failures only (README Gap 1).** A `catch` covers the typed row only. Interruption and defects are not in any row, and they always pass through a `catch`, total or partial. A total catch therefore has no default arm in source. Its lowering must still pass interruption and defects on; the prototype emits a default arm that re-panics with them.
 7. **Binding and statements (designed).** `catch e { case T: … }` binds the caught error, as `switch e := err.(type)` does; inside an arm with one type, `e` has that type. An arm may hold statements. When the `catch` is an expression, the arm's last statement is an expression that yields its value. `return` in an arm leaves the enclosing function, because an arm is not a block (README Gap 11).
-8. **Lowering.** A catch becomes a type switch on the Go error value, inline, with no closure. *Prior art:* XGo lowers `expr!` and `expr?:default` through a generated closure; Effra's catch stays inline.
+8. **Lowering.** A catch becomes a type switch on the Go error value, inline, with no closure. *Prior art:* XGo lowers `expr!` and `expr?:default` through a generated closure; Ergo's catch stays inline.
 
 ## Capability rows
 
@@ -73,7 +73,7 @@ Status: **implemented in prototype**.
 3. **Upper bound (S102).** Every capability a body charges must be in its `needs` clause or discharged by an enclosing `with`. A name in a `needs` clause must denote a capability (S104).
 4. **Entry.** `main` takes no parameters (S109) and cannot be called (S109). Prototype: its `needs` clause may list only `Console` (S102), and it returns nothing (S109). README Gaps 4 and 5 record the designed entry.
 5. **Names.** Designed: `needs http.Client` brings the bare name `Client` into scope for the body; when two packages export the same name, the body qualifies it. Prototype: in a selector `X.m`, a capability named `X` wins over a local named `X`, so such a local is never read (fixture `same-local-as-cap`, S110). Designed: declaring a local with the name of a capability in scope is an error.
-6. **Inference.** Designed: inside a package the compiler infers both rows of an unexported function. Exported functions spell them, so a changed body never silently widens a public contract. *Prior art:* Go export data; OCaml `.mli` signatures; Effra's earlier rule for exported contracts.
+6. **Inference.** Designed: inside a package the compiler infers both rows of an unexported function. Exported functions spell them, so a changed body never silently widens a public contract. *Prior art:* Go export data; OCaml `.mli` signatures; Ergo's earlier rule for exported contracts.
 7. **Lowering.** Capabilities become Go interfaces whose methods take the task handle first. A function takes a hidden environment with one field per capability, and the task. When `wire` knows the concrete provider, the call may be devirtualised.
 
 ## Footprints

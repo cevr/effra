@@ -151,7 +151,7 @@ func goodTask() {
 
 1. **R16.** Passing a resource as an argument lends it. The caller keeps ownership, and the resource is usable again after the call.
 2. **R17.** A lent resource must not be stored, returned, sent or captured by an escaping closure or by `go` inside the callee, except by a structured lend (R27, R31) to a task or owner that the callee releases before it returns. Each of these is an error. A call that lends `r` while `r` is consumed in the same call is an error.
-3. **R18.** Lending needs no lifetime annotations, because a lent value cannot escape the call. *Prior art:* Swift non-escaping borrowed parameters; Rust borrows, whose lifetimes Effra drops because a lend never escapes.
+3. **R18.** Lending needs no lifetime annotations, because a lent value cannot escape the call. *Prior art:* Swift non-escaping borrowed parameters; Rust borrows, whose lifetimes Ergo drops because a lend never escapes.
 4. A lend of a `Task` lets the callee read it but not `Wait` or `Stop` it.
 
 ## Closures
@@ -191,7 +191,7 @@ func keys() map[Key]string {
 }
 ```
 
-*Prior art:* Rust's `Vec<T>` forbids moving out by index and moves out through `Vec::remove` and `swap_remove`; Effra keeps that shape and chooses reverse order for release, to match its scope rule (R5). Rust's `HashMap<K, V>` owns and drops its keys as well as its values; Effra defers owned keys (R40) rather than add key extraction and replacement rules in v0.
+*Prior art:* Rust's `Vec<T>` forbids moving out by index and moves out through `Vec::remove` and `swap_remove`; Ergo keeps that shape and chooses reverse order for release, to match its scope rule (R5). Rust's `HashMap<K, V>` owns and drops its keys as well as its values; Ergo defers owned keys (R40) rather than add key extraction and replacement rules in v0.
 
 ## Channels
 
@@ -220,7 +220,7 @@ func keys() map[Key]string {
 
 ## `defer`
 
-`defer` stays for statements that are not releases, such as `defer done <- i`. `defer r.Close()` on a resource the scope owns is an error, because the scope already releases `r`; consume it with `r.Close()` where it should end early. *Prior art:* Zig keeps explicit `defer` and `errdefer` to avoid hidden control flow; Effra answers that cost with visibility (below).
+`defer` stays for statements that are not releases, such as `defer done <- i`. `defer r.Close()` on a resource the scope owns is an error, because the scope already releases `r`; consume it with `r.Close()` where it should end early. *Prior art:* Zig keeps explicit `defer` and `errdefer` to avoid hidden control flow; Ergo answers that cost with visibility (below).
 
 ## Visibility
 
@@ -233,9 +233,9 @@ The emitted Go is the `defer` a careful Go programmer writes, with an exit accum
 
 ## Prior art
 
-- **Rust `Drop` with moves.** The model. Effra keeps moves and drops lifetimes, because a lent value cannot escape.
+- **Rust `Drop` with moves.** The model. Ergo keeps moves and drops lifetimes, because a lent value cannot escape.
 - **Swift `~Copyable`.** `consume`, `deinit` and non-escaping borrowed parameters.
-- **C# `using var` and Python `with`.** Scoped release with a marker at each binding. Effra infers it from the type.
+- **C# `using var` and Python `with`.** Scoped release with a marker at each binding. Ergo infers it from the type.
 - **Gleam `use`.** `use f <- with_file(path)` flattens callback-scoped cleanup; it is explicit, and each resource needs a wrapper function.
-- **Elixir/OTP.** A port or file belongs to its process and closes when the process exits. Effra's per-task scope has the same "the owner's end releases it" rule.
+- **Elixir/OTP.** A port or file belongs to its process and closes when the process exits. Ergo's per-task scope has the same "the owner's end releases it" rule.
 - **Effect.** `acquireRelease`, `Scope`, `addFinalizer`, `ensuring` and `forkScoped`, replaced by one rule.

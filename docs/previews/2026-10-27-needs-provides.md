@@ -2,7 +2,7 @@
 
 Labels: **Tested candidate** and **Proposed**. Supersedes the `uses` spelling of [the Go-shaped language preview](2026-10-27-go-sketch.md), which stays unchanged as the record of that day. Ticket: [#217](https://github.com/cevr/ergo/issues/217). Normative text: [grammar.md, Keywords](../spec/grammar.md#keywords) and [rows.md, Wire](../spec/rows.md#wire) rule 8.
 
-- **Tested candidate** snippets depend on branch `wf10/sweep` at commit `71fc9ab4`, which implements the parser, the formatter and the bridge refusals. Commands, run on that commit in a scratch directory with the manifest `{"edition": "2026"}`: `ergo check`, `ergo fmt --check` and `ergo run`. Each snippet states its result. After the Ergo rename on the same branch ([2026-10-27-ergo.md](2026-10-27-ergo.md)), the binary is `ergo` and the manifest is `ergo.json`.
+- **Tested candidate** snippets depend on branch `wf10/sweep`. Commit `71fc9ab4` implements the parser, the formatter and the bridge refusals. The commands ran there as `ef`, and again at commit `2c76d055`, after the Ergo rename ([2026-10-27-ergo.md](2026-10-27-ergo.md)), as `ergo check`, `ergo fmt --check` and `ergo run`, in a scratch directory with the manifest `ergo.json` holding `{"edition": "2026"}`. Both runs gave the results each snippet states.
 - **Proposed** means the checking of a wire header, which [#196](https://github.com/cevr/ergo/issues/196) owns.
 
 ## What changed

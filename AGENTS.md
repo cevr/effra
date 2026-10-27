@@ -1,4 +1,4 @@
-# Effra
+# Ergo
 
 Claude orchestrates. Opus native subagents implement, one writer per isolated lane, running in parallel as far as the work DAG allows. After each implementation, get an independent review through the codex mod: `mcp__codex__start` with model `sol`, role `reviewer`, and "review directly" in the prompt; follow up with `mcp__codex__send`. Continue past two rounds while findings remain. Older handoffs naming `okra counsel`, other models, Herdr panes or Codex panes are superseded. Every review includes a prior-art section: how Gleam, ReScript, Elixir and the other compile-to-host languages in PRIOR_ART.md handle the same problem, and which optimizations and lowering paths they use (owner, 2026-10-07: "remember to look at lang prior arts as well as part of the review, gleam, rescript, elixir - they all compile downto another language, what optimizations and paths have they used?").
 

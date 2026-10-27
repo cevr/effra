@@ -1,8 +1,8 @@
-# What Effra needs to earn adoption
+# What Ergo needs to earn adoption
 
 Assessment prepared 2026-10-05 against the checked prototype and the [real-world source review](research/effect-native-showcases.md). This is a proposed build order and set of acceptance gates, not implemented features or a production-readiness claim.
 
-Effra has a credible semantic core: lazy execution, explicit failure/service contracts, native Go artifacts, owned child/resource cleanup, a lifecycle corpus and compiler-backed inspection. Go is the only target (owner, 2026-10-26). Practical adoption now depends on representing real application data, using real host libraries, constructing real providers and preserving the operational policies those applications need.
+Ergo has a credible semantic core: lazy execution, explicit failure/service contracts, native Go artifacts, owned child/resource cleanup, a lifecycle corpus and compiler-backed inspection. Go is the only target (owner, 2026-10-26). Practical adoption now depends on representing real application data, using real host libraries, constructing real providers and preserving the operational policies those applications need.
 
 Records, closed ADTs and match now cover the first application-data slice. The source review shows why they are insufficient by themselves: notification providers need dependent initialization; SDKs return named objects; event consumers need decoding and bounded replay; command services need transactions and stable identity.
 
@@ -10,7 +10,7 @@ The owner-directed [bundled standard library parity map](standard-library.md) de
 
 ## Gaps exposed by the inspected applications
 
-| Real pattern | What Effra already supplies | What blocks a faithful port | Owner |
+| Real pattern | What Ergo already supplies | What blocks a faithful port | Owner |
 | --- | --- | --- | --- |
 | Phase states and transition decisions | Explicit function/effect contracts | Codecs, usable collections and control flow beyond the closed data slice | Compiler + libraries |
 | Stored events and interaction records | Failure propagation | Explicit codecs, validation, versioned wire formats, nominal identifiers | Compiler-supported types + codec library + application migrations |
@@ -59,7 +59,7 @@ Add typed effectful error handlers so callers can inspect payloads, translate fa
 
 Grow the current HTTP provider into request/response types, bodies, status/headers, routing, codecs, streaming, disconnect cancellation and configurable limits. Add typed configuration, structured logging/tracing and clocks that deterministic concurrency tests can control.
 
-Add bounded queues, channels/streams, concurrency limits and supervised tasks. Keep restart, retry and timeout policies explicit; retries require a real idempotency contract. Go's scheduler supplies execution, while Effra still owns admission, cancellation and joined cleanup. Scopes alone do not prove mutable data race freedom; synchronized handles and explicit sharing rules remain necessary.
+Add bounded queues, channels/streams, concurrency limits and supervised tasks. Keep restart, retry and timeout policies explicit; retries require a real idempotency contract. Go's scheduler supplies execution, while Ergo still owns admission, cancellation and joined cleanup. Scopes alone do not prove mutable data race freedom; synchronized handles and explicit sharing rules remain necessary.
 
 Use Go drivers and SDKs behind deep services for SQL, networking and process work. A giant collection of per-function wrappers would defeat automatic interop. Shared facilities should encode a lifecycle or policy that callers would otherwise repeatedly implement.
 
@@ -91,7 +91,7 @@ These fixtures are acceptance criteria, not claims that the corresponding compil
 
 ## What can remain application or library work
 
-SQL transactions, migrations, command receipts, correlation and outbox protocols can use existing databases and libraries behind explicit services. Effra needs to express and inspect their contracts; it does not need a new database or a universal durable workflow engine.
+SQL transactions, migrations, command receipts, correlation and outbox protocols can use existing databases and libraries behind explicit services. Ergo needs to express and inspect their contracts; it does not need a new database or a universal durable workflow engine.
 
 Deployment state and deferred output graphs remain framework responsibilities. Native `output` syntax is an optional experiment after the application gates pass; a library interface can first preserve its phase semantics. The Go server path should not require a deployment framework.
 

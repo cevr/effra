@@ -1,18 +1,18 @@
-# Effra
+# Ergo
 
 **Go's directness and native binaries. Effect's typed failures, explicit dependencies and owned lifetimes. Algebraic data types with exhaustive matching. One small language.**
 
-Effra is an experimental application language. You write `.ef` files and `ergo` compiles them to a single static Go executable. Go is the only target; [Effect](https://effect.website) is the model for the guarantees, not a runtime. Every function signature states what it returns, every way it can fail and every service it needs, and the compiler checks all three.
+Ergo is an experimental application language. You write `.ef` files and `ergo` compiles them to a single static Go executable. Go is the only target; [Effect](https://effect.website) is the model for the guarantees, not a runtime. Every function signature states what it returns, every way it can fail and every service it needs, and the compiler checks all three.
 
-The aim is Effect for Go: application code with Go's simplicity, Effect's guarantees and a standard library covering what Effect does, in Effra's own idioms ([north star](NORTH_STAR.md)). What runs today is server-focused.
+The aim is Effect for Go: application code with Go's simplicity, Effect's guarantees and a standard library covering what Effect does, in Ergo's own idioms ([north star](NORTH_STAR.md)). What runs today is server-focused.
 
-> **Status: runnable prototype.** Everything in the first two sections compiles and runs today. The gate checks every Effra snippet that isn't labelled as a sketch. Syntax and APIs will still change.
+> **Status: runnable prototype.** Everything in the first two sections compiles and runs today. The gate checks every Ergo snippet that isn't labelled as a sketch. Syntax and APIs will still change.
 
 ## One program, three languages
 
 Here is a checkout step written three ways: look up an order, ask a payment gateway to authorize it within 500 ms, and describe the result. The payment result is a closed sum type, and every failure is a named, typed error. All three versions are checked in and print the same thing.
 
-### Effra
+### Ergo
 
 ```rust
 error OrderNotFound { id: string }
@@ -106,7 +106,7 @@ const checkout = (id: string) =>
   })
 ```
 
-Effect gives you the same guarantees, and Effra borrows its model directly. The cost is in the encoding: service classes declared through a two-stage generic, generators with `yield*`, `pipe`, and a contract that is inferred rather than written down. You only see that contract by hovering.
+Effect gives you the same guarantees, and Ergo borrows its model directly. The cost is in the encoding: service classes declared through a two-stage generic, generators with `yield*`, `pipe`, and a contract that is inferred rather than written down. You only see that contract by hovering.
 
 ### Go
 
@@ -168,13 +168,13 @@ func Checkout(ctx context.Context, orders Orders, gateway Gateway, id string) (s
 }
 ```
 
-Go's version is the most direct to read, and Effra keeps that directness: plain statements, no generators, no combinator chains. What Go can't tell you is which errors come back, whether the switch covers every case, or what a nil `Payment` would do.
+Go's version is the most direct to read, and Ergo keeps that directness: plain statements, no generators, no combinator chains. What Go can't tell you is which errors come back, whether the switch covers every case, or what a nil `Payment` would do.
 
 ### Same mistakes, three compilers
 
-Each row makes one mistake in the program above and records what happens. The Effra column is the actual `ergo diagnostics` output, verified by the gate ([`TestReadmeSmoke`](cmd/ergo/readme_smoke_test.go)).
+Each row makes one mistake in the program above and records what happens. The Ergo column is the actual `ergo diagnostics` output, verified by the gate ([`TestReadmeSmoke`](cmd/ergo/readme_smoke_test.go)).
 
-| Mistake | Go | TypeScript + Effect | Effra |
+| Mistake | Go | TypeScript + Effect | Ergo |
 | --- | --- | --- | --- |
 | Forget the `Declined` case | Compiles; falls into `default` at runtime | Type error | `EF117: missing match arm for Payment.Declined` |
 | Add the timeout but don't declare it | Compiles; a new error appears at runtime | Compiles; the inferred error union silently widens | `EF107: undeclared failures: Timeout` |
@@ -185,7 +185,7 @@ Each row makes one mistake in the program above and records what happens. The Ef
 
 ### At a glance
 
-| | Go | TypeScript + Effect | Effra |
+| | Go | TypeScript + Effect | Ergo |
 | --- | --- | --- | --- |
 | Which failures can happen | `error`; read the body | Inferred `E` type parameter | Declared in `raises { … }` and checked |
 | What a function needs | Parameters, struct fields, `context` | Inferred `R` type parameter | Declared in `uses { … }` and checked |
@@ -379,7 +379,7 @@ Each row states what has landed on this branch, what is in flight and what is on
 | Actors with explicit mailbox budgets and owned behavior | [Specified](docs/specs/actors.md); not built |
 | Evidence and proofs: values that carry what was checked | [Designed](docs/research/opaque-values-and-evidence.md) |
 | Numeric application code: floating point, loops and numeric buffers | Direction; not built ([#117](https://github.com/cevr/ergo/issues/117)) |
-| Swappable effect runtimes: a userland provider admitted by the runtime laws, beside Effra's own Go runtime | [Specified research](docs/research/lawful-runtime-contract.md); neither the RS1 law suite ([#124](https://github.com/cevr/ergo/issues/124)) nor the Effect-suite harness ([#123](https://github.com/cevr/ergo/issues/123)) runs yet |
+| Swappable effect runtimes: a userland provider admitted by the runtime laws, beside Ergo's own Go runtime | [Specified research](docs/research/lawful-runtime-contract.md); neither the RS1 law suite ([#124](https://github.com/cevr/ergo/issues/124)) nor the Effect-suite harness ([#123](https://github.com/cevr/ergo/issues/123)) runs yet |
 | Laws as a general construct for behavior types can't state | Admitted, not built; shape open ([#125](https://github.com/cevr/ergo/issues/125)) |
 
 ### Proofs you can't forget to check
@@ -431,7 +431,7 @@ go build -o bin/ergo ./cmd/ergo
 ./bin/ergo lsp                                    # diagnostics, hover, definition and formatting over LSP
 ```
 
-Native builds lower checked source into typed Go closures and run `go build`. The executable needs no Effra installation to run, and contains only the declarations and runtime modules its entry point reaches. `--target js` is the EF110 diagnostic: since 2026-10-26 Go is the only target.
+Native builds lower checked source into typed Go closures and run `go build`. The executable needs no Ergo installation to run, and contains only the declarations and runtime modules its entry point reaches. `--target js` is the EF110 diagnostic: since 2026-10-26 Go is the only target.
 
 ## Runnable examples
 
@@ -485,4 +485,4 @@ Open design questions are tracked in the [Wayfinder map](https://github.com/cevr
 go test -race ./...
 ```
 
-Fast compilation is a design constraint; see the [measurement receipts](docs/prototype.md#baseline). Effra is an application language. Kernels, hard real-time and no-GC execution are out of scope.
+Fast compilation is a design constraint; see the [measurement receipts](docs/prototype.md#baseline). Ergo is an application language. Kernels, hard real-time and no-GC execution are out of scope.

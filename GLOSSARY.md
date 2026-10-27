@@ -1,6 +1,6 @@
-# Effra glossary
+# Ergo glossary
 
-Effra is "Effect for Go": a Go-shaped language whose compiler checks Effect's guarantees (typed failures, explicit dependencies, structured concurrency, completed cleanup) and emits Go. Go is the only target (owner, 2026-10-26). The normative rules are in [`docs/spec/`](docs/spec/README.md). Every domain term is defined only here; the spec files state rules and link to these definitions.
+Ergo is "Effect for Go": a Go-shaped language whose compiler checks Effect's guarantees (typed failures, explicit dependencies, structured concurrency, completed cleanup) and emits Go. Go is the only target (owner, 2026-10-26). The normative rules are in [`docs/spec/`](docs/spec/README.md). Every domain term is defined only here; the spec files state rules and link to these definitions.
 
 The sections are:
 - **Language**: the Go-shaped language of `docs/spec/`.
@@ -55,7 +55,7 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Discharge** (implemented in prototype): Removing a capability from the row a block charges to its enclosing function, because an enclosing `with` binds it.
 
-**Wire** (implemented in prototype for provider literals): A declaration `wire Name { Cap = provider … }`, or an inline `wire{ … }` literal, that binds capabilities to providers or constructors. It is Effra's form of an Effect layer.
+**Wire** (implemented in prototype for provider literals): A declaration `wire Name { Cap = provider … }`, or an inline `wire{ … }` literal, that binds capabilities to providers or constructors. It is Ergo's form of an Effect layer.
 
 **Wire exposure** (parsed; checking designed, [#196](https://github.com/cevr/ergo/issues/196)): The `provides A, B` clause of a named wire header: the capabilities a `with` of that wire discharges. Entries the wire builds and does not list stay private to its build. A header may also state the wire's requirements, `wire App provides Account, Invoice needs Config { … }`, which join the `with` site's capability row.
 
@@ -129,7 +129,7 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Exit cause**: How a task ended when it did not succeed: one or more typed failures, defects and interruptions, all kept.
 
-**Defect**: A failure outside every row, such as a Go panic in Effra code or a crash in `Close`. It re-raises in the parent at the join.
+**Defect**: A failure outside every row, such as a Go panic in Ergo code or a crash in `Close`. It re-raises in the parent at the join.
 
 **Span** (designed): A named trace region, scoped by `with(trace.Span(…))`, keyed to a checked definition identity.
 
@@ -197,11 +197,11 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Zero-cost abstraction obligation** (destination, not current support): A candidate abstraction must make the illegal states and invalid operations covered by its checked contract unrepresentable in checked source, while foreign and trusted behavior remains explicitly qualified, and then erase or directly lower without an abstraction-induced executable size or runtime penalty against a semantic equivalence baseline. Retained allocation, dispatch, module, byte and residual-check costs must be visible in matched receipts. Native output targets parity with or better performance than the optimized idiomatic Go member, and Go lowering pursues every material measured lowering or specialization opportunity while preserving the userland runtime contract. This obligation never removes a required guardrail and does not promise universally zero overhead or a fixed speedup multiplier.
 
-**Semantic equivalence baseline** (acceptance term): A matched Effra and explicit Go program pair that performs the same validation and observable work while preserving the same rows, ownership, cancellation and completed-cleanup behavior. The Go member is an optimized idiomatic Go control with the same contract. The baseline makes an abstraction's generated and runtime costs attributable rather than inferred from unequal examples. Until 2026-10-26 the baseline also had a TypeScript/Effect member; it went with the JavaScript target.
+**Semantic equivalence baseline** (acceptance term): A matched Ergo and explicit Go program pair that performs the same validation and observable work while preserving the same rows, ownership, cancellation and completed-cleanup behavior. The Go member is an optimized idiomatic Go control with the same contract. The baseline makes an abstraction's generated and runtime costs attributable rather than inferred from unequal examples. Until 2026-10-26 the baseline also had a TypeScript/Effect member; it went with the JavaScript target.
 
 ## Runtime and providers
 
-**Effect runtime provider** (direction): An implementation of the lawful runtime contract that executes Effra effects on a target. `runtime/ergo` is the native Go provider of the earlier language, and the prototype's `rt` package is the first provider of the Go-shaped language. Pinned Effect as the JavaScript provider went with the JavaScript target on 2026-10-26.
+**Effect runtime provider** (direction): An implementation of the lawful runtime contract that executes Ergo effects on a target. `runtime/ergo` is the native Go provider of the earlier language, and the prototype's `rt` package is the first provider of the Go-shaped language. Pinned Effect as the JavaScript provider went with the JavaScript target on 2026-10-26.
 
 **Lawful runtime contract** (specified research): The host operations and laws an effect runtime provider must satisfy, with each obligation's evidence classified as nominally checked, trusted decision, tested law, refuted or unresolved/unavailable.
 
@@ -247,7 +247,7 @@ These terms describe the `.ef` language that `internal/compiler` and `runtime/er
 
 **Entry failure report**: The deterministic stderr text and exit status a program entry produces when `main` fails. It lists each cause reason in order, as a named failure with its payload, a defect message or an interruption. Payloads are rendered from the checked types of `main`'s failure row, so the report is deterministic for every failure in that row, including built-in, codec and HTTP listener failures. The one exception is an unclassified HTTP listener failure, which keeps the host's text.
 
-**Effect contract**: The success value, named failures, and required services of a deferred Effra program.
+**Effect contract**: The success value, named failures, and required services of a deferred Ergo program.
 
 **Failure row**: The unordered set of nominal failures admitted by an effect contract. Counterpart: error row.
 
@@ -301,7 +301,7 @@ These terms describe the `.ef` language that `internal/compiler` and `runtime/er
 
 **Semantic revision**: The identity of the checked snapshot described by inspection or diagnostics, including imported declaration data and behavior contracts when present.
 
-**Managed fiber**: An execution of an Effra effect with an owner and a completion result. Its cancellation request and completed shutdown are distinct states. Counterpart: task.
+**Managed fiber**: An execution of an Ergo effect with an owner and a completion result. Its cancellation request and completed shutdown are distinct states. Counterpart: task.
 
 **Owning scope**: The lifetime that owns managed fibers and resource releases. Its closure establishes their completed shutdown and cleanup. Counterpart: owner scope.
 

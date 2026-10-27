@@ -43,7 +43,7 @@ The research note is `docs/research/traceability.md`. The unit directory is `/ho
 
 ## Prior art
 
-- Go `context`: the cancellation tree. Effra keeps the downward stop and adds a drain: `Stop` waits for the work and its releases.
+- Go `context`: the cancellation tree. Ergo keeps the downward stop and adds a drain: `Stop` waits for the work and its releases.
 - Effect `Fiber`, `Scope` and `Cause`: the guarantees. Release runs once on every exit. Interruption is not a typed error. A cause keeps every reason. In pinned Effect 4, fork is interruptible by default and inherits only on request.
 - ZIO `uninterruptibleMask` with restore: the explicit masked start (`GoMasked`) and its restore.
 - Trio nurseries and Swift task groups: structured lend. A scope stops and drains its tasks before it releases the resources it acquired earlier.

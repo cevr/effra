@@ -1,6 +1,6 @@
 # Compiler-distributed modules
 
-Effra admits explicit portable imports from a finite compiler distribution.
+Ergo admits explicit portable imports from a finite compiler distribution.
 `import Fns "ergo/functions"` resolves the ordinary `Fns.call` forwarding
 function, the pure `Fns.identity` function, the managed callback forwarding
 function `Fns.forwardFile`, and `Fns.suffixed(input, suffix = "!")`, whose
