@@ -1,0 +1,50 @@
+package recipes
+
+type Transient struct{}
+
+type Attempt[T any] struct {
+	Label string
+	Work  func(Ctx[Console]) (T, error[Transient]) // a recipe: runs fresh on every call
+}
+
+type RetryPolicy[T any] struct {
+	Primary Attempt[T]
+	Backup  Option[Attempt[T]]
+}
+
+func probe(cx Ctx[Console], name string) (string, error[Transient]) {
+	cx.Console.Log("probe " + name)
+	if name == "flaky" {
+		return Transient{}
+	}
+	return name + " ok"
+}
+
+func attempt(cx Ctx[Console], step Attempt[string]) string {
+	return step.Work(cx) catch {
+	case Transient:
+		step.Label + " failed"
+	}
+}
+
+func retry(cx Ctx[Console], policy RetryPolicy[string]) string {
+	first := attempt(cx, policy.Primary)
+	switch b := policy.Backup.(type) {
+	case None:
+		return first
+	case Some:
+		return first + "; " + attempt(cx, b.V)
+	}
+}
+
+func main(cx Ctx[Console]) {
+	policy := RetryPolicy[string]{
+		Primary: Attempt[string]{Label: "flaky", Work: func(cx) { return probe(cx, "flaky") }},
+		Backup:  Some{V: Attempt[string]{Label: "stable", Work: func(cx) { return probe(cx, "stable") }}},
+	}
+	cx.Console.Log("constructed")
+	once := retry(cx, policy)
+	again := retry(cx, policy)
+	cx.Console.Log(once)
+	cx.Console.Log(again)
+}

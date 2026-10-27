@@ -1,0 +1,100 @@
+package main
+
+import "wiring"
+
+type OrderNotFound struct {
+    ID string
+}
+
+type GatewayDown struct{}
+
+type Order struct {
+    ID string
+    Total int64
+}
+
+type Payment enum {
+    Pending
+    Authorized{ AuthID string }
+    Declined{ Reason string }
+}
+
+type Orders interface {
+    Find(id string) (Order, error[OrderNotFound])
+}
+
+type Gateway interface {
+    Authorize(order Order) (Payment, error[GatewayDown])
+}
+
+func checkout(cx Ctx[Orders, Gateway, Scheduler], id string) (string, error[OrderNotFound | GatewayDown | TimedOut]) {
+    order := try(cx.Orders.Find(id))
+    payment := try(SchedulerTimeout(cx, 500ms, func(cx) { return cx.Gateway.Authorize(order) }))
+    switch p := payment.(type) {
+    case Pending:
+        return "pending"
+    case Authorized:
+        return "paid " + p.AuthID
+    case Declined:
+        return "declined: " + p.Reason
+    }
+}
+
+type MemoryOrders struct{}
+
+func (m MemoryOrders) Find(id string) (Order, error[OrderNotFound]) {
+    if id == "42" {
+        return Order{ID: id, Total: 1999}
+    } else {
+        return OrderNotFound{ID: id}
+    }
+}
+
+type FakeGateway struct {
+    AuthID string
+}
+
+func (g FakeGateway) Authorize(order Order) (Payment, error[GatewayDown]) {
+    return Authorized{AuthID: g.AuthID}
+}
+
+// Constructor signatures keep provision resolved by the capability type.
+func NewOrders() Orders {
+    return MemoryOrders{}
+}
+
+func NewGateway() Gateway {
+    return FakeGateway{AuthID: "auth-7"}
+}
+
+// Lazy named constructor bundle; its proposed meaning is in checkout.md.
+var Live = wiring.Bundle(NewOrders, NewGateway, LiveScheduler)
+
+func report(cx Ctx[Console], id string) {
+    outcome := ""
+    {
+        app := provide(cx, Live)
+        switch r := checkout(app, id).(type) {
+        case string:
+            outcome = r
+        case OrderNotFound:
+            outcome = "no such order"
+        case GatewayDown:
+            outcome = "gateway down"
+        case TimedOut:
+            outcome = "gateway timed out"
+        }
+    }
+    cx.Console.Log(outcome)
+}
+
+func main(cx Ctx[]) {
+    {
+        app := provide(cx, Stdout)
+        report(app, "42")
+    }
+    {
+        app := provide(cx, Stdout)
+        report(app, "7")
+    }
+}

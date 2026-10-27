@@ -1,0 +1,38 @@
+package poller
+
+interface Recorded {
+	Sizes() []int
+}
+
+type Constant struct{ Value float64 }
+
+func (c Constant) Read() (float64, error[SourceDown]) {
+	return c.Value
+}
+
+// A Ref is the shareable mutable cell; each layer build gets a fresh one.
+type Recorder struct{ sizes Ref[[]int] }
+
+func (r Recorder) Flush(batch []Reading) error[FlushFailed] {
+	r.sizes.Update { var s in s.Append(len(batch)) }
+}
+
+func (r Recorder) Sizes() []int {
+	return r.sizes.Get()
+}
+
+// TestClock provides Clock and Scheduler. Virtual time jumps to the next
+// timer when every task waits, as Go's testing/synctest does.
+layer TestLive {
+	Clock, Scheduler = TestClock{}
+	Source = Constant{Value: 1}
+	Sink, Recorded = Recorder{}
+	Console = Discard{}
+}
+
+func TestRunBatches() error[FlushFailed] uses Test {
+	provide(TestLive) {
+		try Run(10500ms)
+		Test.Equal(Recorded.Sizes(), []int{5, 5})
+	}
+}

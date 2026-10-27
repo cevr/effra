@@ -1,0 +1,34 @@
+package wordcount
+
+import (
+	"fs"
+	"os"
+	"strings"
+)
+
+type WordCount struct {
+	Word  string
+	Count int
+}
+
+// Lines opens the file and closes it when the loop ends, on every exit.
+func topWords(path string, n int) ([]WordCount, error[fs.NotFound | fs.ReadFailed]) uses fs.Files {
+	var counts map[string]int
+	for line in try Files.Lines(path) {
+		for w in strings.Fields(strings.ToLower(line)) {
+			counts[w] += 1
+		}
+	}
+	var words []WordCount
+	for w, c in counts {
+		words.Append(WordCount{w, c})
+	}
+	words.Sort { a, b in a.Count > b.Count || a.Count == b.Count && a.Word < b.Word }
+	return words.Take(n)
+}
+
+func main() error[fs.NotFound | fs.ReadFailed] uses fs.Files, os.Args, Console {
+	for w in try topWords(Args.Get(1), 5) {
+		Console.Log(w.Word, w.Count)
+	}
+}

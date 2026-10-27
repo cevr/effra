@@ -1,0 +1,4 @@
+// want S108
+package demo
+func f(x string, x string) {}
+func main() {}

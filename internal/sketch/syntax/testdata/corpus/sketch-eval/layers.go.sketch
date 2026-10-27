@@ -1,0 +1,65 @@
+package main
+
+import "wiring"
+
+type Store interface {
+    Label(cx Ctx[]) string
+}
+
+type Account interface {
+    Label(cx Ctx[]) string
+}
+
+type Invoice interface {
+    Label(cx Ctx[]) string
+}
+
+type Memory struct {
+    Text string
+}
+
+func (m Memory) Label(cx Ctx[]) string {
+    return m.Text
+}
+
+type AccountLive struct {
+    Store Store
+}
+
+func (a AccountLive) Label(cx Ctx[]) string {
+    return a.Store.Label(cx)
+}
+
+func NewAccount(cx Ctx[Store]) Account {
+    return AccountLive{Store: cx.Store}
+}
+
+type InvoiceLive struct {
+    Store Store
+}
+
+func (i InvoiceLive) Label(cx Ctx[]) string {
+    return i.Store.Label(cx)
+}
+
+func NewInvoice(cx Ctx[Store]) Invoice {
+    return InvoiceLive{Store: cx.Store}
+}
+
+// Proposed lazy plan API; no provider is acquired by these declarations.
+var Shared = wiring.Bind[Store](func() Store { return Memory{Text: "live"} })
+var Accounts = wiring.Merge(Shared, wiring.Bind[Account](NewAccount))
+var Invoices = wiring.Merge(Shared, wiring.Bind[Invoice](NewInvoice))
+var App = wiring.Expose[Account, Invoice](wiring.Merge(Accounts, Invoices))
+var Fixture = wiring.Replace[Store](App, func() Store { return Memory{Text: "fixture"} })
+
+func labels(cx Ctx[Account, Invoice]) string {
+    account := cx.Account.Label(cx)
+    invoice := cx.Invoice.Label(cx)
+    return account + ":" + invoice
+}
+
+func main(cx Ctx[]) string {
+    app := provide(cx, Fixture)
+    return labels(app)
+}

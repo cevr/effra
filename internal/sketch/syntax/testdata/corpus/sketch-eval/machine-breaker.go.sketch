@@ -1,0 +1,127 @@
+package main
+
+type ProbeUnavailable struct{}
+
+type Probe interface {
+    Healthy(endpoint string) (bool, error[ProbeUnavailable])
+}
+
+type HealthyProbe struct{}
+
+func (p HealthyProbe) Healthy(endpoint string) (bool, error[ProbeUnavailable]) {
+    return endpoint == "primary"
+}
+
+func NewHealthyProbe() Probe {
+    return HealthyProbe{}
+}
+
+type Signal enum {
+    Failure{ Endpoint string }
+    Success
+    Retry
+    Retire
+}
+
+// Ordinary enum syntax; machine interpretation of its alternatives is NEW.
+type BreakerDecision enum {
+    Enter{ Next Breaker }
+    Stay{ Next Breaker }
+    Ignore
+    Reject
+    Done{ Output string }
+}
+
+type Breaker = CircuitBreaker
+
+// NEW: decision/error result contract, explicit initial value, decision returns.
+type CircuitBreaker machine(cx Ctx[Probe], Signal) (BreakerDecision, error[ProbeUnavailable]) {
+    Closed{ Failures int64 }
+    Open{ Endpoint string }
+    HalfOpen{ Endpoint string }
+
+    initial Closed{Failures: 0}
+
+    case s Closed, e Failure:
+        if s.Failures >= 2 {
+            return Enter{Next: tripped(e.Endpoint)}
+        } else {
+            return Stay{Next: Closed{Failures: s.Failures + 1}}
+        }
+    case Closed, Success:
+        return Stay{Next: Closed{Failures: 0}}
+    case Closed, Retry:
+        return Ignore{}
+    case HalfOpen, Retry:
+        return Ignore{}
+    case s Open, Retry:
+        if try(cx.Probe.Healthy(s.Endpoint)) {
+            return Enter{Next: HalfOpen{Endpoint: s.Endpoint}}
+        } else {
+            return Stay{Next: s}
+        }
+    case Open, e Failure:
+        return Enter{Next: tripped(e.Endpoint)}
+    case HalfOpen, e Failure:
+        return Enter{Next: tripped(e.Endpoint)}
+    case HalfOpen, Success:
+        return Enter{Next: Closed{Failures: 0}}
+    case Open, Success:
+        return Reject{}
+    case _, Retire:
+        return Done{Output: "retired"}
+}
+
+func tripped(endpoint string) Breaker {
+    return Open{Endpoint: endpoint}
+}
+
+func breakerStep(cx Ctx[Probe], state Breaker, signal Signal) (BreakerDecision, error[ProbeUnavailable]) {
+    return CircuitBreaker.Step(cx, state, signal)
+}
+
+func describe(decision BreakerDecision) string {
+    switch d := decision.(type) {
+    case Enter:
+        return "enter " + label(d.Next)
+    case Stay:
+        return "stay " + label(d.Next)
+    case Ignore:
+        return "ignore"
+    case Reject:
+        return "reject"
+    case Done:
+        return "done " + d.Output
+    }
+}
+
+func label(state Breaker) string {
+    switch s := state.(type) {
+    case Closed:
+        return "closed"
+    case Open:
+        return "open " + s.Endpoint
+    case HalfOpen:
+        return "half-open " + s.Endpoint
+    }
+}
+
+func main(cx Ctx[]) (string, error[ProbeUnavailable]) {
+    open := tripped("primary")
+    var retried BreakerDecision = Ignore{}
+    {
+        app := provide(cx, NewHealthyProbe)
+        retried = try(breakerStep(app, open, Retry{}))
+    }
+    var failed BreakerDecision = Ignore{}
+    {
+        app := provide(cx, NewHealthyProbe)
+        failed = try(breakerStep(app, Closed{Failures: 2}, Failure{Endpoint: "primary"}))
+    }
+    var retired BreakerDecision = Ignore{}
+    {
+        app := provide(cx, NewHealthyProbe)
+        retired = try(breakerStep(app, open, Retire{}))
+    }
+    return describe(retried) + "; " + describe(failed) + "; " + describe(retired)
+}

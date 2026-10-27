@@ -1,0 +1,4 @@
+// want S108
+package demo
+func (LiveScheduler) Extra() {}
+func main() {}

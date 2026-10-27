@@ -1,0 +1,19 @@
+package tasks
+
+// Map is library code, not a construct. It keeps input order and runs at
+// most limit calls at once. If a join fails, Map exits, and the exit
+// interrupts and drains every task still in the queue (rule M5.3).
+func Map(xs []A, limit int, f func(A) (B, error[E]) uses R) ([]B, error[E]) uses R {
+	var running []Task[B, E]
+	var out []B
+	for x in xs {
+		if len(running) == limit {
+			out.Append(try await running.PopFront())
+		}
+		running.Append(go f(x))
+	}
+	for t in running {
+		out.Append(try await t)
+	}
+	return out
+}

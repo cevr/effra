@@ -1,0 +1,6 @@
+// out: ok
+package demo
+func main() uses Console {
+  xª := "ok"
+  Console.Println(xª)
+}

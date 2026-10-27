@@ -1,0 +1,5 @@
+// out: 
+package demo
+type plain struct{}
+func f() error[plain] {}
+func main() {}

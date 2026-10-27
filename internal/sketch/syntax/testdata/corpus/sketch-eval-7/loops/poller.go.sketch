@@ -1,0 +1,58 @@
+package poller
+
+import "timeout"
+
+type SourceDown struct{}
+type FlushFailed struct{}
+
+type Reading struct {
+	At    Time
+	Value float64
+}
+
+type Source interface {
+	Read() (float64, error[SourceDown])
+}
+
+type Sink interface {
+	Flush(batch []Reading) error[FlushFailed]
+}
+
+// The ticker stops when the loop ends. A full queue blocks Send.
+func poll(out Queue[Reading]) uses Source, Clock, Console {
+	for at in Clock.Every(1s) {
+		v := Source.Read() catch {
+		case SourceDown:
+			Console.Log("poll failed")
+			continue
+		}
+		out.Send(Reading{at, v})
+	}
+}
+
+func batch(in Queue[Reading], size int) error[FlushFailed] uses Sink {
+	var buf []Reading
+	for r in in {
+		buf.Append(r)
+		if len(buf) == size {
+			try Sink.Flush(buf)
+			buf.Clear()
+		}
+	}
+	if len(buf) > 0 {
+		try Sink.Flush(buf)
+	}
+}
+
+// A flush failure exits Run, and that exit interrupts the producer.
+func Run(d Duration) error[FlushFailed] uses Source, Sink, Clock, Scheduler, Console {
+	q := Queue[Reading](16)
+	producer := go {
+		timeout.After(d) { poll(q) } catch {
+		case timeout.Expired:
+		}
+		q.Close()
+	}
+	try batch(q, 5)
+	await producer
+}
