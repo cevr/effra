@@ -9,13 +9,20 @@ import (
 // snapshot is the lowering of a value copy across the actor boundary: the
 // rule that values copy into a task (runtime.md Tasks rule 6) with value
 // semantics (types.md Structs rule 6), applied where a value leaves one task
-// for another: a message, a reply, an agent call's result and a machine's
+// for another: an actor's initial state, a message, a reply value or failure,
+// an agent call's result or failure, a handler's failure and a machine's
 // state snapshot and decision. It returns a value that shares no mutable
 // storage with v: slices and maps are copied, deeply. Strings, numbers,
 // channels, functions and pointers are not copied: they are immutable or are
-// synchronised handles (a Reply's slot, a lowered capability environment). A
-// resource (a type with Close) moves rather than copies, so it is returned as
-// it is.
+// synchronised handles (a Reply's slot, a lowered capability environment).
+//
+// A resource moves, and a move must not duplicate the resource's identity.
+// In this lowering a resource's identity is always a handle (a pointer, a
+// channel or a function: a Reply's slot, an rt handle), which is shared, so
+// the move keeps it. The ordinary fields beside it, in a message that holds a
+// Reply for example, are values and are copied like any other: in source the
+// struct literal copied them. A lowered resource whose identity were a slice
+// or a map would need the compiler to mark it; none exists here.
 //
 // The compiler knows each type statically and would emit the copy, or none,
 // at the boundary, and skip it on a last use (move on last use); for an
@@ -75,12 +82,7 @@ func planFor(t reflect.Type) plan {
 	return p
 }
 
-var closer = reflect.TypeFor[interface{ Close() }]()
-
 func computePlan(t reflect.Type, visiting map[reflect.Type]bool) plan {
-	if t.Kind() != reflect.Interface && t.Implements(closer) {
-		return planNone // a resource moves
-	}
 	switch t.Kind() {
 	case reflect.Slice, reflect.Map:
 		return planDeep

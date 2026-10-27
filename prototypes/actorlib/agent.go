@@ -5,10 +5,10 @@ import "effra.local/prototype/runtime/rt"
 // call is an agent's message: a function on the state that also answers its
 // caller. A call is a resource: its Close, which the drain runs on a queued
 // call and the handler runs after every call, answers an unanswered caller
-// with the refusal (Stopped while the agent stops, NoReply while it runs), as
-// Reply.Close does. After the call answered, Close has no effect.
+// with the refusal (Stopped once the agent's stop is requested, NoReply while
+// it runs), as Reply.Close does. After the call answered, Close has no effect.
 type call[S any] struct {
-	run  func(t *rt.Task, s *S)
+	run  func(t *rt.Task, s *S) error
 	slot refuser
 }
 
@@ -28,15 +28,20 @@ type Agent[S any] = Actor[call[S]]
 // AgentAddress is its copyable half.
 type AgentAddress[S any] = Address[call[S]]
 
-// StartAgent runs an agent over initial with a mailbox of the given capacity.
-// The agent owns its state; each call borrows it.
+// StartAgent runs an agent over a copy of initial with a mailbox of the given
+// capacity. The agent owns its state on every exit: each call only borrows
+// it, so a call that panics or ends the agent leaves the state to the agent's
+// release, which runs once after the queue is released.
 func StartAgent[S any](s *rt.Scope, span string, initial S, capacity int) Agent[S] {
-	state := &initial
-	return Start(s, span, state, capacity, func(t *rt.Task, st *S, c call[S]) (Next[*S], error) {
-		defer c.Close() // answers nothing after run answered; NoReply if run panicked
-		c.run(t, st)
+	state := new(S)
+	*state = snapshot(initial)
+	return start(s, span, state, capacity, func(t *rt.Task, st *S, c call[S]) (Next[*S], error) {
+		defer c.Close() // answers nothing after run answered; NoReply or Stopped otherwise
+		if err := c.run(t, st); err != nil {
+			return Next[*S]{}, err
+		}
 		return Continue(st), nil
-	})
+	}, true)
 }
 
 // Call runs f on the agent's state, in mailbox order, and returns f's value or
@@ -48,26 +53,31 @@ func StartAgent[S any](s *rt.Scope, span string, initial S, capacity int) Agent[
 // f runs on the agent's task and receives it: its waits are interruption
 // points of the agent (I1), so Stop interrupts a waiting f. f has an empty
 // requirement row: a detached caller's call may run after the caller's `with`
-// has released its providers. The reply is f's return value, so every
-// admitted call is answered once by construction; the value is copied out
-// (snapshot) so it never aliases the state. The exit is Stopped when the
-// agent stops before f runs or while f waits, NoReply when f panics (the
-// panic is a defect of the agent, which Stop returns), and rt.Interrupted
-// when t is stopped while it waits; the caller then detaches and a late
-// result is released.
+// has released its providers. The value and the typed failure are copied out
+// (snapshot) so they never alias the state.
+//
+// Call decides by the kind of f's exit, as a catch does (rt.Failure): a lone
+// typed failure is the caller's failure, and the agent goes on. Any other
+// exit, an interruption or a cause with a defect, is the agent's: it ends the
+// agent with that exit, which Stop returns (without a stop's interruption);
+// the caller gets NoReply, or Stopped when the agent's stop was requested,
+// and queued callers get Stopped. A panic in f ends the agent the same way.
+// The exit is rt.Interrupted when t is stopped while it waits; the caller
+// then detaches and a late result is released.
 func Call[S, T any](t *rt.Task, to AgentAddress[S], f func(t *rt.Task, s *S) (T, error)) (T, error) {
 	sl := newSlot[T, error](&to.c.control)
 	err := to.Send(t, call[S]{
-		run: func(at *rt.Task, s *S) {
+		run: func(at *rt.Task, s *S) error {
 			v, err := f(at, s)
-			switch {
-			case err == nil:
+			if err == nil {
 				sl.answer(outcome[T, error]{v: snapshot(v)})
-			case err == rt.Interrupted:
-				release(v) // the agent is stopping: Close answers Stopped
-			default:
-				sl.answer(outcome[T, error]{e: err, kind: failed})
+				return nil
 			}
+			if fe, ok := rt.Failure(err); ok {
+				sl.answer(outcome[T, error]{e: snapshot(fe), kind: failed})
+				return nil
+			}
+			return err // the agent's exit; the handler's Close answers the caller
 		},
 		slot: sl,
 	})

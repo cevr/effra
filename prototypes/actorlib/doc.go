@@ -32,7 +32,9 @@
 // that Effra releases at scope end lowers to a Close call on every path where
 // it is still owned. A message struct with a [Reply] field gets the generated
 // Close of resources.md R3, which closes the reply. A value that crosses
-// from one task to another (a message, a reply, an agent result, a state
-// snapshot) is copied by snapshot, the stand-in for the copy the compiler
-// emits per type (runtime.md Tasks rule 6).
+// from one task to another (an initial state, a message, a reply value or
+// failure, an agent result or failure, a handler failure, a state snapshot)
+// is copied by snapshot, the stand-in for the copy the compiler emits per
+// type (runtime.md Tasks rule 6). An actor's exit goes through rt's owner
+// scope (rt.Scope.End), so rt classifies every recovered panic.
 package actorlib
