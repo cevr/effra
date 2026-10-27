@@ -180,8 +180,15 @@ func (s *scanner) number(start int) {
 	for end < len(src) && '0' <= src[end] && src[end] <= '9' {
 		end++
 	}
-	if end+1 < len(src) && src[end] == '.' && '0' <= src[end+1] && src[end+1] <= '9' {
-		s.fail(start, end+2-start, "floating-point literals are not part of v0 (#81)")
+	if end < len(src) && src[end] == '.' {
+		// Go reads `1.5`, and also `0.` before any other character, as a
+		// floating-point literal: `0.A` is the float `0.` and the name `A`,
+		// never a selector on 0 (write `0 .A`, as gofmt does).
+		length := end + 1 - start
+		if end+1 < len(src) && '0' <= src[end+1] && src[end+1] <= '9' {
+			length++
+		}
+		s.fail(start, length, "floating-point literals are not part of v0 (#81)")
 		return
 	}
 	suffixEnd := end

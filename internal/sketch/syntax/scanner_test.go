@@ -87,6 +87,8 @@ func TestNumberForms(t *testing.T) {
 	for src, want := range map[string]string{
 		"0x1F":  "hexadecimal",
 		"1.5":   "floating-point",
+		"0.A":   "floating-point",
+		"1.":    "floating-point",
 		"1_000": "separators",
 		"5kg":   `unknown number suffix "kg"`,
 	} {
