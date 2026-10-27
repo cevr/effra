@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -576,5 +577,71 @@ func TestUninspectableEntriesAreNeverTakenAsMissing(t *testing.T) {
 		restrict(t, manifest, 0o000, false)
 		_, err := admitPath(t, source)
 		wantAdmissionRefusal(t, err)
+		if !strings.Contains(err.Error(), manifest) || !strings.Contains(err.Error(), os.ErrPermission.Error()) {
+			t.Fatalf("the refusal lost the path or the cause: %v", err)
+		}
+	})
+}
+
+// An entry that cannot be inspected again at validation keeps its path and
+// cause in the EF146 refusal: a linked manifest's backing file made
+// unreadable after the walk, or a linked go.mod's target directory made
+// search-only after the walk, report "permission denied", not a generic
+// changed entry. A real change keeps the generic message. Ported from the
+// round 6 review probe.
+func TestValidationRefusalsKeepTheInspectionCause(t *testing.T) {
+	for _, kind := range []string{"linked manifest backing file", "linked go.mod target directory"} {
+		t.Run(kind, func(t *testing.T) {
+			var source, restricted string
+			var mode os.FileMode
+			if kind == "linked manifest backing file" {
+				root := workspace(t)
+				write(t, filepath.Join(root, "go.mod"), "module scratch\n")
+				write(t, filepath.Join(root, ManifestName), `{"edition":"2026"}`)
+				source = filepath.Join(root, "pkg", "main.ef")
+				write(t, source, "source\n")
+				restricted = filepath.Join(root, "manifest-target.json")
+				write(t, restricted, `{"edition":"legacy"}`)
+				if err := os.Symlink(restricted, filepath.Join(root, "pkg", ManifestName)); err != nil {
+					t.Fatal(err)
+				}
+				restrict(t, restricted, 0o000, false)
+				mode = 0o000
+			} else {
+				_, source, restricted = linkedBoundaryWorkspace(t)
+				restrict(t, restricted, 0o111, true)
+				mode = 0o111
+			}
+			if err := os.Chmod(restricted, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			restore := hookAt(StageWalked, func() {
+				if err := os.Chmod(restricted, mode); err != nil {
+					t.Fatal(err)
+				}
+			})
+			admitted, err := admitPath(t, source)
+			restore()
+			if admitted != nil {
+				admitted.Close()
+			}
+			wantAdmissionRefusal(t, err)
+			if !strings.Contains(err.Error(), os.ErrPermission.Error()) || strings.Contains(err.Error(), "changed while it was admitted") {
+				t.Fatalf("the validation refusal lost the inspection cause: %v", err)
+			}
+		})
+	}
+	t.Run("a real change keeps the generic message", func(t *testing.T) {
+		_, source, private := linkedBoundaryWorkspace(t)
+		defer hookAt(StageWalked, func() {
+			if err := os.Remove(filepath.Join(private, "inner.mod")); err != nil {
+				t.Fatal(err)
+			}
+		})()
+		_, err := admitPath(t, source)
+		wantAdmissionRefusal(t, err)
+		if !strings.Contains(err.Error(), "changed while it was admitted") {
+			t.Fatalf("a removed go.mod target gave %v, want the changed-entry message", err)
+		}
 	})
 }

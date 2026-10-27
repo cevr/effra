@@ -182,7 +182,11 @@ func admit(anchor *os.File, info os.FileInfo, spelled string, directory bool, ab
 	if again != physical {
 		return "", Resolution{}, admissionError("source %s moved while its edition was resolved: it was %s and is now %s", spelled, physical, again)
 	}
-	if changed := walked.changed(); changed != "" {
+	changed, unknown := walked.changed()
+	if unknown != nil {
+		return "", Resolution{}, admissionError("the edition of source %s could not be validated: %s", spelled, unknown.Diagnostic.Message)
+	}
+	if changed != "" {
 		return "", Resolution{}, admissionError("the edition of source %s could not be fixed: %s changed while it was admitted", spelled, changed)
 	}
 	return physical, walked.resolution, nil
@@ -531,52 +535,74 @@ func readManifest(dir *os.Root, path string, record *manifestRecord) (Resolution
 // path; its manifest is read again through the directory handle the walk
 // held, with the same link and file checks, and its bytes must be equal;
 // its go.mod must be the same; and every absent path must still be missing.
-func (s snapshot) changed() string {
+// An entry that cannot be inspected again (any error but not-exist) is
+// returned as the inspection's refusal, with its path and cause, instead of
+// a changed entry.
+func (s snapshot) changed() (string, *AdmissionError) {
 	for _, dir := range s.dirs {
 		if dir.missing {
-			if _, err := os.Lstat(dir.path); !errors.Is(err, fs.ErrNotExist) {
-				return "directory " + dir.path
+			if _, err := os.Lstat(dir.path); err == nil {
+				return "directory " + dir.path, nil
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				return "", uninspectable("directory "+dir.path, err)
 			}
 			continue
 		}
 		if dir.info == nil {
 			continue
 		}
-		if now, err := os.Stat(dir.path); err != nil || !os.SameFile(dir.info, now) {
-			return "directory " + dir.path
+		now, err := os.Stat(dir.path)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return "", uninspectable("directory "+dir.path, err)
+		}
+		if err != nil || !os.SameFile(dir.info, now) {
+			return "directory " + dir.path, nil
 		}
 		manifestPath := filepath.Join(dir.path, ManifestName)
 		entry, err := dir.root.Lstat(ManifestName)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return "", uninspectable("manifest "+manifestPath, err)
+		}
 		if !dir.manifest.present {
-			if !errors.Is(err, fs.ErrNotExist) {
-				return "manifest " + manifestPath
+			if err == nil {
+				return "manifest " + manifestPath, nil
 			}
 		} else {
 			if err != nil || !sameContent(dir.manifest.entry, entry) {
-				return "manifest " + manifestPath
+				return "manifest " + manifestPath, nil
 			}
 			again := manifestRecord{present: true, entry: entry}
-			if _, unknown := readManifest(dir.root, manifestPath, &again); unknown != nil || !dir.manifest.same(again) {
-				return "manifest " + manifestPath
+			if _, unknown := readManifest(dir.root, manifestPath, &again); unknown != nil {
+				return "", unknown
+			}
+			if !dir.manifest.same(again) {
+				return "manifest " + manifestPath, nil
 			}
 			// A manifest decides; no go.mod at or above it was consulted.
 			continue
 		}
-		if again := inspectGoMod(dir.root, dir.path); again.err != nil || !dir.goMod.same(again) {
-			return "go.mod in " + dir.path
+		again := inspectGoMod(dir.root, dir.path)
+		if again.err != nil {
+			return "", again.err
+		}
+		if !dir.goMod.same(again) {
+			return "go.mod in " + dir.path, nil
 		}
 	}
 	if len(s.absent) > 0 {
 		if len(s.dirs) == 0 || s.dirs[0].root == nil {
-			return "the directory of the missing paths"
+			return "the directory of the missing paths", nil
 		}
 		for _, missing := range s.absent {
-			if _, err := s.dirs[0].root.Lstat(missing); !errors.Is(err, fs.ErrNotExist) {
-				return filepath.Join(s.dirs[0].path, missing)
+			path := filepath.Join(s.dirs[0].path, missing)
+			if _, err := s.dirs[0].root.Lstat(missing); err == nil {
+				return path, nil
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				return "", uninspectable(path, err)
 			}
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // sameContent reports whether two statuses are of the same file with the
