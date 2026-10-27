@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"effra.local/prototype/internal/edition"
+	"effra.local/prototype/internal/sketchfront"
 )
 
 // retargetAt points link at target by an atomic rename when the shared
@@ -89,9 +90,9 @@ func runCommand(args ...string) error {
 // step of the admission of the 2026 file is never formatted as legacy, in
 // check mode or in place, and nothing is written. Before the physical path
 // is read, the opened file is still the 2026 file at new/main.ef, so the
-// formatter answers EF145 for 2026; later, the moved spelling is refused
-// with EF146 or still names new/main.ef. Either way the legacy formatter
-// never runs.
+// 2026 formatter formats it (it is already formatted); later, the moved
+// spelling is refused with EF146 or still names new/main.ef. Either way the
+// legacy formatter never runs.
 func TestFormatterNeverFormatsASourceRetargetedDuringAdmissionAsLegacy(t *testing.T) {
 	for _, stage := range []string{edition.StageOpened, edition.StageResolving, edition.StageWalked} {
 		for _, check := range []bool{true, false} {
@@ -118,8 +119,11 @@ func formatRetargeted(t *testing.T, stage string, check bool) {
 	restore := retargetAt(t, stage, alias, filepath.Join(root, "old"))
 	report, err := formatFiles(fmtOptions{check: check, files: []string{filepath.Join(alias, "main.ef")}})
 	restore()
-	if err == nil || len(report.Failures) != 1 || (report.Failures[0].Code != edition.CodeAdmission && report.Failures[0].Code != edition.CodeUnavailable) {
-		t.Fatalf("%s check=%v: %+v, %v; want %s or %s", stage, check, report.Failures, err, edition.CodeUnavailable, edition.CodeAdmission)
+	formatted2026 := err == nil && len(report.Failures) == 0 && len(report.Files) == 1 &&
+		report.Files[0].FormatterVersion == sketchfront.FormatterIdentity && !report.Files[0].Changed
+	refused := err != nil && len(report.Failures) == 1 && report.Failures[0].Code == edition.CodeAdmission
+	if !formatted2026 && !refused {
+		t.Fatalf("%s check=%v: %+v, %+v, %v; want the 2026 formatter on new/main.ef or %s", stage, check, report.Files, report.Failures, err, edition.CodeAdmission)
 	}
 	for path, data := range before {
 		if after, err := os.ReadFile(path); err != nil || string(after) != string(data) {

@@ -1,0 +1,56 @@
+package fetchall
+
+import (
+	"http"
+	"os"
+	"retry"
+	"tasks"
+	"timeout"
+)
+
+type Unauthorized struct{}
+type Failed struct{ Status int }
+
+type Result struct {
+	URL   string
+	Bytes Option[int] // None when every attempt failed
+}
+
+// Get reads the whole body and releases the connection before it returns.
+func fetchOnce(url string) (int, error[Unauthorized | Failed | timeout.Expired]) uses http.Client, Scheduler {
+	resp := try timeout.After(2s) { Client.Get(url) }
+	if resp.Status == 401 {
+		return Unauthorized{}
+	}
+	if resp.Status >= 500 {
+		return Failed{resp.Status}
+	}
+	return len(resp.Body)
+}
+
+// retry.On retries only the listed errors; Unauthorized passes straight through.
+func fetch(url string) (Result, error[Unauthorized]) uses http.Client, Scheduler {
+	n := try retry.On[Failed | timeout.Expired](retry.Exponential(100ms).Times(3)) { fetchOnce(url) } catch {
+	case Failed, timeout.Expired:
+		return Result{URL: url}
+	}
+	return Result{url, Some(n)}
+}
+
+// At most 8 fetches run at once. The first Unauthorized exits fetchAll,
+// and that exit interrupts and drains the fetches still running.
+func fetchAll(urls []string) ([]Result, error[Unauthorized]) uses http.Client, Scheduler {
+	return tasks.Map(urls, 8) { url in fetch(url) }
+}
+
+func main() error[Unauthorized] uses http.Client, os.Args, Scheduler, Console {
+	results := try fetchAll(Args.Rest())
+	var ok, total = 0, 0
+	for r in results {
+		if n, found := r.Bytes.Get(); found {
+			ok += 1
+			total += n
+		}
+	}
+	Console.Log(ok, "ok,", len(results)-ok, "failed,", total, "bytes")
+}

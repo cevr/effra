@@ -1,0 +1,4 @@
+// want S108
+package demo
+type Node struct{ Next Node }
+func main() uses Console { Console.Println(Node{}) }

@@ -18,7 +18,7 @@ The standard library is the "Effect for Go" track, [#206](https://github.com/cev
 | Schedule, retry and timeout | [#179](https://github.com/cevr/effra/issues/179) | Schedule, retry, repeat, timeout, Clock.sleep, Duration | `schedule`, `retry.On`, `timeout.After(d) { }`, duration literals | library |
 | Channels, queues and streams | [#64](https://github.com/cevr/effra/issues/64) | Queue, PubSub, Mailbox, Stream, Sink, Channel | `chan`, `for range`, iterators that are resources | kernel + library |
 | Schema and codecs | [#49](https://github.com/cevr/effra/issues/49) | Schema, Arbitrary | `ParseX`/`Wire` by name, `json.Codec` | library + coherence rule |
-| Sync and STM | [#208](https://github.com/cevr/effra/issues/208) | Ref, SynchronizedRef, Deferred, Semaphore, Latch, TxRef, TxQueue, TxSemaphore | `sync.Ref`, `sync.Atomically { }`, `sync.Tx` | kernel + library |
+| Sync and STM | [#208](https://github.com/cevr/effra/issues/208) | Ref, SynchronizedRef, Deferred, Semaphore, Latch, TxRef, TxQueue, TxSemaphore | `sync.Ref`, `sync.Atomically() { }`, `sync.Tx` | kernel + library |
 | Batching, caching and pools | [#68](https://github.com/cevr/effra/issues/68) | Request, RequestResolver, Cache, ScopedCache, Pool, KeyedPool, RcRef, RcMap, ScopedRef | `batch.Resolve` in `wire` | library |
 | Config | [#67](https://github.com/cevr/effra/issues/67) | Config, ConfigProvider, Redacted | `config`, `Redacted[T]` | library |
 | Observability | [#69](https://github.com/cevr/effra/issues/69) | Tracer, Logger, Metric, LogLevel, References | `with(trace.Span(…))`, `log`, `metric` | library on kernel G1/G2 ([#200](https://github.com/cevr/effra/issues/200)) |
@@ -55,7 +55,7 @@ The prelude is in scope in every package without an import: `Option`, `Task`, `D
 [#208](https://github.com/cevr/effra/issues/208).
 
 1. `sync.Ref`, `Latch`, `Semaphore` and `Deferred`. A blocking wait is an interruption point.
-2. `sync.TxRef[T]`, `sync.Atomically { … }` and `sync.Retry()`. `Load` and `Store` need the `sync.Tx` capability, which only `Atomically` provides.
+2. `sync.TxRef[T]`, `sync.Atomically() { … }` and `sync.Retry()`. `Load` and `Store` need the `sync.Tx` capability, which only `Atomically` provides.
 3. A transaction can re-run, so its body is a replayable parameter ([types.md](types.md#function-values)): its footprint holds only `sync.Tx`, and I/O inside a transaction is an error.
 4. `Retry` rolls back, registers the read set and waits, interruptibly, until a `TxRef` it read changes. No lock-freedom or starvation-freedom is claimed.
 

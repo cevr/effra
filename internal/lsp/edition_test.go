@@ -229,3 +229,80 @@ func TestUnsavedBufferIsRefusedWhenItsMissingSuffixAppears(t *testing.T) {
 		})
 	}
 }
+
+// TestFormattingFollowsTheEdition: a 2026 document formats with the 2026
+// formatter, a syntax error is refused with its S code, and a manifest
+// change between two changes refuses formatting until the next change
+// analyses the document in its new edition, in both directions.
+func TestFormattingFollowsTheEdition(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := filepath.Join(root, edition.ManifestName)
+	if err := os.WriteFile(manifest, []byte(`{"edition":"2026"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	uri := "file://" + filepath.ToSlash(filepath.Join(root, "main.ef"))
+	unformatted := "package main\n\nfunc main()  uses Console {\nConsole.Println(\"a\")\n}\n"
+	formatted := "package main\n\nfunc main() uses Console {\n\tConsole.Println(\"a\")\n}\n"
+	legacySource := "fn ok() -> string { \"ok\" }\n"
+
+	s := startSession(t)
+	s.send(initialize())
+	s.receive()
+	s.send(initialized())
+	format := func(id int) map[string]json.RawMessage {
+		t.Helper()
+		s.send(formatting(uri, id, nil))
+		return s.receive()
+	}
+	wantRefusal := func(id int, want string) {
+		t.Helper()
+		if response := format(id); !strings.Contains(string(response["error"]), want) {
+			t.Fatalf("formatting %d answered %s (error %s), want an error naming %q", id, response["result"], response["error"], want)
+		}
+	}
+
+	s.send(open(uri, unformatted, 1))
+	s.diagnosticCodes()
+	response := format(10)
+	var edits []struct {
+		NewText string `json:"newText"`
+	}
+	if err := json.Unmarshal(response["result"], &edits); err != nil || len(edits) != 1 || edits[0].NewText != formatted {
+		t.Fatalf("2026 formatting answered %s (error %s)", response["result"], response["error"])
+	}
+	s.send(change(uri, "package main\n\nfunc main() {\n\tx := )\n}\n", 2))
+	s.diagnosticCodes()
+	wantRefusal(11, "cannot format: S001: ")
+
+	// 2026 to legacy: refused until the next change, then the legacy formatter.
+	if err := os.Remove(manifest); err != nil {
+		t.Fatal(err)
+	}
+	wantRefusal(12, "needs a legacy analysis")
+	s.send(change(uri, legacySource, 3))
+	s.diagnosticCodes()
+	if response := format(13); response["error"] != nil {
+		t.Fatalf("legacy formatting after the change: %s", response["error"])
+	}
+
+	// Legacy to 2026: refused until the next change.
+	if err := os.WriteFile(manifest, []byte(`{"edition":"2026"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wantRefusal(14, "needs a 2026 analysis")
+	s.send(change(uri, formatted, 4))
+	s.diagnosticCodes()
+	if response := format(15); response["error"] != nil || string(response["result"]) != "[]" {
+		t.Fatalf("formatting a formatted 2026 document answered %s (error %s)", response["result"], response["error"])
+	}
+
+	s.send(shutdown())
+	s.receive()
+	s.send(call("exit", nil, nil))
+	if err := <-s.done; err != nil {
+		t.Fatal(err)
+	}
+}

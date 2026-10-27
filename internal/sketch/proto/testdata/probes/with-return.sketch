@@ -1,0 +1,9 @@
+// want S109
+package demo
+type Fault struct{}
+func f() string {
+  with(wire{}) { return "ok" }
+  return "after"
+}
+func row() error[Fault] { return Fault{} }
+func main() uses Console { Console.Println(f()) }

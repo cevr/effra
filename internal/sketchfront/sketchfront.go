@@ -1,52 +1,55 @@
 // Package sketchfront is the front-end of the 2026 edition: a thin adapter
-// over the frozen prototype compiler effra.local/sketch9. It is the only
-// package that imports the prototype. It maps the prototype's diagnostics to
-// compiler diagnostics with UTF-8 byte spans, so every surface projects them
+// that parses with internal/sketch/syntax, checks and emits through the
+// prototype checker and emitter behind the bridge (internal/sketch/proto),
+// and formats with internal/sketch/format. It maps every diagnostic to a
+// compiler diagnostic with a UTF-8 byte span, so every surface projects it
 // with the shared report code, and it builds a checked program to a native
-// executable through the prototype's direct-Go emitter.
+// executable through the prototype's direct-Go emitter. CLI, MCP and LSP
+// format 2026 sources only through Format, so they report one identity.
 //
-// #195 moves the parser into this module; this package then changes its
-// import and no surface changes. No runtime or generated-code package may
-// import it: generated modules require this module without the prototype's
-// replacement.
+// No runtime or generated-code package may import it.
 package sketchfront
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"effra.local/prototype/internal/compiler"
 	"effra.local/prototype/internal/receipt"
-	"effra.local/sketch9/sketch"
+	"effra.local/prototype/internal/sketch/format"
+	"effra.local/prototype/internal/sketch/proto"
+	"effra.local/prototype/internal/sketch/syntax"
 )
-
-// sourceName is the fixed file name the adapter passes to the prototype's
-// parser, which prefixes its syntax error with it.
-const sourceName = "effra-2026.ef"
 
 // Analysis is the 2026 front-end's outcome for one source text.
 type Analysis struct {
-	// Diagnostics are the prototype's diagnostics in source order, with
+	// Diagnostics are the front-end's diagnostics in source order, with
 	// UTF-8 byte spans into the analysed text.
 	Diagnostics []compiler.Diagnostic
-	checked     *sketch.Checked
+	checked     *proto.Checked
 }
 
-// Check parses and checks source with the prototype.
+// Check parses source, converts it through the bridge and checks it with
+// the prototype checker. A syntax error is the only diagnostic; a bridge
+// refusal (S109) stops before the checker, which never sees a partial
+// program.
 func Check(source string) Analysis {
-	lines := lineStarts(source)
-	file, err := sketch.Parse(sourceName, source)
+	file, err := syntax.Parse(source)
 	if err != nil {
-		return Analysis{Diagnostics: []compiler.Diagnostic{parseDiagnostic(source, lines, err.Error())}}
+		return Analysis{Diagnostics: []compiler.Diagnostic{syntaxDiagnostic(err)}}
 	}
-	checked, diagnostics := sketch.Check(file)
-	analysis := Analysis{checked: checked}
+	lines := lineStarts(source)
+	converted, refusals := proto.FromSyntax(file)
+	var analysis Analysis
+	diagnostics := refusals
+	if converted != nil {
+		analysis.checked, diagnostics = proto.Check(converted)
+	}
 	for _, diagnostic := range diagnostics {
 		analysis.Diagnostics = append(analysis.Diagnostics, compiler.Diagnostic{Code: diagnostic.Code, Message: diagnostic.Msg, Span: span(source, lines, diagnostic.Pos.Line, diagnostic.Pos.Col)})
 	}
@@ -56,35 +59,63 @@ func Check(source string) Analysis {
 	return analysis
 }
 
+// syntaxDiagnostic is the compiler diagnostic of a parse error, located by
+// the parser's own byte span.
+func syntaxDiagnostic(err error) compiler.Diagnostic {
+	var e *syntax.Error
+	if !errors.As(err, &e) {
+		return compiler.Diagnostic{Code: syntax.CodeSyntax, Message: err.Error()}
+	}
+	return compiler.Diagnostic{Code: e.Code, Message: e.Message, Span: compiler.Span{Offset: e.Offset, Length: e.Length, Line: e.Line, Column: e.Column}}
+}
+
 // Result is the diagnostics-only compiler result of the analysis.
 func (a Analysis) Result(source, target string) *compiler.Result {
 	return compiler.ForeignResult(source, target, a.Diagnostics)
 }
 
-// parseDiagnostic recovers S001 and its position from the prototype's
-// formatted error "NAME:LINE:COL: CODE MESSAGE". An error of any other shape
-// keeps its whole text and no location, so nothing is dropped.
-func parseDiagnostic(source string, lines []int, text string) compiler.Diagnostic {
-	fallback := compiler.Diagnostic{Code: "S001", Message: text}
-	rest, ok := strings.CutPrefix(text, sourceName+":")
-	if !ok {
-		return fallback
+// FormatterIdentity names the 2026 formatter on every surface.
+const FormatterIdentity = format.Identity
+
+// Format formats a 2026 source with the syntax-only formatter, with the
+// legacy formatter's result shape and errors: a compiler.FormatFailure
+// holding the syntax diagnostic, or a compiler.FormatLimitError when the
+// output would exceed a positive maxOutputBytes.
+func Format(source string, maxOutputBytes int) (compiler.FormatResult, error) {
+	if maxOutputBytes < 0 {
+		return compiler.FormatResult{}, fmt.Errorf("formatter output limit must not be negative")
 	}
-	lineText, rest, ok := strings.Cut(rest, ":")
-	if !ok {
-		return fallback
+	inputDigest := compiler.FormatDigest(source)
+	partial := compiler.FormatResult{SchemaVersion: compiler.FormatterSchemaVersion, InputDigest: inputDigest}
+	// The bound is checked while rendering, before the text is built.
+	text, err := format.SourceBounded(source, maxOutputBytes)
+	var limit *format.LimitError
+	switch {
+	case errors.As(err, &limit):
+		return partial, compiler.FormatLimitError{Limit: maxOutputBytes}
+	case err != nil:
+		return partial, compiler.FormatFailure{Diagnostics: []compiler.Diagnostic{syntaxDiagnostic(err)}}
 	}
-	colText, rest, ok := strings.Cut(rest, ": ")
-	if !ok {
-		return fallback
+	return compiler.FormatResult{
+		SchemaVersion: compiler.FormatterSchemaVersion,
+		InputDigest:   inputDigest,
+		OutputDigest:  compiler.FormatDigest(text),
+		Changed:       text != source,
+		Text:          text,
+	}, nil
+}
+
+// FailureMessage is the refusal text of a 2026 formatting failure: it names
+// the first diagnostic's code and position, as the LSP does for legacy.
+func FailureMessage(failure compiler.FormatFailure) string {
+	if len(failure.Diagnostics) == 0 {
+		return failure.Error()
 	}
-	line, lineErr := strconv.Atoi(lineText)
-	col, colErr := strconv.Atoi(colText)
-	code, message, ok := strings.Cut(rest, " ")
-	if lineErr != nil || colErr != nil || !ok || !strings.HasPrefix(code, "S") {
-		return fallback
+	d := failure.Diagnostics[0]
+	if d.Span.Line > 0 {
+		return fmt.Sprintf("source cannot be formatted: %s at %d:%d: %s", d.Code, d.Span.Line, d.Span.Column, d.Message)
 	}
-	return compiler.Diagnostic{Code: code, Message: message, Span: span(source, lines, line, col)}
+	return fmt.Sprintf("source cannot be formatted: %s: %s", d.Code, d.Message)
 }
 
 // lineStarts are the byte offsets where the prototype's lines start: it
@@ -140,7 +171,7 @@ func Build(a Analysis, lineName, output string, stderr io.Writer) error {
 		return fmt.Errorf("the 2026 front-end has diagnostics; nothing to build")
 	}
 	a.checked.File.Name = lineName
-	code, err := sketch.Emit(a.checked)
+	code, err := proto.Emit(a.checked)
 	if err != nil {
 		return fmt.Errorf("2026 emission failed: %w", err)
 	}
@@ -149,7 +180,7 @@ func Build(a Analysis, lineName, output string, stderr io.Writer) error {
 		return err
 	}
 	defer os.RemoveAll(module)
-	files := map[string]string{"go.mod": sketch.GoMod, "main.go": code, filepath.Join("rt", "rt.go"): sketch.RuntimeSource()}
+	files := map[string]string{"go.mod": proto.GoMod, "main.go": code, filepath.Join("rt", "rt.go"): proto.RuntimeSource()}
 	for name, body := range files {
 		path := filepath.Join(module, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

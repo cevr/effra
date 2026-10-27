@@ -1,0 +1,43 @@
+package concurrency
+
+type Bad struct{}
+
+func immediate(cx Ctx) string {
+	return "child joined"
+}
+
+func pending(cx Ctx[Clock]) string {
+	cx.Clock.Sleep(10s)
+	return "late"
+}
+
+func bad(cx Ctx) (string, error[Bad]) {
+	return Bad{}
+}
+
+// The function body is the owner block: every child is consumed or awaited before it returns.
+func program(cx Ctx[Clock, Console, Scheduler]) error[Bad] {
+	child := go immediate(cx)
+	cx.Console.Log(<-child)
+
+	stopped := go pending(cx)
+	stopped.Interrupt() // waits for its cleanup
+
+	deadline := timeout.After(cx, 1ms, pending) catch {
+	case Timeout:
+		"timed out"
+	}
+	cx.Console.Log(deadline)
+
+	failed := go bad(cx) // fallible: must be consumed exactly once
+	recovered := <-failed catch {
+	case Bad:
+		"recovered"
+	}
+	cx.Console.Log(recovered)
+	return
+}
+
+func main(cx Ctx[Clock, Console, Scheduler]) error[Bad] {
+	return program(cx)
+}

@@ -1,0 +1,50 @@
+package layers
+
+// Capability identity is the interface name, so these three stay distinct.
+type Store interface{ Label(cx Ctx) string }
+type Account interface{ Label(cx Ctx) string }
+type Invoice interface{ Label(cx Ctx) string }
+
+type Memory struct{ Text string }
+
+func (m Memory) Label(cx Ctx) string { return m.Text }
+
+type AccountLive struct{ Store Store } // capability field: filled by the layer
+
+func (a AccountLive) Label(cx Ctx) string { return a.Store.Label(cx) }
+
+type InvoiceLive struct{ Store Store }
+
+func (i InvoiceLive) Label(cx Ctx) string { return i.Store.Label(cx) }
+
+layer Shared {
+	Store = Memory{Text: "live"}
+}
+
+layer Accounts {
+	Shared
+	Account = AccountLive
+}
+
+layer Invoices {
+	Shared
+	Invoice = InvoiceLive
+}
+
+layer App Ctx[Account, Invoice] { // exposes two; Store stays hidden, built once
+	Accounts
+	Invoices
+}
+
+layer Fixture {
+	App
+	replace Store = Memory{Text: "fixture"}
+}
+
+func labels(cx Ctx[Account, Invoice]) string {
+	return cx.Account.Label() + ":" + cx.Invoice.Label()
+}
+
+func main(cx Ctx) string {
+	return labels(provide(cx, Fixture))
+}

@@ -682,9 +682,10 @@ func Serve(root string, packs *lintpacks.Session, input io.Reader, output io.Wri
 
 func formatCode(root string, args arguments) (any, error) {
 	var (
-		text   string
-		origin = "buffer"
-		uri    string
+		text        string
+		origin      = "buffer"
+		uri         string
+		edition2026 bool
 	)
 	if args.SourcePresent {
 		text = args.Source
@@ -697,11 +698,12 @@ func formatCode(root string, args arguments) (any, error) {
 			return nil, err
 		}
 		defer admitted.Close()
-		// Only a legacy file reaches the legacy formatter. A source buffer has
+		// Each file reaches its own edition's formatter. A source buffer has
 		// no directory and is legacy by default.
 		if refusal := editionRefusal("code.format", admitted.source.Resolution); refusal != nil {
 			return nil, fmt.Errorf("%s", refusal.String())
 		}
+		edition2026 = admitted.source.Resolution.Edition == edition.E2026
 		source, fileURI, err := readFormatSource(admitted)
 		if err != nil {
 			return nil, err
@@ -717,11 +719,20 @@ func formatCode(root string, args arguments) (any, error) {
 	if args.ExpectedDigest != "" && args.ExpectedDigest != inputDigest {
 		return nil, fmt.Errorf("stale format source; expected digest %s, current digest %s", args.ExpectedDigest, inputDigest)
 	}
-	result, err := compiler.FormatSourceBounded(text, maxFormatOutputBytes)
+	formatterVersion := compiler.FormatterIdentity
+	format := compiler.FormatSourceBounded
+	if edition2026 {
+		formatterVersion, format = sketchfront.FormatterIdentity, sketchfront.Format
+	}
+	result, err := format(text, maxFormatOutputBytes)
 	if err != nil {
 		var limit compiler.FormatLimitError
 		if errors.As(err, &limit) {
 			return nil, fmt.Errorf("formatted source exceeds %d-byte MCP output limit", limit.Limit)
+		}
+		var failure compiler.FormatFailure
+		if edition2026 && errors.As(err, &failure) {
+			return nil, fmt.Errorf("%s", sketchfront.FailureMessage(failure))
 		}
 		return nil, err
 	}
@@ -731,7 +742,7 @@ func formatCode(root string, args arguments) (any, error) {
 	formatted := map[string]any{
 		"producer":         producer.Current(),
 		"schemaVersion":    result.SchemaVersion,
-		"formatterVersion": compiler.FormatterIdentity,
+		"formatterVersion": formatterVersion,
 		"origin":           origin,
 		"inputDigest":      result.InputDigest,
 		"outputDigest":     result.OutputDigest,
@@ -860,7 +871,7 @@ func call(root string, packs *lintpacks.Session, name string, args arguments) (a
 				"mutableAliases":     "not implemented", "openRows": "not implemented",
 				"inspection":     fmt.Sprintf("schema %d response-local canonical type/row tables; references are revision-scoped, empty rows are omitted, and selected projections refuse explicitly when node, edge, row-label, name, compatibility, or response-byte limits are exceeded", compiler.SemanticSchemaVersion),
 				"typeProjection": "semantic checking retains the complete private arena; public tables contain every reachable definition or return typeProjectionComplete=false with typeProjectionError",
-				"formatting":     "syntax-only compiler formatter; valid UTF-8; 2 MiB source and 4 MiB output bounds; 16 MiB newline and encoded-response frames; code.format never writes",
+				"formatting":     "syntax-only formatter of the file's edition (a source buffer is legacy); valid UTF-8; 2 MiB source and 4 MiB output bounds; 16 MiB newline and encoded-response frames; code.format never writes",
 			},
 		}, nil
 	}
@@ -1058,7 +1069,7 @@ var fileTools = map[string]string{
 	"project.edition":     "",
 	"project.check":       "",
 	"project.diagnostics": "",
-	"code.format":         edition.TicketFormat,
+	"code.format":         "",
 	"code.inspect":        edition.TicketChecker,
 	"code.explain":        edition.TicketChecker,
 	"code.type":           edition.TicketChecker,

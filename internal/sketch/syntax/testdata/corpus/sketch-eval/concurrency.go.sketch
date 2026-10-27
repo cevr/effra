@@ -1,0 +1,52 @@
+package main
+
+type Bad struct{}
+
+func immediate() string {
+    return "child joined"
+}
+
+func pending(cx Ctx[Clock]) string {
+    cx.Clock.Sleep(10000ms)
+    return "late"
+}
+
+func bad() (string, error[Bad]) {
+    return Bad{}
+}
+
+// SchedulerTimeout is the timeout library adapter specified in concurrency.md.
+func program(cx Ctx[Clock, Console, Scheduler]) error[Bad] {
+    {
+        child := go immediate()
+        text := <-child
+        cx.Console.Log(text)
+        {
+            stopped := go pending(cx)
+            _ = stopped
+        } // Cancel this child and await cleanup before starting the timeout.
+        deadline := ""
+        switch r := SchedulerTimeout(cx, 1ms, func(cx) { return pending(cx) }).(type) {
+        case string:
+            deadline = r
+        case TimedOut:
+            deadline = "timed out"
+        }
+        cx.Console.Log(deadline)
+        failed := go bad()
+        recovered := ""
+        switch r := (<-failed).(type) {
+        case string:
+            recovered = r
+        case Bad:
+            recovered = "recovered"
+        }
+        cx.Console.Log(recovered)
+    }
+    return
+}
+
+func main(cx Ctx[]) error[Bad] {
+    app := provide(cx, LiveClock, Stdout, LiveScheduler)
+    return program(app)
+}

@@ -1,0 +1,78 @@
+package main
+
+type Transient struct{}
+
+type Attempt[T any] struct {
+    Label string
+    Work func(Ctx[Console]) (T, error[Transient])
+}
+
+type RetryPolicy[T any] struct {
+    Primary Attempt[T]
+    Backup Option[Attempt[T]]
+}
+
+func probe(cx Ctx[Console], name string) (string, error[Transient]) {
+    cx.Console.Log("probe " + name)
+    if name == "flaky" {
+        return Transient{}
+    } else {
+        return name + " ok"
+    }
+}
+
+func attempt(cx Ctx[Console], step Attempt[string]) string {
+    switch r := step.Work(cx).(type) {
+    case string:
+        return r
+    case Transient:
+        return step.Label + " failed"
+    }
+}
+
+func retry(cx Ctx[Console], policy RetryPolicy[string]) string {
+    first := attempt(cx, policy.Primary)
+    switch backup := policy.Backup.(type) {
+    case None:
+        return first
+    case Some[Attempt[string]]:
+        return first + "; " + attempt(cx, backup.V)
+    }
+}
+
+func main(cx Ctx[]) {
+    policy := RetryPolicy[string]{
+        Primary: Attempt[string]{
+            Label: "flaky",
+            Work: func(cx) { return probe(cx, "flaky") },
+        },
+        Backup: Some[Attempt[string]]{
+            V: Attempt[string]{
+                Label: "stable",
+                Work: func(cx) { return probe(cx, "stable") },
+            },
+        },
+    }
+    {
+        app := provide(cx, Stdout)
+        app.Console.Log("constructed")
+    }
+    once := ""
+    {
+        app := provide(cx, Stdout)
+        once = retry(app, policy)
+    }
+    again := ""
+    {
+        app := provide(cx, Stdout)
+        again = retry(app, policy)
+    }
+    {
+        app := provide(cx, Stdout)
+        app.Console.Log(once)
+    }
+    {
+        app := provide(cx, Stdout)
+        app.Console.Log(again)
+    }
+}

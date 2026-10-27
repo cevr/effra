@@ -1,0 +1,74 @@
+package checkout
+
+type OrderNotFound struct{ ID string }
+type GatewayDown struct{}
+
+type Order struct {
+	ID    string
+	Total int64
+}
+
+type Payment enum {
+	Pending
+	Authorized{ AuthID string }
+	Declined{ Reason string }
+}
+
+type Orders interface {
+	Find(cx Ctx, id string) (Order, error[OrderNotFound])
+}
+
+type Gateway interface {
+	Authorize(cx Ctx, order Order) (Payment, error[GatewayDown])
+}
+
+func checkout(cx Ctx[Orders, Gateway, Scheduler], id string) (string, error[OrderNotFound | GatewayDown | Timeout]) {
+	order := try cx.Orders.Find(id)
+	payment := try timeout.After(cx, 500ms, func(cx) { return cx.Gateway.Authorize(order) })
+	switch p := payment.(type) {
+	case Pending:
+		return "pending"
+	case Authorized:
+		return "paid " + p.AuthID
+	case Declined:
+		return "declined: " + p.Reason
+	}
+}
+
+type MemoryOrders struct{}
+
+func (MemoryOrders) Find(cx Ctx, id string) (Order, error[OrderNotFound]) {
+	if id == "42" {
+		return Order{ID: id, Total: 1999}
+	}
+	return OrderNotFound{ID: id}
+}
+
+type FakeGateway struct{ AuthID string }
+
+func (g FakeGateway) Authorize(cx Ctx, order Order) (Payment, error[GatewayDown]) {
+	return Authorized{AuthID: g.AuthID}
+}
+
+layer Live {
+	Orders = MemoryOrders{}
+	Gateway = FakeGateway{AuthID: "auth-7"}
+	Scheduler = LiveScheduler{}
+}
+
+func report(cx Ctx[Console], id string) {
+	outcome := checkout(provide(cx, Live), id) catch { // Live is built for this statement only
+	case OrderNotFound:
+		"no such order"
+	case GatewayDown:
+		"gateway down"
+	case Timeout:
+		"gateway timed out"
+	}
+	cx.Console.Log(outcome)
+}
+
+func main(cx Ctx[Console]) {
+	report(cx, "42")
+	report(cx, "7")
+}
