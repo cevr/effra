@@ -3,6 +3,7 @@ package actorlib_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -12,17 +13,24 @@ import (
 	"effra.local/prototype/prototypes/actorlib/examples"
 )
 
-// Q8, round 2 (finding M6). The raw baselines in bench_test.go give less than
-// the library. The matched baselines below are hand-written Go with the
-// library's contract, as a careful Go programmer would write it without the
-// library:
+// Q8 (findings M6 of rounds 1 and 2). The raw baselines in bench_test.go give
+// less than the library. The matched baselines below are hand-written Go with
+// the library's contract, as a careful Go programmer would write it without
+// the library. bench_matched_contract_test.go checks each clause:
 //
-//   - admission fencing: a send after stop fails at once; a send blocked on a
-//     full mailbox wakes on stop (an RWMutex fence and a stopping channel);
+//   - admission: a sender whose context is already cancelled is refused
+//     before it admits (I1); a send after stop fails at once; a send blocked
+//     on a full mailbox wakes on stop (an RWMutex fence, a closing flag and a
+//     stopping channel);
 //   - dropped-reply completion: an unanswered reply is completed with a
-//     refusal, and a reply nobody can receive is released (a one-shot slot
-//     with an atomic state);
-//   - queued release: on stop, every queued request is answered "stopped";
+//     refusal, "no reply" while the actor runs and "stopped" once it stops,
+//     and a reply nobody can receive is released, including one taken by a
+//     receiver whose context was cancelled (a one-shot slot with an atomic
+//     state and checks before and after the wait);
+//   - waits inside the actor observe its stop: an agent callback receives the
+//     actor's context;
+//   - queued release: on stop, every queued request is answered "stopped",
+//     and each release's panic is recovered and kept, in order;
 //   - structured ownership: stop waits for the goroutine, and a panic in the
 //     loop is recovered and kept, so the drain still runs.
 //
@@ -32,7 +40,10 @@ import (
 // library's run-time stand-in for that decision is measured on its own
 // (BenchmarkSnapshot*).
 
-var errStopped = errors.New("stopped")
+var (
+	errStopped = errors.New("stopped")
+	errNoReply = errors.New("no reply")
+)
 
 const (
 	mOpen uint32 = iota
@@ -48,11 +59,14 @@ type mOutcome[T any] struct {
 
 // mSlot is the hand-written one-shot reply with the library's contract.
 type mSlot[T any] struct {
-	state atomic.Uint32
-	ch    chan mOutcome[T]
+	state   atomic.Uint32
+	ch      chan mOutcome[T]
+	closing *atomic.Bool // the actor's: set once its stop is requested
 }
 
-func newMSlot[T any]() *mSlot[T] { return &mSlot[T]{ch: make(chan mOutcome[T], 1)} }
+func newMSlot[T any](closing *atomic.Bool) *mSlot[T] {
+	return &mSlot[T]{ch: make(chan mOutcome[T], 1), closing: closing}
+}
 
 func (s *mSlot[T]) answer(o mOutcome[T]) {
 	if s.state.CompareAndSwap(mOpen, mAnswered) {
@@ -70,15 +84,29 @@ func (s *mSlot[T]) abandon() {
 }
 
 // refuse is the completion of a dropped or discarded reply.
-func (s *mSlot[T]) refuse() { s.answer(mOutcome[T]{refused: true, err: errStopped}) }
+func (s *mSlot[T]) refuse() {
+	err := errNoReply
+	if s.closing.Load() {
+		err = errStopped
+	}
+	s.answer(mOutcome[T]{refused: true, err: err})
+}
 
 func (s *mSlot[T]) receive(ctx context.Context) (T, error) {
+	var zero T
+	if err := ctx.Err(); err != nil {
+		s.abandon()
+		return zero, err
+	}
 	select {
 	case o := <-s.ch:
+		if err := ctx.Err(); err != nil {
+			releaseAny(o.v)
+			return zero, err
+		}
 		return o.v, o.err
 	case <-ctx.Done():
 		s.abandon()
-		var zero T
 		return zero, ctx.Err()
 	}
 }
@@ -93,19 +121,22 @@ func releaseAny[T any](v T) {
 type mMsg interface{ release() }
 
 // fenced is the matched actor's shell: a fenced mailbox, a stoppable
-// goroutine and a drain. handle owns each message it receives.
+// goroutine and a drain. handle owns each message it receives; a non-nil
+// result ends the actor with that exit.
 type fenced[M mMsg] struct {
 	mu       sync.RWMutex
 	closed   bool
+	closing  atomic.Bool
 	stopping chan struct{}
 	once     sync.Once
 	mailbox  chan M
 	cancel   context.CancelFunc
 	done     chan struct{}
-	panicked any
+	exit     error
+	panics   []any // the loop's panic, then each release panic, in order
 }
 
-func startFenced[M mMsg](capacity int, handle func(ctx context.Context, m M)) *fenced[M] {
+func startFenced[M mMsg](capacity int, handle func(ctx context.Context, m M) error) *fenced[M] {
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &fenced[M]{stopping: make(chan struct{}), mailbox: make(chan M, capacity), cancel: cancel, done: make(chan struct{})}
 	go func() {
@@ -118,7 +149,10 @@ func startFenced[M mMsg](capacity int, handle func(ctx context.Context, m M)) *f
 					m.release()
 					return
 				}
-				handle(ctx, m)
+				if err := handle(ctx, m); err != nil {
+					a.exit = err
+					return
+				}
 			case <-ctx.Done():
 				return
 			}
@@ -128,6 +162,7 @@ func startFenced[M mMsg](capacity int, handle func(ctx context.Context, m M)) *f
 }
 
 func (a *fenced[M]) closeAdmission() {
+	a.closing.Store(true)
 	a.once.Do(func() { close(a.stopping) })
 	a.mu.Lock()
 	a.closed = true
@@ -135,12 +170,14 @@ func (a *fenced[M]) closeAdmission() {
 }
 
 func (a *fenced[M]) finish() {
-	a.panicked = recover()
+	if p := recover(); p != nil {
+		a.panics = append(a.panics, p)
+	}
 	a.closeAdmission()
 	for {
 		select {
 		case m := <-a.mailbox:
-			m.release()
+			a.releaseRecovering(m)
 			continue
 		default:
 		}
@@ -148,7 +185,20 @@ func (a *fenced[M]) finish() {
 	}
 }
 
+func (a *fenced[M]) releaseRecovering(m M) {
+	defer func() {
+		if p := recover(); p != nil {
+			a.panics = append(a.panics, p)
+		}
+	}()
+	m.release()
+}
+
 func (a *fenced[M]) send(ctx context.Context, m M) error {
+	if err := ctx.Err(); err != nil {
+		m.release()
+		return err
+	}
 	a.mu.RLock()
 	if a.closed {
 		a.mu.RUnlock()
@@ -176,10 +226,21 @@ func (a *fenced[M]) send(ctx context.Context, m M) error {
 	return err
 }
 
-func (a *fenced[M]) stop() {
+// stop closes admission, cancels the actor and waits. It returns the exit
+// that ended the actor, other than the stop's own cancellation, and every
+// panic, in order.
+func (a *fenced[M]) stop() error {
 	a.closeAdmission()
 	a.cancel()
 	<-a.done
+	var errs []error
+	if a.exit != nil && !errors.Is(a.exit, context.Canceled) {
+		errs = append(errs, a.exit)
+	}
+	for _, p := range a.panics {
+		errs = append(errs, fmt.Errorf("panic: %v", p))
+	}
+	return errors.Join(errs...)
 }
 
 // The counter.
@@ -195,18 +256,19 @@ type mCounterMsg interface{ release() }
 
 func startMatchedCounter(capacity int) *fenced[mCounterMsg] {
 	var n int64
-	return startFenced(capacity, func(_ context.Context, m mCounterMsg) {
+	return startFenced(capacity, func(_ context.Context, m mCounterMsg) error {
 		switch m := m.(type) {
 		case mInc:
 			n += m.by
 		case mGet:
 			m.reply.answer(mOutcome[int64]{v: n})
 		}
+		return nil
 	})
 }
 
 func matchedCount(ctx context.Context, a *fenced[mCounterMsg]) (int64, error) {
-	r := newMSlot[int64]()
+	r := newMSlot[int64](&a.closing)
 	if err := a.send(ctx, mGet{r}); err != nil {
 		r.abandon()
 		return 0, err
@@ -228,7 +290,9 @@ func BenchmarkSendMatched(b *testing.B) {
 		b.Fatal(err)
 	}
 	sink = n
-	a.stop()
+	if err := a.stop(); err != nil {
+		b.Fatal(err)
+	}
 }
 
 func BenchmarkAskMatched(b *testing.B) {
@@ -242,13 +306,17 @@ func BenchmarkAskMatched(b *testing.B) {
 		}
 		sink = n
 	}
-	a.stop()
+	if err := a.stop(); err != nil {
+		b.Fatal(err)
+	}
 }
 
 func BenchmarkStartStopMatched(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		startMatchedCounter(benchCapacity).stop()
+		if err := startMatchedCounter(benchCapacity).stop(); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -293,11 +361,12 @@ func matchedStep(s examples.BreakerState, sig examples.Signal) (examples.Breaker
 
 func startMatchedBreaker(capacity int) *fenced[mSignal] {
 	var st examples.BreakerState = examples.Closed{}
-	return startFenced(capacity, func(_ context.Context, m mSignal) {
+	return startFenced(capacity, func(_ context.Context, m mSignal) error {
+		defer m.release() // answers nothing after the answer; "no reply" if the step panics
 		d, err := matchedStep(st, m.sig)
 		if err != nil {
 			m.reply.answer(mOutcome[examples.BreakerDecision]{err: err})
-			return
+			return nil
 		}
 		switch d := d.(type) {
 		case actorlib.Enter[examples.BreakerState, string]:
@@ -306,6 +375,7 @@ func startMatchedBreaker(capacity int) *fenced[mSignal] {
 			st = d.Next
 		}
 		m.reply.answer(mOutcome[examples.BreakerDecision]{v: d})
+		return nil
 	})
 }
 
@@ -314,7 +384,7 @@ func BenchmarkMachineAskMatched(b *testing.B) {
 	a := startMatchedBreaker(benchCapacity)
 	b.ReportAllocs()
 	for b.Loop() {
-		r := newMSlot[examples.BreakerDecision]()
+		r := newMSlot[examples.BreakerDecision](&a.closing)
 		if err := a.send(ctx, mSignal{examples.Success{}, r}); err != nil {
 			b.Fatal(err)
 		}
@@ -322,13 +392,16 @@ func BenchmarkMachineAskMatched(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
-	a.stop()
+	if err := a.stop(); err != nil {
+		b.Fatal(err)
+	}
 }
 
-// The agent: a closure message on the state, completed if it panics.
+// The agent: a closure message on the state, completed if it panics. The
+// callback receives the actor's context, so its waits observe the stop.
 
 type mCall struct {
-	run   func(n *int64)
+	run   func(ctx context.Context, n *int64) error
 	reply interface{ refuse() }
 }
 
@@ -336,17 +409,24 @@ func (m mCall) release() { m.reply.refuse() }
 
 func startMatchedAgent(capacity int) *fenced[mCall] {
 	var n int64
-	return startFenced(capacity, func(_ context.Context, c mCall) {
+	return startFenced(capacity, func(ctx context.Context, c mCall) error {
 		defer c.release() // answers nothing after run answered
-		c.run(&n)
+		return c.run(ctx, &n)
 	})
 }
 
-func matchedCall[T any](ctx context.Context, a *fenced[mCall], f func(n *int64) (T, error)) (T, error) {
-	r := newMSlot[T]()
-	err := a.send(ctx, mCall{run: func(n *int64) {
-		v, err := f(n)
+// matchedCall answers the caller with f's value or error. An error that is
+// the actor's own cancellation ends the actor; the caller then gets
+// "stopped" from the release.
+func matchedCall[T any](ctx context.Context, a *fenced[mCall], f func(ctx context.Context, n *int64) (T, error)) (T, error) {
+	r := newMSlot[T](&a.closing)
+	err := a.send(ctx, mCall{run: func(actx context.Context, n *int64) error {
+		v, err := f(actx, n)
+		if err != nil && actx.Err() != nil && errors.Is(err, actx.Err()) {
+			return err
+		}
 		r.answer(mOutcome[T]{v: v, err: err})
+		return nil
 	}, reply: r})
 	if err != nil {
 		r.abandon()
@@ -361,13 +441,15 @@ func BenchmarkAgentCallMatched(b *testing.B) {
 	a := startMatchedAgent(benchCapacity)
 	b.ReportAllocs()
 	for b.Loop() {
-		n, err := matchedCall(ctx, a, func(n *int64) (int64, error) { return *n, nil })
+		n, err := matchedCall(ctx, a, func(_ context.Context, n *int64) (int64, error) { return *n, nil })
 		if err != nil {
 			b.Fatal(err)
 		}
 		sink = n
 	}
-	a.stop()
+	if err := a.stop(); err != nil {
+		b.Fatal(err)
+	}
 }
 
 // The copy rule's cost (finding M3): the library's run-time snapshot of a
