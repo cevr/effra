@@ -551,6 +551,25 @@ func totalityVerdict(diags []check.Diagnostic) string {
 // Over 16 subjects the verdict matches enumeration exactly; over 60
 // subjects the solver ends within its budget, refusing some switches with
 // "too many cases" rather than accepting them unproven (D16 as amended).
+// TestTotalityEmptySubject: a subject whose union lost every variant to a
+// reported error has no value, so the switch is vacuously total: one
+// diagnostic, the unknown name, in every subject position (the fuzzer's
+// round-3 crasher, testdata/fuzz/FuzzCheck/9c69c36df14c1bf1).
+func TestTotalityEmptySubject(t *testing.T) {
+	for _, sw := range []string{
+		`switch c.(type){}`,
+		`switch c.(type){ case _: return A{} }`,
+		`switch _, _ := c.(type), d.(type) {}`,
+		`switch _, _ := d.(type), c.(type) { case (A, _): return A{} }`,
+	} {
+		src := "package main\ntype A struct{}\ntype B struct{}\ntype Choice interface{A00}\ntype Full interface{A | B}\nfunc F(c Choice, d Full) A {" + sw + "}\n"
+		_, diags := checkWithin(t, src, 2*time.Second)
+		if len(diags) != 1 || diags[0].Code != "S104" {
+			t.Errorf("%s: want only the unknown-name S104, got %s", sw, describe(diags))
+		}
+	}
+}
+
 func TestTotalityBudget(t *testing.T) {
 	rng := rand.New(rand.NewSource(1965))
 	for k := 0; k < 12; k++ {

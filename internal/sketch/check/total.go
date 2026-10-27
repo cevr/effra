@@ -315,6 +315,13 @@ func specializeBy(row solverRow, q []int) (solverRow, bool) {
 // It returns a witness the rows miss (a variant per subject), and ok false
 // when the budget ran out.
 func (s *matrixSolver) total(rows [][]int) (witness []int, missing, ok bool) {
+	// A subject of no variant (its variants were all reported unknown) has
+	// no value, so no value vector exists and none is missing (D3).
+	for _, n := range s.sizes {
+		if n == 0 {
+			return nil, false, true
+		}
+	}
 	cols := make([]int, len(s.sizes))
 	for j := range cols {
 		cols[j] = j
