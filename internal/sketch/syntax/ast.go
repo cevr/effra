@@ -462,13 +462,15 @@ type (
 		Block *BlockStmt
 	}
 
-	// Ellipsis is `...T`, the type of a variadic parameter.
+	// Ellipsis is `...T`, the type of a variadic parameter, or `...` with no
+	// Elt, the length of an array composite literal `[...]T{…}`.
 	Ellipsis struct {
 		Ellipsis Pos
 		Elt      Expr
 	}
 
-	// ArrayType is `[N]T`, or `[]T` when Len is nil.
+	// ArrayType is `[N]T`, or `[]T` when Len is nil, or `[...]T` when Len
+	// is an Ellipsis (only as the type of a composite literal).
 	ArrayType struct {
 		Lbrack Pos
 		Len    Expr
@@ -632,8 +634,13 @@ func (x *GoExpr) End() Pos {
 	}
 	return x.Call.End()
 }
-func (x *Ellipsis) Pos() Pos  { return x.Ellipsis }
-func (x *Ellipsis) End() Pos  { return x.Elt.End() }
+func (x *Ellipsis) Pos() Pos { return x.Ellipsis }
+func (x *Ellipsis) End() Pos {
+	if x.Elt == nil {
+		return x.Ellipsis + 3
+	}
+	return x.Elt.End()
+}
 func (x *ArrayType) Pos() Pos { return x.Lbrack }
 func (x *ArrayType) End() Pos { return x.Elt.End() }
 func (x *MapType) Pos() Pos   { return x.Map }
@@ -703,10 +710,13 @@ type (
 		Decl *VarDecl
 	}
 
-	// EmptyStmt is an explicit `;` with no statement, kept only where a
-	// statement is required (the body of a label at a block's end).
+	// EmptyStmt is the empty statement of a label: an explicit `;` after
+	// the colon (`L: ;`), or an implicit one before a block's `}` (`L: }`),
+	// as go/ast.EmptyStmt. An explicit one is a statement of its own, so the
+	// statement after it is not labelled.
 	EmptyStmt struct {
 		Semicolon Pos
+		Implicit  bool // no `;` in the source: the label ends its block
 	}
 
 	// LabeledStmt is `label: stmt`.

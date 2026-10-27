@@ -450,13 +450,13 @@ func (p *parser) parseInterfaceType() *InterfaceType {
 		}
 	} else if p.tok.tok != RBRACE {
 		// A union: one line of variants.
-		t.Union = append(t.Union, p.parseType(false))
+		t.Union = append(t.Union, p.parseTypeName("a union variant"))
 		for p.tok.tok == OR {
 			p.next()
 			if p.tok.tok == RBRACE || p.tok.tok == SEMICOLON {
 				p.errorf("expected a type after \"|\", found %s", p.found())
 			}
-			t.Union = append(t.Union, p.parseType(false))
+			t.Union = append(t.Union, p.parseTypeName("a union variant"))
 		}
 		p.endStmt(RBRACE, "union")
 		if p.tok.tok != RBRACE {
@@ -667,9 +667,9 @@ func (p *parser) parseErrorRow() *ErrorRow {
 	r := &ErrorRow{Error: p.tok.pos}
 	p.next()
 	r.Lbrack = p.want(LBRACK)
-	r.Types = append(r.Types, p.parseType(true))
+	r.Types = append(r.Types, p.parseTypeName("an error row"))
 	for p.got(OR) {
-		r.Types = append(r.Types, p.parseType(true))
+		r.Types = append(r.Types, p.parseTypeName("an error row"))
 	}
 	r.Rbrack = p.want(RBRACK)
 	return r
@@ -880,6 +880,28 @@ func (p *parser) parseType(list bool) Expr {
 	}
 	p.errorf("expected a type, found %s", p.found())
 	return nil
+}
+
+// parseTypeName parses a type name: QualifiedName [ TypeArgs ]. Error rows,
+// catch arms and union interfaces name types (grammar.md: QualifiedName,
+// identifier); a row variable is a name, and an instantiated generic type
+// such as `retry.Exhausted[E]` is a name with type arguments. Any other
+// type is S001 at its first token.
+func (p *parser) parseTypeName(what string) Expr {
+	p.enter()
+	defer p.leave()
+	switch {
+	case p.tok.tok == IDENT && p.tok.lit == "error" && p.peek(1).tok == LBRACK:
+		p.errorf("an error row error[…] appears only in a result list")
+	case p.tok.tok == IDENT, p.tok.tok == GO && p.peek(1).tok == PERIOD:
+	default:
+		p.errorf("%s names a type; expected a type name, found %s", what, p.found())
+	}
+	x := p.parseQualifiedName()
+	if p.tok.tok == LBRACK {
+		x = p.parseTypeArgs(x)
+	}
+	return x
 }
 
 func (p *parser) parseTypeArgs(x Expr) Expr {

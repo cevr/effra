@@ -76,6 +76,20 @@ func TestRefusedForms(t *testing.T) {
 		{"select case", "package p\nfunc f() {\n\tselect {\n\tcase x:\n\t}\n}\n", "send or a receive"},
 		{"empty type arguments", "package p\nvar x T[]\n", "type argument"},
 		{"three-index slice without max", "package p\nvar x = s[1:2:]\n", "final index"},
+		// Review M4: Go's IdentifierList ":=" holds in a range clause too.
+		{"range define of a selector", "package p\nfunc f() { for a.x := range xs {} }\n", "non-name on the left side of :="},
+		{"range define of a parenthesised name", "package p\nfunc f() { for (i) := range xs {} }\n", "non-name on the left side of :="},
+		// Review M5: error rows, catch arms and unions name types.
+		{"error row of a slice type", "package p\nfunc f() error[[]int | *E] {}\n", "an error row names a type"},
+		{"error row of a pointer", "package p\nfunc f() error[E | *F] {}\n", "an error row names a type"},
+		{"union of composite types", "package p\ntype U interface { []int | map[string]int }\n", "a union variant names a type"},
+		{"union variant pointer", "package p\ntype U interface { A | *B }\n", "a union variant names a type"},
+		{"catch arm of a slice type", "package p\nfunc f() { g() catch { case []int: 1 } }\n", "a catch arm names a type"},
+		// Review M6: [...] only as a composite literal's type.
+		{"inferred length as a parameter type", "package p\nfunc f(a [...]int) {}\n", "expected a type"},
+		{"inferred length without a literal", "package p\nvar x = [...]int\n", "array composite literal only"},
+		// Review M7: an inserted semicolon before `{` leaves no condition.
+		{"if condition then newline", "package p\nfunc f() {\n\tif x := g(); x\n\t{\n\t}\n}\n", "newline"},
 	}
 	for _, c := range cases {
 		_, err := Parse(c.src)
@@ -182,5 +196,84 @@ func TestAdmittedForms(t *testing.T) {
 	entries := g.Decls[1].(*WireDecl).Body.Entries
 	if len(entries[0].Keys) != 1 || entries[1].Kind != WireReplace || entries[2].Kind != WireEmbed {
 		t.Fatal("wire entries")
+	}
+	// Review M5: a name with type arguments is still a type name.
+	row := parse("package p\nfunc f() error[retry.Exhausted[E] | go.Error | E] {}\n").Decls[0].(*FuncDecl).Type.Results.List[0].Type.(*ErrorRow)
+	if _, ok := row.Types[0].(*IndexExpr); !ok || len(row.Types) != 3 {
+		t.Fatalf("error row %#v", row.Types)
+	}
+	// Review M6: `[...]T{…}` has an Ellipsis length.
+	arrLit := parse("package p\nvar x = [...]int{1, 2}\n").Decls[0].(*VarDecl).Specs[0].Values[0].(*CompositeLit)
+	if arr, ok := arrLit.Type.(*ArrayType); !ok || arr.Len.(*Ellipsis).Elt != nil || len(arrLit.Elts) != 2 {
+		t.Fatalf("inferred length %#v", arrLit.Type)
+	}
+	// Review M7: inserted header semicolons, as go/parser reads them.
+	hs := body("if x := g()\nx {\n}\nswitch g()\n{\ndefault:\n}\nfor i := 0\ni < 3\ni++ {\n}")
+	if s := hs[0].(*IfStmt); s.Init == nil || s.Cond.(*Ident).Name != "x" {
+		t.Fatalf("if header %#v", s)
+	}
+	if s := hs[1].(*SwitchStmt); s.Init == nil || s.Tag != nil {
+		t.Fatalf("switch header %#v", s)
+	}
+	if s := hs[2].(*ForStmt); s.Init == nil || s.Cond == nil || s.Post == nil {
+		t.Fatalf("for header %#v", s)
+	}
+	// Review M8: a parenthesised receive is a receive; the parentheses stay.
+	sel := body("select {\ncase (<-ch):\ncase x = (<-ch):\n}")[0].(*SelectStmt)
+	if _, ok := sel.Clauses[0].Comm.(*ExprStmt).X.(*ParenExpr); !ok {
+		t.Fatal("parenthesised receive")
+	}
+	if _, ok := sel.Clauses[1].Comm.(*AssignStmt).Rhs[0].(*ParenExpr); !ok {
+		t.Fatal("assigned parenthesised receive")
+	}
+	// Review M9: `L: ;` labels the empty statement, as in go/ast; the loop
+	// after it is not labelled. `L: }` labels an implicit one.
+	ls := body("L:;\nfor {\n\tbreak L\n}")
+	if l, ok := ls[0].(*LabeledStmt); !ok || l.Stmt.(*EmptyStmt).Implicit {
+		t.Fatalf("labelled empty statement %#v", ls[0])
+	}
+	if _, ok := ls[1].(*ForStmt); !ok || len(ls) != 2 {
+		t.Fatalf("the loop after the label: %#v", ls)
+	}
+	if l := body("M:")[0].(*LabeledStmt); !l.Stmt.(*EmptyStmt).Implicit {
+		t.Fatal("implicit empty statement")
+	}
+}
+
+// TestNestingLimit: every recursive construct, and every chain that
+// deepens the tree (selectors, calls, indexes, binary operators, else if),
+// charges the nesting limit, so a tree deeper than MaxNesting is S001
+// before any consumer walks it (review M3; go/parser charges the same).
+func TestNestingLimit(t *testing.T) {
+	chains := []struct {
+		name       string
+		src        func(n int) string
+		deep, flat int
+	}{
+		{"parentheses", func(n int) string {
+			return "package p\nvar x = " + strings.Repeat("(", n) + "1" + strings.Repeat(")", n) + "\n"
+		}, MaxNesting, 400},
+		{"selectors", func(n int) string { return "package p\nvar x = a" + strings.Repeat(".a", n) + "\n" }, MaxNesting, 900},
+		{"calls", func(n int) string { return "package p\nvar x = f" + strings.Repeat("()", n) + "\n" }, MaxNesting, 900},
+		{"indexes", func(n int) string { return "package p\nvar x = a" + strings.Repeat("[0]", n) + "\n" }, MaxNesting, 900},
+		{"binary operators", func(n int) string { return "package p\nvar x = 1" + strings.Repeat(" + 1", n) + "\n" }, MaxNesting, 900},
+		{"unary operators", func(n int) string { return "package p\nvar x = " + strings.Repeat("!", n) + "x\n" }, MaxNesting, 900},
+		{"else if", func(n int) string {
+			return "package p\nfunc f() {\n\tif x {\n\t}" + strings.Repeat(" else if x {\n\t}", n) + "\n}\n"
+		}, MaxNesting, 900},
+		{"blocks", func(n int) string {
+			return "package p\nfunc f() " + strings.Repeat("{", n) + strings.Repeat("}", n) + "\n"
+		}, MaxNesting, 400},
+		{"slice types", func(n int) string { return "package p\nvar x " + strings.Repeat("[]", n) + "int\n" }, MaxNesting, 900},
+	}
+	for _, c := range chains {
+		if _, err := Parse(c.src(c.flat)); err != nil {
+			t.Errorf("%s: %d levels: %v", c.name, c.flat, err)
+		}
+		_, err := Parse(c.src(c.deep + 1))
+		var e *Error
+		if !errors.As(err, &e) || e.Code != CodeSyntax || !strings.Contains(e.Message, "nesting deeper than") {
+			t.Errorf("%s: %d levels: %v, want the nesting S001", c.name, c.deep+1, err)
+		}
 	}
 }

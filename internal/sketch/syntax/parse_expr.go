@@ -14,14 +14,23 @@ func (p *parser) parseExpr() Expr {
 	return x
 }
 
+// parseBinary parses a binary expression of precedence prec or tighter. Each
+// operator deepens the left spine of the tree by one level, so each charges
+// the nesting limit until the expression ends, as go/parser's
+// parseBinaryExpr does: a long chain is as deep for every recursive consumer
+// as the same number of parentheses.
 func (p *parser) parseBinary(prec int) Expr {
 	x := p.parseUnary()
+	n := 0
+	defer func() { p.nest -= n }()
 	for {
 		op := p.tok.tok
 		opPrec := op.Precedence()
 		if opPrec < prec {
 			return x
 		}
+		n++
+		p.enter()
 		pos := p.tok.pos
 		p.next()
 		y := p.parseBinary(opPrec + 1)
@@ -92,9 +101,9 @@ func (p *parser) parseCatch(x Expr) *CatchExpr {
 	for p.tok.tok == CASE {
 		arm := &CatchArm{Case: p.tok.pos}
 		p.next()
-		arm.Types = append(arm.Types, p.parseType(true))
+		arm.Types = append(arm.Types, p.parseTypeName("a catch arm"))
 		for p.got(COMMA) {
-			arm.Types = append(arm.Types, p.parseType(true))
+			arm.Types = append(arm.Types, p.parseTypeName("a catch arm"))
 		}
 		arm.Colon = p.want(COLON)
 		arm.Body = p.parseStmtList()
@@ -112,9 +121,19 @@ func (p *parser) parseCatch(x Expr) *CatchExpr {
 	return c
 }
 
+// parsePrimaryExpr parses an operand and its selectors, indexes, calls and
+// literals. Each one deepens the tree by one level and charges the nesting
+// limit until the expression ends (go/parser's parsePrimaryExpr).
 func (p *parser) parsePrimaryExpr() Expr {
 	x := p.parseOperand()
+	n := 0
+	defer func() { p.nest -= n }()
 	for {
+		switch p.tok.tok {
+		case PERIOD, LBRACK, LPAREN, LBRACE:
+			n++
+			p.enter()
+		}
 		switch p.tok.tok {
 		case PERIOD:
 			p.next()
@@ -197,6 +216,21 @@ func (p *parser) parseOperand() Expr {
 		}
 		return t
 	case LBRACK, MAP, CHAN, STRUCT, INTERFACE:
+		if p.tok.tok == LBRACK && p.peek(1).tok == ELLIPSIS {
+			// `[...]T{…}`: the length is the number of elements. It is
+			// the type of a composite literal only, never a type of its
+			// own (go/types rejects it elsewhere; here it is S001).
+			lbrack := p.tok.pos
+			p.next()
+			ellipsis := p.tok.pos
+			p.next()
+			p.want(RBRACK)
+			t := &ArrayType{Lbrack: lbrack, Len: &Ellipsis{Ellipsis: ellipsis}, Elt: p.parseType(false)}
+			if p.tok.tok != LBRACE {
+				p.errorAt(ellipsis, 3, "[...] is the length of an array composite literal only; expected \"{\" after the type, found %s", p.found())
+			}
+			return t
+		}
 		return p.parseType(false)
 	case WIRE:
 		pos := p.tok.pos

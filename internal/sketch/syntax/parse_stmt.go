@@ -135,6 +135,15 @@ func (p *parser) parseSimpleStmt(mode simpleMode) Stmt {
 	case DEFINE, ASSIGN, ADD_ASSIGN, SUB_ASSIGN, MUL_ASSIGN, QUO_ASSIGN, REM_ASSIGN,
 		AND_ASSIGN, OR_ASSIGN, XOR_ASSIGN, SHL_ASSIGN, SHR_ASSIGN, AND_NOT_ASSIGN:
 		pos, tok := p.tok.pos, p.tok.tok
+		if tok == DEFINE {
+			// Go: IdentifierList ":=", in a range clause too; `=` takes
+			// any expressions.
+			for _, x := range lhs {
+				if _, ok := x.(*Ident); !ok {
+					p.errorAt(x.Pos(), int(x.End()-x.Pos()), "non-name on the left side of :=")
+				}
+			}
+		}
 		p.next()
 		if mode == simpleRange && p.tok.tok == RANGE && (tok == DEFINE || tok == ASSIGN) {
 			if len(lhs) > 2 {
@@ -151,15 +160,7 @@ func (p *parser) parseSimpleStmt(mode simpleMode) Stmt {
 		if tok != DEFINE && tok != ASSIGN && len(lhs) > 1 {
 			p.errorAt(pos, 2, "%s takes one operand on each side", tok)
 		}
-		s := &AssignStmt{Lhs: lhs, TokPos: pos, Tok: tok, Rhs: p.parseExprList()}
-		if tok == DEFINE {
-			for _, x := range lhs {
-				if _, ok := x.(*Ident); !ok {
-					p.errorAt(x.Pos(), int(x.End()-x.Pos()), "non-name on the left side of :=")
-				}
-			}
-		}
-		return s
+		return &AssignStmt{Lhs: lhs, TokPos: pos, Tok: tok, Rhs: p.parseExprList()}
 	}
 	if len(lhs) > 1 {
 		p.errorf("expected := or = after an expression list, found %s", p.found())
@@ -169,11 +170,15 @@ func (p *parser) parseSimpleStmt(mode simpleMode) Stmt {
 		if id, ok := lhs[0].(*Ident); ok && mode == simpleLabel {
 			colon := p.tok.pos
 			p.next()
-			if p.tok.tok == RBRACE {
+			switch p.tok.tok {
+			case RBRACE:
+				return &LabeledStmt{Label: id, Colon: colon, Stmt: &EmptyStmt{Semicolon: p.tok.pos, Implicit: true}}
+			case SEMICOLON:
+				// `L: ;` labels the empty statement (go/parser); the
+				// statement list consumes the `;` as its terminator, and the
+				// next statement is not labelled. No semicolon is inserted
+				// after a colon, so this one is explicit.
 				return &LabeledStmt{Label: id, Colon: colon, Stmt: &EmptyStmt{Semicolon: p.tok.pos}}
-			}
-			for p.tok.tok == SEMICOLON && p.tok.lit == ";" {
-				p.next()
 			}
 			return &LabeledStmt{Label: id, Colon: colon, Stmt: p.parseStmt()}
 		}
@@ -197,17 +202,18 @@ func (p *parser) parseExprList() []Expr {
 	return list
 }
 
-// headerSemicolon consumes the explicit semicolon of a control clause. An
-// inserted one means the header broke across lines.
-func (p *parser) headerSemicolon() bool {
+// headerSemicolon consumes the semicolon of a control clause, explicit or
+// inserted at a line break, as go/parser does: `if x := g()` and `x {` on
+// the next line is a header with an init statement. It reports the
+// semicolon's position and whether it was inserted, for the error of a
+// missing condition.
+func (p *parser) headerSemicolon() (ok bool, pos Pos, inserted bool) {
 	if p.tok.tok != SEMICOLON {
-		return false
+		return false, NoPos, false
 	}
-	if p.tok.lit == "\n" {
-		p.errorf("expected \"{\" after the header, found newline")
-	}
+	pos, inserted = p.tok.pos, p.tok.lit == "\n"
 	p.next()
-	return true
+	return true, pos, inserted
 }
 
 func (p *parser) parseIfStmt() *IfStmt {
@@ -221,9 +227,12 @@ func (p *parser) parseIfStmt() *IfStmt {
 	if p.tok.tok != SEMICOLON {
 		first = p.parseSimpleStmt(simplePlain)
 	}
-	if p.headerSemicolon() {
+	if ok, semi, inserted := p.headerSemicolon(); ok {
 		s.Init = first
 		if p.tok.tok == LBRACE {
+			if inserted {
+				p.errorAt(semi, 1, "expected \"{\" after the if header, found newline")
+			}
 			p.errorf("missing condition in if statement")
 		}
 		first = p.parseSimpleStmt(simplePlain)
@@ -244,7 +253,10 @@ func (p *parser) parseIfStmt() *IfStmt {
 		p.next()
 		switch p.tok.tok {
 		case IF:
+			// Each else if nests one level deeper in the tree.
+			p.enter()
 			s.Else = p.parseIfStmt()
+			p.leave()
 		case LBRACE:
 			s.Else = p.parseBlock()
 		default:
@@ -264,7 +276,7 @@ func (p *parser) parseSwitchStmt() Stmt {
 		if p.tok.tok != SEMICOLON {
 			header = p.parseSimpleStmt(simpleSwitch)
 		}
-		if p.headerSemicolon() {
+		if ok, _, _ := p.headerSemicolon(); ok {
 			init, header = header, nil
 			if p.tok.tok != LBRACE {
 				header = p.parseSimpleStmt(simpleSwitch)
@@ -452,7 +464,17 @@ func (p *parser) parseSelectStmt() *SelectStmt {
 	return s
 }
 
+// isRecv reports whether x is a receive `<-ch`, possibly parenthesised:
+// Go's RecvExpr is an Expression, so `case (<-ch):` and `case v = (<-ch):`
+// are receives (the parentheses stay in the tree).
 func isRecv(x Expr) bool {
+	for {
+		paren, ok := x.(*ParenExpr)
+		if !ok {
+			break
+		}
+		x = paren.X
+	}
 	u, ok := x.(*UnaryExpr)
 	return ok && u.Op == ARROW
 }
@@ -493,7 +515,7 @@ func (p *parser) parseForStmt() Stmt {
 			p.exprLev = saved
 			return &RangeStmt{For: pos, Key: rc.key, Value: rc.value, TokPos: rc.tokPos, Tok: rc.tok, Range: rc.rangePos, X: rc.x, Body: p.forBody()}
 		}
-		if p.headerSemicolon() {
+		if ok, _, _ := p.headerSemicolon(); ok {
 			init = first
 			if p.tok.tok != SEMICOLON {
 				x := p.parseSimpleStmt(simplePlain)
@@ -503,7 +525,7 @@ func (p *parser) parseForStmt() Stmt {
 				}
 				cond = e.X
 			}
-			if !p.headerSemicolon() {
+			if ok, _, _ := p.headerSemicolon(); !ok {
 				p.errorf("expected \";\" in the for clause, found %s", p.found())
 			}
 			if p.tok.tok != LBRACE {
