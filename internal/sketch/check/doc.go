@@ -42,12 +42,13 @@
 //     matrix, never the product of the subjects, with Parmatch's pruning:
 //     subsumed rows dropped, a wildcard row answering at once, equal
 //     submatrices answered once. The column to split is chosen by
-//     Maranget's necessity heuristic over columns put first in a structural
-//     order (colour refinement, McKay's nauty; canon.go), so the search
-//     does not depend on the order of the subjects or the cases,
-//     and a fixed step budget bounds the proof, as rustc's
+//     Maranget's necessity heuristic, ties broken by source column, so
+//     the search is deterministic for a given source, and a fixed step
+//     budget counts every superlinear pass, as rustc's
 //     pattern_complexity_limit and GHC's max-pmcheck-models do: over
 //     budget, the switch is refused (S103), never accepted unproven.
+//     Like theirs, the budget depends on the order of the subjects; a
+//     proved verdict does not (D16 as amended in round 5).
 //   - go/types initorder.go and its "instantiation cycle" check: package
 //     var initialization cycles and expanding generic instantiations are
 //     rejected on their dependency graphs, with no depth limit.

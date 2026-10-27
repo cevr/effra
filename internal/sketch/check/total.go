@@ -101,24 +101,12 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 			}
 		}
 	}
-	// The solver sees the columns in a structural order, so its steps and
-	// its verdicts do not depend on the order the subjects are written in
-	// (round-3 M2): perm[k] is the subject at canonical column k.
-	perm := canonicalColumns(all, sizes)
-	csizes := make([]int, n)
-	for k, j := range perm {
-		csizes[k] = sizes[j]
-	}
-	canon := func(row []int) []int {
-		out := make([]int, n)
-		for k, j := range perm {
-			out[k] = row[j]
-		}
-		return out
-	}
-	// Reachability follows source order: a case is unreachable when the
-	// cases before it cover it.
-	useful := newMatrixSolver(csizes)
+	// The solvers see the columns in source order: the solver is
+	// deterministic for a given source, and reordering the subjects may
+	// change whether a switch near the budget is refused, never a proved
+	// verdict (D16 as amended in round 5). Reachability follows the cases'
+	// order: a case is unreachable when the cases before it cover it.
+	useful := newMatrixSolver(sizes)
 	var matrix [][]int
 	for ci, cl := range s.Clauses {
 		var tuples [][]int
@@ -127,12 +115,11 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 			if row == nil {
 				continue
 			}
-			crow := canon(row)
-			if u, ok := useful.caseUseful(matrix, crow); ok && !u {
+			if u, ok := useful.caseUseful(matrix, row); ok && !u {
 				c.errorf(item, CodeType, "this case is already covered by the cases before it (unreachable)")
 				continue
 			}
-			matrix = addRow(matrix, crow)
+			matrix = useful.addRow(matrix, row)
 			tuples = append(tuples, row)
 		}
 		inner := c.openScope()
@@ -166,14 +153,15 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 			c.errorf(s.Binds[j], CodeUnused, "the type-switch binding %s is read in no case; write _ (rows.md, Totality 1)", s.Binds[j].Name)
 		}
 	}
-	// Totality is decided over the set of all case rows, canonically
-	// ordered, by a solver of its own: its steps and verdict depend on
-	// neither the subjects' order nor the cases' order (round-3 M2).
-	total := newMatrixSolver(csizes)
+	// Totality is decided over the maximal case rows by a solver of its
+	// own, so it does not depend on which cases reachability judged first.
+	// A switch with default needs no proof: its cost stays linear in the
+	// subjects and cases (round-4 M4).
+	total := newMatrixSolver(sizes)
 	var set [][]int
 	if valid && patternsOK && !hasDefault {
 		for _, row := range all {
-			set = addMaximal(set, canon(row))
+			set = total.addMaximal(set, row)
 		}
 	}
 	w, missing, ok := total.total(set)
@@ -198,8 +186,8 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 		c.errorAt(s.Switch, s.Switch+6, CodeNotTotal, "too many cases to prove this switch total; split it or add default (rows.md, Totality 5)")
 	case missing:
 		parts := make([]string, n)
-		for k, idx := range w {
-			parts[perm[k]] = unions[perm[k]].Variants[idx].String()
+		for j, idx := range w {
+			parts[j] = unions[j].Variants[idx].String()
 		}
 		what := parts[0]
 		if n > 1 {
@@ -245,18 +233,21 @@ func (c *checker) caseVariant(e syntax.Expr, u *Union, subj Type) int {
 }
 
 // totalityBudget bounds the steps of each of a switch's two solvers, one for
-// its cases' reachability and one for its totality (D16 as amended in round 3; round-3 M2). A step is
-// one residual matrix the solver splits, weighted by its number of rows, so
-// the bound holds the work, not only the count, to a fixed amount.
+// its cases' reachability and one for its totality (D16 as amended in rounds 3
+// and 5). A step is one residual matrix the solver splits, weighted by its
+// number of rows, or one row scanned when a case specializes or joins the
+// matrix, so the bound holds all the superlinear work to a fixed amount.
 // Deciding totality over several subjects is NP-complete in the worst case
 // (a case row can encode a clause, so totality encodes unsatisfiability;
 // Maranget 2007, Sekar et al.), so no exact checker is linear on every
 // input. A switch whose proof needs more steps is refused (S103, "too many
-// cases"), never accepted unproven. The budget is deterministic: steps,
-// not time. Every switch over at most 6 subjects of at most 3 variants
-// stays far below it (at most 3^6 = 729 residual matrices), and the odd
-// cycles of 41 subjects take 47 558 steps in every column order (measured;
-// TestTotalityPermutations holds 31 subjects under an eighth of it).
+// cases"), never accepted unproven. The budget is deterministic for a
+// given source: steps, not time. Like rustc's limit it depends on the
+// order of the subjects, so reordering them may change whether a switch
+// near the budget is refused, never a proved verdict. Every switch over at
+// most 6 subjects of at most 3 variants stays far below it (at most 3^6 =
+// 729 residual matrices; TestTotalityPermutations holds the odd cycles of
+// 31 subjects under an eighth of it).
 //
 // Prior art: rustc's pattern_complexity_limit, GHC's -fmax-pmcheck-models.
 const totalityBudget = 200_000
@@ -326,6 +317,12 @@ func toRow(r []int) solverRow {
 // totality question over q's wildcard columns, answered with the shared
 // memo. ok is false when the budget ran out.
 func (s *matrixSolver) caseUseful(rows [][]int, q []int) (useful, ok bool) {
+	// Specializing the matrix scans its rows: counted, so the cases'
+	// quadratic work stays under the budget (round 5: nothing superlinear
+	// runs outside the counters).
+	if !s.charge(len(rows)) {
+		return false, false
+	}
 	var residual []solverRow
 	for _, r := range rows {
 		row, keep := specializeBy(toRow(r), q)
@@ -404,9 +401,7 @@ func (s *matrixSolver) missing(rows []solverRow, cols []int) missingResult {
 	if r, ok := s.memo[key]; ok {
 		return r
 	}
-	s.steps += len(rows)
-	if s.steps > totalityBudget {
-		s.over = true
+	if !s.charge(len(rows)) {
 		return missingResult{}
 	}
 	res := s.split(rows, cols)
@@ -414,6 +409,37 @@ func (s *matrixSolver) missing(rows []solverRow, cols []int) missingResult {
 		s.memo[key] = res
 	}
 	return res
+}
+
+// charge counts work of the given weight against the budget and reports
+// whether the budget still holds.
+func (s *matrixSolver) charge(w int) bool {
+	if s.over {
+		return false
+	}
+	s.steps += w
+	if s.steps > totalityBudget {
+		s.over = true
+		return false
+	}
+	return true
+}
+
+// addRow is addRow with its scan of the matrix counted. Past the budget
+// nothing more is proved, so the matrix stops growing.
+func (s *matrixSolver) addRow(rows [][]int, row []int) [][]int {
+	if !s.charge(len(rows)) {
+		return rows
+	}
+	return addRow(rows, row)
+}
+
+// addMaximal is addMaximal with its scan of the set counted.
+func (s *matrixSolver) addMaximal(rows [][]int, row []int) [][]int {
+	if !s.charge(len(rows)) {
+		return rows
+	}
+	return addMaximal(rows, row)
 }
 
 // split chooses a column and decides the matrix by its constructors.

@@ -2,9 +2,6 @@ package check_test
 
 import (
 	"fmt"
-	"math/rand"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,7 +12,7 @@ import (
 // (round-3-findings.md). These tests cover the wider domains; the go/types
 // differential test (differential_test.go) covers M1 and M4.
 
-// ---------------------------------------------------------------- M2: order-invariant totality
+// ---------------------------------------------------------------- M2: case matrices as switches
 
 // matrixSwitch writes a switch over len(sizes) subjects whose case rows are
 // rows (-1 is _), with the subjects written in the order order: written
@@ -105,133 +102,12 @@ func identityOrder(n int) []int {
 	return out
 }
 
-// TestTotalityOrderInvariance: random case matrices, their columns
-// permuted (the subjects written in another order) and their rows
-// shuffled. A column permutation leaves the totality steps, the
-// reachability steps and every diagnostic code unchanged; a row shuffle
-// leaves the totality steps and verdict unchanged (reachability follows
-// source order by definition). Matrices range from 2 to 10 subjects of 2
-// or 3 variants, and random 3-CNF matrices near the budget (round-3 M2).
-func TestTotalityOrderInvariance(t *testing.T) {
-	rng := rand.New(rand.NewSource(20261027))
-	type gen struct {
-		sizes []int
-		rows  [][]int
-	}
-	var gens []gen
-	for trial := 0; trial < 300; trial++ {
-		n := 2 + rng.Intn(9)
-		sizes := make([]int, n)
-		for j := range sizes {
-			sizes[j] = 2 + rng.Intn(2)
-		}
-		m := 1 + rng.Intn(40)
-		rows := make([][]int, m)
-		for i := range rows {
-			r := make([]int, n)
-			for j := range r {
-				r[j] = -1
-				if rng.Intn(3) > 0 {
-					r[j] = rng.Intn(sizes[j])
-				}
-			}
-			rows[i] = r
-		}
-		gens = append(gens, gen{sizes, rows})
-	}
-	// 3-CNF at the satisfiability threshold, at the budget's edge: the
-	// reachability checks of these exhaust it.
-	for _, n := range []int{24, 40, 72} {
-		for k := 0; k < 1; k++ {
-			sizes := make([]int, n)
-			for j := range sizes {
-				sizes[j] = 2
-			}
-			var rows [][]int
-			for i := 0; i < n*43/10; i++ {
-				r := make([]int, n)
-				for j := range r {
-					r[j] = -1
-				}
-				for _, j := range rng.Perm(n)[:3] {
-					r[j] = rng.Intn(2)
-				}
-				rows = append(rows, r)
-			}
-			gens = append(gens, gen{sizes, rows})
-		}
-	}
-	edge := 0
-	for gi, g := range gens {
-		n := len(g.sizes)
-		base := matrixSwitch(g.sizes, g.rows, identityOrder(n))
-		tsteps, usteps, diags := check.SolverSteps(base)
-		want := codes(diags)
-		if tsteps[0] > check.TotalityBudget/2 || usteps[0] > check.TotalityBudget {
-			edge++
-		}
-		perms := 3
-		if n > 20 {
-			perms = 1
-		}
-		for p := 0; p < perms; p++ {
-			order := rng.Perm(n)
-			src := matrixSwitch(g.sizes, g.rows, order)
-			ts, us, d := check.SolverSteps(src)
-			if ts[0] != tsteps[0] || us[0] != usteps[0] || codes(d) != want || verdict(d) != verdict(diags) {
-				t.Fatalf("matrix %d, columns %v: totality steps %d vs %d, reachability steps %d vs %d, codes %q vs %q\n%s", gi, order, ts[0], tsteps[0], us[0], usteps[0], codes(d), want, src)
-			}
-			shuffled := append([][]int(nil), g.rows...)
-			rng.Shuffle(len(shuffled), func(a, b int) { shuffled[a], shuffled[b] = shuffled[b], shuffled[a] })
-			src = matrixSwitch(g.sizes, shuffled, order)
-			ts, _, d = check.SolverSteps(src)
-			// Reachability follows the cases' order, so a shuffle may
-			// change which case is unreachable or whether reachability is
-			// proved; the totality proof never changes.
-			sameVerdict := verdict(d) == verdict(diags) || verdict(d) == "refused-reachability" || verdict(diags) == "refused-reachability"
-			if ts[0] != tsteps[0] || !sameVerdict {
-				t.Fatalf("matrix %d, rows shuffled, columns %v: totality steps %d vs %d, verdict %s vs %s\n%s", gi, order, ts[0], tsteps[0], verdict(d), verdict(diags), src)
-			}
-		}
-	}
-	if edge == 0 {
-		t.Errorf("no generated matrix came near the budget; the edge is untested")
-	}
-}
-
 func codes(diags []check.Diagnostic) string {
 	var out []string
 	for _, d := range diags {
 		out = append(out, d.Code)
 	}
 	return strings.Join(out, " ")
-}
-
-// TestTotalitySavedPermutation: the reviewer's 39-subject, 147-case pair,
-// one the other with its columns permuted, was refused in one order and
-// accepted in the other. Both are total (an independent DPLL proves it);
-// both orders now take the same steps and get the same verdict.
-func TestTotalitySavedPermutation(t *testing.T) {
-	var steps []int
-	var verdicts []string
-	for _, name := range []string{"permutation-original.ef", "permutation-reordered.ef"} {
-		data, err := os.ReadFile(filepath.Join("testdata", "totality", name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		s, d := check.TotalitySteps(string(data))
-		if len(s) != 1 {
-			t.Fatalf("%s: steps %v", name, s)
-		}
-		steps = append(steps, s[0])
-		verdicts = append(verdicts, verdict(d))
-		if v := verdict(d); v != "total" && v != "refused" {
-			t.Errorf("%s: a total switch got %s: %s", name, v, describe(d))
-		}
-	}
-	if steps[0] != steps[1] || verdicts[0] != verdicts[1] {
-		t.Errorf("column order changed the proof: steps %v, verdicts %v", steps, verdicts)
-	}
 }
 
 // ---------------------------------------------------------------- M5: linear body graph
