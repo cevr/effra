@@ -1,7 +1,6 @@
 package sketch
 
 import (
-	"bufio"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -98,6 +97,31 @@ func recorded(src string, dropped int, evs ...TraceEvent) []byte {
 		b.WriteByte('\n')
 	}
 	return []byte(b.String())
+}
+
+// The query reads the schema the kernel records now and its name before the
+// #218 rename, which the recorded traces carry, names the one it read, and
+// refuses any other.
+func TestQueryTraceSchemaNames(t *testing.T) {
+	c, src := loadFile(t, "../testdata/trace/timeout.sketch")
+	m := NewModel(c)
+	data := string(recorded(src, 0, task(1, 0, "start", 1, 0), task(2, 0, "body-exit", 1, 0)))
+	for _, schema := range []string{TraceSchema, traceSchemaEffra, "other-trace-3"} {
+		ev, err := QueryTrace(m, Revision(src), []byte(strings.Replace(data, `"schema":"`+TraceSchema+`"`, `"schema":"`+schema+`"`, 1)))
+		if schema == "other-trace-3" {
+			if err == nil || !strings.Contains(err.Error(), TraceSchema) {
+				t.Errorf("%s: got %v; want a refusal naming %s", schema, err, TraceSchema)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: refused: %v", schema, err)
+			continue
+		}
+		if !strings.Contains(ev.Text(), "schema "+schema+")") {
+			t.Errorf("%s: text does not name the schema read:\n%s", schema, ev.Text())
+		}
+	}
 }
 
 // Events of timeout.sketch for hand-built traces.
@@ -446,23 +470,77 @@ func TestQueryTraceLabelsCandidates(t *testing.T) {
 	}
 }
 
-// kernelRoot finds the checkout that holds runtime/rt above the test.
+// kernelRoot finds the checkout that holds runtime/rt above the test. It
+// skips only when there is no checkout at all (sketch9 copied elsewhere).
+// Inside a checkout whose module is not KernelModule it fails: a skip there
+// hid the #218 rename, when every kernel test skipped silently.
 func kernelRoot(t *testing.T) string {
 	t.Helper()
-	dir, err := filepath.Abs(".")
-	if err != nil {
-		t.Fatal(err)
+	root, mod, ok := FindCheckout(".")
+	if !ok {
+		t.Skip("no checkout of " + KernelModule + " above the test")
 	}
-	for ; dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
-		if raw, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil {
-			sc := bufio.NewScanner(strings.NewReader(string(raw)))
-			if sc.Scan() && strings.TrimSpace(sc.Text()) == "module "+KernelModule {
-				return dir
-			}
+	if mod != KernelModule {
+		t.Fatalf("the checkout at %s declares module %s, but kernel mode links %s (sketch.KernelModule); update KernelModule", root, mod, KernelModule)
+	}
+	return root
+}
+
+// The lookup finds the nearest checkout by its module's shape or its
+// runtime/rt, passes over sketch9's own go.mod, and reports the module the
+// checkout declares, so that a renamed root module is a mismatch and not a
+// missing checkout.
+func TestKernelCheckoutLookup(t *testing.T) {
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
 		}
 	}
-	t.Skip("no checkout of " + KernelModule + " above the test")
-	return ""
+	for _, tc := range []struct {
+		name  string
+		files map[string]string
+		dirs  []string
+		want  string // module found; "" for none
+	}{
+		{"kernel module", map[string]string{"go.mod": "module " + KernelModule + "\n"}, nil, KernelModule},
+		{"renamed module", map[string]string{"go.mod": "// root\nmodule other.local/prototype\n"}, nil, "other.local/prototype"},
+		{"runtime/rt beside go.mod", map[string]string{"go.mod": "module example.com/x\n"}, []string{"runtime/rt"}, "example.com/x"},
+		{"unrelated module", map[string]string{"go.mod": "module example.com/x\n"}, nil, ""},
+		{"no go.mod", nil, []string{"runtime/rt"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			top := t.TempDir()
+			for name, body := range tc.files {
+				write(filepath.Join(top, name), body)
+			}
+			for _, d := range tc.dirs {
+				if err := os.MkdirAll(filepath.Join(top, d), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			start := filepath.Join(top, "prototypes", "sketch9", "sketch")
+			write(filepath.Join(top, "prototypes", "sketch9", "go.mod"), "module effra.local/sketch9\n")
+			if err := os.MkdirAll(start, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			root, mod, ok := FindCheckout(start)
+			if tc.want == "" {
+				// t.TempDir can sit under a checkout, so only a find at or
+				// below top is wrong.
+				if ok && strings.HasPrefix(root, top) {
+					t.Fatalf("found %s (%s); want none at or below %s", root, mod, top)
+				}
+				return
+			}
+			if !ok || root != top || mod != tc.want {
+				t.Fatalf("FindCheckout = %q, %q, %v; want %q, %q, true", root, mod, ok, top, tc.want)
+			}
+		})
+	}
 }
 
 // The timeout example built in kernel mode records nothing by default, and a

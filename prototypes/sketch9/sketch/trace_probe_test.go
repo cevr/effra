@@ -19,15 +19,15 @@ import (
 // records the run with the real recorder and writer and prints the
 // occurrence each reason came from, as the program saw it (0 when no event
 // raised it). mk(i) makes the i-th failure. The definitions and sites are
-// the checker's, filled in by the test.
+// the checker's, filled in by the test, and the imports name KernelModule.
 const probeProgram = `package main
 
 import (
 	"fmt"
 	"os"
 
-	"effra.local/prototype/runtime/rt"
-	"effra.local/prototype/runtime/rt/rttrace"
+	"%[1]s/runtime/rt"
+	"%[1]s/runtime/rt/rttrace"
 )
 
 %s
@@ -136,7 +136,7 @@ func TestKernelEqualFailureProbes(t *testing.T) {
 		{"distinct", "type Missing struct{ key string }", "func mk(i int) error { return Missing{key: fmt.Sprint(\"value-\", i)} }", true},
 	} {
 		dir := t.TempDir()
-		code := fmt.Sprintf(probeProgram, v.typ+"\n\n"+v.mk, "calls.main", main.Site, "calls.Store.Get", sites[0], sites[1], Revision(src))
+		code := fmt.Sprintf(probeProgram, KernelModule, v.typ+"\n\n"+v.mk, "calls.main", main.Site, "calls.Store.Get", sites[0], sites[1], Revision(src))
 		for name, body := range map[string]string{"go.mod": KernelGoMod(root), "main.go": code} {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 				t.Fatal(err)

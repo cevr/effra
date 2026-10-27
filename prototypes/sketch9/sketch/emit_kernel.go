@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Kernel mode links the merged kernel runtime (effra.local/prototype/runtime/rt)
+// Kernel mode links the merged kernel runtime (ergo.local/prototype/runtime/rt)
 // and makes the program traceable by construction. Every definition ID it
 // names comes from the Model, which the checker's declarations determine; the
 // emitter writes them as constants and never computes one at run time.

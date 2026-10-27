@@ -31,8 +31,12 @@ import (
 
 const (
 	// TraceSchema is the JSON Lines format a kernel program records
-	// (runtime/rt/rttrace).
-	TraceSchema = "effra-trace-3"
+	// (runtime/rt/rttrace Schema).
+	TraceSchema = "ergo-trace-3"
+	// traceSchemaEffra is TraceSchema's name before the root module was
+	// renamed (#218, 2026-10-27). Only the name changed, so the query reads
+	// both; the traces recorded before the rename carry it.
+	traceSchemaEffra = "effra-trace-3"
 	// TraceEvidenceSchema is the envelope a query answers with. Its envelope
 	// fields are those of the review evidence schema (#156): schema,
 	// producer, revision, budgets, omissions and fingerprint.
@@ -157,6 +161,8 @@ type TraceEvidence struct {
 	Calls       []TraceCallSpan `json:"calls"`
 	Events      []TraceEvent    `json:"events"`
 	CauseTrace  []string        `json:"causeTrace"`
+	// traceSchema is the schema the trace header names, for Text.
+	traceSchema string
 }
 
 // traceIndex is a validated trace: every lookup the explanation makes.
@@ -215,8 +221,8 @@ func QueryTrace(m *Model, revision string, data []byte) (*TraceEvidence, error) 
 		return nil, err
 	}
 	switch {
-	case h.Schema != TraceSchema:
-		return nil, fmt.Errorf("trace schema %q; this query reads %s", h.Schema, TraceSchema)
+	case h.Schema != TraceSchema && h.Schema != traceSchemaEffra:
+		return nil, fmt.Errorf("trace schema %q; this query reads %s (or %s, its name before #218)", h.Schema, TraceSchema, traceSchemaEffra)
 	case h.Revision != revision:
 		return nil, fmt.Errorf("trace revision %s does not match %s revision %s: the trace was recorded from another program or another version of this one", short(h.Revision), m.File, short(revision))
 	case h.Events != len(events):
@@ -230,13 +236,14 @@ func QueryTrace(m *Model, revision string, data []byte) (*TraceEvidence, error) 
 	}
 
 	ev := &TraceEvidence{
-		Schema:   TraceEvidenceSchema,
-		Producer: TraceProducer,
-		Revision: revision,
-		Source:   m.File,
-		Recorder: h.Producer,
-		Order:    "partial: seq is the recorder's arrival order; id is the runtime's emission order, in which an event that happens before another has the smaller id, though a smaller id alone does not mean happens-before",
-		Budgets:  TraceBudgets{Events: h.Capacity, Bytes: TraceByteBudget, KeptEvents: len(events), TraceBytes: len(data)},
+		Schema:      TraceEvidenceSchema,
+		Producer:    TraceProducer,
+		Revision:    revision,
+		Source:      m.File,
+		Recorder:    h.Producer,
+		traceSchema: h.Schema,
+		Order:       "partial: seq is the recorder's arrival order; id is the runtime's emission order, in which an event that happens before another has the smaller id, though a smaller id alone does not mean happens-before",
+		Budgets:     TraceBudgets{Events: h.Capacity, Bytes: TraceByteBudget, KeptEvents: len(events), TraceBytes: len(data)},
 		Omissions: []TraceOmission{
 			{Kind: "values", Detail: "argument, result and field values are not serialized (privacy default); failures and defects are named by type"},
 			{Kind: "functionCalls", Detail: "direct calls between functions are not events; each site resolves to its enclosing definition"},
@@ -1014,7 +1021,7 @@ func (c *causeWriter) candidates(task uint64, def string, before uint64, depth i
 // Text renders the answer for a person or an agent reading a terminal.
 func (ev *TraceEvidence) Text() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "trace of %s at revision %s (recorder %s; schema %s)\n", ev.Source, short(ev.Revision), ev.Recorder, TraceSchema)
+	fmt.Fprintf(&b, "trace of %s at revision %s (recorder %s; schema %s)\n", ev.Source, short(ev.Revision), ev.Recorder, ev.traceSchema)
 	dropped := 0
 	for _, o := range ev.Omissions {
 		if o.Kind == "dropped" {

@@ -20,7 +20,7 @@ func RuntimeSource() string { return runtimeSource }
 const GoMod = "module sketchgen\n\ngo 1.27\n"
 
 // KernelModule is the module that holds the kernel runtime, runtime/rt.
-const KernelModule = "effra.local/prototype"
+const KernelModule = "ergo.local/prototype"
 
 // KernelGoMod is the go.mod of a program emitted in kernel mode. It links the
 // kernel runtime from the repository checkout at root, which needs no network
@@ -31,7 +31,7 @@ func KernelGoMod(root string) string {
 
 // Options selects how a checked file is emitted.
 type Options struct {
-	// Kernel links the kernel runtime effra.local/prototype/runtime/rt instead
+	// Kernel links the kernel runtime ergo.local/prototype/runtime/rt instead
 	// of the embedded prototype runtime. The program carries its definition
 	// IDs and sites as constants and records a trace when EFFRA_TRACE names a
 	// file.
@@ -107,7 +107,7 @@ func EmitWith(c *Checked, o Options) (string, error) {
 		// The tables go before the first //line directive, with main.
 		tables = e.kernelTables()
 		e.useFmt = true
-		imports = []string{`"effra.local/prototype/runtime/rt"`, `"effra.local/prototype/runtime/rt/rttrace"`, `"os"`}
+		imports = []string{strconv.Quote(KernelModule + "/runtime/rt"), strconv.Quote(KernelModule + "/runtime/rt/rttrace"), `"os"`}
 	}
 	if e.useFmt {
 		imports = append(imports, `"fmt"`)

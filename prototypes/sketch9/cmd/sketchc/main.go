@@ -5,14 +5,13 @@
 //	sketchc build [-rt embedded|kernel] [-rtroot DIR] FILE -out DIR [-o BIN]
 //	sketchc trace [-json] FILE TRACE
 //
-// build -rt kernel links the kernel runtime, effra.local/prototype/runtime/rt,
+// build -rt kernel links the kernel runtime, ergo.local/prototype/runtime/rt,
 // from the repository checkout (found above FILE or the working directory,
 // or named by -rtroot) instead of copying the embedded prototype runtime. A
 // kernel program records a trace to the file EFFRA_TRACE names.
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -22,7 +21,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"effra.local/sketch9/sketch"
 )
@@ -161,8 +159,10 @@ func build(file, out, bin string, kernel bool, rtRoot string) error {
 }
 
 // findKernelRoot finds the checkout that holds the kernel runtime: the
-// nearest directory above file, or else above the working directory, whose
-// go.mod declares module effra.local/prototype.
+// nearest checkout (sketch.FindCheckout) above file, or else above the
+// working directory, whose go.mod declares module sketch.KernelModule
+// (ergo.local/prototype). A checkout that declares another module is named in
+// the error, so a renamed root module reads as a mismatch.
 func findKernelRoot(file string) (string, error) {
 	var starts []string
 	if abs, err := filepath.Abs(file); err == nil {
@@ -171,34 +171,23 @@ func findKernelRoot(file string) (string, error) {
 	if wd, err := os.Getwd(); err == nil {
 		starts = append(starts, wd)
 	}
+	var mismatch error
 	for _, dir := range starts {
-		for {
-			if declaresModule(filepath.Join(dir, "go.mod"), sketch.KernelModule) {
-				return dir, nil
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
+		root, mod, ok := sketch.FindCheckout(dir)
+		if !ok {
+			continue
 		}
+		if mod == sketch.KernelModule {
+			return root, nil
+		}
+		if mismatch == nil {
+			mismatch = fmt.Errorf("the checkout at %s declares module %s, but kernel mode links %s; pass -rtroot", root, mod, sketch.KernelModule)
+		}
+	}
+	if mismatch != nil {
+		return "", mismatch
 	}
 	return "", fmt.Errorf("no checkout of %s above %s or the working directory; pass -rtroot", sketch.KernelModule, file)
-}
-
-func declaresModule(gomod, module string) bool {
-	f, err := os.Open(gomod)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		if fields := strings.Fields(sc.Text()); len(fields) == 2 && fields[0] == "module" {
-			return fields[1] == module
-		}
-	}
-	return false
 }
 
 func trace(file, tracePath string, asJSON bool, stdout io.Writer) error {
