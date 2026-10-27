@@ -233,7 +233,10 @@ func (p *printer) comment(limit syntax.Pos) {
 	isLine := strings.HasPrefix(c.Text, "//")
 	text := c.Text
 	if isLine {
-		text = strings.TrimRight(text, " \t")
+		// A line comment ends at a newline; trailing blanks, and a carriage
+		// return the scanner kept because a blank followed it, are dropped,
+		// so the output reads back as the same comment.
+		text = strings.TrimRight(text, " \t\r")
 	}
 	trailing := p.lastEnd.IsValid() && p.line(c.Slash) == p.line(p.lastEnd)
 	switch {
