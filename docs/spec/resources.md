@@ -25,7 +25,7 @@ func copyFile(src, dst string) error[NotFound | WriteFailed] needs FS {
 3. **R6. Loop iterations.** The body of a loop is its own owner scope. A resource acquired in an iteration is closed at the end of that iteration, not at function exit.
 
    ```go
-   func importAll(paths []string) error[NotFound] uses FS {
+   func importAll(paths []string) error[NotFound] needs FS {
    	for _, p := range paths {
    		f := try FS.Open(p)
    		try load(f)

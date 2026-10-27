@@ -67,7 +67,7 @@ payment := try timeout.After(500ms) { Gateway.Authorize(order) }
 func After(d duration, body func() (T, error[E]) needs R) (T, error[E | Expired]) needs Scheduler, R
 ```
 
-The callback type carries `uses R`, so the requirements of the block appear in `After`'s own row. A trailing block is the `body` argument ([grammar.md](grammar.md#expressions)). *Prior art:* Effect's `Effect.timeout` is an ordinary combinator over fibers and the clock; Go's `context.WithTimeout` is a library function.
+The callback type carries `needs R`, so the requirements of the block appear in `After`'s own row. A trailing block is the `body` argument ([grammar.md](grammar.md#expressions)). *Prior art:* Effect's `Effect.timeout` is an ordinary combinator over fibers and the clock; Go's `context.WithTimeout` is a library function.
 
 1. `timeout.After(d) { block }` needs `import "timeout"`. It takes one `duration` (S108) and a block (S108). The duration is a value position, so a fallible duration is S105.
 2. It charges `Scheduler` and the block's requirements ([rows.md](rows.md#capability-rows)), because its signature says so.
@@ -154,7 +154,7 @@ type Breaker machine[State, Signal] {
 }
 ```
 
-1. **Machine.** `type X machine[S, E] { initial v; step f }` declares a state machine. `S` and `E` are unions. `initial` is a value of `S`; `step` names a function from `S` and `E` to `Decision[S, O]`, with any error and `uses` rows.
+1. **Machine.** `type X machine[S, E] { initial v; step f }` declares a state machine. `S` and `E` are unions. `initial` is a value of `S`; `step` names a function from `S` and `E` to `Decision[S, O]`, with any error and `needs` rows.
 2. **Decision.** A step returns `Enter{next}` (re-enter, even with the same variant), `Stay{next}` (keep the entry), `Ignore{}`, `Reject{}` (observable, state unchanged) or `Done{output}` (terminal).
 3. **Totality.** The step's switch is total over `S × E` (README Gap 12).
 4. **Inspection.** `ef inspect` draws the machine's graph from the step's cases. A helper the step calls is static in the graph only when its footprint is empty, not its row ([rows.md](rows.md#footprints)).

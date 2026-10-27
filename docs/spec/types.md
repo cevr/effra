@@ -94,11 +94,11 @@ type Orders interface {
 1. An interface with method signatures declares a capability. Method names in one capability are distinct (S108).
 2. **A capability is not a first-class value.** The capability name denotes the provider that the nearest `with` binds. `Orders.Find(id)` calls that provider and charges `Orders` ([rows.md](rows.md#capability-rows)). Any other use of the name as an expression is an error: `Orders.Find` without a call (S108), and, designed, passing, returning, storing or capturing `Orders` (README Gap 29). The prototype reports a bare `Orders` as an unknown name (S104).
 3. **Capability name against interface type.** The same interface declaration has two roles, told apart by position:
-   - in a `uses` clause, a `wire` entry, or as the receiver of a method call `Orders.m(…)`, the name is the **capability**: an ambient requirement that only `with` supplies;
+   - in a `needs` clause, a `wire` entry, or as the receiver of a method call `Orders.m(…)`, the name is the **capability**: an ambient requirement that only `with` supplies;
    - in a type position (a parameter, result, field or type argument), the name is an ordinary **interface type**. A value of it is a provider value. Calling its method, `o.Find(id)`, runs that provider's method with the method's declared error row and charges no capability. A constructor that returns `Orders` returns such a value.
 
    This keeps decision #102: a capability is an ordinary interface bound by `wire`, and only the ambient binding is second-class. Prototype: an interface type is accepted in a parameter or result type, but a method call on such a value is S109 (README Gap 29). *Prior art:* Effect separates a service's tag, the requirement, from a service value; Scala 3 capture checking treats capabilities apart from their types.
-4. A capability method's signature carries its error row. Prototype: a `uses` clause on a capability method is an error (S109). Designed: unchanged, because a provider's requirements are captured at construction (README Gap 17).
+4. A capability method's signature carries its error row. Prototype: a `needs` clause on a capability method is an error (S109). Designed: unchanged, because a provider's requirements are captured at construction (README Gap 17).
 5. The prelude capabilities `Console`, `Clock`, `Scheduler` and `Random` are ordinary interfaces bound by `wire` (decision #102). Prototype: `Console` (with a variadic `Println`) and `Scheduler` exist; `Scheduler` takes only the host provider `LiveScheduler{}`, and `Console` cannot be wired.
 6. Designed: an interface is also a generic constraint, with Go's method-set rules.
 
@@ -108,7 +108,7 @@ Status: **partly implemented in prototype**: value-receiver methods are declared
 
 1. A method call on a value, `v.M(…)`, including on a composite literal, `S{}.M(…)`, calls `M` with `v` as its receiver, as in Go. Its rows are `M`'s declared rows. Prototype: such a call is S109 (README Gap 27); a method runs only as a provider method reached through `Cap.M(…)`.
 2. A receiver names a struct type declared in the package (S108). A method name is unique per receiver type (S108). A parameter may not repeat the receiver's name (S108).
-3. Prototype: a method may not carry a `uses` clause and may not call a capability (S109); a provider method calls functions with an empty `uses` row.
+3. Prototype: a method may not carry a `needs` clause and may not call a capability (S109); a provider method calls functions with an empty `needs` row.
 4. Designed: a pointer receiver `*T` means the method mutates its receiver ([Borrows](#borrows)).
 5. Prototype: an error type may not declare `Error`, because the emitter generates it (fixture `error-method`, S109). Designed: the same rule. An error type's text comes from its fields.
 
@@ -128,7 +128,7 @@ func NewStore() Store { return Mem{} } // Mem implements Store
    - the parameter types and the result type are identical to `I`'s;
    - the method is fallible exactly when `I`'s method is;
    - its error row is a subset of `I`'s method's error row;
-   - its `uses` row is a subset of `I`'s method's `uses` row.
+   - its `needs` row is a subset of `I`'s method's `needs` row.
 
    This is method-row compatibility: an implementation may fail less and require less, never more. It is the same check `wire` applies to a provider (S106; [rows.md](rows.md#wire)).
 2. A union type is not an interface in this sense; it is assignable only by the variant rule.
@@ -155,7 +155,7 @@ Status: **partly implemented in prototype**.
 
 Status: **designed, not yet implemented**.
 
-1. A function type carries its parameters, result, error row and `uses` row. It carries requirements only, never purity ([rows.md](rows.md#footprints)).
+1. A function type carries its parameters, result, error row and `needs` row. It carries requirements only, never purity ([rows.md](rows.md#footprints)).
 2. A function-typed parameter is non-escaping unless its type says otherwise: the callee may call it and may hand it to a task that the call consumes, but it may not store, return or send it. A trailing block is such an argument. *Prior art:* Swift non-escaping closures by default; Effekt second-class blocks.
 3. A `func` literal that escapes captures by copy and may not assign captured locals. A non-escaping inline block may assign them. A captured resource follows [resources.md](resources.md#closures).
 4. **Concurrent parameters.** A function parameter that the callee hands to `go`, directly or through another call, is concurrent. The compiler infers this fact and records it in the exported interface summary. A block or literal passed to a concurrent parameter may not assign captured locals, so `parallel { n++ }` is an error. *Prior art:* Swift `@Sendable` parameters.
@@ -178,7 +178,7 @@ Status: **designed, not yet implemented**. The spelling is provisional until [#1
 func Map(xs []A, limit int64, f func(A) (B, error[E]) needs R) ([]B, error[E]) needs R
 ```
 
-1. Type parameters are implicit. `[T any]` is not written. A parameter may range over types (`A`, `B`), error rows (`E`) or `uses` rows (`R`).
+1. Type parameters are implicit. `[T any]` is not written. A parameter may range over types (`A`, `B`), error rows (`E`) or `needs` rows (`R`).
 2. Constraints are named interfaces such as `comparable` and `cmp.Ordered`, or interfaces with methods. Method constraints resolve through the type's owner package, with one answer per type.
 3. Rows in a generic signature may be elided only where they pass through unchanged. A declared requirement is never elided.
 4. Exported signatures spell their rows and type parameters, so clients check against interface summaries, Go's export-data model.
@@ -209,7 +209,7 @@ func LawFindAfterPut(id string, v Order) bool needs Store {
 ```
 
 1. A function named `LawX` that returns `bool` is a law. `ef test` checks it like a fuzz target, with generated arguments.
-2. A law with a `uses` clause is a provider law: `ef test` checks it against every provider wired for that capability.
+2. A law with a `needs` clause is a provider law: `ef test` checks it against every provider wired for that capability.
 3. A refuted law refuses the build. A law that passes a finite suite is reported as tested, never as proved (NORTH_STAR pillar 4).
 4. Laws are found by name, as Go finds `TestX`. The same rule serves every client: codecs, providers, schedules and machines. *Prior art:* Go `TestX`/`FuzzX` discovery; Haskell QuickCheck properties; Elixir `StreamData` properties.
 
@@ -218,5 +218,5 @@ func LawFindAfterPut(id string, v Order) bool needs Store {
 Status: **designed, not yet implemented** ([#49](https://github.com/cevr/effra/issues/49)).
 
 1. A type's wire form is found by name: `ParseX` decodes into `X`, and `x.Wire()` encodes. Go's `netip.ParseAddr` and `String` pair is the model.
-2. A derived codec's rows are the union of its fields' rows. `json.Decode[Order]` has the error and `uses` rows of every `ParseX` it reaches.
+2. A derived codec's rows are the union of its fields' rows. `json.Decode[Order]` has the error and `needs` rows of every `ParseX` it reaches.
 3. README Gap 20 records the open question about discovery by name.

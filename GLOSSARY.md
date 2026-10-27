@@ -25,7 +25,7 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Constructor** (designed): An ordinary function named as a `wire` entry, such as `Orders = OpenPostgres`. Its requirements are satisfied from the same wire, and its failures become startup failures of the `with` that builds it.
 
-**Captured provider** (designed): A provider that holds the capabilities its constructor used. Its methods use them without a `uses` clause of their own.
+**Captured provider** (designed): A provider that holds the capabilities its constructor used. Its methods use them without a `needs` clause of their own.
 
 **Prelude**: The names in scope in every package without an import: `Option`, `Task`, `Decision`, `Clock`, `Scheduler`, `Random` and `Console`.
 
@@ -35,7 +35,7 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Error row** (implemented in prototype): The set of error types a function may fail with, written `error[A | B]` in its result. Order and repetition carry no meaning.
 
-**Capability row** (implemented in prototype): The set of capabilities a caller must supply, written `uses A, B` after a signature. Also called the `uses` row or requirement row.
+**Capability row** (implemented in prototype): The set of capabilities a caller must supply, written `needs A, B` after a signature. Also called the `needs` row or requirement row. Before 2026-10-27 it was spelled `uses` ([#217](https://github.com/cevr/ergo/issues/217)); `uses` is now a syntax error with the hint "`uses` is now `needs`".
 
 **Row**: An error row or a capability row. Rows are checked and then erased from the emitted Go.
 
@@ -56,6 +56,8 @@ A status in parentheses applies to the term's support: *implemented in prototype
 **Discharge** (implemented in prototype): Removing a capability from the row a block charges to its enclosing function, because an enclosing `with` binds it.
 
 **Wire** (implemented in prototype for provider literals): A declaration `wire Name { Cap = provider … }`, or an inline `wire{ … }` literal, that binds capabilities to providers or constructors. It is Effra's form of an Effect layer.
+
+**Wire exposure** (parsed; checking designed, [#196](https://github.com/cevr/ergo/issues/196)): The `provides A, B` clause of a named wire header: the capabilities a `with` of that wire discharges. Entries the wire builds and does not list stay private to its build. A header may also state the wire's requirements, `wire App provides Account, Invoice needs Config { … }`, which join the `with` site's capability row.
 
 **Inline wire** (implemented in prototype): A `wire{ … }` literal given directly to `with`. Its provider expressions are evaluated in, and charged to, the enclosing function.
 
@@ -157,7 +159,7 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Notation exception**: A syntax form admitted without an unrepresentability argument because it desugars one-to-one, at parse time, into ordinary calls and adds no checking, typing, evaluation order or runtime behavior.
 
-**Compiler-known construct**: A form whose meaning the compiler must know for checking, inference, plan facts, inspection or special lowering. By owner direction (2026-10-09) it is spelled as syntax or a predeclared language identifier. In the Go-shaped language: `try`, `catch`, `uses`, `wire`, `machine`, `go` and `with`. A dot form is never one: `timeout.After` is an ordinary library function over the kernel primitives `go`, `Task.Stop` and `Scheduler`, and the prototype's name-keyed handling of it is a recorded exception ([spec README, Gap 31](docs/spec/README.md#gaps)).
+**Compiler-known construct**: A form whose meaning the compiler must know for checking, inference, plan facts, inspection or special lowering. By owner direction (2026-10-09) it is spelled as syntax or a predeclared language identifier. In the Go-shaped language: `try`, `catch`, `needs`, `provides`, `wire`, `machine`, `go` and `with`. A dot form is never one: `timeout.After` is an ordinary library function over the kernel primitives `go`, `Task.Stop` and `Scheduler`, and the prototype's name-keyed handling of it is a recorded exception ([spec README, Gap 31](docs/spec/README.md#gaps)).
 
 **Predeclared language identifier**: A name the language specification defines in every package without an import or library declaration, following Go's predeclared `len` and `error`, such as `with`, `duration` and the prelude types. Capability services are not predeclared language identifiers, even when the compiler declares them.
 
@@ -179,7 +181,7 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Law** (designed): A named behavioral obligation that types cannot state, written as a function `LawX(…) bool` and checked like a fuzz target. A refuted law refuses the build. Laws are one general construct with many clients: codecs, providers, schedules, machines and composition algebra ([#125](https://github.com/cevr/effra/issues/125)).
 
-**Provider law** (designed): A law with a `uses` clause. It is checked against every provider wired for that capability.
+**Provider law** (designed): A law with a `needs` clause. It is checked against every provider wired for that capability.
 
 **Contract** ([#170](https://github.com/cevr/effra/issues/170)): An interface used as a constraint together with the laws stated over its methods. A type satisfies the contract when it has the methods and its laws hold.
 
