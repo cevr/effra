@@ -55,6 +55,15 @@
 //     bounded (G2); a defect keeps its chain as at most 32 copied frames.
 //   - An exit crosses code with no error row only inside the package's own
 //     transport; any other panic value, a *Cause included, is a defect.
+//   - Tracing is off unless a root is made with [TracedRoot]; every task below
+//     it inherits the [Tracer]. The runtime raises the task events of #124's
+//     vocabulary (start, body-exit, cancel-request, observe, deadline,
+//     release, panic) keyed by the task's span, and emitted code raises call,
+//     interrupt, construct and handler events at its own sites through
+//     [Task.Trace]. Events carry IDs, sites and error types, never values.
+//     With no tracer each emission point is one load and compare, the poll
+//     has none, and the off path allocates nothing; the recorder and the
+//     JSON Lines writer live in package rttrace.
 //   - [Clock] and [Scheduler] are the time capabilities, with a [Live] and a
 //     deterministic [Virtual] implementation. [After] is the timeout, written
 //     as an ordinary library function over [Go]-style tasks and a [Scheduler].

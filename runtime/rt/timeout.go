@@ -20,7 +20,14 @@ import "time"
 // running, stops the timer, and adds each cleanup defect after the exit it
 // already holds, so a defect in the child is kept on every path (Exit causes,
 // rules 3 and 4).
-func After[T any](t *Task, s Scheduler, d time.Duration, body func(*Task) (T, error)) (v T, err error) {
+func After[T any](t *Task, s Scheduler, d time.Duration, body func(*Task) (T, error)) (T, error) {
+	return AfterSpan(t, s, d, "timeout.After", body)
+}
+
+// AfterSpan is After with the child task started under span: emitted code
+// passes the definition ID of the timeout block, so a defect chain and a trace
+// name the block, not the library function.
+func AfterSpan[T any](t *Task, s Scheduler, d time.Duration, span string, body func(*Task) (T, error)) (v T, err error) {
 	if t.Stopped() {
 		return v, Interrupted
 	}
@@ -51,16 +58,25 @@ func After[T any](t *Task, s Scheduler, d time.Duration, body func(*Task) (T, er
 		}
 	}()
 	timer = s.NewTimer(d)
-	h = spawn(t, "timeout.After", false, body)
+	h = spawn(t, span, false, body)
 	select {
 	case <-h.done:
 		joined = true
+		if h.task.trace != nil {
+			h.task.childEvent(TraceObserve, t)
+		}
 		c.Add(h.err)
 		v = h.value
 	case <-timer.C():
+		if h.task.trace != nil {
+			h.task.childEvent(TraceDeadline, t)
+		}
 		h.task.Interrupt()
 		<-h.done
 		joined = true
+		if h.task.trace != nil {
+			h.task.childEvent(TraceObserve, t)
+		}
 		c.Add(defectsOf(h.err))
 		c.AddFailure(Expired{})
 	case <-t.Done():

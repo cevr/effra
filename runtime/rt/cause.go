@@ -139,6 +139,9 @@ func (c *Cause) recovered(t *Task, p any, inRelease bool) {
 
 func (c *Cause) defect(t *Task, p any, inRelease bool) {
 	c.Reasons = append(c.Reasons, Reason{Kind: KindDefect, Value: p, Chain: t.Chain(), InRelease: inRelease})
+	if t.trace != nil {
+		t.traceDefect(p, inRelease)
+	}
 }
 
 // Err returns the accumulated exit in canonical form: nil when empty, a lone

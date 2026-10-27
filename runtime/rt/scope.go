@@ -133,6 +133,9 @@ func (s *Scope) runRelease(e entry, c *Cause) {
 		if p := recover(); p != nil {
 			c.recovered(s.task, p, true)
 		}
+		if s.task.trace != nil {
+			s.task.traceTask(TraceRelease, nil)
+		}
 	}()
 	e.run.release(e.v)
 }

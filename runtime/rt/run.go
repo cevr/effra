@@ -23,8 +23,12 @@ func (t *Task) settle(c *Cause, p any) {
 //	_, err := rt.Run(rt.Root("main"), mainBody)
 //	os.Exit(rt.ExitCode(err))
 //
-// A law adapter (#124) drives the runtime through the same entry.
+// A law adapter (#124) drives the runtime through the same entry. On a traced
+// tree Run raises the start and body-exit events of t.
 func Run[T any](t *Task, body func(*Task) (T, error)) (v T, err error) {
+	if t.trace != nil {
+		t.traceTask(TraceStart, nil)
+	}
 	defer func() {
 		var c Cause
 		c.Add(err)
@@ -32,6 +36,9 @@ func Run[T any](t *Task, body func(*Task) (T, error)) (v T, err error) {
 		if err = c.Err(); err != nil {
 			var zero T
 			v = zero
+		}
+		if t.trace != nil {
+			t.traceTask(TraceBodyExit, err)
 		}
 	}()
 	return body(t)

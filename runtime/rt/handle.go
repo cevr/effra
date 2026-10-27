@@ -77,6 +77,9 @@ func (h *Handle[T]) Wait() (T, error) {
 		// Done closes only on a stop the owner can observe, so an owner that
 		// is still not stopped was woken by the task finishing.
 		if !owner.Stopped() {
+			if h.task.trace != nil {
+				h.task.childEvent(TraceObserve, owner)
+			}
 			return h.value, h.err
 		}
 	}
@@ -100,9 +103,13 @@ func (h *Handle[T]) Stop() error {
 	if h.consumed {
 		return nil
 	}
+	owner := h.owner
 	h.consumed, h.owner = true, nil
 	h.task.Interrupt()
 	<-h.done
+	if h.task.trace != nil {
+		h.task.childEvent(TraceObserve, owner)
+	}
 	return defectsOf(h.err)
 }
 

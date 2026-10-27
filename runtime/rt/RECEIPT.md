@@ -25,6 +25,16 @@ Package `rt` is the kernel runtime that emitted sketch code links against (#198)
   - Virtual time fires due timers in deadline order, ties in arming order, but does not wait for managed continuations to quiesce (R14).
   - A defect records no start site (G2 rule 1); it records only the task and span chain.
 
+## Tracing (#188)
+
+The research note is `docs/research/traceability.md`. The unit directory is `/home/exedev/.cache/baton/wf10/trace-188`.
+
+- **Off by default.** A tree is traced only when its root comes from `TracedRoot(span, tracer)`. Each task holds one `*tracer` pointer, which it inherits when it starts. The pointer took the word that moving `shielded` beside `stopped` freed, so `Task` stays 136 bytes and `Handle[struct{}]` stays 176 bytes. A start still allocates 3 objects and 320 B. `TestTraceHookKeepsTaskSize` pins the sizes, and `TestTraceOffAddsNoAllocs` pins the allocation counts 0, 3 and 0.
+- **Emission points.** `Run` raises `start` and `body-exit`. `Interrupt` raises `cancel-request` when the flag flips, so each task in the cascade gets one. `Wait`, `Stop` and the join in `After` raise `observe`. An interrupted join raises none (law R4). The deadline path of `After` raises `deadline` for the child. A release raises `release` on every exit. A recorded defect raises `panic`. Emitted code raises `call`, `interrupt`, `construct` and `handler` through `Task.Trace`, which inlines to one load and a compare. The poll (`Stopped`, `Check`) has no emission point. `AfterSpan` is `After` with the child's span given, so a trace and a defect chain name the timeout block.
+- **No Event literal in a hot frame.** An `Event` literal built inside `Run` grew Run's frame from 0x60 to 0xc0 bytes even with tracing off. The first interleaved run measured spawn+wait about 90 ns slower than base (`bench-r1-prefix.txt`). Every emission point now calls a small `//go:noinline` helper (`traceTask`, `childEvent`, `traceAt`, `traceDefect`), and only that helper builds the `Event`. Run's frame is now 0x70 for `struct{}` against 0x58 on base, and spawn+wait matches base within the noise (below).
+- **A tracer that panics** is disabled for its tree. `deliver` recovers the panic and sets `broken`, so the panic never joins the program's cause and never skips a release (`TestTracePanickingTracerIsDisabled`). A tracer must not block. It runs on the emitting goroutine, sometimes under the task's mutex (the cascade) or in a masked region. The bounded recorder in `rttrace` never waits: one atomic add reserves a slot, and a full recorder counts the event as dropped.
+- **Recorder and writer** are in `runtime/rt/rttrace`. `rt` has no buffer and no encoding. The writer encodes its fixed shapes by hand, because `encoding/json` added about 1.48 MB to each example binary. With the hand encoder the trace switch costs about 62 KB per kernel-mode binary (`examples-r1.txt`).
+
 ## Prior art
 
 - Go `context`: the cancellation tree. Effra keeps the downward stop and adds a drain: `Stop` waits for the work and its releases.
@@ -56,3 +66,16 @@ Reading the numbers (measured unless labeled):
 - Round 4 against round 3, as ratios to each run's own baseline (min / median). Acquire+release went from 6.8x / 6.9x to 7.9x / 7.9x: the region stack's push and truncate on `Acquire` and on the release mask cost about 3–4 ns over the round-3 counters. Spawn+wait went from 1.02x / 0.99x to 1.10x / 1.07x, and a start went from 288 to 320 B (still 3 allocs) because the stack's overflow slice header joined the task. The poll stayed near 0.3x of the `ctx.Done` select (0.33x to 0.28x by minimum), and its code did not change.
 - Round 5 against round 4, as ratios to each run's own baseline (min / median). Acquire+release: 7.9x / 7.9x to 6.4x / 6.4x. Spawn+wait: 1.10x / 1.07x to 1.10x / 1.06x, still 320 B and 3 allocs. Poll against the `ctx.Done` select: 0.28x to 0.26x. Round 5 removed the depth check from `push` and widened the inline array to seven entries. Inferred, because the samples do not isolate the cause: the Acquire gain comes mostly from run-to-run variation on the shared box, not only from the removed check.
 - Inferred: an emitted function with an empty scope pays only the `End` fast path: a `recover`, a length check and one stop-flag load.
+
+### Tracing off and on (#188)
+
+Machine and toolchain as above (go1.27.0, 16 vCPU EPYC 9554P, shared; load average 3–11 during the run). Command: `go test -run '^$' -bench 'Poll|SpawnWait|AcquireRelease' -benchmem -count 2 ./runtime/rt/`, five rounds, interleaved with the same command on a `git archive` copy of base `854f21e7` in a scratch directory. Raw output: `bench-r1.txt` in the unit directory. Ten samples per row; read the minimum.
+
+| Operation | base `854f21e7` (min / median ns/op) | tracing off (min / median ns/op) | allocs/op, B/op (base, off) | tracing on (min / median ns/op) | allocs/op, B/op on | events per op |
+| --- | --- | --- | --- | --- | --- | --- |
+| Poll on a running task | 1.476 / 1.536 | 1.465 / 1.635 | 0, 0 and 0, 0 | 1.166 / 1.285 | 0, 0 | 0 |
+| Spawn + wait of an empty task | 776.3 / 906.1 | 815.2 / 897.9 | 3, 320 and 3, 320 | 1160 / 1234 | 3, 320 | 4 |
+| Acquire + release of a no-op resource | 31.72 / 33.63 | 31.25 / 34.42 | 0, 0 and 0, 0 | 89.40 / 96.00 | 0, 0 | 1 |
+
+- Measured: tracing off allocates exactly what base allocates. Off/base ratios are 0.99 / 1.06 (poll), 1.05 / 0.99 (spawn+wait) and 0.99 / 1.02 (acquire+release), by min / median. The spawn+wait context baseline runs the same code in both trees, and its ratio was 1.07 / 1.08. So the box's noise band is wider than every off/base difference. Inferred: tracing off costs no measurable time. The code adds one or two pointer compares per spawn and per release, and none to the poll.
+- Measured: one recorded event costs about 60 ns (acquire+release on against off, by minimum). `BenchmarkTraceCallOn` measured 62.9 / 66.3 ns, and `BenchmarkTraceCallOff` measured 1.28 / 1.47 ns, which is about the cost of the poll loop (`bench-calls-r1.txt`). A CPU profile of the traced acquire put about 25% of samples in the recorder's clock read (`runtime.nanotime`).
