@@ -83,7 +83,7 @@ type Declined struct{ Reason string }
 
 ## Capabilities
 
-Status: **implemented in prototype**.
+Status: **checked** by `internal/sketch/check` ([#196](https://github.com/cevr/effra/issues/196)); runs.
 
 ```go
 type Orders interface {
@@ -92,29 +92,29 @@ type Orders interface {
 ```
 
 1. An interface with method signatures declares a capability. Method names in one capability are distinct (S108).
-2. **A capability is not a first-class value.** The capability name denotes the provider that the nearest `with` binds. `Orders.Find(id)` calls that provider and charges `Orders` ([rows.md](rows.md#capability-rows)). Any other use of the name as an expression is an error: `Orders.Find` without a call (S108), and, designed, passing, returning, storing or capturing `Orders` (README Gap 29). The prototype reports a bare `Orders` as an unknown name (S104).
+2. **A capability is not a first-class value.** The capability name denotes the provider that the nearest `with` binds. `Orders.Find(id)` calls that provider and charges `Orders` ([rows.md](rows.md#capability-rows)). Any other use of the name as an expression is an error: `Orders.Find` without a call (S108), and passing, returning, storing or capturing `Orders` (S104; README Gap 29).
 3. **Capability name against interface type.** The same interface declaration has two roles, told apart by position:
    - in a `uses` clause, a `wire` entry, or as the receiver of a method call `Orders.m(…)`, the name is the **capability**: an ambient requirement that only `with` supplies;
    - in a type position (a parameter, result, field or type argument), the name is an ordinary **interface type**. A value of it is a provider value. Calling its method, `o.Find(id)`, runs that provider's method with the method's declared error row and charges no capability. A constructor that returns `Orders` returns such a value.
 
-   This keeps decision #102: a capability is an ordinary interface bound by `wire`, and only the ambient binding is second-class. Prototype: an interface type is accepted in a parameter or result type, but a method call on such a value is S109 (README Gap 29). *Prior art:* Effect separates a service's tag, the requirement, from a service value; Scala 3 capture checking treats capabilities apart from their types.
-4. A capability method's signature carries its error row. Prototype: a `uses` clause on a capability method is an error (S109). Designed: unchanged, because a provider's requirements are captured at construction (README Gap 17).
-5. The prelude capabilities `Console`, `Clock`, `Scheduler` and `Random` are ordinary interfaces bound by `wire` (decision #102). Prototype: `Console` (with a variadic `Println`) and `Scheduler` exist; `Scheduler` takes only the host provider `LiveScheduler{}`, and `Console` cannot be wired.
-6. Designed: an interface is also a generic constraint, with Go's method-set rules.
+   This keeps decision #102: a capability is an ordinary interface bound by `wire`, and only the ambient binding is second-class. The checker implements both roles (README Gap 29); the build refuses a method call on an interface value until [#50](https://github.com/cevr/effra/issues/50). *Prior art:* Effect separates a service's tag, the requirement, from a service value; Scala 3 capture checking treats capabilities apart from their types.
+4. A capability method's signature carries its error row. A capability or interface method writes no capability row (S108), because a provider's requirements are captured at construction (README Gap 17).
+5. The prelude capabilities `Console`, `Clock`, `Scheduler` and `Random` are ordinary interfaces bound by `wire` (decision #102). The prelude (`internal/sketch/std/prelude.ef`) declares them with the methods the fixtures and the corpus call, provisionally until [#209](https://github.com/cevr/effra/issues/209) fixes their method sets.
+6. An interface is also a generic constraint, with Go's method-set rules.
 
 ## Methods
 
-Status: **partly implemented in prototype**: value-receiver methods are declared and checked, but called only through a capability.
+Status: **checked** (#196); the build refuses a direct method call until #50.
 
-1. A method call on a value, `v.M(…)`, including on a composite literal, `S{}.M(…)`, calls `M` with `v` as its receiver, as in Go. Its rows are `M`'s declared rows. Prototype: such a call is S109 (README Gap 27); a method runs only as a provider method reached through `Cap.M(…)`.
+1. A method call on a value, `v.M(…)`, including on a composite literal, `S{}.M(…)`, calls `M` with `v` as its receiver, as in Go. Its rows are `M`'s declared rows (README Gap 27).
 2. A receiver names a struct type declared in the package (S108). A method name is unique per receiver type (S108). A parameter may not repeat the receiver's name (S108).
-3. Prototype: a method may not carry a `uses` clause and may not call a capability (S109); a provider method calls functions with an empty `uses` row.
-4. Designed: a pointer receiver `*T` means the method mutates its receiver ([Borrows](#borrows)).
-5. Prototype: an error type may not declare `Error`, because the emitter generates it (fixture `error-method`, S109). Designed: the same rule. An error type's text comes from its fields.
+3. A method may write a capability row, and a call of it charges that row. Such a method cannot implement a capability method (S106) or an interface method (S108), because its row is wider (README Gap 17).
+4. A pointer receiver `*T` means the method mutates its receiver ([Borrows](#borrows)).
+5. An error type may not declare a method named `Error` (S108), because the emitter generates it; an error type's text comes from its fields (fixture `error-method-on-error-type`).
 
 ## Interface assignability
 
-Status: **designed, not yet implemented**. The prototype reports S108 for assigning a struct value to an interface type, a prototype limit (README Gap 29).
+Status: **checked** (#196); runs where the prototype emitter can lower the program.
 
 ```go
 type Store interface{ Get() string }
@@ -137,23 +137,23 @@ func NewStore() Store { return Mem{} } // Mem implements Store
 
 ## Error types
 
-Status: **implemented in prototype**.
+Status: **checked** (#196).
 
-1. A type named in any error row is an error type. It must be a struct declared in the package (S104), or `timeout.Expired` when `timeout` is imported.
+1. A type named in any error row is an error type. It must be a named struct type, of this package or of an imported one such as `timeout.Expired` (S104). Inside a package, a struct type is an error type when an error row of that package, or of the package that declares the type, names it; a struct type that no such row names is an ordinary value type.
 2. An error type is not an ordinary value: returning a value of an error type is a failure ([rows.md](rows.md#error-rows); fixture `error-as-value`, S101).
 3. Error rows are sets of independent struct types, not one declared sum per function. *Prior art:* Gleam returns one declared `Result` error type per function; OCaml polymorphic variants and Koka effect rows are open sets; Effra's rows are closed sets of nominal types with no open tail in v0.
 
 ## Operators
 
-Status: **partly implemented in prototype**.
+Status: **checked** (#196); the build refuses operators other than `==` and `+` until #50.
 
-1. `==` compares two values of one basic type: `string`, `int64`, `bool` or `duration` (S108 for mismatched types). Prototype: `==` on `duration` and on any non-basic type is S109 (README Gap 26).
-2. `+` adds two `int64` values or concatenates two `string` values (S108 otherwise).
-3. Prototype: every other operator, including `!=`, `<`, `-`, `&&` and `||`, is S109. Designed: Go's operators on Go's operand types; `&&` and `||` short-circuit (README Gap 10); equality on comparable structs, with `comparable` and `cmp.Ordered` as constraints ([#211](https://github.com/cevr/effra/issues/211)).
+1. Go's operators on Go's operand types, with Go's untyped constants and exact constant arithmetic (an overflow is S108): arithmetic on numeric types, `+` on strings, ordering on numbers and strings, `==` and `!=` on comparable types (structs whose fields are comparable included; README Gap 26), `&&`, `||` and `!` on `bool`, shifts on integers. S108 otherwise.
+2. `duration` takes `+`, `-`, ordering and `==` between durations; an untyped integer never converts to `duration` implicitly (S108). Its other arithmetic is [#175](https://github.com/cevr/effra/issues/175)'s.
+3. `&&` and `||` short-circuit (README Gap 10). `comparable` is a constraint; ordering constraints such as `cmp.Ordered` are [#211](https://github.com/cevr/effra/issues/211)'s.
 
 ## Function values
 
-Status: **designed, not yet implemented**.
+Status: rule 1 is **checked** (#196): a function value converts to a function type with identical parameters and results and rows that are subsets of the type's (S108 otherwise). Rules 2 to 5 are **designed, not yet implemented** ([#197](https://github.com/cevr/effra/issues/197)).
 
 1. A function type carries its parameters, result, error row and `uses` row. It carries requirements only, never purity ([rows.md](rows.md#footprints)).
 2. A function-typed parameter is non-escaping unless its type says otherwise: the callee may call it and may hand it to a task that the call consumes, but it may not store, return or send it. A trailing block is such an argument. *Prior art:* Swift non-escaping closures by default; Effekt second-class blocks.
@@ -163,7 +163,7 @@ Status: **designed, not yet implemented**.
 
 ## Borrows
 
-Status: **designed, not yet implemented**.
+Status: placement (rule 1, first sentence) is **checked** (#196): `*T` outside a parameter or receiver type is S108. The rest is **designed, not yet implemented** ([#197](https://github.com/cevr/effra/issues/197)).
 
 1. `*T` appears only on parameters and receivers. A borrow is never nil, stored, returned, sent or captured by `go`.
 2. Two mutable borrows into one value must not overlap. With constant indexes the checker decides; with dynamic indexes it needs a dominating guard or it rejects the call. *Prior art:* Swift's law of exclusivity; Rust `get_many_mut`.
@@ -172,21 +172,22 @@ Status: **designed, not yet implemented**.
 
 ## Generics
 
-Status: **designed, not yet implemented**. The spelling is provisional until [#135](https://github.com/cevr/effra/issues/135) decides it (README Gap 23).
+Status: **checked** (#196), by rows-and-constraints §3 and §7 amendment 2; the build refuses generics until #50. The spelling is provisional until [#135](https://github.com/cevr/effra/issues/135) decides it (README Gap 23).
 
 ```go
 func Map(xs []A, limit int64, f func(A) (B, error[E]) uses R) ([]B, error[E]) uses R
 ```
 
-1. Type parameters are implicit. `[T any]` is not written. A parameter may range over types (`A`, `B`), error rows (`E`) or `uses` rows (`R`).
-2. Constraints are named interfaces such as `comparable` and `cmp.Ordered`, or interfaces with methods. Method constraints resolve through the type's owner package, with one answer per type.
+1. Type parameters are implicit. A name of one upper-case letter, optionally followed by digits, that names no declaration is an implicit type parameter. Its kind follows its position: inside `error[…]` an error row (`E`), after the capability-row keyword a capability row (`R`), elsewhere a type (`A`, `B`); one name in two kinds is S108. A bracket list is optional on a function and gives constraints and the order of explicit instantiation: `[T]` means `[T any]`, `[F error]` declares an error-row parameter, bracket parameters come first in explicit instantiation, and implicit ones are always inferred. A generic type declaration writes its bracket list. Methods take no type parameters of their own (S108).
+2. Constraints are `any`, `comparable`, `error` (an error-row parameter) and interfaces with methods; ordering constraints such as `cmp.Ordered` are [#211](https://github.com/cevr/effra/issues/211)'s. Method constraints resolve through the type's owner package, with one answer per type. An argument that does not satisfy its constraint is S108.
 3. Rows in a generic signature may be elided only where they pass through unchanged. A declared requirement is never elided.
 4. Exported signatures spell their rows and type parameters, so clients check against interface summaries, Go's export-data model.
 5. **Lowering.** Generics emit as Go generics, which Go compiles by GC shape. Specialised copies need a measured win under [#190](https://github.com/cevr/effra/issues/190). *Prior art:* Go GC-shape stenciling; MoonBit and Rust monomorphise; Effra's earlier measurements refused frontend monomorphisation ([design.md](../design.md#compile-speed-is-a-language-constraint)).
+6. **Inference.** Type arguments are inferred by unification over the value arguments, as Go infers function type arguments, never from a call's expected result. A row parameter binds to the row of a function-typed argument, less the row's written part; `error[E | Expired]` is the union. A composite literal of a generic type, or a generic variant in a `case`, written without type arguments takes them from the expected type, else from its field values (`Some{n}`, `Enter{x}`). A type parameter left unbound is S108; a row parameter left unbound is empty. A result-position type parameter bound by a block with no value stands for no value, lowered to `struct{}`. *Prior art:* Go `types2/infer.go`; Koka infers effect rows; OCaml and ReScript disambiguate constructors by the expected type; Gleam's `Nil` and Rust's `()` for no value.
 
 ## Prelude types
 
-Status: **designed, not yet implemented**, except the timeout result `timeout.Expired`.
+Status: **declared** in the embedded prelude (`internal/sketch/std/prelude.ef`) and checked by the checker (#196); the build refuses them until #50, except the timeout result `timeout.Expired`. The capabilities' method sets are provisional until [#209](https://github.com/cevr/effra/issues/209); `Option` is [#99](https://github.com/cevr/effra/issues/99)'s.
 
 - `Option[T]` with `Some` and `None` ([#99](https://github.com/cevr/effra/issues/99)).
 - `Task[T, E]`, a resource ([runtime.md](runtime.md#tasks)).

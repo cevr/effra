@@ -9,7 +9,7 @@ Two Effra languages live in one repository until [#205](https://github.com/cevr/
 | Id | Language | Front-end |
 | --- | --- | --- |
 | `legacy` | The earlier `.ef` language | `internal/compiler` |
-| `2026` | The Go-shaped language of `docs/spec/` v0 | `internal/sketchfront`: the parser `internal/sketch/syntax` and the formatter `internal/sketch/format` ([#195](https://github.com/cevr/effra/issues/195)), with the prototype checker and emitter behind the bridge `internal/sketch/proto` until [#196](https://github.com/cevr/effra/issues/196) |
+| `2026` | The Go-shaped language of `docs/spec/` v0 | `internal/sketchfront`: the parser `internal/sketch/syntax` and the formatter `internal/sketch/format` ([#195](https://github.com/cevr/effra/issues/195)), the checker `internal/sketch/check` ([#196](https://github.com/cevr/effra/issues/196)), and the prototype emitter behind the bridge `internal/sketch/proto` for `build` and `run` until [#50](https://github.com/cevr/effra/issues/50) |
 
 Ids are exact and case-sensitive: `"Legacy"`, `" 2026"` and `"sketch"` are not ids. The id `2026` names the language, not a compiler version, as Rust's edition years do, so it stays meaningful after #205 removes the other front-end.
 
@@ -76,9 +76,9 @@ A legacy file reaches `internal/compiler` exactly as before this change, and its
 
 - **The tables are the routes.** The CLI admits a file command only from its `fileCommands` table, and MCP refuses a file tool missing from its `fileTools` table for every edition but `legacy`. A command or tool added later is therefore routed by edition too. The process tests enumerate the commands from that table and the tools from `tools/list`.
 - **2026 formatting.** `effra-2026/formatter-1` ([formatting spec](formatting.md#2026-edition)), with the legacy limits, `EFMT_*` codes, write and stale-source rules. A request may mix editions; each file is formatted by its own edition's formatter, and its CLI file report names that formatter in `formatterVersion`. The LSP refuses formatting with EF145 when the manifest changed the document's edition since its last analysis, until the next change.
-- **2026 diagnostics.** The parser's `S001` and the prototype's other `S` codes, with UTF-8 byte spans and UTF-16 LSP ranges, through the shared diagnostic report. The prototype's column counts bytes; the adapter maps it to a byte offset, and the report projects it to UTF-16. Lint is unavailable (`lintAvailable: false`, with the EF145 reason).
-- **2026 check.** `checked`, `revision`, `target`, `edition` and the bounded diagnostics. There are no symbol, type or application tables before [#196](https://github.com/cevr/effra/issues/196).
-- **2026 build.** The prototype's direct-Go emitter writes a temporary Go module, `go build` links it with the flags of every native build, and the module is removed.
+- **2026 diagnostics.** The parser's `S001` and the checker's other `S` codes ([diagnostics](../spec/diagnostics.md)), with UTF-8 byte spans and UTF-16 LSP ranges, through the shared diagnostic report. Lint is unavailable (`lintAvailable: false`, with the EF145 reason naming [#203](https://github.com/cevr/effra/issues/203)).
+- **2026 check.** `checked`, `revision`, `target`, `edition` and the bounded diagnostics. There are no symbol, type or application tables before [#203](https://github.com/cevr/effra/issues/203).
+- **2026 build.** The checker runs first; a diagnostic refuses the build and names its code. Then the bridge, the prototype checker and the prototype's direct-Go emitter lower the program: any refusal there is re-coded `S109` with the message "the prototype emitter cannot lower this program yet (#50): …" at its position, and nothing is written. Otherwise the emitter writes a temporary Go module, `go build` links it with the flags of every native build, and the module is removed.
 - **EF144.** Every file command and tool reports EF144 alone, with no front-end diagnostic. `check` and `diagnostics` (and `project.check`, `project.diagnostics`, LSP publications) carry it in their usual report, without a location; LSP projects it to the document start. Every other operation reports `EF144: message` as its error. `build` writes nothing.
 
 The codes are declared once in `internal/edition` and documented in [the tooling table](../tooling.md#edition-diagnostics). EF### and S### codes live side by side until the registry ([#79](https://github.com/cevr/effra/issues/79)) unifies them.
@@ -90,7 +90,7 @@ The earlier front-end retires in four phases, each keyed to a ticket rather than
 | Phase | Ticket | `legacy` | No manifest | EF145 rows left |
 | --- | --- | --- | --- | --- |
 | 0 | [#194](https://github.com/cevr/effra/issues/194) | Supported; may be written explicitly | `legacy` | All rows of the routing table |
-| 1 | [#195](https://github.com/cevr/effra/issues/195), [#196](https://github.com/cevr/effra/issues/196), [#197](https://github.com/cevr/effra/issues/197) | Frozen: fixes only, no new features | `legacy` | Shrinking: #195 removes formatting, #196 the type, inspection, explanation, query, graph and lint rows; tests and `build --receipt` remain |
+| 1 | [#195](https://github.com/cevr/effra/issues/195), [#196](https://github.com/cevr/effra/issues/196), [#197](https://github.com/cevr/effra/issues/197) | Frozen: fixes only, no new features | `legacy` | Shrinking: #195 removes formatting; #196 checks every construct; [#203](https://github.com/cevr/effra/issues/203) removes the type, inspection, explanation, query, graph and lint rows; tests and `build --receipt` remain |
 | 2 | [#204](https://github.com/cevr/effra/issues/204) | Supported with a deprecation warning (#204 allocates the code) | `legacy`, with the warning | Only what #204 leaves; the gate runs every example as `2026` |
 | 3 | [#205](https://github.com/cevr/effra/issues/205) | EF144 with the message "retired in #205" and a migration pointer | `2026` | None |
 

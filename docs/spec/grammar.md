@@ -143,7 +143,7 @@ ExprStmt   = Expression .
 2. `if` takes a block or another `if` after `else`. The bridge desugars `else if` to a nested `if` for the prototype checker.
 3. The prototype's type switch has one subject and a binding. Designed: `default`, `case _`, and the multi-subject form `switch a, b := x.(type), y.(type)` with tuple cases `case (A, B):` (README Gap 12).
 4. Designed statements: `var` declarations with definite initialisation, assignment, `for` and `for … range`, `go`, `defer` of any simple statement (including `defer done <- i`), channel send `ch <- v`, `select`, `break` and `continue`.
-5. A bare block, a `with` block and a trailing block (such as the block of `timeout.After`) yield their last expression. `return`, `break` and `continue` are errors inside them (S109 in the prototype, which applies the ban to `with` and `timeout.After` blocks). A `func` literal's `return` returns from the literal, as in Go. `catch` arms are not blocks, so a designed `return` in an arm leaves the enclosing function. *Prior art:* Kotlin inline lambdas allow non-local return; Go has none, and Effra follows Go.
+5. A bare block, a `with` block and a trailing block (such as the block of `timeout.After`) yield their last expression. `return`, `break` and `continue` that would leave them are errors (S108). A `func` literal's `return` returns from the literal, as in Go. `catch` arms are not blocks, so a `return` in an arm leaves the enclosing function. *Prior art:* Kotlin inline lambdas allow non-local return; Go has none, and Effra follows Go.
 
 ## Expressions
 
@@ -191,13 +191,13 @@ Status: **implemented** in `internal/sketch/syntax` ([#195](https://github.com/c
 
 ### Extensions beyond the written productions
 
-The corpus of `docs/spec/README.md` needs these forms. Each one is parsed; the column "checker" states what the bridge does until #196.
+The corpus of `docs/spec/README.md` needs these forms. Each one is parsed; the column "checker" states what the checker `internal/sketch/check` (#196) does.
 
 | Form | Production | Checker |
 | --- | --- | --- |
-| `try` in operand position: `!try x`, `a + try x` | `Unary = … \| "try" Binary-rest`: `try` extends over the rest of the binary expression to its right, so it still binds looser than every binary operator (Expressions rule 1). *Prior art:* Swift needs parentheses here; Zig's `try` is a unary prefix. | Passed to the checker as `try` |
-| `wire Name uses A, B { … }` | `WireDecl = "wire" identifier [ UsesClause ] WireBody .` | S109; meaning open ([rows-and-constraints.md](../research/rows-and-constraints.md) §7 item 9), [Gaps](README.md#gaps) |
-| `uses (A, B)` in a function type inside a parameter or result list | `UsesClause = "uses" ( QualifiedName \| "(" QualifiedName { "," QualifiedName } ")" ) .` The parenthesised form is admitted only inside a list; there, an unparenthesised `uses` takes one name, because a comma would end the parameter. A declaration's own `uses` clause is unchanged. | S109 for function-typed parameters |
-| Grouped struct field names: `From, To int` | `FieldDecl = identifier { "," identifier } Type .` (Go's `IdentifierList Type`) | Passed to the checker, one field per name |
-| One provider for several capabilities: `Clock, Scheduler = testing.VirtualClock{}` | `WireEntry = QualifiedName { "," QualifiedName } "=" Expression .` (Go's `var a, b = …`). *Prior art:* Effect's `Layer.mergeAll` builds one layer for several services. | S109; meaning open, [Gaps](README.md#gaps) |
-| A type parameter without a constraint: `type Attempt[T] struct { … }` | `TypeParam = identifier { "," identifier } [ Constraint ] .` The constraint defaults to `any` ([rows-and-constraints.md](../research/rows-and-constraints.md) §3; owner rule "generics: Go simplicity, implicit kinds"). **Difference from Go**, which requires `[T any]`. | S109 (type parameters) |
+| `try` in operand position: `!try x`, `a + try x` | `Unary = … \| "try" Binary-rest`: `try` extends over the rest of the binary expression to its right, so it still binds looser than every binary operator (Expressions rule 1). *Prior art:* Swift needs parentheses here; Zig's `try` is a unary prefix. | Checked as `try` |
+| `wire Name uses A, B { … }` | `WireDecl = "wire" identifier [ UsesClause ] WireBody .` | S109: the corpus means exposure, and the spelling is pending the owner (README Gap 33) |
+| `uses (A, B)` in a function type inside a parameter or result list | `UsesClause = "uses" ( QualifiedName \| "(" QualifiedName { "," QualifiedName } ")" ) .` The parenthesised form is admitted only inside a list; there, an unparenthesised `uses` takes one name, because a comma would end the parameter. A declaration's own `uses` clause is unchanged. | Checked |
+| Grouped struct field names: `From, To int` | `FieldDecl = identifier { "," identifier } Type .` (Go's `IdentifierList Type`) | Checked, one field per name |
+| One provider for several capabilities: `Clock, Scheduler = testing.VirtualClock{}` | `WireEntry = QualifiedName { "," QualifiedName } "=" Expression .` (Go's `var a, b = …`). *Prior art:* Effect's `Layer.mergeAll` builds one layer for several services. | Checked: one shared value that implements each capability (README Gap 34) |
+| A type parameter without a constraint: `type Attempt[T] struct { … }` | `TypeParam = identifier { "," identifier } [ Constraint ] .` The constraint defaults to `any` ([rows-and-constraints.md](../research/rows-and-constraints.md) §3; owner rule "generics: Go simplicity, implicit kinds"). **Difference from Go**, which requires `[T any]`. | Checked, as `[T any]` |

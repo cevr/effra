@@ -9,7 +9,7 @@ The sections are:
 - **Earlier `.ef` language**: terms of the language that `internal/compiler` implements today. They stay in force for that compiler until [#205](https://github.com/cevr/effra/issues/205) retires it.
 - **Tooling and testing**.
 
-A status in parentheses applies to the term's support: *implemented in prototype* (`prototypes/sketch9`), *designed* (decided, not implemented), or, in the earlier-language section, the earlier labels.
+A status in parentheses applies to the term's support: *checked* (the 2026 checker `internal/sketch/check`, [#196](https://github.com/cevr/effra/issues/196), checks it; building may still need [#50](https://github.com/cevr/effra/issues/50)), *implemented in prototype* (`prototypes/sketch9`), *designed* (decided, not implemented), or, in the earlier-language section, the earlier labels.
 
 ## Language
 
@@ -17,11 +17,11 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Exported name** (designed; owner decision 2026-10-27): A package-level name, field or method whose first character is an upper-case letter. Only exported names are visible to other packages, as in Go. See [grammar](docs/spec/grammar.md#visibility).
 
-**Capability** (implemented in prototype): An interface with method signatures that names replaceable behaviour, such as `Orders` or `Clock`. Code reaches it only by calling its methods on the capability name, `Orders.Find(id)`, and every such call charges the capability to the caller's capability row. The capability is not a first-class value: it cannot be passed, returned or stored (designed; the prototype reports a bare capability name as unknown). See [types](docs/spec/types.md#capabilities) and [rows](docs/spec/rows.md#capability-rows).
+**Capability** (checked): An interface with method signatures that names replaceable behaviour, such as `Orders` or `Clock`. Code reaches it only by calling its methods on the capability name, `Orders.Find(id)`, and every such call charges the capability to the caller's capability row. The capability is not a first-class value: it cannot be passed, returned or stored (S104). See [types](docs/spec/types.md#capabilities) and [rows](docs/spec/rows.md#capability-rows).
 
-**Interface value** (designed; the prototype accepts interface types in signatures but rejects method calls on their values and assignments to them): A value of an interface type in a type position, such as a parameter `o Orders`. It holds a provider value. Calling its method runs that provider's method with the method's declared rows and charges no capability. A type is assignable to the interface by method-row compatibility ([types](docs/spec/types.md#interface-assignability)).
+**Interface value** (checked): A value of an interface type in a type position, such as a parameter `o Orders`. It holds a provider value. Calling its method runs that provider's method with the method's declared rows and charges no capability. A type is assignable to the interface by method-row compatibility ([types](docs/spec/types.md#interface-assignability)).
 
-**Provider** (implemented in prototype for literals): A value whose type implements a capability's methods, bound to that capability by a `wire`. A provider may fail less than its capability, never more.
+**Provider** (checked for provider values): A value whose type implements a capability's methods, bound to that capability by a `wire`. A provider may fail less than its capability, never more.
 
 **Constructor** (designed): An ordinary function named as a `wire` entry, such as `Orders = OpenPostgres`. Its requirements are satisfied from the same wire, and its failures become startup failures of the `with` that builds it.
 
@@ -31,41 +31,51 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Host package** (designed): A reviewed standard-library package, such as `os`, `fs`, `net` or `sql`, that calls Go. Only host packages and `import go` reach the host, so every effect appears in some footprint.
 
-**Error type** (implemented in prototype): A struct type named in some error row. Returning a value of an error type is a failure, never an ordinary result.
+**Error type** (checked): A named struct type that an error row names: in a package, one named by an error row of that package or of the package that declares it. Returning a value of an error type is a failure, never an ordinary result.
 
-**Error row** (implemented in prototype): The set of error types a function may fail with, written `error[A | B]` in its result. Order and repetition carry no meaning.
+**Error row** (checked): The set of error types a function may fail with, written `error[A | B]` in its result. Order and repetition carry no meaning.
 
-**Capability row** (implemented in prototype): The set of capabilities a caller must supply, written `uses A, B` after a signature. Also called the `uses` row or requirement row.
+**Capability row** (checked): The set of capabilities a caller must supply, written `uses A, B` after a signature. Also called the `uses` row or requirement row.
 
 **Row**: An error row or a capability row. Rows are checked and then erased from the emitted Go.
 
-**Fallible expression** (implemented in prototype): An expression that can fail with a non-empty error row and whose failure is not yet handled. It must be tried, caught or returned.
+**Inferred row** (checked): A row the checker computes from a body because the row is not written: the rows of an unexported function with a body and of a function literal. A written row is declared and is an upper bound. Inference runs per strongly connected component of a package's reference graph.
 
-**Escape** (implemented in prototype): The passage of a failure from an expression to its failure target, through `try`, a fallible `return`, a returned error value or the rest of a partial catch.
+**Export guard** (checked): The rule that a declaration other code depends on spells its rows: exported functions, methods, interface methods, `main`, `LawX`, bodiless declarations and the step of an exported machine type. An unwritten row there is empty, never inferred.
 
-**Failure target** (implemented in prototype): Where an escaping failure goes: the innermost enclosing function or function literal. A trailing block is a function literal, so the block of `timeout.After` is one. A `with` block is not a failure target.
+**Requirement binding** (checked): The bare name of a capability a written capability row lists, entered in the body's frame beside the parameters. A local of that name in the same frame is an error.
 
-**Try** (implemented in prototype): The keyword form `try e`, which yields `e`'s success value and escapes `e`'s failures.
+**Implicit type parameter** (checked): A name of one upper-case letter, optionally followed by digits, that names no declaration in a signature. Its kind follows its position: a type, an error row inside `error[…]`, or a capability row after the capability-row keyword.
 
-**Catch** (implemented in prototype): The keyword form `e catch { case T: … }`, which handles named error types of a fallible expression. It covers typed failures only; interruption and defects pass through it.
+**Row parameter** (checked): An implicit or bracket type parameter that ranges over rows, such as `E` in `error[E]` or `R` in `uses R`. A call binds it to the row of a function-typed argument; an unbound row parameter is empty.
 
-**Total catch** (implemented in prototype): A `catch` without `try`. It must handle every error type of the caught row.
+**Fallible expression** (checked): An expression that can fail with a non-empty error row and whose failure is not yet handled. It must be tried, caught or returned.
 
-**Partial catch** (implemented in prototype): `try e catch { … }`. It handles the named types, and `try` escapes the rest.
+**Escape** (checked): The passage of a failure from an expression to its failure target, through `try`, a fallible `return`, a returned error value or the rest of a partial catch.
 
-**Discharge** (implemented in prototype): Removing a capability from the row a block charges to its enclosing function, because an enclosing `with` binds it.
+**Failure target** (checked): Where an escaping failure goes: the innermost enclosing function or function literal. A trailing block is a function literal, so the block of `timeout.After` is one. A `with` block is not a failure target.
 
-**Wire** (implemented in prototype for provider literals): A declaration `wire Name { Cap = provider … }`, or an inline `wire{ … }` literal, that binds capabilities to providers or constructors. It is Effra's form of an Effect layer.
+**Try** (checked): The keyword form `try e`, which yields `e`'s success value and escapes `e`'s failures.
 
-**Inline wire** (implemented in prototype): A `wire{ … }` literal given directly to `with`. Its provider expressions are evaluated in, and charged to, the enclosing function.
+**Catch** (checked): The keyword form `e catch { case T: … }`, which handles named error types of a fallible expression. It covers typed failures only; interruption and defects pass through it.
 
-**Named wire** (implemented in prototype): A top-level `wire Name { … }`. It is built by its own function at each `with` that names it.
+**Total catch** (checked): A `catch` without `try`. It must handle every error type of the caught row.
 
-**Closed wire** (prototype limit): A named wire whose providers need no capability from the caller and let no failure escape. The prototype admits only closed named wires.
+**Partial catch** (checked): `try e catch { … }`. It handles the named types, and `try` escapes the rest.
+
+**Discharge** (checked): Removing a capability from the row a block charges to its enclosing function, because an enclosing `with` binds it.
+
+**Wire** (checked for provider values; constructors designed): A declaration `wire Name { Cap = provider … }`, or an inline `wire{ … }` literal, that binds capabilities to providers or constructors. It is Effra's form of an Effect layer.
+
+**Inline wire** (checked): A `wire{ … }` literal given directly to `with`. Its provider expressions are evaluated in, and charged to, the enclosing function.
+
+**Named wire** (checked): A top-level `wire Name { … }`. It is built by its own function at each `with` that names it.
+
+**Closed wire** (checked; open named wires are [#37](https://github.com/cevr/effra/issues/37)'s): A named wire whose providers need no capability from the caller and let no failure escape. The checker admits only closed named wires.
 
 **Build** (designed): One execution of a wire at one `with`: constructors run once per shared node, and the build owns their releases until the `with` block ends. Each `with` is a new build.
 
-**With** (implemented in prototype for one wire): The compiler-known form `with(W) { block }`, spelled as a predeclared identifier. It discharges the capabilities `W` binds for the block and yields the block's last expression. It also takes context values (designed).
+**With** (checked for one wire): The compiler-known form `with(W) { block }`, spelled as a predeclared identifier. It discharges the capabilities `W` binds for the block and yields the block's last expression. It also takes context values (designed).
 
 **Context value** (designed): An immutable value, such as a span or a log annotation, that `with` scopes to a block and that every task started inside inherits.
 
@@ -73,21 +83,21 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Pure function** (designed): A function whose footprint is empty. An empty capability row does not make a function pure, and a call through an unknown function value counts as impure.
 
-**Union** (implemented in prototype): A closed set of struct types, written `interface{ A | B }`. It has no zero value.
+**Union** (checked): A closed set of struct types, written `interface{ A | B }`. It has no zero value.
 
-**Variant** (implemented in prototype): One struct type listed in a union. A variant value is assignable to every union that lists it.
+**Variant** (checked): One struct type listed in a union. A variant value is assignable to every union that lists it.
 
 **Defaultable type**: A type with a valid zero value: a basic type, or a struct whose fields are all defaultable. Unions, capabilities, function types, tasks, resources and borrows are not defaultable. Outside its package, a struct with an unexported field is not defaultable either, so its only values there come from the package's exported functions.
 
-**Definite initialisation** (designed): The rule that a variable of a non-defaultable type has a value before it is used.
+**Definite initialisation** (checked for `var x T`; the rest designed, [#197](https://github.com/cevr/effra/issues/197)): The rule that a variable of a non-defaultable type has a value before it is used.
 
-**Type switch** (implemented in prototype for one subject): `switch v := u.(type) { case A: … }` over a union value, narrowing `v` to the case's variant.
+**Type switch** (checked, with one or several subjects): `switch v := u.(type) { case A: … }` over a union value, narrowing `v` to the case's variant. With several subjects, a case is a tuple of variants, and `_` matches any variant.
 
-**Totality**: The property of a type switch, a `catch` or a machine step that covers every alternative. A total form needs no default for its declared alternatives.
+**Totality**: The property of a type switch, a `catch` or a machine step that covers every alternative. A total form needs no default for its declared alternatives. The checker decides it for a type switch by a usefulness check over its case matrix, never by enumerating the product of the subjects.
 
 **Block**: A braced statement list. As the body of `with`, `timeout.After` or a trailing block, it yields its last expression, and `return`, `break` and `continue` are errors inside it.
 
-**Trailing block** (designed; the prototype has it only for `with` and, by name, `timeout.After`): A block written after a call's parentheses. It is notation for a function-literal final argument whose body contains no `return`, `break` or `continue`; an early return needs an explicit `func` literal. It cannot escape the call unless the parameter type says so. The block of `with` is part of that construct instead.
+**Trailing block** (checked; the build lowers it only for `with` and `timeout.After` until #50): A block written after a call's parentheses. It is notation for a function-literal final argument whose body contains no `return`, `break` or `continue`; an early return needs an explicit `func` literal. It cannot escape the call unless the parameter type says so. The block of `with` is part of that construct instead.
 
 **Non-escaping parameter** (designed): A function-typed parameter that the callee may call, or hand to a task the call consumes, but may not store, return or send.
 

@@ -6,7 +6,7 @@ Every function has two rows besides its result: an error row, `error[...]`, and 
 
 ## Error rows
 
-Status: **implemented in prototype**.
+Status: **checked** by `internal/sketch/check` ([#196](https://github.com/cevr/effra/issues/196)); runs through the prototype emitter.
 
 ```go
 func pay(id string) (string, error[OrderNotFound | GatewayDown]) uses Orders, Gateway {
@@ -29,14 +29,14 @@ func pay(id string) (string, error[OrderNotFound | GatewayDown]) uses Orders, Ga
    - `return v` where `v` is a value of an error type;
    - the unhandled rest of a partial `try e catch { … }`.
 
-   The failure target is the innermost enclosing function or function literal. A trailing block is a function literal ([grammar.md](grammar.md#expressions)), so the block of `timeout.After` is a failure target; the prototype gives it that role by name (README Gap 31). A `with` block is part of a construct, not a function literal, so it is not a failure target: a `try` inside it escapes to the enclosing function.
+   The failure target is the innermost enclosing function or function literal. A trailing block is a function literal ([grammar.md](grammar.md#expressions)), so the block of `timeout.After` is a failure target, as every trailing block is (README Gap 31). A `with` block is part of a construct, not a function literal, so it is not a failure target: a `try` inside it escapes to the enclosing function.
 5. **Upper bound (S101).** Every error type that can escape a function must be in its declared row. A function with no row lets nothing escape. Returning a value of an error type from a function with no row is therefore S101 (fixture `error-as-value`).
 6. **Value of `try`.** `try e` has `e`'s success value, or no value when `e` has none. `try` on an expression that cannot fail is an error (S108).
 7. **Lowering.** `try f()` becomes `v, err := f(…); if err != nil { return zero, err }`. Error types implement Go's `error`; the row is checked and erased. *Prior art:* Borgo's tuple path for `?`; XGo's inline `expr?`; Rust's `?`; Gleam has no operator and uses `use` with `result.try`.
 
 ## Catch
 
-Status: **implemented in prototype** for single-expression arms; the binding form is **designed, not yet implemented**.
+Status: **checked** (#196), the binding form and statement arms included; the build refuses the binding form and statement arms until [#50](https://github.com/cevr/effra/issues/50).
 
 ```go
 outcome := with(Live) { checkout(id) } catch {
@@ -58,22 +58,22 @@ case OrderNotFound:
 4. **Total catch (S103).** A `catch` without `try` must handle every error type in `e`'s row. *Prior art:* Rust and Gleam exhaustive `match` on an error enum; Swift propagates an error that no `catch` clause matches to the enclosing scope, and a non-throwing function must handle every error; Effra's total catch is the same obligation stated per error type.
 5. **Partial catch.** `try e catch { … }` handles the named types and escapes the rest through `try`. The rest escapes to the enclosing failure target and is checked against its row (rules 4 and 5 of [Error rows](#error-rows); fixture `try … catch` in `sketch/sketch_test.go`, "partial catch under try still needs the rest declared", S101).
 6. **Typed failures only (README Gap 1).** A `catch` covers the typed row only. Interruption and defects are not in any row, and they always pass through a `catch`, total or partial. A total catch therefore has no default arm in source. Its lowering must still pass interruption and defects on; the prototype emits a default arm that re-panics with them.
-7. **Binding and statements (designed).** `catch e { case T: … }` binds the caught error, as `switch e := err.(type)` does; inside an arm with one type, `e` has that type. An arm may hold statements. When the `catch` is an expression, the arm's last statement is an expression that yields its value. `return` in an arm leaves the enclosing function, because an arm is not a block (README Gap 11).
+7. **Binding and statements.** `catch e { case T: … }` binds the caught error, as `switch e := err.(type)` does; inside an arm with one type, `e` has that type. An arm may hold statements. When the `catch` is an expression, the arm's last statement is an expression that yields its value, or the arm leaves the function. With several types in one arm, `e` has the union of those types. `e` must be read in some arm (S110). `return` in an arm leaves the enclosing function, because an arm is not a block (README Gap 11).
 8. **Lowering.** A catch becomes a type switch on the Go error value, inline, with no closure. *Prior art:* XGo lowers `expr!` and `expr?:default` through a generated closure; Effra's catch stays inline.
 
 ## Capability rows
 
-Status: **implemented in prototype**.
+Status: **checked** (#196), with inference (rule 6); runs.
 
 1. **Spelling.** `uses A, B` lists capabilities ([types.md](types.md#capabilities)). The row is a set.
 2. **Charges.** A body charges a capability when it:
    - calls a capability method, `A.m(…)`, which charges `A`;
    - calls a function whose row lists `A`;
-   - calls `timeout.After`, whose signature lists `uses Scheduler` (the prototype charges it by name, README Gap 31).
+   - calls `timeout.After`, an ordinary library function whose signature lists `uses R, Scheduler` (README Gap 31).
 3. **Upper bound (S102).** Every capability a body charges must be in its `uses` clause or discharged by an enclosing `with`. A name in a `uses` clause must denote a capability (S104).
-4. **Entry.** `main` takes no parameters (S109) and cannot be called (S109). Prototype: its `uses` clause may list only `Console` (S102), and it returns nothing (S109). README Gaps 4 and 5 record the designed entry.
-5. **Names.** Designed: `uses http.Client` brings the bare name `Client` into scope for the body; when two packages export the same name, the body qualifies it. Prototype: in a selector `X.m`, a capability named `X` wins over a local named `X`, so such a local is never read (fixture `same-local-as-cap`, S110). Designed: declaring a local with the name of a capability in scope is an error.
-6. **Inference.** Designed: inside a package the compiler infers both rows of an unexported function. Exported functions spell them, so a changed body never silently widens a public contract. *Prior art:* Go export data; OCaml `.mli` signatures; Effra's earlier rule for exported contracts.
+4. **Entry.** `main` takes no parameters and returns no value; an error row is allowed (S113). It cannot be called (S113). The checker does not restrict its capability row; the build refuses what the host cannot supply (README Gaps 4 and 5).
+5. **Names.** A written capability row binds each listed capability's bare name in the body's frame, beside the parameters; `uses http.Client` binds `Client` (with packages; when two packages export the same name, the body qualifies it). A local of that name in the same frame is S104. A local in an inner frame, or a local beside a capability the row does not list, may shadow a package or prelude capability (rows-and-constraints §7 amendment 3; fixtures `local-and-binding-one-frame`, `same-local-as-cap`). A capability name is the capability in a capability row, a wire key, a `replace` target and as the receiver of `X.m(…)`; in a type position it is the interface type ([types.md](types.md#capabilities)).
+6. **Inference.** Inside a package the checker infers each unwritten row of an unexported function with a body and of a function literal; a written row is declared. `main`, `LawX`, exported functions, methods, interface methods, bodiless declarations and the step of an exported machine type spell their rows, and an unwritten row there is empty, so a changed body never silently widens a public contract. A literal passed where a function type is expected is checked against that type's rows. Inference runs per strongly connected component of the package's reference graph, joining rows to a fixpoint, callees before callers (rows-and-constraints §7 amendment 1). *Prior art:* Go export data; OCaml `.mli` signatures; Effra's earlier rule for exported contracts.
 7. **Lowering.** Capabilities become Go interfaces whose methods take the task handle first. A function takes a hidden environment with one field per capability, and the task. When `wire` knows the concrete provider, the call may be devirtualised.
 
 ## Footprints
@@ -88,7 +88,7 @@ Status: **designed, not yet implemented**.
 
 ## Wire
 
-Status: **partly implemented in prototype**: provider literals and closed named wires. Constructors, embedding and `replace` are **designed, not yet implemented**.
+Status: **checked** (#196): provider literals, closed named wires, embedding, `replace` and several keys in one entry; the build refuses embedding, `replace` and several keys until #50. Constructors are **designed, not yet implemented**: S109 naming [#37](https://github.com/cevr/effra/issues/37).
 
 ```go
 wire Live {
@@ -98,17 +98,17 @@ wire Live {
 }
 ```
 
-1. **Entries.** A `wire` binds capabilities to providers, one entry per capability: `Cap = provider`. An entry naming a non-capability is S104. Wire names are unique (S108). A second entry for a capability in one wire, other than a `replace` of an embedded entry, is an error (S111, designed). Prototype: it accepts the second entry, and the later one wins (README Gap 28). *Prior art:* Google Wire rejects two providers of one type in a provider set.
-2. **Providers (S106).** A provider literal's type must implement every method of the capability: the same name, the same parameter types, the same result and the same fallibility. Each error type of a provider method must be in the capability method's row: a provider may fail less, never more. Prototype: `Scheduler` takes only `LiveScheduler{}`, `LiveScheduler{}` provides only `Scheduler`, and `Console` cannot be wired (all S106).
+1. **Entries.** A `wire` binds capabilities to providers, one entry per capability: `Cap = provider`. An entry naming a non-capability is S104. Wire names are unique (S108). A second entry for a capability in one wire, other than a `replace` of an embedded entry, is an error (S111; README Gap 28). One entry may list several capabilities, `Clock, Scheduler = v`: one shared value that must implement each (README Gap 34). *Prior art:* Google Wire rejects two providers of one type in a provider set.
+2. **Providers (S106).** A provider literal's type must implement every method of the capability: the same name, the same parameter types, the same result and the same fallibility. Each error type of a provider method must be in the capability method's row: a provider may fail less, never more. A provider method that writes a capability row is wider than the capability method, which writes none (S106; README Gap 17).
 3. **Inline wires.** `wire{ A = X{}; B = Y{} }` appears only as the argument of `with` (S108 elsewhere). Its provider expressions are evaluated in the enclosing function, before the block's discharge, so their requirements and failures charge the enclosing function. A provider expression does not see the capabilities of its own wire (fixture `wire-sibling`, S102); it sees those of an enclosing `with` (fixture `wire-order`).
-4. **Named wires.** A named wire is built by its own function at each `with` that names it, so its provider expressions do not see the caller's locals (fixture `named-wire-shadow`). Prototype: a named wire must be closed: its providers require no capability from the caller (S102) and let no failure escape (S101). It may use a capability it binds itself. Designed: README Gap 6.
-5. **Cycles.** A wire whose providers reach `with` of the same wire, directly or through called functions or provider methods, is an error (S109). The prototype follows every provider method of a called capability method's name, which over-approximates.
-6. **Constructors (designed).** An entry may name a constructor: `Orders = OpenPostgres`. A constructor is an ordinary function. Its `uses` row is satisfied from the same wire graph, and its error row joins the startup errors of every `with` that builds it. A constructor that returns a resource gives the wire its release ([resources.md](resources.md#wire)). *Prior art:* Effect `Layer.effect` and `Layer.scoped`; Google Wire's generated constructor with cleanups in reverse order.
-7. **Composition (designed).** A wire may embed another wire by name. `replace Cap = provider` overrides an embedded entry; a second entry for one capability without `replace` is an error (S111). A shared node is built once per build, and each `with` is a new build. *Prior art:* Effect `Layer.merge`, `Layer.provide` and `Layer.fresh` (README Gap 22).
+4. **Named wires.** A named wire is built by its own function at each `with` that names it, so its provider expressions do not see the caller's locals (fixture `named-wire-shadow`). A named wire is closed: its providers require no capability from the caller (S102) and let no failure escape (S101). It may use a capability it binds itself. Open named wires are #37's (README Gap 6).
+5. **Cycles.** A named wire whose build can reach itself is an error (S108): a provider expression that enters it with `with`, a function or method a provider calls that does, a capability method whose provider in the package does, or an embedding. The checker follows every method of the called name for a call on a value of interface type, which over-approximates.
+6. **Constructors (designed; S109 naming #37).** An entry may name a constructor: `Orders = OpenPostgres`. A constructor is an ordinary function. Its `uses` row is satisfied from the same wire graph, and its error row joins the startup errors of every `with` that builds it. A constructor that returns a resource gives the wire its release ([resources.md](resources.md#wire)). *Prior art:* Effect `Layer.effect` and `Layer.scoped`; Google Wire's generated constructor with cleanups in reverse order.
+7. **Composition.** A wire may embed another wire by name. `replace Cap = provider` overrides an embedded entry; a second entry for one capability without `replace` is an error (S111). Two embedded wires that bind one capability are S111 unless one entry is replaced; a `replace` of a capability no embedded wire binds is S108. A shared node is built once per build, and each `with` is a new build. *Prior art:* Effect `Layer.merge`, `Layer.provide` and `Layer.fresh` (README Gap 22).
 
 ## With
 
-Status: **implemented in prototype** for one wire argument; context values are **designed, not yet implemented**.
+Status: **checked** (#196) for one wire argument; runs. Context values are **designed, not yet implemented**: S109 naming G1.
 
 ```go
 value := with(Live) { checkout(id) }
@@ -134,7 +134,7 @@ local := with(wire{ Orders = MemoryOrders{} }) { report(id) }
 
    Flattening the two into one wire `wire{ Store = Holder{"inner"}; Box = Holder{read()} }` changes the program: `read()` would need `Store` from its own wire, which is S102 (fixture `wire-sibling`).
 4. `with(wire{})` binds nothing and keeps the enclosing bindings (fixture `empty-wire`).
-5. The block's value is its last expression, which must be an expression statement (S109). `return` cannot leave the block (S109). Locals declared in the block are scoped to it.
+5. When the `with` is used as a value, the block's value is its last expression statement; a `with` used as a statement needs none. `return`, `break` and `continue` cannot leave the block (S108; [grammar.md](grammar.md#statements) rule 5). Locals declared in the block are scoped to it.
 6. A `with` expression is fallible when its last expression is fallible. A failure that a `try` in the block escapes goes to the enclosing function. Designed: the startup errors of the wire's constructors join the `with` expression's row.
 7. **Context values (designed, G1).** `with` also takes context values: `with(trace.Span("ingest"), log.Annotate("region", "eu")) { … }` ([runtime.md](runtime.md#g1-context-through-with)).
 8. **Lowering.** `with` copies the environment and sets the wire's fields inline, with no closure. A named wire is its own Go function.
@@ -143,13 +143,13 @@ local := with(wire{ Orders = MemoryOrders{} }) { report(id) }
 
 ## Totality
 
-Status: **partly implemented in prototype**.
+Status: **checked** (#196); the build refuses the multi-subject form until #50.
 
-1. **Type switch.** `switch v := u.(type) { case A: … }` requires a union subject (S108). Each case type must be a variant of the union (S108) and appear once (S108). In a case with one type, `v` has that type; otherwise `v` has the union type. The binding must be read in at least one case (S110).
-2. **Totality rule (designed; README Gap 3).** A type switch must name every variant of its union or have a `default` arm. The prototype does not enforce this rule. *Prior art:* Gleam, Rust and Swift reject a non-exhaustive match; Go accepts one.
-3. **Missing return (S107).** A function with a result must not reach the end of its body. A body terminates when its last statement is a `return`; an `if` with an `else` whose branches both terminate; or a type switch whose cases all terminate and name every variant.
+1. **Type switch.** `switch v := u.(type) { case A: … }` requires a union subject (S108). Each case type must be a variant of the union (S108). A case that the cases before it already cover is unreachable (S108). In a case with one type, `v` has that type; otherwise `v` has the union type. Each binding must be read in at least one case or be `_` (S110).
+2. **Totality rule (S103; README Gap 3).** A type switch must name every variant of its union or have a `default` arm. *Prior art:* Gleam, Rust and Swift reject a non-exhaustive match; Go accepts one.
+3. **Missing return (S107).** A function with a result must not reach the end of its body. A body terminates by Go's terminating statements: a final `return`; an `if` with an `else` whose branches both terminate; a `for` with no condition and no `break`; a `switch` or `select` whose cases all terminate; or a total type switch whose cases all terminate.
 4. **Total catch.** See [Catch](#catch), rule 4.
-5. **Multi-subject switch (designed; README Gap 12).** `switch s, e := s.(type), e.(type)` with tuple cases is total over the product of the two unions; `_` matches any variant.
+5. **Multi-subject switch (README Gap 12).** `switch s, e := s.(type), e.(type)` with tuple cases is total over the product of the unions; `_` matches any variant. The checker decides totality by a usefulness check over the case matrix (Maranget), never by enumerating the product, and names one missing tuple (S103).
 
 ## Composition laws
 
