@@ -269,6 +269,57 @@ func TestAdmissionValidatesTheSnapshot(t *testing.T) {
 		_, err := admitPath(t, source)
 		wantAdmissionRefusal(t, err)
 	})
+	// The module boundary is part of the snapshot, read through each held
+	// directory: a go.mod that is removed, created, or replaced (even by a
+	// link to the same file) in a walked directory after the walk is EF146.
+	boundaryWorkspace := func(t *testing.T) (root, source string) {
+		root = workspace(t)
+		write(t, filepath.Join(root, "go.mod"), "module m\n")
+		source = filepath.Join(root, "a", "main.ef")
+		write(t, source, "legacy bytes\n")
+		return root, source
+	}
+	t.Run("go.mod removed after the walk", func(t *testing.T) {
+		root, source := boundaryWorkspace(t)
+		defer hookAt(StageWalked, func() {
+			if err := os.Rename(filepath.Join(root, "go.mod"), filepath.Join(root, "go.mod.old")); err != nil {
+				t.Fatal(err)
+			}
+		})()
+		_, err := admitPath(t, source)
+		wantAdmissionRefusal(t, err)
+	})
+	t.Run("go.mod created in a walked directory after the walk", func(t *testing.T) {
+		root, source := boundaryWorkspace(t)
+		defer hookAt(StageWalked, func() { write(t, filepath.Join(root, "a", "go.mod"), "module a\n") })()
+		_, err := admitPath(t, source)
+		wantAdmissionRefusal(t, err)
+	})
+	t.Run("go.mod replaced by a link to the same file after the walk", func(t *testing.T) {
+		root, source := boundaryWorkspace(t)
+		defer hookAt(StageWalked, func() {
+			goMod := filepath.Join(root, "go.mod")
+			if err := os.Rename(goMod, goMod+".real"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(goMod+".real", goMod); err != nil {
+				t.Fatal(err)
+			}
+		})()
+		_, err := admitPath(t, source)
+		wantAdmissionRefusal(t, err)
+	})
+	t.Run("go.mod unchanged", func(t *testing.T) {
+		_, source := boundaryWorkspace(t)
+		admitted, err := admitPath(t, source)
+		if err != nil {
+			t.Fatalf("admission refused: %v", err)
+		}
+		defer admitted.Close()
+		if admitted.Resolution.Edition != Legacy || admitted.Resolution.Source != SourceDefault {
+			t.Fatalf("bound %s, want the default legacy edition", admitted.Resolution.JSON())
+		}
+	})
 	t.Run("no change", func(t *testing.T) {
 		_, source, link := snapshotWorkspace(t)
 		admitted, err := admitPath(t, link)

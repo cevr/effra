@@ -240,8 +240,9 @@ type dirRecord struct {
 	root     *os.Root
 	info     os.FileInfo
 	manifest manifestRecord
-	// goMod is the go.mod that ends the walk here, or nil.
-	goMod os.FileInfo
+	// goMod is the go.mod entry of the directory, as the walk found it
+	// through root; goMod.boundary() ends the walk here.
+	goMod goModRecord
 }
 
 // manifestRecord is one effra.json as the walk found it.
@@ -300,7 +301,7 @@ func walk(start string) snapshot {
 			walked.resolution = resolution
 			return walked
 		}
-		if record.goMod != nil {
+		if record.goMod.boundary() {
 			break
 		}
 		parent := filepath.Dir(current)
@@ -339,10 +340,80 @@ func inspect(dir string) (dirRecord, Resolution, bool) {
 		record.manifest = manifestRecord{present: true, entry: entry}
 		return record, readManifest(root, manifestPath, &record.manifest), true
 	}
-	if info, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil && !info.IsDir() {
-		record.goMod = info
-	}
+	record.goMod = inspectGoMod(root, dir)
 	return record, Resolution{}, false
+}
+
+// goModRecord is one go.mod entry as a walk found it through its directory's
+// handle. Only its presence decides the module boundary; its bytes do not.
+type goModRecord struct {
+	// entry is the directory entry itself (it may be a link), or nil.
+	entry os.FileInfo
+	// For a link: target is the status of the file it reaches, and
+	// targetDir the identity of that file's directory; both nil when the
+	// link reaches nothing.
+	target, targetDir os.FileInfo
+}
+
+// boundary reports whether the go.mod ends the walk: an entry that is not a
+// directory, or a link that reaches one that is not.
+func (r goModRecord) boundary() bool {
+	switch {
+	case r.entry == nil:
+		return false
+	case r.entry.Mode()&fs.ModeSymlink != 0:
+		return r.target != nil && !r.target.IsDir()
+	default:
+		return !r.entry.IsDir()
+	}
+}
+
+// same reports whether a go.mod inspected again is the one the walk
+// recorded: the same entry of the same type, and for a link the same file
+// in the same directory.
+func (r goModRecord) same(again goModRecord) bool {
+	if !sameIdentity(r.entry, again.entry) || r.entry != nil && r.entry.Mode().Type() != again.entry.Mode().Type() {
+		return false
+	}
+	return sameIdentity(r.target, again.target) && sameIdentity(r.targetDir, again.targetDir)
+}
+
+// inspectGoMod records the go.mod of the directory held by root, at path
+// dir, through that handle: the entry by Lstat on root and, for a link, the
+// file it reaches by Lstat on a handle of the target's directory, as
+// readManifest does for a linked manifest.
+func inspectGoMod(root *os.Root, dir string) goModRecord {
+	var record goModRecord
+	entry, err := root.Lstat("go.mod")
+	if err != nil {
+		return record
+	}
+	record.entry = entry
+	if entry.Mode()&fs.ModeSymlink == 0 {
+		return record
+	}
+	target, err := filepath.EvalSymlinks(filepath.Join(dir, "go.mod"))
+	if err == nil {
+		target, err = filepath.Abs(target)
+	}
+	if err != nil {
+		return record
+	}
+	targetRoot, err := os.OpenRoot(filepath.Dir(target))
+	if err != nil {
+		return record
+	}
+	defer targetRoot.Close()
+	targetDir, err := targetRoot.Stat(".")
+	if err != nil {
+		return record
+	}
+	status, err := targetRoot.Lstat(filepath.Base(target))
+	if err != nil {
+		return record
+	}
+	record.target, record.targetDir = status, targetDir
+	return record
 }
 
 // readManifest admits one manifest: a regular file of at most
@@ -446,9 +517,7 @@ func (s snapshot) changed() string {
 			// A manifest decides; no go.mod at or above it was consulted.
 			continue
 		}
-		goMod, err := os.Stat(filepath.Join(dir.path, "go.mod"))
-		boundary := err == nil && !goMod.IsDir()
-		if boundary != (dir.goMod != nil) || boundary && !os.SameFile(dir.goMod, goMod) {
+		if !dir.goMod.same(inspectGoMod(dir.root, dir.path)) {
 			return "go.mod in " + dir.path
 		}
 	}
