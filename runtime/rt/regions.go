@@ -1,7 +1,5 @@
 package rt
 
-import "math"
-
 // region is the kind of one open mask region of a task (I2).
 type region uint8
 
@@ -14,21 +12,22 @@ const (
 	// owner's ambient stop.
 	protecting
 	// acquiring is Acquire's registration step (I2 item 4, R8). It masks the
-	// task but does not shield children: work started by open stays
-	// cancellable.
+	// acquiring task, and it is transparent to the shield decision: work
+	// started by an ordinary open stays cancellable, and an open inside a
+	// cleanup keeps that cleanup's protection.
 	acquiring
 )
 
-const inlineRegions = 5
+const inlineRegions = 7
 
 // regionStack is a task's stack of open mask regions, innermost on top. Only
 // the owner goroutine touches it; a child copies the one bit it needs, its
 // shield, when it starts. Regions are explicit, so a restore cannot leave a
 // counter that later misclassifies an inner release.
 type regionStack struct {
-	top    region // kind of the innermost entry, or interruptible when empty
-	n      uint16
-	inline [inlineRegions]region // with top and n, one 8-byte word
+	top    region                // kind of the innermost entry, or interruptible when empty
+	inline [inlineRegions]region // with top, one 8-byte word
+	n      int                   // depth; deeper entries spill to more, with no limit
 	more   []region
 }
 
@@ -42,10 +41,7 @@ func (s *regionStack) at(i int) region {
 // push opens a region and returns its index, the depth to truncate to when it
 // closes.
 func (s *regionStack) push(r region) int {
-	i := int(s.n)
-	if i == math.MaxUint16 {
-		panic("rt: too many nested mask regions")
-	}
+	i := s.n
 	if i < inlineRegions {
 		s.inline[i] = r
 	} else {
@@ -58,7 +54,7 @@ func (s *regionStack) push(r region) int {
 
 // truncate closes every region at index n and above.
 func (s *regionStack) truncate(n int) {
-	s.n = uint16(n)
+	s.n = n
 	if len(s.more) > 0 {
 		s.more = s.more[:max(n-inlineRegions, 0)]
 	}
@@ -68,14 +64,18 @@ func (s *regionStack) truncate(n int) {
 	}
 }
 
-// shields reports whether a child started now is shielded: the nearest entry
-// that is not a restore is a protecting one.
+// shields reports whether a child started now is shielded. The walk goes down
+// from the top and skips acquiring entries: the nearest protecting entry
+// shields, the nearest interruptible (restore) entry does not, and an empty
+// walk does not. An acquisition masks only its own registration window; it is
+// not a cleanup region, so it neither shields a child nor hides the cleanup
+// region around it.
 func (s *regionStack) shields() bool {
-	for i := int(s.n) - 1; i >= 0; i-- {
+	for i := s.n - 1; i >= 0; i-- {
 		switch s.at(i) {
 		case protecting:
 			return true
-		case acquiring:
+		case interruptible:
 			return false
 		}
 	}
@@ -99,7 +99,7 @@ func (t *Task) Mask() Mask {
 // requested while it was open is observed at the next poll, unless an outer
 // region is still open.
 func (m Mask) Unmask() {
-	if int(m.t.regions.n) <= m.index {
+	if m.t.regions.n <= m.index {
 		panic("rt: Unmask without Mask")
 	}
 	m.t.regions.truncate(m.index)

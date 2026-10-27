@@ -89,13 +89,18 @@ func TestRegionKinds(t *testing.T) {
 	if !root.Stopped() || shield() {
 		t.Fatal("an empty stack must be interruptible and must not shield")
 	}
+	a0 := root.acquire() // an ordinary Acquire, outside any cleanup
+	if root.Stopped() || shield() {
+		t.Fatal("an ordinary acquisition must mask the task and must not shield its children")
+	}
+	root.regions.truncate(a0)
 	m := root.Mask() // a defer body or a release
 	if root.Stopped() || !shield() {
 		t.Fatal("a protecting region must mask and shield")
 	}
 	a := root.acquire() // Acquire's registration step inside it
-	if root.Stopped() || shield() {
-		t.Fatal("an acquiring region must mask and must not shield")
+	if root.Stopped() || !shield() {
+		t.Fatal("an acquisition inside a cleanup must mask and keep the cleanup's shield")
 	}
 	m.Interruptible(func() {
 		// The restore takes the state outside m: unmasked.
@@ -103,8 +108,13 @@ func TestRegionKinds(t *testing.T) {
 			t.Error("a restore of an outermost region did not unmask")
 		}
 		if shield() {
-			t.Error("the nearest non-restore region is the acquisition, which must not shield")
+			t.Error("a restore entry must not shield")
 		}
+		ra := root.acquire()
+		if root.Stopped() || shield() {
+			t.Error("an acquisition inside a restore must mask and stay cancellable")
+		}
+		root.regions.truncate(ra)
 		inner := root.Mask()
 		if root.Stopped() || !shield() {
 			t.Error("a release inside a restore inside an acquisition did not protect")
@@ -118,8 +128,8 @@ func TestRegionKinds(t *testing.T) {
 	})
 	root.regions.truncate(a)
 	m.Interruptible(func() {
-		if !root.Stopped() || !shield() {
-			t.Error("a child started in a restore of a protecting region lost its shield")
+		if !root.Stopped() || shield() {
+			t.Error("a restore of a protecting region must unmask and must not shield: it is an explicitly interruptible region")
 		}
 		nested := root.Mask()
 		deeper := root.Mask()
@@ -171,8 +181,8 @@ func TestDeepRegionNesting(t *testing.T) {
 		masks = append(masks, root.Mask())
 	}
 	_ = root.acquire() // innermost, in the overflow slice
-	if root.Stopped() || root.regions.shields() {
-		t.Fatal("the innermost acquiring region must mask without shielding")
+	if root.Stopped() || !root.regions.shields() {
+		t.Fatal("the innermost acquisition must mask and keep the enclosing cleanup's shield")
 	}
 	inner := masks[len(masks)-1]
 	inner.Interruptible(func() {
@@ -182,7 +192,7 @@ func TestDeepRegionNesting(t *testing.T) {
 			t.Error("a deep restore took the wrong outside state")
 		}
 	})
-	if root.regions.shields() {
+	if root.regions.top != acquiring {
 		t.Fatal("the restore entry was not popped")
 	}
 	masks[inlineRegions].Unmask()
