@@ -52,7 +52,7 @@ type Breaker machine[State, Signal] {
 	step    step
 }
 
-func guard(b actor.Machine[State, Signal, string, ProbeDown]) (Decision[State, string], error[actor.Stopped | actor.NoReply]) {
+func guard(b actor.MachineActor[State, Signal, string, ProbeDown]) (Decision[State, string], error[actor.Stopped | actor.NoReply]) {
 	return try b.Ask(Retry{}) catch { case ProbeDown: Reject{} }
 }
 

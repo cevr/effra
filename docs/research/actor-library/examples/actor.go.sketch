@@ -1,34 +1,46 @@
 // Label: Proposed. The std `actor` package as ordinary Effra library code, in
 // the provisional generic spelling of docs/spec/types.md (#135). Hand-lowered
-// in prototypes/actorlib (actor.go, machine.go, agent.go). Every feature it
-// uses is a general one; the ones docs/spec does not have yet are Gaps A1-A9
-// in docs/research/actor-library.md. No compiler rule names this package.
+// in prototypes/actorlib (actor.go, machine.go, agent.go, snapshot.go). Every
+// feature it uses is a general one; the ones docs/spec does not have yet are
+// Gaps A1-A12 in docs/research/actor-library.md. No compiler rule names this
+// package. Every function result is `T`, `error[E]` or `(T, error[E])`
+// (grammar.md, Declarations rule 5).
 package actor
 
 import "sync"
 
-// Stopped: the actor refused or discarded the request because it was
-// stopping or had ended.
+// Stopped: the actor refused or discarded the request because its stop was
+// requested or it had ended.
 type Stopped struct{}
 
 // NoReply: the actor dequeued the request, then released its reply
 // unanswered while it was running.
 type NoReply struct{}
 
+// Refusal is the answer of a reply released unanswered.
+type Refusal interface{ Stopped | NoReply }
+
 // Reply is a one-shot reply address carried in a message. It has Close, so it
 // is a resource (R1): a dropped reply is released at its owner's scope end,
 // and its release answers the caller.
+//
+// The slot is a channel of outcomes, and an outcome may hold a resource. The
+// asker and the reply share the slot. Under the channel rule (Gap A3), the
+// buffer owns a value in flight and the release of the slot's last owner
+// releases it, so an answer nobody can receive, because the asker detached,
+// is released exactly once. A value nobody can receive is released.
 type Reply[T, E] struct {
 	slot chan Exit[T, E | Stopped | NoReply] // capacity 1 (Gap A7: Exit)
 	from control
 }
 
 // Send answers with v. Its body consumes r, so Send consumes r (Gap A1), and
-// a second answer is a use after consume (R20).
+// a second answer is a use after consume (R20). v leaves the actor's task, so
+// it is a copy (runtime.md Tasks rule 6; Gap A11).
 func (r Reply[T, E]) Send(v T) {
 	select {
 	case r.slot <- Succeed(v):
-	default:
+	default: // answered already: v stays in Send's scope, which releases it (R5)
 	}
 	r.Close() // the answer is buffered or taken, so this refusal is never read
 }
@@ -42,8 +54,8 @@ func (r Reply[T, E]) Fail(e E) {
 	r.Close()
 }
 
-// Close answers an unanswered request: Stopped while the actor stops,
-// NoReply while it runs.
+// Close answers an unanswered request: Stopped once the stop is requested,
+// NoReply while the actor runs.
 func (r Reply[T, E]) Close() {
 	select {
 	case r.slot <- Fail(r.from.refusal()):
@@ -61,7 +73,12 @@ type Address[M] struct {
 
 // Send admits m, waiting while the mailbox is full. It moves m (Gap A1): on
 // success into the mailbox, on failure into Send's own scope, which releases
-// it, so a reply inside m is answered.
+// it, so a reply inside m is answered. m crosses into the actor's task, so a
+// value with no resource copies (runtime.md Tasks rule 6; Gap A11).
+//
+// Admission is linearizable with the stop: Stop closes admission before it
+// interrupts, under the exclusive lock, so after the stop is requested no
+// Send succeeds.
 func (a Address[M]) Send(m M) error[Stopped] {
 	admit := a.control.admission.RLock() // a held lock is a resource: released at scope end
 	if a.control.closed.Load() {
@@ -76,11 +93,13 @@ func (a Address[M]) Send(m M) error[Stopped] {
 }
 
 // Ask builds a message around a fresh reply address and waits for the
-// answer. T and E come from request's parameter type alone.
+// answer. T and E come from request's parameter type alone. The receive is
+// an interruption point: a stopped caller detaches, Ask's scope releases its
+// share of the slot, and a late answer is released by the reply's (A3).
 func Ask(to Address[M], request func(Reply[T, E]) M) (T, error[E | Stopped | NoReply]) {
 	slot := make(chan Exit[T, E | Stopped | NoReply], 1)
 	try to.Send(request(Reply[T, E]{slot, to.control}))
-	return (<-slot).Get() // an interruption point: a stopped caller detaches
+	return (<-slot).Get()
 }
 
 // Next is a handler's decision (Gleam OTP actor.continue and actor.stop).
@@ -99,9 +118,14 @@ type Actor[M, E] struct {
 	task    Task[struct{}, E]
 }
 
-func (a Actor[M, E]) Address() Address[M]          { return a.address }
-func (a Actor[M, E]) Send(m M) error[Stopped]      { return a.address.Send(m) }
-func (a Actor[M, E]) Stop() error[E]               { return a.task.Stop() } // Gap A9
+func (a Actor[M, E]) Address() Address[M]     { return a.address }
+func (a Actor[M, E]) Send(m M) error[Stopped] { return a.address.Send(m) }
+
+// Stop closes admission, then stops the task and waits (Gap A9).
+func (a Actor[M, E]) Stop() error[E] {
+	a.address.control.close()
+	return a.task.Stop()
+}
 
 // Start runs handle over a mailbox of the given capacity. handle escapes into
 // the actor's task, and its requirements R are charged here, where they are
@@ -117,8 +141,8 @@ func Start(initial S, capacity int64, handle func(S, M) (Next[S], error[E]) uses
 func serve(s S, mailbox chan M, c control, handle func(S, M) (Next[S], error[E]) uses R) error[E] uses R {
 	defer drain(mailbox, c) // runs masked (I2) on every exit
 	for {
-		m := <-mailbox             // an interruption point
-		next := try handle(s, m)   // moves s and m into handle (Gap A5)
+		m := <-mailbox           // an interruption point
+		next := try handle(s, m) // moves s and m into handle (Gap A5)
 		if next.End {
 			return
 		}
@@ -126,8 +150,10 @@ func serve(s S, mailbox chan M, c control, handle func(S, M) (Next[S], error[E])
 	}
 }
 
-// drain refuses admission, then releases every queued message, so a queued
-// request is answered Stopped.
+// drain closes admission, then releases every queued message, so a queued
+// request is answered Stopped. Each release runs even when an earlier one
+// panicked, and the exit keeps every defect in order (R9); s is released
+// after the queue by serve's own scope end.
 func drain(mailbox chan M, c control) {
 	c.close()
 	for {
@@ -147,29 +173,46 @@ type control struct {
 	task      TaskID
 }
 
-func (c control) refusal() Stopped | NoReply { /* Stopped once the actor stops, else NoReply */ }
-func (c control) close()                      { /* raise stopping, then fence admission */ }
+// refusal is Stopped once the stop is requested or the actor ended, else
+// NoReply.
+func (c control) refusal() Refusal { /* reads closed and the task's stop request */ }
+
+// close raises stopping, which wakes waiting senders, then takes admission
+// exclusively once and sets closed.
+func (c control) close() { /* idempotent */ }
 
 // Machine-backed actors: ordinary code over Start.
 
-type envelope[S, E, O, F] interface{ event[S, E, O, F] | snapshot[S] }
+// Machine is the type of a machine value (Gap A12). `type Breaker
+// machine[State, Signal] { initial …; step step }` declares a value of type
+// Machine[State, Signal, string, ProbeDown, Probe]: the output O, failure row
+// F and requirement row R are read from step's signature, as Go infers type
+// arguments. A function-typed field carries its rows, so StartMachine sees
+// step's whole signature through ordinary generics.
+type Machine[S, E, O, F, R] struct {
+	initial S
+	step    func(S, E) (Decision[S, O], error[F]) uses R
+}
+
+type envelope[S, E, O, F] interface{ event[S, E, O, F] | stateQuery[S] }
 
 type event[S, E, O, F] struct {
 	ev    E
 	reply Option[Reply[Decision[S, O], F]] // None for Send
 }
 
-type snapshot[S] struct{ reply Reply[S] }
+type stateQuery[S] struct{ reply Reply[S] }
 
-type Machine[S, E, O, F] struct{ actor Actor[envelope[S, E, O, F], F] }
+// MachineActor is the owner handle of a machine-backed actor.
+type MachineActor[S, E, O, F] struct{ actor Actor[envelope[S, E, O, F], F] }
 
-// Start over a machine value. The step's rows pass through: its failure row
-// F goes to the asker, and its requirements R are charged here.
-func StartMachine(m machine[S, E], capacity int64) Machine[S, E, O, F] uses R {
-	return Machine[S, E, O, F]{Start(m.initial, capacity, func(s S, msg envelope[S, E, O, F]) (Next[S], error[F]) {
+// StartMachine runs m. The step's rows pass through: its failure row F goes
+// to the asker, and its requirements R are charged here.
+func StartMachine(m Machine[S, E, O, F, R], capacity int64) MachineActor[S, E, O, F] uses R {
+	return MachineActor[S, E, O, F]{Start(m.initial, capacity, func(s S, msg envelope[S, E, O, F]) (Next[S], error[F]) uses R {
 		switch msg := msg.(type) {
-		case snapshot[S]:
-			msg.reply.Send(s)
+		case stateQuery[S]:
+			msg.reply.Send(s) // a copy: Send copies v (Gap A11)
 			return Continue(s)
 		case event[S, E, O, F]:
 			d := m.step(s, msg.ev) catch e {
@@ -191,58 +234,84 @@ func StartMachine(m machine[S, E], capacity int64) Machine[S, E, O, F] uses R {
 	})}
 }
 
-func (b Machine[S, E, O, F]) Send(e E) error[Stopped] {
+func (b MachineActor[S, E, O, F]) Send(e E) error[Stopped] {
 	return b.actor.Send(event[S, E, O, F]{e, None})
 }
 
-func (b Machine[S, E, O, F]) Ask(e E) (Decision[S, O], error[F | Stopped | NoReply]) {
+func (b MachineActor[S, E, O, F]) Ask(e E) (Decision[S, O], error[F | Stopped | NoReply]) {
 	return Ask(b.actor.Address(), func(r Reply[Decision[S, O], F]) envelope[S, E, O, F] {
 		return event[S, E, O, F]{e, Some(r)}
 	})
 }
 
-func (b Machine[S, E, O, F]) State() (S, error[Stopped | NoReply]) {
-	return Ask(b.actor.Address(), func(r Reply[S]) envelope[S, E, O, F] { return snapshot[S]{r} })
+func (b MachineActor[S, E, O, F]) State() (S, error[Stopped | NoReply]) {
+	return Ask(b.actor.Address(), func(r Reply[S]) envelope[S, E, O, F] { return stateQuery[S]{r} })
 }
 
-func (b Machine[S, E, O, F]) Stop() error[F] { return b.actor.Stop() }
+func (b MachineActor[S, E, O, F]) Stop() error[F] { return b.actor.Stop() }
 
-// Agents: calls on a state value. The reply is the call's return value, so
-// every admitted call is answered once by construction, with no Reply
-// resource. f has no `uses` row: a detached caller's call may still run after
-// the caller's `with` has released its providers.
+// Agents: calls on a state value. The protocol is the state's methods, which
+// take a lent *S receiver: `func (r *Room) Join(name string) (int64,
+// error[RoomFull])`. One Call takes a function literal on the lent state.
 
+// call is f bound to its caller's slot. Close makes a call a resource: the
+// drain releases a queued call, which answers its caller Stopped without
+// running it, and the handler releases every call it ran, which answers
+// nothing after run answered and NoReply after a defect in f.
 type call[S] struct {
-	run    func(s S) S
+	run    func(s *S)
 	refuse func()
 }
 
-// Close makes a call a resource: the drain releases a queued call, which
-// answers its caller Stopped without running it.
 func (c call[S]) Close() { c.refuse() }
 
-type Agent[S] struct{ actor Actor[call[S]] }
+// Agent is the owner handle; AgentAddress is its copyable half.
+type Agent[S] struct{ actor Actor[call[S]] } // an empty failure row (Gap A6)
+type AgentAddress[S] struct{ address Address[call[S]] }
+
+func (a Agent[S]) Address() AgentAddress[S] { return AgentAddress[S]{a.actor.Address()} }
+func (a Agent[S]) Stop()                    { a.actor.Stop() }
 
 func StartAgent(initial S, capacity int64) Agent[S] {
-	return Agent[S]{Start(initial, capacity, func(s S, c call[S]) Next[S] { return Continue(c.run(s)) })}
+	return Agent[S]{Start(initial, capacity, func(s S, c call[S]) Next[S] {
+		c.run(&s) // lends s to f for the call (types.md Borrows)
+		return Continue(s)
+	})}
 }
 
-func Call(a Agent[S], f func(S) (S, T, error[E])) (T, error[E | Stopped | NoReply]) {
+// Call runs f on the agent's state, in mailbox order, and returns f's value
+// or its typed failure. f borrows the state: it may change it in place, and
+// a failure does not roll back what f changed before it failed. f cannot keep
+// the borrow: `*S` is not a result type, a field type or an element type, and
+// a borrow is never stored, returned, sent or captured by `go` (types.md
+// Borrows rules 1 and 4) or by an escaping closure (R17, R33); a
+// non-escaping closure inside f may use it for the duration of its call
+// (R30).
+//
+// f has an empty `uses` row: a detached caller's call may still run after the
+// caller's `with` has released its providers. An empty row is not purity: f
+// may wait on a channel or a timer. It runs on the agent's task, so each wait
+// is an interruption point of the agent (I1), and Stop interrupts it; the
+// caller then gets Stopped. f's result leaves the agent's task, so it is a
+// copy, never an alias of the state (Gap A11).
+func Call(a AgentAddress[S], f func(s *S) (T, error[E])) (T, error[E | Stopped | NoReply]) {
 	slot := make(chan Exit[T, E | Stopped | NoReply], 1)
-	refuse := func() {
+	answer := func(x Exit[T, E | Stopped | NoReply]) {
 		select {
-		case slot <- Fail(Stopped{}):
-		default:
+		case slot <- x:
+		default: // answered already: x is released here (R5)
 		}
 	}
-	try a.actor.Send(call[S]{refuse: refuse, run: func(s S) S {
-		next, v := f(s) catch e {
-			case E:
-				slot <- Fail(e)
-				return s
-		}
-		slot <- Succeed(v)
-		return next
-	}})
+	try a.address.Send(call[S]{
+		run: func(s *S) {
+			v := f(s) catch e {
+				case E:
+					answer(Fail(e))
+					return
+			}
+			answer(Succeed(v))
+		},
+		refuse: func() { answer(Fail(a.address.control.refusal())) },
+	})
 	return (<-slot).Get()
 }
