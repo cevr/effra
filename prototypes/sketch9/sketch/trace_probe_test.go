@@ -111,9 +111,6 @@ func main() {
 // never calls two reasons equal: two distinct values that no traced point
 // raised get the same answer as equal ones (the fourth review's m1).
 func TestKernelEqualFailureProbes(t *testing.T) {
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("no go tool")
-	}
 	root := kernelRoot(t)
 	c, src := loadFile(t, "../testdata/trace/two-calls.sketch")
 	m := NewModel(c)

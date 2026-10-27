@@ -10,18 +10,15 @@ import (
 	"strings"
 )
 
-// KernelRootEnv names the environment variable that gives the kernel tests
-// the repository root, the checkout whose runtime/rt kernel mode links. The
-// gate sets it. Unset, the kernel tests skip and say so; set, any problem with
-// the root fails them. The tests never guess the root from the directory
-// layout. Prior art: Cargo gives tests CARGO_MANIFEST_DIR, and Go's own tests
-// ask the go tool (internal/testenv).
+// KernelRootEnv names the environment variable that gives the repository
+// root, the checkout whose runtime/rt kernel mode links. The root is always
+// given, never discovered: sketchc build -rt kernel takes -rtroot DIR, or
+// this variable when the flag is absent, and refuses to build with neither;
+// the kernel tests take this variable, which the gate sets. Unset, the kernel
+// tests skip and say so; set, every problem fails them. Prior art: Go's -C
+// and Cargo's --manifest-path take the path explicitly, and discovery is
+// where both tools carry their edge cases.
 const KernelRootEnv = "ERGO_REPO_ROOT"
-
-// SketchModule is sketch9's own module. It is nested inside the repository,
-// so a lookup that starts inside sketch9 passes over it to the module that
-// holds runtime/rt.
-const SketchModule = "effra.local/sketch9"
 
 // KernelRoot checks that dir is a checkout kernel mode can link and returns
 // its absolute path: a directory whose go.mod, as Go's own parser reads it,
@@ -74,36 +71,6 @@ func ModulePath(gomod string) (string, error) {
 		return "", fmt.Errorf("%s declares no module", gomod)
 	}
 	return file.Module.Path, nil
-}
-
-// EnclosingModule returns the go.mod of the module that contains dir, as the
-// go tool finds it (go env GOMOD), passing over sketch9's own module; found
-// is false when no module contains dir. dir's symbolic links are resolved
-// first, so a link that enters a checkout below its root still finds it.
-func EnclosingModule(dir string) (gomod string, found bool, err error) {
-	dir, err = filepath.EvalSymlinks(dir)
-	if err != nil {
-		return "", false, err
-	}
-	for {
-		out, err := goTool(dir, "env", "GOMOD")
-		if err != nil {
-			return "", false, err
-		}
-		gomod := strings.TrimSpace(string(out))
-		if gomod == "" || gomod == os.DevNull {
-			return "", false, nil
-		}
-		mod, err := ModulePath(gomod)
-		if err != nil || mod != SketchModule {
-			return gomod, true, err
-		}
-		parent := filepath.Dir(filepath.Dir(gomod))
-		if parent == filepath.Dir(gomod) {
-			return "", false, nil
-		}
-		dir = parent
-	}
 }
 
 // goTool runs the go tool in dir and returns its standard output, or an error

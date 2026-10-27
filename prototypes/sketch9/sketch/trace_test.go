@@ -473,9 +473,6 @@ func TestQueryTraceLabelsCandidates(t *testing.T) {
 // The timeout example built in kernel mode records nothing by default, and a
 // recorded run answers "why did this time out" with the deadline and sites.
 func TestKernelTimeoutTrace(t *testing.T) {
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("no go tool")
-	}
 	root := kernelRoot(t)
 	c, src := loadFile(t, "../testdata/trace/timeout.sketch")
 	code, err := EmitWith(c, Options{Kernel: true, Revision: Revision(src)})
@@ -541,9 +538,6 @@ func TestKernelTimeoutTrace(t *testing.T) {
 // masked, and only the handler lines and what they caught are compared: the
 // facts under a deadline depend on whether the child reached its sleep.
 func TestKernelProbeTraces(t *testing.T) {
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("no go tool")
-	}
 	root := kernelRoot(t)
 	seq := regexp.MustCompile(`seq \d+`)
 	for _, tc := range []struct {
