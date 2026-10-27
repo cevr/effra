@@ -55,22 +55,21 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 			sizes[i] = len(u.Variants)
 		}
 	}
-	var matrix [][]int
-	solver := newMatrixSolver(sizes)
-	if c.silent == 0 {
-		defer func() { c.totalitySteps = append(c.totalitySteps, solver.steps) }()
-	}
+	// The case rows, resolved once, in source order: rowOf[clause][item]
+	// is nil for a case that does not resolve (reported).
 	hasDefault := false
 	patternsOK := valid
-	for _, cl := range s.Clauses {
-		var tuples [][]int
+	rowOf := make([][][]int, len(s.Clauses))
+	var all [][]int
+	for ci, cl := range s.Clauses {
 		if cl.List == nil {
 			if hasDefault {
 				c.errorf(cl, CodeType, "a switch has at most one default")
 			}
 			hasDefault = true
 		}
-		for _, item := range cl.List {
+		rowOf[ci] = make([][]int, len(cl.List))
+		for ii, item := range cl.List {
 			var elts []syntax.Expr
 			if n == 1 {
 				elts = []syntax.Expr{item}
@@ -96,16 +95,44 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 				}
 				row[j] = idx
 			}
-			if !ok {
+			if ok {
+				rowOf[ci][ii] = row
+				all = append(all, row)
+			}
+		}
+	}
+	// The solver sees the columns in a structural order, so its steps and
+	// its verdicts do not depend on the order the subjects are written in
+	// (round-3 M2): perm[k] is the subject at canonical column k.
+	perm := canonicalColumns(all, sizes)
+	csizes := make([]int, n)
+	for k, j := range perm {
+		csizes[k] = sizes[j]
+	}
+	canon := func(row []int) []int {
+		out := make([]int, n)
+		for k, j := range perm {
+			out[k] = row[j]
+		}
+		return out
+	}
+	// Reachability follows source order: a case is unreachable when the
+	// cases before it cover it.
+	useful := newMatrixSolver(csizes)
+	var matrix [][]int
+	for ci, cl := range s.Clauses {
+		var tuples [][]int
+		for ii, item := range cl.List {
+			row := rowOf[ci][ii]
+			if row == nil {
 				continue
 			}
-			// Past the budget a case is kept unjudged; the switch is then
-			// refused unless it has default.
-			if useful, ok := solver.caseUseful(matrix, row); ok && !useful {
+			crow := canon(row)
+			if u, ok := useful.caseUseful(matrix, crow); ok && !u {
 				c.errorf(item, CodeType, "this case is already covered by the cases before it (unreachable)")
 				continue
 			}
-			matrix = addRow(matrix, row)
+			matrix = addRow(matrix, crow)
 			tuples = append(tuples, row)
 		}
 		inner := c.openScope()
@@ -139,24 +166,40 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 			c.errorf(s.Binds[j], CodeUnused, "the type-switch binding %s is read in no case; write _ (rows.md, Totality 1)", s.Binds[j].Name)
 		}
 	}
-	if !valid || !patternsOK {
-		// Already reported: the switch counts as total, so no missing
-		// return or totality diagnostic follows from it (D3).
+	// Totality is decided over the set of all case rows, canonically
+	// ordered, by a solver of its own: its steps and verdict depend on
+	// neither the subjects' order nor the cases' order (round-3 M2).
+	total := newMatrixSolver(csizes)
+	var set [][]int
+	if valid && patternsOK && !hasDefault {
+		for _, row := range all {
+			set = addMaximal(set, canon(row))
+		}
+	}
+	w, missing, ok := total.total(set)
+	if c.silent == 0 {
+		c.totalitySteps = append(c.totalitySteps, total.steps)
+		c.usefulSteps = append(c.usefulSteps, useful.steps)
+	}
+	if useful.over {
+		// A case whose reachability is unproven is never accepted.
+		c.errorAt(s.Switch, s.Switch+6, CodeNotTotal, "too many cases to prove which cases of this switch are reachable; split it (rows.md, Totality 5)")
 		c.totalSwitch[s] = true
 		return
 	}
-	if hasDefault {
+	if !valid || !patternsOK || hasDefault {
+		// Already reported, or total by default: the switch counts as
+		// total, so no missing return or totality diagnostic follows (D3).
 		c.totalSwitch[s] = true
 		return
 	}
-	w, missing, ok := solver.total(matrix)
 	switch {
 	case !ok:
 		c.errorAt(s.Switch, s.Switch+6, CodeNotTotal, "too many cases to prove this switch total; split it or add default (rows.md, Totality 5)")
 	case missing:
-		parts := make([]string, len(w))
-		for j, idx := range w {
-			parts[j] = unions[j].Variants[idx].String()
+		parts := make([]string, n)
+		for k, idx := range w {
+			parts[perm[k]] = unions[perm[k]].Variants[idx].String()
 		}
 		what := parts[0]
 		if n > 1 {
@@ -185,7 +228,9 @@ func (c *checker) caseVariant(e syntax.Expr, u *Union, subj Type) int {
 				return i
 			}
 		}
-		c.errorf(e, CodeType, "%s is not a variant of %s (rows.md, Totality 1)", n.Obj.Name, subj)
+		if !u.Bad {
+			c.errorf(e, CodeType, "%s is not a variant of %s (rows.md, Totality 1)", n.Obj.Name, subj)
+		}
 		return -2
 	}
 	for i, v := range u.Variants {
@@ -193,12 +238,14 @@ func (c *checker) caseVariant(e syntax.Expr, u *Union, subj Type) int {
 			return i
 		}
 	}
-	c.errorf(e, CodeType, "%s is not a variant of %s (rows.md, Totality 1)", t, subj)
+	if !u.Bad {
+		c.errorf(e, CodeType, "%s is not a variant of %s (rows.md, Totality 1)", t, subj)
+	}
 	return -2
 }
 
-// totalityBudget bounds the solver steps one switch may take to decide its
-// cases' usefulness and its totality (D16 as amended in round 3). A step is
+// totalityBudget bounds the steps of each of a switch's two solvers, one for
+// its cases' reachability and one for its totality (D16 as amended in round 3; round-3 M2). A step is
 // one residual matrix the solver splits, weighted by its number of rows, so
 // the bound holds the work, not only the count, to a fixed amount.
 // Deciding totality over several subjects is NP-complete in the worst case
@@ -557,4 +604,16 @@ func addRow(rows [][]int, row []int) [][]int {
 		}
 	}
 	return append(out, row)
+}
+
+// addMaximal adds row to a set of maximal rows: nothing when a row of the
+// set already subsumes it, else the row in place of those it subsumes. The
+// result is the maximal rows of everything added, in any order of adding.
+func addMaximal(rows [][]int, row []int) [][]int {
+	for _, r := range rows {
+		if subsumes(r, row) {
+			return rows
+		}
+	}
+	return addRow(rows, row)
 }

@@ -102,6 +102,9 @@ type Method struct {
 // Union is a closed set of struct variants.
 type Union struct {
 	Variants []Type
+	// Bad: a variant failed to resolve (reported), so a case that names no
+	// listed variant may name the lost one: no case diagnostic follows (D3).
+	Bad bool
 }
 
 // MachineType is a `machine[S, E]` declaration's type.

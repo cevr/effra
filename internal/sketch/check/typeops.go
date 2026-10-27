@@ -50,7 +50,7 @@ func (c *checker) subst(t Type, m map[*TypeParam]Type) Type {
 		}
 		return it
 	case *Union:
-		u := &Union{Variants: make([]Type, len(t.Variants))}
+		u := &Union{Variants: make([]Type, len(t.Variants)), Bad: t.Bad}
 		for i, v := range t.Variants {
 			u.Variants[i] = c.subst(v, m)
 		}

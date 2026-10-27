@@ -76,7 +76,12 @@ type checker struct {
 	// totalitySteps records the solver steps of each type switch reported
 	// (not silent), in check order: the deterministic cost the tests bound.
 	totalitySteps []int
-	mono          monoState // the instantiation graph (instantiation cycles)
+	// usefulSteps records the steps of each switch's reachability checks.
+	usefulSteps []int
+	// bodyEdges counts the edges of the body graph: linear in the source
+	// (round-3 M5), and bounded by a test.
+	bodyEdges int
+	mono      monoState // the instantiation graph (instantiation cycles)
 
 	errorTypes map[*Named]syntax.Pos // origin error types named in an error row of this package
 	funcs      []*Func               // every package function and method, in source order
