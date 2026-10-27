@@ -115,7 +115,7 @@ Status: **designed, not yet implemented** ([#69](https://github.com/cevr/effra/i
 
 1. `tasks.Set(policy)` owns an unbounded number of tasks and drops finished ones. It is a resource, owned by a function or a provider.
 2. The policy is fail-fast, `tasks.LogFailures`, or restart with a `schedule`: `tasks.Restart(schedule.Exponential(1s).UpTo(5))`.
-3. `Set.Go` takes a `func` literal, because the Set keeps it after `Go` returns. The literal escapes, so it may capture a resource only under the structured-lend rule: the Set must be released before the resource ([resources.md](resources.md#closures)). In `set.Go(func() { actor.Pump(b, signals) })`, `set` must be declared after `b` in the same scope, and `b.Stop()` while `set` may still run the literal is an error.
+3. `Set.Go` takes a `func` literal, because the Set keeps it after `Go` returns. The literal escapes, so it may capture a resource only under the structured-lend rule: the Set must be released before the borrow of the resource ends ([resources.md](resources.md#closures)). In `set.Go(func() { actor.Pump(b, signals) })`, when `set` and `b` are bound in the same scope, `set` must be declared after `b`. Other owner arrangements follow R27 and R31: for example, a `set` bound inside a `with` block nested in `b`'s scope is released first and qualifies. In every arrangement, `b.Stop()` while `set` may still run the literal is an error.
 4. A restart policy needs a reusable factory that captures no moved resource. A connection moved into its handler cannot restart, so such a Set uses `tasks.LogFailures`.
 5. *Prior art:* Erlang/OTP `one_for_one` supervisors restart from the child specification; Effect `FiberSet` and `Supervisor`; Go has neither.
 
