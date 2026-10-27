@@ -1,6 +1,6 @@
 # Ergo
 
-**A Go-shaped language that compiles to plain Go. It is designed to check the guarantees that large Go programs keep only by convention.** The guarantees come from [Effect](https://effect.website), the TypeScript library: typed errors, tracked dependencies, safe resources, structured concurrency with interruption, every failure cause kept, built-in tracing and testable time. Ergo's design puts them in the language: the compiler checks them and then erases them, so a checked row adds no wrapper type and no run-time cost.
+**An experimental Go-shaped language that compiles to plain Go. It is designed to check the guarantees that large Go programs keep only by convention.** The guarantees are typed errors, declared dependencies, resource safety, structured concurrency with cancellation, every failure cause kept, built-in tracing and observability, testable time, and laws. Ergo's design puts them in the language, where the compiler checks them (`ergo test` runs the laws). The compiler then erases the checked rows, so a row adds no wrapper type and no run-time cost.
 
 Ergo is a design and a prototype. The program below is the designed language. It parses and formats today, and most of its checks are designed, not built:
 
@@ -62,7 +62,7 @@ The "In Ergo" column is the design. The last column says what runs today.
 | Guarantee | What it means | In Go today | In Ergo | Runs today |
 | --- | --- | --- | --- | --- |
 | **Typed errors** | You can see every expected failure of a function, and the compiler knows which failures you handled. | `error` says only "something failed" | `error[NotFound \| Declined]`, exhaustive `catch` | prototype checker |
-| **Tracked dependencies** | You can see every service the caller must supply. A missing one is a compile error. | `context.Context` values, globals, constructor plumbing | `needs` rows, `wire … provides`, `with` | prototype checker: `needs` rows, closed wires |
+| **Declared dependencies** | You can see every service the caller must supply. A missing one is a compile error. | `context.Context` values, globals, constructor plumbing | `needs` rows, `wire … provides`, `with` | prototype checker: `needs` rows, closed wires |
 | **Resource safety** | Everything acquired is released once, on every exit: success, failure, panic or cancellation. | `defer`, if you remember it | release at scope end; moves and lends | release rules in `runtime/rt`; checks designed ([#197](https://github.com/cevr/ergo/issues/197)) |
 | **Structured concurrency** | No task outlives its scope. A stop reaches every child. A stop cannot cut cleanup short. | goroutines can leak; `context` is cooperative | scoped tasks, interruption points, masked release | task tree, stops and masks in `runtime/rt` |
 | **Every cause kept** | When several things fail, you get all of them, with defects kept apart from expected failures. | needs explicit aggregation (`errors.Join`) and recovery code | one cause with every failure, defect and interruption | designed; `runtime/rt` keeps defects, not yet every child failure |
@@ -70,7 +70,7 @@ The "In Ergo" column is the design. The last column says what runs today.
 | **Testable time and effects** | A test swaps any service, the clock included, with no mock framework. | interfaces and hand-written fakes | `replace` in a test wire; `testing.VirtualClock` | designed; `runtime/rt` has a virtual clock |
 | **Laws** | You state what must always hold, and every implementation is checked against it. | comments and example tests | `func LawX`, found like `TestX` | designed ([#162](https://github.com/cevr/ergo/issues/162)) |
 
-Ergo keeps Go's spelling, Go's runtime and garbage collector, and single static binaries built by `go build`. Effect delivers its guarantees as a runtime library of wrapper values. Ergo is designed to check them in the compiler and to emit ordinary Go, so a function is still a function and an error type still implements `error`.
+Ergo keeps Go's spelling, Go's runtime and garbage collector, and single static binaries built by `go build`. The compiler is designed to check the guarantees, erase them and emit ordinary Go, with no wrapper values, so a function is still a function and an error type still implements `error`.
 
 ---
 
@@ -128,7 +128,7 @@ func main() error[NotFound | Declined | DialFailed] needs Console {
 - `with` meets the needs of its block. A capability that nothing provides is a compile error that names it.
 - A service that a `with` inside the body supplies leaves the row: `main` calls `Checkout`, which needs `Orders` and `Payments`, yet `main`'s row lists only `Console`. The row is what remains for the caller, not every service the body touches. The footprint, every capability a body uses, is designed: the compiler will infer it and `ergo inspect` will show it ([rows](docs/spec/rows.md#footprints)).
 - A constructor's failures join the row of the `with` that builds it, so `main` lists `DialFailed`.
-- Prior art: Effect's `Layer<ROut, E, RIn>`, Roc's `provides` and `requires`, and Google Wire.
+- Prior art: Roc's `provides` and `requires`, and Google Wire.
 
 ### Tests replace providers, with no mock framework
 
@@ -365,7 +365,7 @@ These are rules of the designed language. The parser enforces the syntax rules t
 
 - [Specification](docs/spec/README.md): grammar, types, rows, resources, runtime, standard library and diagnostics.
 - [North star](NORTH_STAR.md): the seven pillars and how ties are broken.
-- [Prior art](PRIOR_ART.md): Effect, the source of the guarantees, and Go, Gleam, ReScript, Elixir, MoonBit, Borgo and others, with what Ergo takes from each.
+- [Prior art](PRIOR_ART.md): Effect, Go, Gleam, ReScript, Elixir, MoonBit, Borgo and others, with what Ergo takes from each.
 - [Glossary](GLOSSARY.md): every domain term.
 - [Roadmap](https://github.com/cevr/ergo/issues/1): the live Wayfinder map ([how it works](docs/wayfinder/README.md)).
 
