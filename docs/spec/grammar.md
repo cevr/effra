@@ -47,7 +47,7 @@ try       catch     uses      wire      machine
 ```
 
 - `goto` and `fallthrough` are removed: structured control flow and union switches replace them. `const` is removed because package-level `var` is immutable (see [Declarations](#declarations)). *Prior art:* Go's keyword set, minus the three forms Gleam, Rust and Swift also do without.
-- `try`, `catch`, `uses` and `wire` are constructs that the checker must know ([rows.md](rows.md)). `machine` declares a state machine ([runtime.md](runtime.md#machines-and-actors)). Constructs use keyword syntax; a dot form is always library (owner, 2026-10-12).
+- `try`, `catch`, `uses` and `wire` are constructs that the checker must know ([rows.md](rows.md)). `machine` declares a state machine ([runtime.md](runtime.md#machines-and-actors)). Constructs use keyword syntax; a dot form is always library (owner, 2026-10-12). `timeout.After` is therefore a library function, not a construct ([runtime.md](runtime.md#timeouts)).
 - **Contextual words.** `replace` (inside `wire`), `initial` and `step` (inside `machine`) are keywords only in those positions.
 - **Prototype status.** The prototype treats `package`, `import`, `type`, `struct`, `interface`, `func`, `return`, `if`, `else`, `switch`, `case`, `wire`, `uses`, `try` and `catch` as keywords. It reserves `break`, `chan`, `continue`, `default`, `defer`, `for`, `go`, `map`, `range`, `select` and `var`, so a program that uses them is S001. It also reserves `const`, `goto` and `fallthrough`, because its output is Go. It does not reserve `machine` (measured: `machine := "m"` checks).
 
@@ -111,7 +111,18 @@ WireEntry   = identifier "=" Expression .
 4. **Type declarations.** `type X struct {…}`, `type X interface { methods }` and `type X interface{ A | B }` are the prototype's three forms. An `interface` body is a union when its first entry is a name not followed by `(`. Designed: generic type parameters, `machine` types ([runtime.md](runtime.md#machines-and-actors)), struct embedding inside interfaces and `wire` only.
 5. **Functions and methods.** A function result is one of: nothing; a value type `T`; an error row alone, `error[E]`; or `(T, error[E])`. A receiver names a struct type declared in the package. Designed: several results, variadic parameters, `*T` receivers and parameters ([types.md](types.md#borrows)).
 6. **Package-level `var`.** Designed: a package-level `var` is immutable. There are no package-level mutable variables, no `init` function and no initialisation order to learn. *Prior art:* Gleam module constants, Rust `static` without `mut`.
-7. **Visibility.** Designed. README Gap 8 records the open choice between `pub` and Go's capitalisation.
+7. **Visibility.** See [Visibility](#visibility).
+
+## Visibility
+
+Status: **designed, not yet implemented**. The prototype compiles one file, so visibility does not arise there. Owner decision, 2026-10-27 (README Gap 8).
+
+1. A package-level name, a struct field or a method is **exported** when its first character is an upper-case letter (Unicode category Lu). Every other name is unexported.
+2. Another package may name only exported declarations, fields and methods. A composite literal in another package may set only exported fields, so a type with an unexported field can be built outside its package only through the functions its package exports (`ParseQuantity` for `Quantity{units}`).
+3. There is no `pub` keyword. The 2026-10-08 decision for explicit `pub` and `pub readonly` is superseded.
+4. Exported functions spell their rows ([rows.md](rows.md#capability-rows)).
+
+*Prior art:* Go exports by capitalisation, which this rule copies; Gleam, Rust and MoonBit use a `pub` keyword; Elixir uses `def` against `defp`. Effra takes Go's rule because it adds no keyword and every sketch already relies on it.
 
 ## Statements
 
@@ -152,6 +163,6 @@ WireLit     = "wire" WireBody .
 
 1. **`try` and `catch`** bind looser than every binary operator. `try e catch { … }` is one partial catch ([rows.md](rows.md#catch)). Designed: `catch e { … }` binds the caught error, and an arm holds statements.
 2. **Composite literals** are all keyed or all positional. Mixing them is an error (S001). Prototype: a composite literal needs a type name that starts with an upper-case ASCII letter, and it is not parsed in an `if` condition or a switch subject, as in Go.
-3. **Trailing blocks.** Prototype: only `with(…)` and `timeout.After(…)` take a trailing block. Designed: a final parameter of function type takes a trailing block at any call; such a block cannot escape the call ([types.md](types.md#function-values)). *Prior art:* Swift trailing closures, Kotlin trailing lambdas, Goose compile-time function values.
+3. **Trailing blocks.** Designed: a trailing block is notation for a function-literal argument. `f(a) { body }` is exactly `f(a, func() T { return body })`, where `T` and the literal's rows come from `f`'s final parameter type, and the block's last expression is the literal's result. It adds no checking of its own: the call is checked as the desugared call, and the block is non-escaping unless the parameter type says otherwise ([types.md](types.md#function-values)). `with(…) { … }` is the one construct that also takes a block; its block is part of the construct. Prototype: only `with(…)` and `timeout.After(…)` take a trailing block, and `timeout.After` is recognised by name (README Gap 31). *Prior art:* Swift trailing closures and Kotlin trailing lambdas are the same notation over closure arguments; Goose compile-time function values.
 4. **Wire literals** appear only as the argument of `with` (S108 otherwise).
 5. **`go` expressions.** Designed: `go f(x)` and `go { … }` start a task and yield a `Task` ([runtime.md](runtime.md#tasks)).

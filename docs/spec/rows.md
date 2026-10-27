@@ -2,7 +2,7 @@
 
 Every function has two rows besides its result: an error row, `error[...]`, and a capability row, `uses`. The checker proves that each row is an upper bound on what the body can do. Rows are checked and then erased: the lowered Go has interfaces, structs, early returns and type switches. Definitions are in the [glossary](../../GLOSSARY.md).
 
-*Prior art:* Effect's `Effect<A, E, R>` tracks the same two rows as type parameters; Koka and OCaml 5 track effects in rows; Go tracks neither and threads `error` and `context.Context` by hand.
+*Prior art:* Effect's `Effect<A, E, R>` tracks the same two rows as type parameters; Koka types effects as rows and checks that each is handled; OCaml 5 has effect handlers but does not track effects in types, so an unhandled effect is a run-time exception; Go tracks neither and threads `error` and `context.Context` by hand.
 
 ## Error rows
 
@@ -29,7 +29,7 @@ func pay(id string) (string, error[OrderNotFound | GatewayDown]) uses Orders, Ga
    - `return v` where `v` is a value of an error type;
    - the unhandled rest of a partial `try e catch { … }`.
 
-   The failure target is the enclosing function, or the innermost `timeout.After` block. A `with` block is not a failure target: a `try` inside it escapes to the enclosing function.
+   The failure target is the innermost enclosing function or function literal. A trailing block is a function literal ([grammar.md](grammar.md#expressions)), so the block of `timeout.After` is a failure target; the prototype gives it that role by name (README Gap 31). A `with` block is part of a construct, not a function literal, so it is not a failure target: a `try` inside it escapes to the enclosing function.
 5. **Upper bound (S101).** Every error type that can escape a function must be in its declared row. A function with no row lets nothing escape. Returning a value of an error type from a function with no row is therefore S101 (fixture `error-as-value`).
 6. **Value of `try`.** `try e` has `e`'s success value, or no value when `e` has none. `try` on an expression that cannot fail is an error (S108).
 7. **Lowering.** `try f()` becomes `v, err := f(…); if err != nil { return zero, err }`. Error types implement Go's `error`; the row is checked and erased. *Prior art:* Borgo's tuple path for `?`; XGo's inline `expr?`; Rust's `?`; Gleam has no operator and uses `use` with `result.try`.
@@ -55,7 +55,7 @@ case OrderNotFound:
 1. **Arms.** `e catch { case T, U: v … }` handles failures of the fallible expression `e`. `catch` on an expression that cannot fail is an error (S108).
 2. Each type in an arm must be in `e`'s row (S108). A type may appear in only one arm (S108).
 3. **Value.** When `e` has a value of type `T`, each arm's value must be assignable to `T` (S108), and the catch expression has type `T`. When `e` has no value, an arm must have no value (S108). An arm's value whose own failure is not handled is S105.
-4. **Total catch (S103).** A `catch` without `try` must handle every error type in `e`'s row. *Prior art:* Rust and Gleam exhaustive `match` on an error enum; Swift `do`/`catch` without exhaustiveness lets a failure pass silently, which this rule forbids.
+4. **Total catch (S103).** A `catch` without `try` must handle every error type in `e`'s row. *Prior art:* Rust and Gleam exhaustive `match` on an error enum; Swift propagates an error that no `catch` clause matches to the enclosing scope, and a non-throwing function must handle every error; Effra's total catch is the same obligation stated per error type.
 5. **Partial catch.** `try e catch { … }` handles the named types and escapes the rest through `try`. The rest escapes to the enclosing failure target and is checked against its row (rules 4 and 5 of [Error rows](#error-rows); fixture `try … catch` in `sketch/sketch_test.go`, "partial catch under try still needs the rest declared", S101).
 6. **Typed failures only (README Gap 1).** A `catch` covers the typed row only. Interruption and defects are not in any row, and they always pass through a `catch`, total or partial. A total catch therefore has no default arm in source. Its lowering must still pass interruption and defects on; the prototype emits a default arm that re-panics with them.
 7. **Binding and statements (designed).** `catch e { case T: … }` binds the caught error, as `switch e := err.(type)` does; inside an arm with one type, `e` has that type. An arm may hold statements. When the `catch` is an expression, the arm's last statement is an expression that yields its value. `return` in an arm leaves the enclosing function, because an arm is not a block (README Gap 11).
@@ -69,7 +69,7 @@ Status: **implemented in prototype**.
 2. **Charges.** A body charges a capability when it:
    - calls a capability method, `A.m(…)`, which charges `A`;
    - calls a function whose row lists `A`;
-   - calls `timeout.After`, which charges `Scheduler`.
+   - calls `timeout.After`, whose signature lists `uses Scheduler` (the prototype charges it by name, README Gap 31).
 3. **Upper bound (S102).** Every capability a body charges must be in its `uses` clause or discharged by an enclosing `with`. A name in a `uses` clause must denote a capability (S104).
 4. **Entry.** `main` takes no parameters (S109) and cannot be called (S109). Prototype: its `uses` clause may list only `Console` (S102), and it returns nothing (S109). README Gaps 4 and 5 record the designed entry.
 5. **Names.** Designed: `uses http.Client` brings the bare name `Client` into scope for the body; when two packages export the same name, the body qualifies it. Prototype: in a selector `X.m`, a capability named `X` wins over a local named `X`, so such a local is never read (fixture `same-local-as-cap`, S110). Designed: declaring a local with the name of a capability in scope is an error.
@@ -98,13 +98,13 @@ wire Live {
 }
 ```
 
-1. **Entries.** A `wire` binds capabilities to providers, one entry per capability: `Cap = provider`. An entry naming a non-capability is S104. Wire names are unique (S108).
+1. **Entries.** A `wire` binds capabilities to providers, one entry per capability: `Cap = provider`. An entry naming a non-capability is S104. Wire names are unique (S108). A second entry for a capability in one wire, other than a `replace` of an embedded entry, is an error (S111, designed). Prototype: it accepts the second entry, and the later one wins (README Gap 28). *Prior art:* Google Wire rejects two providers of one type in a provider set.
 2. **Providers (S106).** A provider literal's type must implement every method of the capability: the same name, the same parameter types, the same result and the same fallibility. Each error type of a provider method must be in the capability method's row: a provider may fail less, never more. Prototype: `Scheduler` takes only `LiveScheduler{}`, `LiveScheduler{}` provides only `Scheduler`, and `Console` cannot be wired (all S106).
 3. **Inline wires.** `wire{ A = X{}; B = Y{} }` appears only as the argument of `with` (S108 elsewhere). Its provider expressions are evaluated in the enclosing function, before the block's discharge, so their requirements and failures charge the enclosing function. A provider expression does not see the capabilities of its own wire (fixture `wire-sibling`, S102); it sees those of an enclosing `with` (fixture `wire-order`).
 4. **Named wires.** A named wire is built by its own function at each `with` that names it, so its provider expressions do not see the caller's locals (fixture `named-wire-shadow`). Prototype: a named wire must be closed: its providers require no capability from the caller (S102) and let no failure escape (S101). It may use a capability it binds itself. Designed: README Gap 6.
 5. **Cycles.** A wire whose providers reach `with` of the same wire, directly or through called functions or provider methods, is an error (S109). The prototype follows every provider method of a called capability method's name, which over-approximates.
 6. **Constructors (designed).** An entry may name a constructor: `Orders = OpenPostgres`. A constructor is an ordinary function. Its `uses` row is satisfied from the same wire graph, and its error row joins the startup errors of every `with` that builds it. A constructor that returns a resource gives the wire its release ([resources.md](resources.md#wire)). *Prior art:* Effect `Layer.effect` and `Layer.scoped`; Google Wire's generated constructor with cleanups in reverse order.
-7. **Composition (designed).** A wire may embed another wire by name. `replace Cap = provider` overrides an embedded entry; a second entry for one capability without `replace` is an error. A shared node is built once per build, and each `with` is a new build. *Prior art:* Effect `Layer.merge`, `Layer.provide` and `Layer.fresh` (README Gap 22).
+7. **Composition (designed).** A wire may embed another wire by name. `replace Cap = provider` overrides an embedded entry; a second entry for one capability without `replace` is an error (S111). A shared node is built once per build, and each `with` is a new build. *Prior art:* Effect `Layer.merge`, `Layer.provide` and `Layer.fresh` (README Gap 22).
 
 ## With
 
@@ -117,7 +117,22 @@ local := with(wire{ Orders = MemoryOrders{} }) { report(id) }
 
 1. `with(W) { block }` takes one wire, named or inline, and a block (S108 otherwise). An unknown wire name is S104.
 2. Inside the block, every capability that `W` binds is discharged: a charge of that capability does not reach the enclosing function's row.
-3. An inner `with` that binds a capability shadows an outer binding of it for the inner block (fixture `wire-order`).
+3. **Nested `with`.** A `with` inside another keeps both scopes:
+   - the inner wire's provider expressions are evaluated in the outer scope, so they see the outer bindings;
+   - an inner entry shadows an outer binding of the same capability for the inner body only;
+   - each outer provider keeps its own startup errors and its own release at the end of the outer block, even when an inner entry shadows it.
+
+   Measured (fixture `wire-order`, output `outer inner`):
+
+   ```go
+   with(wire{ Store = Holder{Value: "outer"} }) {
+   	with(wire{ Store = Holder{Value: "inner"}; Box = Holder{Value: read()} }) {
+   		Console.Println(Box.Get(), Store.Get()) // read() saw the outer Store
+   	}
+   }
+   ```
+
+   Flattening the two into one wire `wire{ Store = Holder{"inner"}; Box = Holder{read()} }` changes the program: `read()` would need `Store` from its own wire, which is S102 (fixture `wire-sibling`).
 4. `with(wire{})` binds nothing and keeps the enclosing bindings (fixture `empty-wire`).
 5. The block's value is its last expression, which must be an expression statement (S109). `return` cannot leave the block (S109). Locals declared in the block are scoped to it.
 6. A `with` expression is fallible when its last expression is fallible. A failure that a `try` in the block escapes goes to the enclosing function. Designed: the startup errors of the wire's constructors join the `with` expression's row.
@@ -150,7 +165,9 @@ Status: **designed**. These laws state the algebra of the row constructs. Law te
 | `timeout.After(d) { b }` | `rows(b) ∪ {timeout.Expired}` | `uses(b) ∪ {Scheduler}` |
 
 1. **Wrapping.** Moving a body into a function `f` and calling `f()` changes no row, provided `f` declares the body's rows. Ordinary functions wrap every construct losslessly.
-2. **Nesting.** `with(W1) { with(W2) { b } }` equals a single `with` of `W1` overlaid by `W2`, where `W2`'s entries win.
-3. **Idempotence.** `with(W) { with(W) { b } }` has the rows of `with(W) { b }`.
-4. **Identity.** `with(wire{}) { b }` has the rows of `b`.
-5. **Catch subtraction.** A partial catch that names every type of `rows(e)` has the rows of the total catch.
+2. **Nesting keeps both scopes.** `with(W1) { with(W2) { b } }` is not, in general, one `with` of an overlaid wire: `W2`'s initializers see `W1`'s bindings, and `W1`'s providers keep their startup errors and releases ([With](#with), rule 3). The body `b` sees `W2`'s entries over `W1`'s.
+3. **Overlay is a law of wire declarations only.** `wire Test { Live; replace Orders = MemoryOrders{} }` is `Live` with the `Orders` entry replaced: the replaced constructor is never built, so its startup errors and release leave `Test`. *Prior art:* Effect's `Layer.provide` against `Layer.merge` keeps the same distinction between nesting and composition.
+4. **Capability rows of nesting.** In `with(W1) { with(W2) { b } }`, the body `b` has `binds(W1) ∪ binds(W2)` discharged. `W2`'s own needs are checked against `W1`'s bindings and the enclosing function, not against `W2`.
+5. **Row idempotence.** `with(W) { with(W) { b } }` has the rows of `with(W) { b }`. It still builds `W` twice, once per `with`.
+6. **Identity.** `with(wire{}) { b }` has the rows of `b`.
+7. **Catch subtraction.** A partial catch that names every type of `rows(e)` has the rows of the total catch.

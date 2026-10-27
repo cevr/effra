@@ -15,7 +15,9 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Package**: One unit of compilation, declared by `package name`, lowered to one Go package. The prototype compiles one file as the whole program.
 
-**Capability** (implemented in prototype): An interface with method signatures that names replaceable behaviour, such as `Orders` or `Clock`. Code reaches it only by calling its methods, and every call charges the capability to the caller's capability row. It is not a value. See [rows](docs/spec/rows.md#capability-rows).
+**Exported name** (designed; owner decision 2026-10-27): A package-level name, field or method whose first character is an upper-case letter. Only exported names are visible to other packages, as in Go. See [grammar](docs/spec/grammar.md#visibility).
+
+**Capability** (implemented in prototype): An interface with method signatures that names replaceable behaviour, such as `Orders` or `Clock`. Code reaches it only by calling its methods on the capability name, `Orders.Find(id)`, and every such call charges the capability to the caller's capability row. The capability is not a first-class value: it cannot be passed, returned or stored. The same interface in a type position is an ordinary interface type whose values are provider values; calling their methods charges no capability. See [types](docs/spec/types.md#capabilities) and [rows](docs/spec/rows.md#capability-rows).
 
 **Provider** (implemented in prototype for literals): A value whose type implements a capability's methods, bound to that capability by a `wire`. A provider may fail less than its capability, never more.
 
@@ -39,7 +41,7 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Escape** (implemented in prototype): The passage of a failure from an expression to its failure target, through `try`, a fallible `return`, a returned error value or the rest of a partial catch.
 
-**Failure target** (implemented in prototype): Where an escaping failure goes: the enclosing function, or the innermost `timeout.After` block. A `with` block is not a failure target.
+**Failure target** (implemented in prototype): Where an escaping failure goes: the innermost enclosing function or function literal. A trailing block is a function literal, so the block of `timeout.After` is one. A `with` block is not a failure target.
 
 **Try** (implemented in prototype): The keyword form `try e`, which yields `e`'s success value and escapes `e`'s failures.
 
@@ -83,7 +85,7 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Block**: A braced statement list. As the body of `with`, `timeout.After` or a trailing block, it yields its last expression, and `return` cannot leave it.
 
-**Trailing block** (implemented in prototype for `with` and `timeout.After`): A block written after a call's parentheses as its final, function-typed argument. It cannot escape the call.
+**Trailing block** (designed; the prototype has it only for `with` and, by name, `timeout.After`): A block written after a call's parentheses. It is notation for a function-literal final argument and adds no checking of its own. It cannot escape the call unless the parameter type says so. The block of `with` is part of that construct instead.
 
 **Non-escaping parameter** (designed): A function-typed parameter that the callee may call, or hand to a task the call consumes, but may not store, return or send.
 
@@ -93,15 +95,17 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Borrow** (designed): A `*T` parameter or receiver. It is never nil, stored, returned, sent or captured by `go`, and two mutable borrows of one value must not overlap.
 
-**Resource** (designed): A value whose type has a `Close()` method, or a struct with a resource field. A task and an actor handle are resources. Its owner scope releases it. See [resources](docs/spec/resources.md).
+**Resource** (designed): A value whose type has a `Close()` method, a struct with a resource field, or a slice, array or map with a resource element type. A task and an actor handle are resources. Its owner scope releases it. See [resources](docs/spec/resources.md).
 
 **Owner scope** (designed): The block that owns a resource: the block that acquired it, or the scope it moved to. A loop body is its own owner scope for each iteration.
 
 **Release** (designed): Closing a resource at the end of its owner scope, in reverse acquisition order, on every exit. A release is infallible and runs masked.
 
-**Move** (designed): A transfer of a resource's ownership: by `return`, into a provider field, into a `go` task, by a channel send, by building a struct that holds it, or by assignment. The source cannot be used after a move.
+**Move** (designed): A transfer of a resource's ownership: by `return`, into a provider field, into a `go` task outside a structured lend, by building a struct or container that holds it, or by assignment. A channel send of a resource is an error in v0. The source cannot be used after a move.
 
-**Lend** (designed): Passing a resource as an argument. The caller keeps ownership; the callee may not store, return, send or capture it, so a lend needs no lifetime annotation.
+**Lend** (designed): Passing a resource as an argument, capturing it in a non-escaping closure, or indexing it out of a container. The owner keeps ownership; the borrower may not store, return, send or capture it, so a lend needs no lifetime annotation.
+
+**Structured lend** (designed): A lend of a resource to a task, or to an escaping closure an owner keeps, that is allowed because the task or owner is certain to be released before the resource: it is bound after the resource in the same scope, or stored in a later field of the same struct. See [resources](docs/spec/resources.md#structured-lend).
 
 **Consume** (designed): Ending a resource early by calling `Close()`, or a task's `Wait()` or `Stop()`. Nothing runs for it at scope end, and a later use is an error.
 
@@ -151,7 +155,7 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Notation exception**: A syntax form admitted without an unrepresentability argument because it desugars one-to-one, at parse time, into ordinary calls and adds no checking, typing, evaluation order or runtime behavior.
 
-**Compiler-known construct**: A form whose meaning the compiler must know for checking, inference, plan facts, inspection or special lowering. By owner direction (2026-10-09) it is spelled as syntax or a predeclared language identifier. In the Go-shaped language: `try`, `catch`, `uses`, `wire`, `machine`, `go`, `with` and `timeout.After`.
+**Compiler-known construct**: A form whose meaning the compiler must know for checking, inference, plan facts, inspection or special lowering. By owner direction (2026-10-09) it is spelled as syntax or a predeclared language identifier. In the Go-shaped language: `try`, `catch`, `uses`, `wire`, `machine`, `go` and `with`. A dot form is never one: `timeout.After` is an ordinary library function over the kernel primitives `go`, `Task.Stop` and `Scheduler`, and the prototype's name-keyed handling of it is a recorded exception ([spec README, Gap 31](docs/spec/README.md#gaps)).
 
 **Predeclared language identifier**: A name the language specification defines in every package without an import or library declaration, following Go's predeclared `len` and `error`, such as `with`, `duration` and the prelude types. Capability services are not predeclared language identifiers, even when the compiler declares them.
 
@@ -249,9 +253,9 @@ These terms describe the `.ef` language that `internal/compiler` and `runtime/ef
 
 **Constant parameter default** (admitted, not implemented): A literal or named constant declared for a parameter and inserted at the call site when the argument is omitted.
 
-**Visibility** (admitted, not implemented): Whether another module may name a declaration. Declarations are private by default and exported with `pub`; the case of a name carries no meaning. The Go-shaped language has not settled visibility ([spec README, Gap 8](docs/spec/README.md#gaps)).
+**Visibility** (admitted, not implemented): Whether another module may name a declaration. Declarations are private by default and exported with `pub`; the case of a name carries no meaning. Superseded 2026-10-27 by exported names (owner: "Yeah, let's go with your [recommendations]").
 
-**Construction authority** (admitted, not implemented): The right to construct values of a nominal type. A `pub readonly` type lets other modules read and match its values while only its owner module constructs them.
+**Construction authority** (admitted, not implemented): The right to construct values of a nominal type. A `pub readonly` type lets other modules read and match its values while only its owner module constructs them. In the Go-shaped language, an unexported field gives the same authority: only the owner package can build the value.
 
 **JSX pragma** (admitted, not implemented): A user-defined selection of the factory, fragment and result types to which JSX notation desugars.
 

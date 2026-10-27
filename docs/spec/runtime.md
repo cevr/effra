@@ -10,10 +10,10 @@ Status: the task tree is **implemented in prototype**; `go`, `Task`, `Wait` and 
 
 1. **Tree.** Every task has a parent, except the task that runs `main`. Stopping a task stops every task below it. A child that finishes detaches from its parent.
 2. **Starting.** `go f(x)` and `go { … }` start a task and yield a `Task[T, E]`. `T` is the body's value and `E` its error row.
-3. **Resource.** A `Task` is a resource ([resources.md](resources.md)). Its owner scope stops and drains it at scope end if it was not consumed. A `Task` can move by `return`, into a provider field, into another task or through a channel ([resources.md](resources.md#moves)).
+3. **Resource.** A `Task` is a resource ([resources.md](resources.md)). Its owner scope stops and drains it at scope end if it was not consumed. A `Task` can move by `return`, into a provider field, into another task or into a container ([resources.md](resources.md#moves)). A channel of tasks is an error in v0 (README Gap 30).
 4. **Consuming.** `t.Wait()` waits for the task and returns `(T, error[E])`; a defect of the task re-raises in the waiter. `t.Stop()` interrupts the task and waits for it to finish, including its releases. Each consumes the task.
-5. **Ownership by function.** Tasks may live in a slice or map of the owning function. Indexing a task out of a container moves it. `running.Take(j)` moves a task out of a map before its fallible `Wait`, so a drain cannot run it twice.
-6. **Captures.** A `go` block may not assign captured locals. Values copy into a task; resources move into it. Only synchronised handles are shared: channels, `sync.Ref`, `sync.TxRef` and actor handles. *Prior art:* Swift `Sendable`; Go shares memory freely and relies on the race detector.
+5. **Containers.** Tasks may live in a slice or map; the container is then a resource ([resources.md](resources.md#containers)). Indexing lends a task, so `running[j].Wait()` is an error. `running.Take(j)` moves a task out of the map before its fallible `Wait`, so a drain cannot run it twice.
+6. **Captures.** A `go` block may not assign captured locals. Values copy into a task. A resource is lent to the task under the structured-lend rule, and moved into it otherwise ([resources.md](resources.md#structured-lend)). Only synchronised handles are shared: channels, `sync.Ref`, `sync.TxRef` and actor handles. *Prior art:* Swift `Sendable`; Go shares memory freely and relies on the race detector.
 
 *Prior art:* Go `errgroup` is function-scoped in the same way; Effect fibers are forked into a scope; Elixir `Task.async` links the task to its caller, and `Task.shutdown` keeps the abnormal exit, as `Stop` keeps a defect here.
 
@@ -55,15 +55,23 @@ Status: **partly implemented in prototype**.
 
 ## Timeouts
 
-Status: **implemented in prototype**.
+Status: **implemented in prototype** as a name-keyed exception (README Gap 31); **designed** as the library function below.
 
 ```go
 payment := try timeout.After(500ms) { Gateway.Authorize(order) }
 ```
 
+**Classification.** `timeout.After` is an ordinary library function in the `timeout` package, not a construct. Under the owner's rules, constructs get keywords, a dot form is library, and kernel primitives are functions (owner, 2026-10-12). Its kernel primitives are task start (`go`), `Task.Stop` and `Task.Wait`, and the `Scheduler` capability. Its designed signature, in the provisional generic spelling of [types.md](types.md#generics):
+
+```go
+func After(d duration, body func() (T, error[E])) (T, error[E | Expired]) uses Scheduler, R
+```
+
+where `body` may itself require `R`. A trailing block is the `body` argument ([grammar.md](grammar.md#expressions)). *Prior art:* Effect's `Effect.timeout` is an ordinary combinator over fibers and the clock; Go's `context.WithTimeout` is a library function.
+
 1. `timeout.After(d) { block }` needs `import "timeout"`. It takes one `duration` (S108) and a block (S108). The duration is a value position, so a fallible duration is S105.
-2. It charges `Scheduler` ([rows.md](rows.md#capability-rows)).
-3. Its block is a failure target: a `try` in the block escapes into the `timeout.After` expression, not into the enclosing function. The expression's error row is `timeout.Expired`, plus the block's last expression's row, plus every error a `try` in the block escapes.
+2. It charges `Scheduler` and the block's requirements ([rows.md](rows.md#capability-rows)), because its signature says so.
+3. Its block is a function literal and so a failure target: a `try` in the block escapes into the `timeout.After` expression, not into the enclosing function. The expression's error row is `timeout.Expired`, plus the block's last expression's row, plus every error a `try` in the block escapes, which is `E | Expired` in the signature.
 4. The block runs as a child task. If the deadline passes first, the child is stopped and drained, and the expression fails with `timeout.Expired`. The result comes only after the child has finished, so completed cleanup beats deadline punctuality (NORTH_STAR tiebreak).
 5. If the parent is stopped first, or while the block runs, the child is stopped and drained, and the expression's exit is an interruption.
 6. A defect in the child re-raises in the parent on every path.
@@ -107,8 +115,8 @@ Status: **designed, not yet implemented** ([#69](https://github.com/cevr/effra/i
 
 1. `tasks.Set(policy)` owns an unbounded number of tasks and drops finished ones. It is a resource, owned by a function or a provider.
 2. The policy is fail-fast, `tasks.LogFailures`, or restart with a `schedule`: `tasks.Restart(schedule.Exponential(1s).UpTo(5))`.
-3. `Set.Go` takes a `func` literal, because the Set keeps it after `Go` returns.
-4. A restart policy needs a reusable factory that captures no resource. A connection moved into its handler cannot restart, so such a Set uses `tasks.LogFailures`.
+3. `Set.Go` takes a `func` literal, because the Set keeps it after `Go` returns. The literal escapes, so it may capture a resource only under the structured-lend rule: the Set must be released before the resource ([resources.md](resources.md#closures)). In `set.Go(func() { actor.Pump(b, signals) })`, `set` must be declared after `b` in the same scope, and `b.Stop()` while `set` may still run the literal is an error.
+4. A restart policy needs a reusable factory that captures no moved resource. A connection moved into its handler cannot restart, so such a Set uses `tasks.LogFailures`.
 5. *Prior art:* Erlang/OTP `one_for_one` supervisors restart from the child specification; Effect `FiberSet` and `Supervisor`; Go has neither.
 
 ## Channels
@@ -116,7 +124,7 @@ Status: **designed, not yet implemented** ([#69](https://github.com/cevr/effra/i
 Status: **designed, not yet implemented** ([#64](https://github.com/cevr/effra/issues/64)).
 
 1. `chan T` is Go's channel. There are no nil channels and no direction types.
-2. Values copy into a channel; a resource moves through it.
+2. Values copy into a channel. A channel whose element type is a resource is an error in v0 ([resources.md](resources.md#channels); README Gap 30).
 3. Send and receive are interruption points.
 4. A send on a closed channel interrupts the sender instead of panicking. This is Effra's own policy, not Effect parity: Effect's `Queue.offer` returns `false` after shutdown.
 5. `ch.Receive()` returns `Option[T]` when `T` is not defaultable ([types.md](types.md#zero-values-and-definite-initialisation)).

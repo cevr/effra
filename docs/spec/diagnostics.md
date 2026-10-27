@@ -19,6 +19,9 @@ A diagnostic has a position, a code and a message: `file:line:col: CODE message`
 | S108 | Types and declarations must be used consistently: no type mismatch, duplicate declaration, invalid literal or misuse of a construct. | [types](types.md), [rows](rows.md) | `probes/duplicate-field.sketch` |
 | S109 | The program must stay inside the implemented subset, and source names must not collide with the prototype's generated Go. | [grammar](grammar.md#reserved-names), README Gaps 6, 10, 16, 17 | `probes/with-return.sketch` |
 | S110 | A declared local must be read, and an expression statement must be a call, `try` or `catch`, as in Go. | [grammar: statements](grammar.md#statements) | `probes/unused-expression.sketch` |
+| S111 (designed) | A wire must not have two entries for one capability, except a `replace` of an embedded entry. | [rows: wire](rows.md#wire), README Gap 28 | none yet: the prototype accepts the program, and the later entry wins |
+
+Designed codes are not in the prototype. Other designed errors in `docs/spec/` (resources, visibility, capability values, channels of resources) get codes when [#196](https://github.com/cevr/effra/issues/196) and [#197](https://github.com/cevr/effra/issues/197) implement them.
 
 ## Rules by code
 
@@ -56,6 +59,8 @@ Each rule names a fixture where one exists.
 
 - An unknown local, function, type, struct type, field, method, capability or wire (`reject/unknown-name.sketch`).
 - An error row names a type that is not a struct declared in the file (`probes/host-error.sketch`).
+- Prototype limit: `duration` as a type name, as in `func delay(d duration)` (README Gap 25).
+- A capability name used as a bare expression, such as `f(Orders)` (README Gap 29).
 
 ### S105: unhandled failure
 
@@ -100,14 +105,15 @@ Each rule names a fixture where one exists.
 | `return` inside a `with` or `timeout.After` block | `probes/with-return.sketch`, `with-nonlocal-return` |
 | A block that does not end with an expression | `probes/empty-block.sketch`, `timeout-statement-last` |
 | A wire that needs itself, directly or through provider methods | `probes/cyclic-wire.sketch`, `wire-method-cycle` |
-| An operator other than `==` and `+`, or `==` on a non-basic type | `probes/operators.sketch` |
+| An operator other than `==` and `+`, or `==` on a type other than `string`, `int64` and `bool`, including `duration` (README Gaps 10, 26) | `probes/operators.sketch` |
+| A method call on a value, such as `S{}.M()`, or on an interface-typed parameter (README Gaps 27, 29) | the checker's "unsupported call" message |
 | A `uses` clause on a capability method or method; a capability call in a provider method | `probes/capability-method-uses.sketch` |
 | `main` is called, takes parameters, returns a value or is missing | `probes/main-call.sketch`, `main-parameter` |
 | A source name is reserved by the prototype's Go output: Go's predeclared names, `rt`, `time`, `fmt`, `init`, `Error`, `timeout`, `duration`, names with `__` or ending in `_` | `probes/predeclared-error.sketch`, `predeclared-local`, `predeclared-panic`, `function-reserved`, `init-name`, `timeout-capability`, `duration-type-name`, `wire-predeclared-name`, `capability-parameter-name` |
 | A field or method name collides with generated names (`Error`, marker methods) | `probes/marker-field.sketch`, `marker-method`, `error-method` |
 | A wire entry that is not a provider literal; an unsupported expression or call | the checker's messages |
 
-The S109 rules are prototype limits, not language rules (README Gaps 4, 6, 7, 10, 16, 17). The main compiler replaces each with the designed rule or with mangled output.
+The S109 rules are prototype limits, not language rules (README Gaps 4, 6, 7, 10, 16, 17, 26, 27, 29, 31). The main compiler replaces each with the designed rule or with mangled output.
 
 ### S110: unused
 

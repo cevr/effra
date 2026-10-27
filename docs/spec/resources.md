@@ -1,6 +1,6 @@
 # Resources and automatic release
 
-Status: **designed, not yet implemented**. The prototype has no resources. This file follows the owner's direction of 2026-10-26 ("How can we make it simpler so that defers are automatic … Kind of like acquire release"), proposed on [#65](https://github.com/cevr/effra/issues/65). It replaces the earlier rules that made a resource linear with a checked `defer` and registered constructor resources with `build.Scope` (README Gap 13). Definitions of resource, owner scope, move, lend and consume are in the [glossary](../../GLOSSARY.md).
+Status: **designed, not yet implemented**. The prototype has no resources. This file follows the owner's direction of 2026-10-26 ("How can we make it simpler so that defers are automatic … Kind of like acquire release"), adopted in the body of [#65](https://github.com/cevr/effra/issues/65). It replaces the earlier rules that made a resource linear with a checked `defer` and registered constructor resources with `build.Scope` (README Gap 13). Definitions of resource, owner scope, move, lend and consume are in the [glossary](../../GLOSSARY.md).
 
 The guarantee is Effect's `acquireRelease`: if an acquisition succeeds, its release runs, once, on every exit. The spelling is Go's: no `defer` to write and none to forget.
 
@@ -14,7 +14,7 @@ func copyFile(src, dst string) error[NotFound | WriteFailed] uses FS {
 
 ## What is a resource
 
-1. **R1.** A type is a resource when it has a method `Close()`, or when it is a struct with a resource field. A `Task` and an actor handle are resources ([runtime.md](runtime.md#tasks)).
+1. **R1.** A type is a resource when it has a method `Close()`, when it is a struct with a resource field, or when it is a slice, array or map with a resource element type (R34). A `Task` and an actor handle are resources ([runtime.md](runtime.md#tasks)).
 2. **R2.** `Close` must not declare an error row (decision #6). A defect in `Close` joins the exit cause ([runtime.md](runtime.md#exit-causes)). A fallible cleanup handles its failure inside `Close`: `p.conn.Close() catch { case CloseFailed: log.Warn("close failed") }`. *Prior art:* Effect's release has error type `never`; Go's `io.Closer` returns an error that callers routinely drop.
 3. **R3. Generated `Close`.** A struct whose fields include resources gets a generated `Close` that closes those fields in reverse declaration order. A hand-written `Close` on such a struct adds behaviour that runs first; the generated field releases still run after it.
 
@@ -44,26 +44,106 @@ A move transfers ownership. After a move, the source binding is unusable, and us
 
 1. **R10. Return.** `return r` moves `r` to the caller, which becomes its owner scope.
 2. **R11. Provider field.** A resource stored in a field of a provider that `wire` builds moves into the provider. The provider is a resource (R1), and the `with` block that built it closes it when the block ends.
-3. **R12. `go`.** A `go` task that captures a resource moves it into the task. The task's scope closes it when the task ends.
-4. **R13. Channel send.** `ch <- r` moves `r` to the receiver.
-5. **R14. Aggregate construction (README Gap 15).** Building a struct value with a resource field moves the resource into the struct. The struct is a resource and has the same owner scope as the binding that receives it.
+3. **R12. `go`.** A `go` task that captures a resource lends it when the structured-lend rule (R27) holds, and moves it into the task otherwise. A moved resource is closed by the task's scope when the task ends.
+4. **R13. Channel send.** In v0 a channel whose element type is a resource is an error, so no resource moves by a send ([Channels](#channels); README Gap 30).
+5. **R14. Aggregate construction (README Gap 15).** Building a struct value with a resource field moves the resource into the struct. The struct is a resource and has the same owner scope as the binding that receives it. Building a slice, array or map with resource elements moves them into the container ([Containers](#containers)).
 6. **R15. Assignment.** `q := r` moves `r` to `q`. There are no copies of a resource, so two releases of one acquisition cannot be scheduled. *Prior art:* Rust moves by default; Swift `~Copyable` types are moved and `consume`d.
 
+## Structured lend
+
+A task may use a resource that it does not own when the task is certain to be stopped and drained before the resource is released.
+
+1. **R27.** `go f(x)`, or a `go` block that captures `x`, **lends** `x` to the task, instead of moving it, when the resulting `Task` is owned by the same owner as `x` and is released before `x`:
+   - in a block, the `Task` is bound after `x` in the same owner scope, so reverse acquisition order (R5) stops and drains the task before `x` closes;
+   - in a struct, the `Task` is stored in a field declared after `x`'s field, so the generated `Close` (R3), which releases fields in reverse declaration order, stops and drains the task before it closes `x`.
+
+   Otherwise the capture moves `x` (R12).
+2. **R28.** While a task holds a structured lend of `x`, `x` must not be consumed, moved alone or converted. Consuming the task first (`t.Stop()`, `t.Wait()`) ends the lend. Moving `x` and the task together into one aggregate keeps the lend when the aggregate preserves their order (R27).
+3. **R29.** Inside one composite literal, a field value may be a `go` expression that lends a resource given to an earlier field of the same literal. The elements are evaluated in order, and the literal satisfies R27 when it completes.
+
 ```go
+type Postgres struct {
+	pool    sql.Pool       // declared first: released last
+	refresh Task[struct{}] // declared after pool: stopped and drained first
+}
+
 func OpenPostgres() (Postgres, error[ConnectFailed]) uses Config, Clock, Scheduler {
 	pool := try retry.On[ConnectFailed](retry.Exponential(200ms).Times(5)) {
 		sql.Open(Config.String("DATABASE_URL"))
 	}
-	return Postgres{pool, go keepWarm(pool)} // both move into Postgres; nothing closes here
+	// pool moves into field pool; go keepWarm(pool) lends it, because its task
+	// lands in field refresh, declared after pool (R27, R29). Nothing closes here.
+	return Postgres{pool, go keepWarm(pool)}
 }
 ```
+
+Negative examples, each an error:
+
+```go
+type Bad struct {
+	refresh Task[struct{}] // declared before pool: would be stopped after pool closes
+	pool    sql.Pool
+}
+func openBad() Bad { p := open(); return Bad{go keepWarm(p), p} } // p is moved into the task by R12, then used: error
+
+func early() {
+	p := open()
+	t := go keepWarm(p) // structured lend: t is bound after p
+	p.Close()           // error: p is lent to t, which may still run (R28)
+	t.Stop()
+}
+```
+
+*Prior art:* Trio nurseries and Swift structured concurrency both guarantee that child tasks end before the scope that started them ends, which is what makes the lend safe; Effect's `forkScoped` ties a fiber to the scope that owns the resources it uses.
 
 ## Lending
 
 1. **R16.** Passing a resource as an argument lends it. The caller keeps ownership, and the resource is usable again after the call.
-2. **R17.** A lent resource must not be stored, returned, sent or captured by `go` inside the callee. Each of these is an error. A call that lends `r` while `r` is consumed in the same call is an error.
+2. **R17.** A lent resource must not be stored, returned, sent or captured by an escaping closure or by `go` inside the callee, except under R27 for the callee's own tasks. Each of these is an error. A call that lends `r` while `r` is consumed in the same call is an error.
 3. **R18.** Lending needs no lifetime annotations, because a lent value cannot escape the call. *Prior art:* Swift non-escaping borrowed parameters; Rust borrows, whose lifetimes Effra drops because a lend never escapes.
-4. A lend of a `Task` lets the callee read it but not `Wait` or `Stop` it. Passing a resource to a function literal that a task keeps, such as `set.Go(func() { actor.Pump(b, signals) })`, lends it for the life of the call that consumes the task ([runtime.md](runtime.md#g4-tasksset)).
+4. A lend of a `Task` lets the callee read it but not `Wait` or `Stop` it.
+
+## Closures
+
+1. **R30.** A non-escaping closure, including a trailing block, lends every resource it captures for the duration of the call it is passed to.
+2. **R31.** An escaping closure may capture a resource only under the structured-lend rule: the owner that keeps the closure must be released before the captured resource. In `set.Go(func() { actor.Pump(b, signals) })`, the Set keeps the literal, so `set` must be released before `b`: `set` is bound after `b` in the same owner scope.
+3. **R32.** While such a closure may still run, consuming the captured resource is an error. `b.Stop()` before `set` is consumed is an error.
+4. **R33.** Every other escaping capture of a resource is an error. *Prior art:* Swift does not let an escaping closure capture a `borrowing` parameter of non-copyable type; Rust requires `move` closures to own what they capture, or a lifetime that outlives them.
+
+```go
+func run(signals chan Signal) uses Probe, Clock, Scheduler {
+	b := actor.Start(Breaker{}, 16)
+	set := tasks.Set(tasks.Restart(schedule.Exponential(1s).UpTo(5))) // bound after b
+	set.Go(func() { actor.Pump(b, signals) })                          // structured lend of b (R31)
+	d := try b.Ask(Retry{}) catch { case ProbeDown: Reject{} }
+}                                                                     // set stopped, then b stopped
+```
+
+The 2026-10-26 sketch bound `set` before `b`; that order is an error under R31, because `b` would stop while the Set could still run the literal.
+
+## Containers
+
+1. **R34.** A slice, array or map whose element type is a resource is itself a resource.
+2. **R35.** Copying such a container moves it (R15). Indexing it, `xs[i]`, lends the element. Calling a consuming method through an index (`xs[i].Close()`, `running[j].Wait()`, `ts[k].Stop()`) is an error.
+3. **R36.** A standard-library removal moves the element out: `slices.Take(xs, i)` for a slice, and the map's delete-and-return (`m.Take(k)`). The element then has the caller's scope as owner.
+4. **R37.** Releasing a container releases its remaining elements: a slice or array in reverse index order, a map in unspecified order. Each release runs even when an earlier one had a defect (R9).
+
+```go
+xs := []File{f}   // f moves into xs (R14)
+ys := xs          // xs moves into ys (R35)
+xs[0].Close()     // error: xs was moved, and Close through an index is a consume (R35)
+read(ys[0])       // allowed: ys[0] is lent to read
+```
+
+*Prior art:* Rust's `Vec<T>` forbids moving out by index and moves out through `Vec::remove` and `swap_remove`; Effra keeps that shape and chooses reverse order for release, to match its scope rule (R5).
+
+## Channels
+
+1. **R38.** In v0, a channel whose element type is a resource is an error (README Gap 30 records the recommended later rule).
+
+## Partial moves
+
+1. **R39.** Moving a single field out of a struct is an error in v0; move the whole struct. `p := pg.pool` where `pool` is a resource field is an error; the field may be lent (`ping(pg.pool)`). *Prior art:* Rust allows partial moves and then forbids using the whole; Swift forbids consuming a stored property of a non-copyable value outside its `consuming` methods. v0 takes the stricter rule.
 
 ## Early release
 

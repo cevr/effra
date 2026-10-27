@@ -20,7 +20,7 @@ Deferred effects need explicit execution and checked failure/service rows. Host 
 
 ## Language design principles
 
-> **Partly superseded by `docs/spec/` (2026-10-27).** The owner rules in this section still govern. The notation members (JSX, pipe, `fn (u: User)` receiver methods, constant defaults) and the `law`/`contract` spelling describe the earlier `.ef` language. For the Go-shaped language, laws are in [docs/spec/types.md](spec/types.md#laws), and visibility (`pub` against Go's capitalisation) is open as [Gap 8](spec/README.md#gaps).
+> **Partly superseded by `docs/spec/` (2026-10-27).** The owner rules in this section still govern. The notation members (JSX, pipe, `fn (u: User)` receiver methods, constant defaults) and the `law`/`contract` spelling describe the earlier `.ef` language. For the Go-shaped language, laws are in [docs/spec/types.md](spec/types.md#laws), and visibility follows Go's capitalisation ([grammar](spec/grammar.md#visibility)): on 2026-10-27 the owner superseded the `pub` and `pub readonly` decision below ("Yeah, let's go with your [recommendations]").
 
 These owner rules govern every language and library proposal. They were set on 2026-10-07, and the notation members and visibility/law decisions were added on 2026-10-08.
 
