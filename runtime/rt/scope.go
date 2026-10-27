@@ -138,17 +138,32 @@ func (s *Scope) release(c *Cause) {
 }
 
 func (s *Scope) runRelease(e entry, c *Cause) {
-	floor := 0 // the calls open when the release began, on a traced tree
 	if s.task.trace != nil {
-		floor = s.task.traceDepth()
+		s.runReleaseTraced(e, c)
+		return
 	}
+	defer func() {
+		if p := recover(); p != nil {
+			c.recovered(s.task, p, true, 0)
+		}
+	}()
+	e.run.release(e.v)
+}
+
+// runReleaseTraced is runRelease on a traced tree. It notes the calls open
+// when the release begins, so an unwind closes only the calls the release
+// opened, and raises the release event. It is a separate frame so the
+// untraced release keeps its size: the floor and the extra call grew
+// runRelease's frame from 0x48 to 0x70 bytes.
+//
+//go:noinline
+func (s *Scope) runReleaseTraced(e entry, c *Cause) {
+	floor := s.task.traceDepth()
 	defer func() {
 		if p := recover(); p != nil {
 			c.recovered(s.task, p, true, floor)
 		}
-		if s.task.trace != nil {
-			s.task.traceTask(TraceRelease, nil)
-		}
+		s.task.traceTask(TraceRelease, nil)
 	}()
 	e.run.release(e.v)
 }

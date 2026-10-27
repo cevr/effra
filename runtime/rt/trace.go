@@ -87,6 +87,8 @@ func (k EventKind) String() string {
 // values reach the Tracer; the rttrace writer serializes them by type only.
 type Event struct {
 	Kind EventKind
+	// InRelease marks a panic raised by a release.
+	InRelease bool
 	// ID is the event's occurrence ID, unique in its traced tree. The runtime
 	// takes it from one atomic counter per tree when the event is raised, so
 	// when one event happens before another its ID is smaller. A smaller ID
@@ -115,8 +117,6 @@ type Event struct {
 	// Defect is the panic value of a panic event or of a call-exit a defect
 	// left.
 	Defect any
-	// InRelease marks a panic raised by a release.
-	InRelease bool
 }
 
 // Tracer receives the events of one task tree. The runtime calls Event from
@@ -178,19 +178,34 @@ type openCall struct {
 	def, site string
 }
 
-// raise assigns e the next occurrence ID and delivers it. It returns the ID,
-// 0 when the tracer is broken.
-func (h *tracer) raise(e *Event) uint64 {
+// raise delivers e as an event of task t and gives it the next occurrence ID.
+// The event's parent is owner, or t's live parent when owner is nil (an
+// owner raising an event of a finished child names itself, because the child
+// has dropped its link). It returns the ID, 0 when the tracer is broken. Call
+// it only when the tree is traced.
+//
+// The Event goes by value and raise hands its own parameter to the Tracer,
+// so raise's frame holds one copy. Through a pointer, the dereference took a
+// temporary and then the call's arguments, two copies, and a wrapper frame
+// (the former emit) added its own; see raiseExit for the one event whose
+// stack depth matters.
+func (h *tracer) raise(t, owner *Task, e Event) uint64 {
 	if h.broken.Load() {
 		return 0
 	}
-	e.ID = h.next.Add(1)
+	if owner == nil {
+		owner = t.parent.Load()
+	}
+	e.Task, e.ID = t.id, h.next.Add(1)
+	if owner != nil {
+		e.Parent = owner.id
+	}
 	defer func() {
 		if recover() != nil {
 			h.broken.Store(true)
 		}
 	}()
-	h.sink.Event(*e)
+	h.sink.Event(e)
 	return e.ID
 }
 
@@ -417,16 +432,16 @@ func (t *Task) TraceCallExit(call uint64, def, site string, err error) {
 func (t *Task) traceAt(k EventKind, def, site string) {
 	switch k {
 	case TraceConstruct, TraceInterrupt:
-		t.emit(&Event{Kind: k, Def: def, Site: site})
+		t.trace.raise(t, nil, Event{Kind: k, Def: def, Site: site})
 	case TraceHandler:
 		caught := t.trace.takeFailure(t.id)
-		t.emit(&Event{Kind: k, Link: caught, Def: def, Site: site})
+		t.trace.raise(t, nil, Event{Kind: k, Link: caught, Def: def, Site: site})
 	}
 }
 
 //go:noinline
 func (t *Task) traceCall(def, site string) uint64 {
-	id := t.emit(&Event{Kind: TraceCall, Def: def, Site: site})
+	id := t.trace.raise(t, nil, Event{Kind: TraceCall, Def: def, Site: site})
 	if id != 0 {
 		t.trace.openCall(t.id, openCall{id, def, site})
 	}
@@ -438,7 +453,7 @@ func (t *Task) traceCallExit(call uint64, def, site string, err error) {
 	if !t.trace.closeCall(t.id, call) {
 		return
 	}
-	id := t.emit(&Event{Kind: TraceCallExit, Link: call, Def: def, Site: site, Cause: err})
+	id := t.trace.raise(t, nil, Event{Kind: TraceCallExit, Link: call, Def: def, Site: site, Cause: err})
 	if err != nil && err != Interrupted && id != 0 {
 		t.trace.setFailure(t.id, id, err)
 	}
@@ -448,7 +463,7 @@ func (t *Task) traceCallExit(call uint64, def, site string, err error) {
 //
 //go:noinline
 func (t *Task) traceTask(k EventKind, cause error) {
-	id := t.emit(&Event{Kind: k, Def: t.span, Cause: cause})
+	id := t.trace.raise(t, nil, Event{Kind: k, Def: t.span, Cause: cause})
 	if k == TraceCancelRequest && id != 0 {
 		t.trace.setCancel(t.id, id)
 	}
@@ -465,9 +480,40 @@ func (t *Task) traceDepth() int { return t.trace.depth(t.id) }
 //
 //go:noinline
 func (t *Task) traceExit(cause error) {
-	origins := t.trace.origins(t.id, cause)
-	id := t.emit(&Event{Kind: TraceBodyExit, Origins: origins, Def: t.span, Cause: cause})
-	t.trace.exited(t.id, id, cause)
+	h := t.trace
+	origins := h.origins(t.id, cause)
+	h.exited(t.id, t.raiseExit(origins, cause), cause)
+}
+
+// raiseExit is raise for the body-exit, built in its own frame from the parts
+// rather than passed in. A new task raises its body-exit near the bottom of
+// its goroutine's first stack, where about 1 KB sits above the stack guard,
+// and the generic path holds the Event three times (the caller's literal, the
+// caller's argument copy and raise's argument copy): one 128-byte copy too
+// many grew the stack, and the copy measured about 2.5 µs per traced spawn (in
+// round 2, and again in round 3 when Event gained Origins). Here the Event is
+// held twice, the local and the Tracer call's argument. Measured headroom:
+// with up to four more words in Event a traced spawn kept its cost; with
+// eight it paid the stack copy again. A field added to Event spends it.
+//
+//go:noinline
+func (t *Task) raiseExit(origins []uint64, cause error) uint64 {
+	h := t.trace
+	if h.broken.Load() {
+		return 0
+	}
+	e := Event{Kind: TraceBodyExit, Task: t.id, Origins: origins, Def: t.span, Cause: cause}
+	if p := t.parent.Load(); p != nil {
+		e.Parent = p.id
+	}
+	e.ID = h.next.Add(1)
+	defer func() {
+		if recover() != nil {
+			h.broken.Store(true)
+		}
+	}()
+	h.sink.Event(e)
+	return e.ID
 }
 
 // traceUnwind closes, innermost first, the capability calls that the panic p
@@ -499,7 +545,7 @@ func (t *Task) traceUnwind(p any, floor int) uint64 {
 		default:
 			e.Defect = p
 		}
-		if id := t.emit(&e); first == 0 {
+		if id := t.trace.raise(t, nil, e); first == 0 {
 			first = id
 		}
 	}
@@ -512,7 +558,7 @@ func (t *Task) traceUnwind(p any, floor int) uint64 {
 //
 //go:noinline
 func (t *Task) traceDefect(p any, inRelease bool, left uint64, key *Frame) {
-	id := t.emit(&Event{Kind: TracePanic, Link: left, Def: t.span, Defect: p, InRelease: inRelease})
+	id := t.trace.raise(t, nil, Event{Kind: TracePanic, Link: left, Def: t.span, Defect: p, InRelease: inRelease})
 	if id != 0 && key != nil {
 		t.trace.mu.Lock()
 		t.trace.defects[key] = id
@@ -530,20 +576,17 @@ func (t *Task) traceDefect(p any, inRelease bool, left uint64, key *Frame) {
 //
 //go:noinline
 func (t *Task) childEvent(k EventKind, owner *Task, carry bool) {
-	e := Event{Kind: k, Task: t.id, Def: t.span}
-	if owner != nil {
-		e.Parent = owner.id
-	}
+	e := Event{Kind: k, Def: t.span}
 	h := t.trace
 	if k == TraceDeadline {
-		if id := h.raise(&e); id != 0 && owner != nil {
+		if id := h.raise(t, owner, e); id != 0 && owner != nil {
 			h.setFailure(owner.id, id, Expired{})
 		}
 		return
 	}
 	exit, err := h.takeExit(t.id)
 	e.Link = exit
-	h.raise(&e)
+	h.raise(t, owner, e)
 	if carry && exit != 0 && owner != nil {
 		if _, ok := Failure(err); ok {
 			h.setFailure(owner.id, exit, err)
@@ -556,16 +599,3 @@ func (t *Task) childEvent(k EventKind, owner *Task, carry bool) {
 //
 //go:noinline
 func (t *Task) traceForget() { t.trace.forget(t.id) }
-
-// emit fills in t's identity and delivers e. It returns the occurrence ID, 0
-// when the tracer is broken. Call it only when t.trace is set. The Event goes
-// by pointer down to the Tracer call: passed by value, each frame held its own
-// copy, a new task's body-exit outgrew the goroutine's first stack, and the
-// stack copy measured about 2.5 µs per traced spawn.
-func (t *Task) emit(e *Event) uint64 {
-	e.Task = t.id
-	if p := t.parent.Load(); p != nil {
-		e.Parent = p.id
-	}
-	return t.trace.raise(e)
-}
