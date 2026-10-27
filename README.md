@@ -163,7 +163,7 @@ func copyFile(src, dst string) error[NotFound | WriteFailed] needs FS {
 
 ## Tasks that cannot leak
 
-*Status:* `go`, `Task` and the `tasks` package are designed, not built ([runtime](docs/spec/runtime.md#tasks)). Today `runtime/rt` implements the task tree, stops, masks and `timeout.After`, and the prototype checks `timeout.After`. The runtime keeps every defect, but not yet every typed failure. A completed child's failure that nobody waited for is dropped when its scope closes normally. When a deadline wins, `timeout.After` drains the child and returns `timeout.Expired` to its caller, with any cleanup defects; the child's own exit keeps its failure and the interruption, and the caller's cause does not carry them ([receipt](runtime/rt/RECEIPT.md)).
+*Status:* `go`, `Task` and the `tasks` package are designed, not built ([runtime](docs/spec/runtime.md#tasks)). Today `runtime/rt` implements the task tree, stops, masks and `timeout.After`, and the prototype checks `timeout.After`. The runtime keeps every defect, but not yet every typed failure. A completed child's failure that nobody waited for is dropped when its scope closes normally. When a deadline wins, `timeout.After` drains the child and returns `timeout.Expired` to its caller, with any cleanup defects; the child's own exit keeps its own failure, marked interrupted when the stop reached the child first, and the caller's cause does not carry it ([receipt](runtime/rt/RECEIPT.md)).
 
 ```go
 func Prices(ids []string) ([]Price, error[NotFound | timeout.Expired]) needs Catalog, Scheduler {
@@ -247,7 +247,7 @@ func LawFindAfterPut(id string, v Order) bool needs Store {
 
 ## Observability by construction
 
-*Status:* `runtime/rt` records traces today. The prototype run below was recorded on 2026-10-27. `ergo trace`, `ergo ps` and an OpenTelemetry exporter are designed, not built.
+*Status:* `runtime/rt` and the prototype's kernel build record traces today. From `prototypes/sketch9`, `go run ./cmd/sketchc build -rt kernel -rtroot ../.. testdata/trace/timeout.sketch -out /tmp/gen -o /tmp/timeout` builds the example; `ERGO_TRACE=/tmp/timeout.jsonl /tmp/timeout` records a run; `sketchc trace` queries it ([how](prototypes/sketch9/README.md#kernel-mode-and-traces-188)). The output below was recorded on 2026-10-27. `ergo trace`, `ergo ps` and an OpenTelemetry exporter are designed, not built.
 
 The checker knows every definition, every capability call and every row. So the compiler can name every trace event, and the source needs no span calls. The [#188 spike](docs/research/traceability.md) put this into `runtime/rt` and the prototype compiler. This is real output of the prototype's trace query, recorded on 2026-10-27. In that run, a 100ms timeout interrupted `Scheduler.Sleep(2s)`, before `Gateway.Authorize` ran (trimmed; [full run](docs/previews/2026-10-27-traceability.md)):
 
