@@ -1,6 +1,6 @@
 {
  "binding_check": {
-  "mutants": 4,
+  "mutants": 7,
   "problems": [],
   "references": 27,
   "units": 92
@@ -243,6 +243,9 @@
     },
     "equal_calls": 19,
     "functions": 18,
+    "kept": 0,
+    "kept_functions": 0,
+    "kept_reasons": {},
     "list": [
      "eval8-five/codec-transforms.go.sketch:160 T (selector) -> testing.T; (b) unique",
      "eval8-five/codec-transforms.go.sketch:161 T (selector) -> testing.T; (b) unique",
@@ -266,8 +269,6 @@
      "eval9-loops/poller_test.go.sketch:41 T (selector) -> testing.T; (b) unique",
      "eval9-loops/wordcount.go.sketch:19 Files (selector) -> fs.Files; (b) unresolved"
     ],
-    "needs_alias": 0,
-    "needs_alias_functions": 0,
     "qualified": 21,
     "sibling_declarations": 0,
     "tokens_a": 42,
@@ -297,7 +298,7 @@
  },
  "controls": [
   {
-   "a": "qualified 1, needs alias 0",
+   "a": "qualified 1, row kept 0",
    "about": "`os` has no export inventory, so (b) cannot rule out a second `Client`; the use is unresolved, not resolved",
    "b": "unique 0, ambiguous 0, lexical 0, unresolved 1",
    "b_counts": {
@@ -312,7 +313,7 @@
    "tokens_a": 2
   },
   {
-   "a": "qualified 3, needs alias 0",
+   "a": "qualified 3, row kept 0",
    "about": "an inline wire key names the capability; the key and both calls are qualified (round-2 review probe)",
    "b": "unique 3, ambiguous 0, lexical 0, unresolved 0",
    "b_counts": {
@@ -327,7 +328,7 @@
    "tokens_a": 6
   },
   {
-   "a": "qualified 0, needs alias 0",
+   "a": "qualified 0, row kept 0",
    "about": "a method keeps its written `uses http.Client`, so the call in its elided literal stays bare and bound",
    "b": "unique 0, ambiguous 0, lexical 0, unresolved 0",
    "b_counts": {
@@ -342,7 +343,7 @@
    "tokens_a": 0
   },
   {
-   "a": "qualified 1, needs alias 0",
+   "a": "qualified 1, row kept 0",
    "about": "a literal with no row calls the capability its enclosing function binds; the call is qualified once",
    "b": "unique 1, ambiguous 0, lexical 0, unresolved 0",
    "b_counts": {
@@ -357,7 +358,7 @@
    "tokens_a": 2
   },
   {
-   "a": "qualified 1, needs alias 0",
+   "a": "qualified 1, row kept 0",
    "about": "a literal and its enclosing function both write `uses http.Client`; the call is qualified once (round-2 review probe)",
    "b": "unique 1, ambiguous 0, lexical 0, unresolved 0",
    "b_counts": {
@@ -372,7 +373,7 @@
    "tokens_a": 2
   },
   {
-   "a": "qualified 1, needs alias 0",
+   "a": "qualified 1, row kept 0",
    "about": "a struct field and a composite-literal key spelled `Client` are not capability references; only the call is qualified",
    "b": "unique 1, ambiguous 0, lexical 0, unresolved 0",
    "b_counts": {
@@ -387,7 +388,22 @@
    "tokens_a": 2
   },
   {
-   "a": "qualified 1, needs alias 0",
+   "a": "qualified 0, row kept 1",
+   "about": "a parameter value `Client` sits outside a literal that binds `uses http.Client`; elision would let the value capture the call, so the literal keeps its row (round-3 review witness)",
+   "b": "unique 0, ambiguous 0, lexical 1, unresolved 0",
+   "b_counts": {
+    "ambiguous": 0,
+    "lexical": 1,
+    "unbound": 0,
+    "unique": 0,
+    "unresolved": 0,
+    "wrong": 0
+   },
+   "control": "outer-value-inner-capability",
+   "tokens_a": 0
+  },
+  {
+   "a": "qualified 1, row kept 0",
    "about": "a local named `http` hides one import name; the qualifier uses the other import name of the package",
    "b": "unique 1, ambiguous 0, lexical 0, unresolved 0",
    "b_counts": {
@@ -402,7 +418,7 @@
    "tokens_a": 2
   },
   {
-   "a": "qualified 0, needs alias 1",
+   "a": "qualified 0, row kept 1",
    "about": "a local named `http` hides the import, and no other import name exists; the function keeps its row (round-2 review probe)",
    "b": "unique 1, ambiguous 0, lexical 0, unresolved 0",
    "b_counts": {
@@ -417,7 +433,7 @@
    "tokens_a": 0
   },
   {
-   "a": "qualified 3, needs alias 0",
+   "a": "qualified 3, row kept 0",
    "about": "a `replace` target names the capability; the target and both calls are qualified (round-2 review probe)",
    "b": "unique 3, ambiguous 0, lexical 0, unresolved 0",
    "b_counts": {
@@ -432,7 +448,22 @@
    "tokens_a": 6
   },
   {
-   "a": "qualified 1, needs alias 0",
+   "a": "qualified 1, row kept 0",
+   "about": "`legacy/http` and `next/http` share a last segment but are two packages; the literal's call to the fresh `Client` is qualified, never bound to the method's old one (round-3 review witness)",
+   "b": "unique 0, ambiguous 0, lexical 1, unresolved 0",
+   "b_counts": {
+    "ambiguous": 0,
+    "lexical": 1,
+    "unbound": 0,
+    "unique": 0,
+    "unresolved": 0,
+    "wrong": 0
+   },
+   "control": "same-leaf-distinct-paths",
+   "tokens_a": 2
+  },
+  {
+   "a": "qualified 1, row kept 0",
    "about": "the package declares its own `Client`; the imported one is qualified, the local one stays bare",
    "b": "unique 0, ambiguous 0, lexical 1, unresolved 0",
    "b_counts": {
@@ -447,7 +478,22 @@
    "tokens_a": 2
   },
   {
-   "a": "qualified 1, needs alias 0",
+   "a": "qualified 0, row kept 1",
+   "about": "a slice parameter named `http` hides the import; no other spelling exists, so the row is kept (round-3 review witness)",
+   "b": "unique 1, ambiguous 0, lexical 0, unresolved 0",
+   "b_counts": {
+    "ambiguous": 0,
+    "lexical": 0,
+    "unbound": 0,
+    "unique": 1,
+    "unresolved": 0,
+    "wrong": 0
+   },
+   "control": "slice-parameter-named-http",
+   "tokens_a": 0
+  },
+  {
+   "a": "qualified 1, row kept 0",
    "about": "`http` and `grpc` both export `Client`; (a) qualifies, (b) reports the bare name ambiguous (round-2 review probe)",
    "b": "unique 0, ambiguous 1, lexical 0, unresolved 0",
    "b_counts": {
@@ -460,6 +506,21 @@
    },
    "control": "two-imports-export-client",
    "tokens_a": 2
+  },
+  {
+   "a": "qualified 0, row kept 1",
+   "about": "`http.http` reads a field of a parameter named `http`, which is legal and no doubled qualifier; the parameter hides the import, so the row is kept (round-3 review witness)",
+   "b": "unique 1, ambiguous 0, lexical 0, unresolved 0",
+   "b_counts": {
+    "ambiguous": 0,
+    "lexical": 0,
+    "unbound": 0,
+    "unique": 1,
+    "unresolved": 0,
+    "wrong": 0
+   },
+   "control": "value-field-named-http",
+   "tokens_a": 0
   }
  ],
  "gap23": {
@@ -864,17 +925,17 @@
   "imports_without_export_inventory": [
    "actor",
    "fs",
-   "goquery",
+   "github.com/PuerkitoBio/goquery",
    "html",
    "log",
    "net",
+   "net/url",
    "os",
    "schedule",
    "sql",
    "strings",
    "time",
-   "trace",
-   "url"
+   "trace"
   ],
   "library": {
    "row_entries": 51,

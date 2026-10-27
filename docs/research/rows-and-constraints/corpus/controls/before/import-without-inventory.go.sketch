@@ -1,5 +1,5 @@
 // control: `os` has no export inventory, so (b) cannot rule out a second `Client`; the use is unresolved, not resolved
-// expect (a): qualified 1, needs alias 0
+// expect (a): qualified 1, row kept 0
 // expect (b): unique 0, ambiguous 0, lexical 0, unresolved 1
 package demo
 

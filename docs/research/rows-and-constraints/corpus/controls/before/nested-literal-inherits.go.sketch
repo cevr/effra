@@ -1,5 +1,5 @@
 // control: a literal with no row calls the capability its enclosing function binds; the call is qualified once
-// expect (a): qualified 1, needs alias 0
+// expect (a): qualified 1, row kept 0
 // expect (b): unique 1, ambiguous 0, lexical 0, unresolved 0
 package demo
 

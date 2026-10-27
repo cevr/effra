@@ -1,0 +1,22 @@
+// control: `legacy/http` and `next/http` share a last segment but are two packages; the literal's call to the fresh `Client` is qualified, never bound to the method's old one (round-3 review witness)
+// expect (a): qualified 1, row kept 0
+// expect (b): unique 0, ambiguous 0, lexical 1, unresolved 0
+package demo
+
+import (
+	old "legacy/http"
+	fresh "next/http"
+)
+
+type Poller struct{}
+type Fresh struct{}
+
+func (Fresh) Ping() {}
+
+func (Poller) Run() uses old.Client {
+	Client.Ping()
+	with(wire{ fresh.Client = Fresh{} }) {
+		f := func() { fresh.Client.Ping() }
+		f()
+	}
+}

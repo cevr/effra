@@ -1,0 +1,13 @@
+// control: `http.http` reads a field of a parameter named `http`, which is legal and no doubled qualifier; the parameter hides the import, so the row is kept (round-3 review witness)
+// expect (a): qualified 0, row kept 1
+// expect (b): unique 1, ambiguous 0, lexical 0, unresolved 0
+package demo
+
+import "http"
+
+type Holder struct{ http string }
+
+func work(http Holder) uses http.Client, Console {
+	Console.Println(http.http)
+	Client.Ping()
+}

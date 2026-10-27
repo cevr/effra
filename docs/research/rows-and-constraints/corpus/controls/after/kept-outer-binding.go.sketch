@@ -1,5 +1,5 @@
 // control: a method keeps its written `uses http.Client`, so the call in its elided literal stays bare and bound
-// expect (a): qualified 0, needs alias 0
+// expect (a): qualified 0, row kept 0
 // expect (b): unique 0, ambiguous 0, lexical 0, unresolved 0
 package demo
 

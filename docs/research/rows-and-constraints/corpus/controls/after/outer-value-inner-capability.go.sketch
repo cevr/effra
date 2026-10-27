@@ -1,0 +1,16 @@
+// control: a parameter value `Client` sits outside a literal that binds `uses http.Client`; elision would let the value capture the call, so the literal keeps its row (round-3 review witness)
+// expect (a): qualified 0, row kept 1
+// expect (b): unique 0, ambiguous 0, lexical 1, unresolved 0
+package demo
+
+import "http"
+
+type Local struct{}
+
+func (Local) Ping() {}
+
+func work(Client Local) {
+	Client.Ping()
+	f := func() uses http.Client { Client.Ping() }
+	f()
+}

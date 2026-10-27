@@ -1,0 +1,11 @@
+// control: a slice parameter named `http` hides the import; no other spelling exists, so the row is kept (round-3 review witness)
+// expect (a): qualified 0, row kept 1
+// expect (b): unique 1, ambiguous 0, lexical 0, unresolved 0
+package demo
+
+import "http"
+
+func work(http []string) uses http.Client, Console {
+	Console.Println(http)
+	Client.Ping()
+}

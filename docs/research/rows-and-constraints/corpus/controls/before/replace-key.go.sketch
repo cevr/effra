@@ -1,5 +1,5 @@
 // control: a `replace` target names the capability; the target and both calls are qualified (round-2 review probe)
-// expect (a): qualified 3, needs alias 0
+// expect (a): qualified 3, row kept 0
 // expect (b): unique 3, ambiguous 0, lexical 0, unresolved 0
 package demo
 

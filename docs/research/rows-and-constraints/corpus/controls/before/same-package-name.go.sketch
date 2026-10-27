@@ -1,5 +1,5 @@
 // control: the package declares its own `Client`; the imported one is qualified, the local one stays bare
-// expect (a): qualified 1, needs alias 0
+// expect (a): qualified 1, row kept 0
 // expect (b): unique 0, ambiguous 0, lexical 1, unresolved 0
 package demo
 
