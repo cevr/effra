@@ -280,7 +280,7 @@ Agents read the same checked model as the compiler, through the CLI or MCP. A di
 
 ```console
 $ ergo diagnostics pay.ef
-pay.ef:21:23: error S102: pay requires Gateway, which its needs clause does not list and no with provides
+pay.ef:21:9: error S102: this call requires checkout.Gateway, which is not in the capability row of function pay and no with provides it
 ```
 
 `ergo inspect` answers the same questions as JSON. For a 2026-edition file it reports EF145 until the checker lands ([#196](https://github.com/cevr/ergo/issues/196)). Designed output:
