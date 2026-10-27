@@ -1,0 +1,23 @@
+// control: the second name of `var a, http = …`, a local `type http`, and a symbolic-array parameter `http [N]string` each hide the import, so all three rows are kept (round-4 review witness)
+// expect (a): qualified 0, row kept 3
+// expect (b): unique 3, ambiguous 0, lexical 0, unresolved 0
+package demo
+
+import "http"
+
+var N = 4
+
+func second() uses http.Client, Console {
+	var a, http = 1, 2
+	Console.Println(a, http)
+	Client.Ping()
+}
+
+func localType() uses http.Client {
+	type http struct{}
+	Client.Ping()
+}
+
+func symbolic(http [N]string) uses http.Client {
+	Client.Ping()
+}

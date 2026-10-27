@@ -299,7 +299,14 @@ class Parser:
             if second == ".":
                 return False
             if second == "[":
-                return len(item) > 2 and (self.t(item[2]).text == "]" or self.t(item[2]).kind == "num")
+                # `xs []T`, `xs [4]T` and `xs [N]T` are named: a type follows the brackets.
+                # `Box[T]` is a type: nothing follows them.
+                depth = 0
+                for pos, k in enumerate(item[1:], 1):
+                    depth += {"[": 1, "]": -1}.get(self.t(k).text, 0)
+                    if depth == 0:
+                        return pos < len(item) - 1
+                return False
             return True
 
         any_named = any(named(it) for it in items)
@@ -877,8 +884,27 @@ class Lexical:
             j = k
             while p.t(j).kind == "ident" and p.t(j + 1).text == ",":
                 j += 2
-            if p.t(k - 1).text in ("var", "catch") or (p.t(j).kind == "ident" and p.t(j + 1).text == ":="):
+            if p.t(k - 1).text == "catch" or (p.t(j).kind == "ident" and p.t(j + 1).text == ":="):
                 self.locals.setdefault(t.text, []).append((k, self.block_end[k]))
+        # `var a, b T`, `var a, b = …`, grouped `var ( … )` and local `type X …`. Any other
+        # declaration form in a body is recorded as unreadable; name_plan keeps the row.
+        self.unreadable = []    # (token, construct)
+        for k, t in enumerate(p.toks):
+            if t.kind != "ident" or self.scope_of[k] is None or p.t(k - 1).text == ".":
+                continue
+            if t.text == "var":
+                names = self.var_names(k)
+                if names is None:
+                    self.unreadable.append((k, f"`var` declaration on line {p.line_of(t.start)}"))
+                for nk in names or ():
+                    self.locals.setdefault(p.t(nk).text, []).append((nk, self.block_end[nk]))
+            elif t.text == "type":
+                if p.t(k + 1).kind == "ident":
+                    self.locals.setdefault(p.t(k + 1).text, []).append((k + 1, self.block_end[k + 1]))
+                else:
+                    self.unreadable.append((k, f"`type` declaration on line {p.line_of(t.start)}"))
+            elif t.text == "const":
+                self.unreadable.append((k, f"`const` declaration on line {p.line_of(t.start)} (not in the language)"))
         # Import spellings -> full import path. One spelling for two paths is unresolvable.
         self.imports, self.clashes = {}, set()
         for alias, path in p.imports:
@@ -890,6 +916,48 @@ class Lexical:
             self.imports[spelling] = path
         self.has_imports = bool(p.imports)
         self.own_path = p.package_path or p.package
+
+    def var_names(self, k):
+        """Token indexes of the names a `var` at k declares, or None when the form is unreadable."""
+        p = self.p
+
+        def chain(j):
+            out = []
+            while p.t(j).kind == "ident":
+                out.append(j)
+                if p.t(j + 1).text != ",":
+                    break
+                j += 2
+            return out
+
+        if p.t(k + 1).kind == "ident":
+            return chain(k + 1)
+        if p.t(k + 1).text != "(":
+            return None
+        end = p.balanced(k + 1, "(", ")")
+        names, depth, start = [], 0, True
+        for j in range(k + 2, end - 1):
+            tok = p.t(j)
+            if tok.kind == "nl" or tok.text == ";":
+                start = depth == 0 or start
+                continue
+            if start and depth == 0:
+                if tok.kind != "ident":
+                    return None
+                names += chain(j)
+                start = False
+            if tok.text in "([{":
+                depth += 1
+            elif tok.text in ")]}":
+                depth -= 1
+        return names
+
+    def pure(self, spelling):
+        """True when every occurrence of the spelling is a qualifier (`spelling.X`) or an import
+        alias, so no declaration a reader missed can give it another meaning."""
+        p = self.p
+        return all(p.t(k + 1).text == "." or p.t(k + 1).kind == "str"
+                   for k, t in enumerate(p.toks) if t.kind == "ident" and t.text == spelling and p.t(k - 1).text != ".")
 
     def path(self, spelling):
         """The import path a qualifier spells, or None. In a fragment with no import
@@ -938,15 +1006,23 @@ class Lexical:
             return ("cap", (path, name), written, s)
         if name in self.p.declared.get(self.p.package, ()):
             return ("pkg", (self.own_path, name))
+        if name in self.imports and name not in self.clashes:
+            return ("import", self.imports[name])    # the file block: a bare name may spell an import
         return None
 
     def qualifier(self, written, path, k):
-        """A spelling of the package at `path` that no local hides at k, or None."""
+        """(spelling, None) for a spelling of the package at `path` that no local hides at k and
+        that appears only as a qualifier or import alias; else (None, why)."""
         names = [written] + sorted(n for n, c in self.imports.items() if c == path and n != written)
+        why = "a local hides every spelling of the package (needs an import alias)"
         for n in names:
-            if n not in self.clashes and self.path(n) == path and not self.shadowed(n, k):
-                return n
-        return None
+            if n in self.clashes or self.path(n) != path or self.shadowed(n, k):
+                continue
+            if not self.pure(n):
+                why = f"`{n}` also appears outside qualifier position, so the script cannot show it names the package"
+                continue
+            return n, None
+        return None, why
 
 
 def lexical(unit):
@@ -990,9 +1066,8 @@ def name_plan(unit, variant):
         if not (entries(s) and c1_base(s, variant, unit)):
             continue
         doubt = [why for k, why in unsure if s.body[0] < k < s.body[1] and p.t(k).text in binds(s)]
-        if doubt:
-            blocked[id(s)] = doubt[0]
-            continue
+        if owned.get(id(s)):    # it binds references: every declaration in its body must be readable
+            doubt += [f"unreadable {what}" for k, what in lex.unreadable if s.body[0] < k < s.body[1]]
         trial = elided | {id(s)}
         mine = []
         for k in owned.get(id(s), ()):
@@ -1006,12 +1081,10 @@ def name_plan(unit, variant):
             elif after and after[0] == "unsure":
                 reason = after[1]
             else:
-                q = lex.qualifier(written, cap[0], k)
-                if q is None:
-                    reason = "a local hides every spelling of the package (needs an import alias)"
+                q, reason = lex.qualifier(written, cap[0], k)
             mine.append({"tok": k, "name": p.t(k).text, "cap": cap, "after": after,
                          "qualifier": q, "reason": reason, "owner": s})
-        reasons = [r["reason"] for r in mine if r["reason"]]
+        reasons = doubt + [r["reason"] for r in mine if r["reason"]]
         if reasons:
             blocked[id(s)] = reasons[0]
         else:
@@ -1040,8 +1113,8 @@ def option_b(unit, ref, inventory):
     declarations first, then exactly one imported package (by import path) exporting the name."""
     lex = lexical(unit)
     after = ref["after"]
-    if after is not None and after[0] in ("cap", "pkg", "local"):
-        return "lexical"        # an outer written `uses`, a local or a same-package declaration captures it
+    if after is not None and after[0] in ("cap", "pkg", "local", "import"):
+        return "lexical"        # an outer written `uses`, a local, a same-package declaration or an import spelling captures it
     if after is not None:
         return "unresolved"     # the script cannot decide the binding
     if not lex.has_imports:
@@ -1158,6 +1231,18 @@ CHECKER_MUTANTS = (
      "bare call captured by an outer value (round 3)"),
     ("same-leaf-distinct-paths", [("{ fresh.Client.Ping() }", "{ Client.Ping() }")],
      "bare call bound to the outer provider of another package (round 3)"),
+    ("grouped-var-named-http", [("func work() uses http.Client, Console {", "func work() {"),
+                                ("\tClient.Ping()", "\thttp.Client.Ping()")],
+     "qualifier captured by a grouped `var` (round 4)"),
+    ("other-binders-named-http", [("func second() uses http.Client, Console {", "func second() {"),
+                                  ("\tConsole.Println(a, http)\n\tClient.Ping()", "\tConsole.Println(a, http)\n\thttp.Client.Ping()")],
+     "qualifier captured by the second name of a `var` (round 4)"),
+    ("other-binders-named-http", [("func localType() uses http.Client {\n\ttype http struct{}\n\tClient.Ping()",
+                                   "func localType() {\n\ttype http struct{}\n\thttp.Client.Ping()")],
+     "qualifier captured by a local `type` (round 4)"),
+    ("other-binders-named-http", [("func symbolic(http [N]string) uses http.Client {\n\tClient.Ping()",
+                                   "func symbolic(http [N]string) {\n\thttp.Client.Ping()")],
+     "qualifier captured by a symbolic-array parameter (round 4)"),
 )
 
 
@@ -1333,9 +1418,10 @@ class Rescan:
             second = self.toks[it[1]]
             if second.text == ".":
                 return False
-            if second.text == "[":      # `xs []T` and `xs [4]T` are named; `Box[T]` is a type
-                third = self.toks[it[2]] if len(it) > 2 else None
-                return third is not None and (third.text == "]" or third.kind == "num")
+            if second.text == "[":      # `xs []T`, `xs [4]T`, `xs [N]T` are named; `Box[T]` is a type
+                close = next((n for n in range(2, len(it))
+                              if sum({"[": 1, "]": -1}.get(self.toks[x].text, 0) for x in it[1:n + 1]) == 0), None)
+                return close is not None and close < len(it) - 1
             return True
 
         with_names = [it for it in items if has_name(it)]
@@ -1346,7 +1432,41 @@ class Rescan:
             return [(self.toks[it[0]].text, it[0]) for it in with_names + singles]
         return [(self.toks[it[0]].text, it[0]) for it in singles] if literal else []
 
+    def declared_by(self, i):
+        """Token indexes of the names a body-level `var` or `type` at i declares: `var a, b T`,
+        `var a, b = …`, grouped `var ( … )`, `type X …`."""
+        def chain(j):
+            out = []
+            while self.tok(j).kind == "ident":
+                out.append(j)
+                if self.tok(j + 1).text != ",":
+                    break
+                j += 2
+            return out
+
+        if self.toks[i].text == "type":
+            return [i + 1] if self.tok(i + 1).kind == "ident" else []
+        if self.tok(i + 1).text != "(":
+            return chain(i + 1)
+        out, depth, fresh, j = [], 0, True, i + 2
+        while j < self.n:
+            t = self.toks[j]
+            if depth == 0 and t.kind == "punct" and t.text == ")":
+                break
+            if t.kind == "nl" or t.text == ";":
+                fresh = fresh or depth == 0
+            elif fresh and depth == 0:
+                out += chain(j)
+                fresh = False
+            if t.kind == "punct" and t.text in "([{":
+                depth += 1
+            elif t.kind == "punct" and t.text in ")]}":
+                depth -= 1
+            j += 1
+        return out
+
     def run(self, caps):
+        skip = set()
         frames = [{"kind": "file", "locals": set(), "binds": {}}]
         for i in range(self.n):
             t = self.toks[i]
@@ -1359,15 +1479,20 @@ class Rescan:
                 if len(frames) > 1:
                     frames.pop()
                 continue
-            if t.kind != "ident" or i in self.row or i in self.declared_at:
+            if t.kind != "ident" or i in self.row or i in self.declared_at or i in skip:
                 continue
             prev, nxt = self.tok(i - 1), self.tok(i + 1)
             if prev.text == ".":
                 continue
+            if t.text in ("var", "type") and len(frames) > 1:
+                for k in self.declared_by(i):
+                    frames[-1]["locals"].add(self.toks[k].text)
+                    skip.add(k)
+                continue
             j = i
             while self.tok(j).kind == "ident" and self.tok(j + 1).text == ",":
                 j += 2
-            if prev.text in ("var", "catch") or (self.tok(j).kind == "ident" and self.tok(j + 1).text == ":="):
+            if prev.text == "catch" or (self.tok(j).kind == "ident" and self.tok(j + 1).text == ":="):
                 frames[-1]["locals"].add(t.text)
                 continue
             if nxt.text == ":" or not any(f["kind"] == "func" for f in frames):
@@ -1378,8 +1503,8 @@ class Rescan:
                 member = self.tok(i + 2).text
                 if path is not None and (path, member) in caps:
                     self.refs.append((path, member))
-                if path is not None and t.text in self.imports and member in self.imports:
-                    self.doubled.append(f"{t.text}.{member}")
+                if path is not None and t.text in self.imports and not member[:1].isupper():
+                    self.doubled.append(f"{t.text}.{member}")   # a package selector naming no exported declaration
                 if path is not None or t.text not in self.names:
                     continue
             if t.text in self.names:
@@ -1401,7 +1526,9 @@ class Rescan:
 
     def resolve(self, name, here):
         if here is None:
-            return ("pkg", name) if name in self.decls else None
+            if name in self.decls:
+                return ("pkg", name)
+            return ("import", self.imports[name]) if name in self.imports else None
         if here[0] == "cap":
             return (here[1], name)
         return here
@@ -1416,7 +1543,11 @@ def binding_check(before_text, after_text, label, caps):
                    for hdr in rb.bodies.values() for x, a in hdr["binds"].items()}
     rb.run(caps)
     ra.run(caps)
-    problems = [f"{label}: doubled qualifier {d}" for d in ra.doubled]
+    extra = list(ra.doubled)
+    for d in rb.doubled:
+        if d in extra:
+            extra.remove(d)
+    problems = [f"{label}: doubled qualifier {d} (a package selector naming no exported declaration)" for d in extra]
     if rb.refs != ra.refs:
         for i, (x, y) in enumerate(zip(rb.refs, ra.refs)):
             if x != y:
@@ -1654,6 +1785,7 @@ def measure(units, after):
     res["controls"] = control_rows
     unseen = checker_self_test(caps)
     res["binding_check"] = {"units": checked, "references": refs_checked, "mutants": len(CHECKER_MUTANTS),
+                            "mutant_list": [what for _, _, what in CHECKER_MUTANTS],
                             "problems": problems + control_problems + unseen}
     no_inventory = sorted({c for u in units if u.group != "fixtures" for c in lexical(u).imports.values()} - set(exports_inv))
     res["inventory"]["imports_without_export_inventory"] = no_inventory
@@ -1927,13 +2059,12 @@ def render(res, inv):
         f"signature reader: one left-to-right pass over the tokens with a stack of lexical frames. It resolves every "
         f"capability reference of each unit from scratch, before and after both elision rewrites ({bc['units']} unit "
         f"rewrites; {bc['references']} references in the corpus before the landing rewrite) and of each control, and the "
-        f"run fails when a reference resolves to another declaration (by full import path) or to nothing, or when a "
-        f"qualifier that resolves to an import is followed by an import name (`http.http.Client`; `http.http` through a "
-        f"value stays legal). Each control's rewrite must also equal its hand-written `controls/after/` file and the "
+        f"run fails when a reference resolves to another declaration (by full import path) or to nothing, or when the rewrite adds a "
+        f"package selector names no exported declaration (`http.http.Client`: the member `http` of package `http`; "
+        f"`http.http` through a value and `http.Client` beside an import aliased `Client` stay legal). Each control's "
+        f"rewrite must also equal its hand-written `controls/after/` file and the "
         f"outcomes its `// expect` lines state. The check must reject {bc['mutants']} known-bad rewrites of the controls "
-        f"(`CHECKER_MUTANTS`): a doubled qualifier, a bare wire key, a bare `replace` target, a qualifier captured by a "
-        f"local, a qualifier captured by a slice parameter, a call captured by an outer value, and a call bound to the "
-        f"outer provider of another package with the same last path segment. Problems found: {len(bc['problems'])}.")
+        f"(`CHECKER_MUTANTS`): " + "; ".join(bc["mutant_list"]) + f". Problems found: {len(bc['problems'])}.")
     sec["source-tokens"] = (
         f"Whole-source tokens, qualifiers included, in the {st['units']} user-facing source units: {st['before']} before, "
         f"{st['after']} after the landing rewrite, {st['before'] - st['after']} saved. Option (a)'s qualifiers cost "

@@ -1,0 +1,13 @@
+// control: `grpc` is imported under the alias `Client`; `http.Client.Ping()` selects http's exported capability, not the grpc package, and is accepted (round-4 review witness)
+// expect (a): qualified 1, row kept 0
+// expect (b): unique 0, ambiguous 0, lexical 1, unresolved 0
+package demo
+
+import (
+	"http"
+	Client "grpc"
+)
+
+func build() { Client.New() }
+
+func work() uses http.Client { Client.Ping() }

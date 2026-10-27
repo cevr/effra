@@ -1,0 +1,12 @@
+// control: a body holds a declaration form the readers do not parse (`const`, removed from the language); the script keeps the row instead of rewriting the body
+// expect (a): qualified 0, row kept 1
+// expect (b): unique 1, ambiguous 0, lexical 0, unresolved 0
+package demo
+
+import "http"
+
+func work() uses http.Client, Console {
+	const http = 1
+	Console.Println(http)
+	Client.Ping()
+}

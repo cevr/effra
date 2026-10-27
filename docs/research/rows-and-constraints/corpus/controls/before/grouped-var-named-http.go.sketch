@@ -1,0 +1,14 @@
+// control: a grouped `var ( http = … )` hides the import; no other spelling exists, so the row is kept (round-4 review witness)
+// expect (a): qualified 0, row kept 1
+// expect (b): unique 1, ambiguous 0, lexical 0, unresolved 0
+package demo
+
+import "http"
+
+func work() uses http.Client, Console {
+	var (
+		http = "shadow"
+	)
+	Console.Println(http)
+	Client.Ping()
+}

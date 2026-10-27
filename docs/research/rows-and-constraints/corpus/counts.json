@@ -1,6 +1,19 @@
 {
  "binding_check": {
-  "mutants": 7,
+  "mutant_list": [
+   "qualified twice (round 2)",
+   "bare wire key (round 2)",
+   "bare replace target (round 2)",
+   "qualifier captured by a local (round 2)",
+   "qualifier captured by a slice parameter (round 3)",
+   "bare call captured by an outer value (round 3)",
+   "bare call bound to the outer provider of another package (round 3)",
+   "qualifier captured by a grouped `var` (round 4)",
+   "qualifier captured by the second name of a `var` (round 4)",
+   "qualifier captured by a local `type` (round 4)",
+   "qualifier captured by a symbolic-array parameter (round 4)"
+  ],
+  "mutants": 11,
   "problems": [],
   "references": 27,
   "units": 92
@@ -299,6 +312,36 @@
  "controls": [
   {
    "a": "qualified 1, row kept 0",
+   "about": "`grpc` is imported under the alias `Client`; `http.Client.Ping()` selects http's exported capability, not the grpc package, and is accepted (round-4 review witness)",
+   "b": "unique 0, ambiguous 0, lexical 1, unresolved 0",
+   "b_counts": {
+    "ambiguous": 0,
+    "lexical": 1,
+    "unbound": 0,
+    "unique": 0,
+    "unresolved": 0,
+    "wrong": 0
+   },
+   "control": "alias-spelled-like-capability",
+   "tokens_a": 2
+  },
+  {
+   "a": "qualified 0, row kept 1",
+   "about": "a grouped `var ( http = \u2026 )` hides the import; no other spelling exists, so the row is kept (round-4 review witness)",
+   "b": "unique 1, ambiguous 0, lexical 0, unresolved 0",
+   "b_counts": {
+    "ambiguous": 0,
+    "lexical": 0,
+    "unbound": 0,
+    "unique": 1,
+    "unresolved": 0,
+    "wrong": 0
+   },
+   "control": "grouped-var-named-http",
+   "tokens_a": 0
+  },
+  {
+   "a": "qualified 1, row kept 0",
    "about": "`os` has no export inventory, so (b) cannot rule out a second `Client`; the use is unresolved, not resolved",
    "b": "unique 0, ambiguous 0, lexical 0, unresolved 1",
    "b_counts": {
@@ -386,6 +429,21 @@
    },
    "control": "not-references",
    "tokens_a": 2
+  },
+  {
+   "a": "qualified 0, row kept 3",
+   "about": "the second name of `var a, http = \u2026`, a local `type http`, and a symbolic-array parameter `http [N]string` each hide the import, so all three rows are kept (round-4 review witness)",
+   "b": "unique 3, ambiguous 0, lexical 0, unresolved 0",
+   "b_counts": {
+    "ambiguous": 0,
+    "lexical": 0,
+    "unbound": 0,
+    "unique": 3,
+    "unresolved": 0,
+    "wrong": 0
+   },
+   "control": "other-binders-named-http",
+   "tokens_a": 0
   },
   {
    "a": "qualified 0, row kept 1",
@@ -506,6 +564,21 @@
    },
    "control": "two-imports-export-client",
    "tokens_a": 2
+  },
+  {
+   "a": "qualified 0, row kept 1",
+   "about": "a body holds a declaration form the readers do not parse (`const`, removed from the language); the script keeps the row instead of rewriting the body",
+   "b": "unique 1, ambiguous 0, lexical 0, unresolved 0",
+   "b_counts": {
+    "ambiguous": 0,
+    "lexical": 0,
+    "unbound": 0,
+    "unique": 1,
+    "unresolved": 0,
+    "wrong": 0
+   },
+   "control": "unreadable-declaration",
+   "tokens_a": 0
   },
   {
    "a": "qualified 0, row kept 1",
