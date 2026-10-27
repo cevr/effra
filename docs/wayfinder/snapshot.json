@@ -1178,7 +1178,7 @@
         197,
         198
       ],
-      "bodySha256": "7cdaf73bc6537ec47f0588c73ac69090bff9c670e604e497f076247ab30cb7de",
+      "bodySha256": "e971e641087f9ef98eb4e5e3529bb70ed0bd5c37e1925cd0c1fd3e5ab1f1b32e",
       "labels": [
         "implementation:task",
         "tier:kernel",
@@ -1190,7 +1190,7 @@
       "state": "open",
       "stateReason": null,
       "title": "std: scope and resources (`build.Scope`, linear resources, finalizer causes)",
-      "updatedAt": "2026-10-26T23:39:58Z",
+      "updatedAt": "2026-10-27T00:34:31Z",
       "url": "https://github.com/cevr/effra/issues/65"
     },
     {
@@ -2674,7 +2674,7 @@
       "state": "open",
       "stateReason": null,
       "title": "receipt.physical races a concurrent dist creation (\"dist exists but cannot be resolved\")",
-      "updatedAt": "2026-10-12T09:47:06Z",
+      "updatedAt": "2026-10-27T00:12:51Z",
       "url": "https://github.com/cevr/effra/issues/152"
     },
     {
@@ -3411,7 +3411,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Sketch language specification v0",
-      "updatedAt": "2026-10-26T23:06:07Z",
+      "updatedAt": "2026-10-27T00:12:21Z",
       "url": "https://github.com/cevr/effra/issues/193"
     },
     {
@@ -3630,7 +3630,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Migrate examples, the conformance corpus and the docs to the sketch",
-      "updatedAt": "2026-10-26T23:06:21Z",
+      "updatedAt": "2026-10-27T00:12:20Z",
       "url": "https://github.com/cevr/effra/issues/204"
     },
     {
@@ -3655,7 +3655,7 @@
     {
       "assignees": [],
       "blockedBy": [],
-      "bodySha256": "027a96b0340a4f31fede21c46330fc582f46bea7d833314bc2d1727f1f416b9d",
+      "bodySha256": "53c7f72d8afb05ef6524172fe3254a44a87986f8274cfee35cdbdc68cb8bb2e7",
       "labels": [
         "track:stdlib",
         "wayfinder:task"
@@ -3665,7 +3665,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Standard library: Effect for Go (epic)",
-      "updatedAt": "2026-10-26T23:06:23Z",
+      "updatedAt": "2026-10-27T00:34:32Z",
       "url": "https://github.com/cevr/effra/issues/206"
     },
     {
