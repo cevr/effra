@@ -488,6 +488,10 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 			c.record(lit, op)
 			lt := op.typ.(*Signature)
 			lits[i] = lt
+			if containsInvalid(lt) {
+				failed = true // see the invalid-operand rule below
+				continue
+			}
 			if allExplicit || failed || !in.mentions(pt) {
 				continue
 			}
@@ -503,13 +507,20 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 		}
 		op, ok := c.argValue(args.exprs[i], hint, x)
 		ops[i] = &op
-		if !ok {
-			failed = true // refused and reported at the call
+		if !ok || op.invalid() || containsInvalid(op.typ) {
+			// The invalid-operand rule, in this one place (round-8 M5;
+			// round 9 class D; D3): an argument that is invalid, or was
+			// refused, already has its diagnostic. The call fails with no
+			// new diagnostic and its result is invalid, so nothing that
+			// depends on the argument (a mismatch, an unbound parameter)
+			// is reported. The other arguments are still checked, so
+			// their independent errors still report.
+			failed = true
 			continue
 		}
 		// Every type argument written: nothing is inferred, and each
 		// argument is only assigned (Go calls no inference then).
-		if op.invalid() || isUntyped(op.typ) || allExplicit || failed || !in.mentions(pt) {
+		if isUntyped(op.typ) || allExplicit || failed || !in.mentions(pt) {
 			continue
 		}
 		if !in.unify(pt, op.typ, unifyAssign) {

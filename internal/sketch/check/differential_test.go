@@ -678,7 +678,7 @@ func F() func(int) int { return Fn[int] }`,
 // either order or with T written (the explicit controls). Every value is a
 // parameter of Main, so no zero value is needed. The calls mix matching
 // and mismatching arguments, so both verdicts occur.
-func inferProgram(rng *rand.Rand) string {
+func inferProgram(rng *rand.Rand, wrap int) string {
 	var b strings.Builder
 	b.WriteString("package p\n\n")
 	b.WriteString("type I0[T any] interface{ M(T) T }\n\n")
@@ -705,15 +705,18 @@ func inferProgram(rng *rand.Rand) string {
 	}
 	values = append(values, "w W0", "j J0", "i I0[int]", "a interface{ M(int) int }", "e interface{ M(string) string }", "n int", "c chan int", "cs chan<- int", "cr <-chan int")
 	types = append(types, "W0", "J0", "I0[int]", "interface{ M(int) int }", "interface{ M(string) string }", "int", "chan int", "chan<- int", "int32")
-	b.WriteString("func FnA[T any](x interface{ M(T) T }) {}\n\n")
-	b.WriteString("func FnN[T any](x I0[T]) {}\n\n")
-	b.WriteString("func FnW[T any](x interface {\n\tM(T) T\n\tN()\n}) {}\n\n")
-	b.WriteString("func Two[T any](a T, b T) {}\n\n")
+	// Every function returns a value, so a call can be nested in another
+	// (round 9 class D).
+	b.WriteString("func FnA[T any](x interface{ M(T) T }) interface{ M(T) T } { return x }\n\n")
+	b.WriteString("func FnN[T any](x I0[T]) I0[T] { return x }\n\n")
+	b.WriteString("func FnW[T any](x interface {\n\tM(T) T\n\tN()\n}) interface {\n\tM(T) T\n\tN()\n} {\n\treturn x\n}\n\n")
+	b.WriteString("func Two[T any](a T, b T) T { return a }\n\n")
 	b.WriteString("func Id[U any](x U) U { return x }\n\n")
-	b.WriteString("func Apply[T any](f func(T) T, x T) {}\n\n")
-	b.WriteString("func Fix(f func(int) int) {}\n\n")
-	b.WriteString("func Rev[T any](x T, f func(T) T) {}\n\n")
-	b.WriteString("func Dep[T any, P interface{ M(T) T }](v T, p P) {}\n\n")
+	b.WriteString("func Pair[A, B any](a A, b B) A { return a }\n\n")
+	b.WriteString("func Apply[T any](f func(T) T, x T) T { return x }\n\n")
+	b.WriteString("func Fix(f func(int) int) int { return f(1) }\n\n")
+	b.WriteString("func Rev[T any](x T, f func(T) T) T { return x }\n\n")
+	b.WriteString("func Dep[T any, P interface{ M(T) T }](v T, p P) T { return v }\n\n")
 	fmt.Fprintf(&b, "func Main(%s) {\n", strings.Join(values, ", "))
 	name := func(v string) string { return v[:strings.Index(v, " ")] }
 	for range 1 + rng.Intn(2) {
@@ -730,43 +733,92 @@ func inferProgram(rng *rand.Rand) string {
 			t := []string{"int", "int8", "int32", "string"}[rng.Intn(4)]
 			return fmt.Sprintf("func(v %s) %s { return v }", t, t)
 		}
+		var call string
 		switch rng.Intn(12) {
 		case 9:
 			// An annotated literal is a typed argument, unified before the
 			// constants default, in either position (round-7 M3).
-			fmt.Fprintf(&b, "\tApply(%s, %s)\n", lit(), v)
+			call = fmt.Sprintf("Apply(%s, %s)", lit(), v)
 		case 10:
-			fmt.Fprintf(&b, "\tRev(%s, %s)\n", v, lit())
+			call = fmt.Sprintf("Rev(%s, %s)", v, lit())
 		case 11:
 			// A parameter a constraint mentions: refused when only a
 			// constant binds it (round-7 M2).
-			fmt.Fprintf(&b, "\tDep(%s, %s)\n", v, w)
+			call = fmt.Sprintf("Dep(%s, %s)", v, w)
 		case 7:
 			// A result in context: Info records the converted type of the
 			// argument and its constant sub-expressions (round-7 M1).
-			fmt.Fprintf(&b, "\t_ = Id(%s)\n", v)
+			call = fmt.Sprintf("Id(%s)", v)
 		case 8:
-			fmt.Fprintf(&b, "\t_ = Id[%s](%s)\n", types[rng.Intn(len(types))], v)
+			call = fmt.Sprintf("Id[%s](%s)", types[rng.Intn(len(types))], v)
 		case 5:
 			// A generic function as an argument: outside the subset unless
 			// instantiated (Apply(Id, n) is refused, Apply(Id[int], n) is valid).
-			fmt.Fprintf(&b, "\tApply(%s, %s)\n", []string{"Id", "Id[int]", "Id[string]"}[rng.Intn(3)], v)
+			call = fmt.Sprintf("Apply(%s, %s)", []string{"Id", "Id[int]", "Id[string]"}[rng.Intn(3)], v)
 		case 6:
-			fmt.Fprintf(&b, "\tFix(%s)\n", []string{"Id", "Id[int]"}[rng.Intn(2)])
+			call = fmt.Sprintf("Fix(%s)", []string{"Id", "Id[int]"}[rng.Intn(2)])
 		case 0:
-			fmt.Fprintf(&b, "\tFnA(%s)\n", v)
+			call = fmt.Sprintf("FnA(%s)", v)
 		case 1:
-			fmt.Fprintf(&b, "\tFnN(%s)\n", v)
+			call = fmt.Sprintf("FnN(%s)", v)
 		case 2:
-			fmt.Fprintf(&b, "\tFnW(%s)\n", v)
+			call = fmt.Sprintf("FnW(%s)", v)
 		case 3:
-			fmt.Fprintf(&b, "\tTwo(%s, %s)\n", v, w)
+			call = fmt.Sprintf("Two(%s, %s)", v, w)
 		default:
-			fmt.Fprintf(&b, "\tTwo[%s](%s, %s)\n", types[rng.Intn(len(types))], v, w)
+			call = fmt.Sprintf("Two[%s](%s, %s)", types[rng.Intn(len(types))], v, w)
 		}
+		// The nesting (round 9 class D) uses no randomness, so the flat and
+		// the nested program of one seed make the same calls.
+		switch wrap {
+		case wrapId:
+			call = "Id(" + call + ")"
+		case wrapPair:
+			call = "Pair(" + call + ", n)"
+		}
+		fmt.Fprintf(&b, "\t_ = %s\n", call)
 	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+// The nestings of a generated call: flat, as the argument of Id, or as the
+// first argument of a second generic call, Pair.
+const (
+	wrapNone = iota
+	wrapId
+	wrapPair
+)
+
+// diagCauses is a program's diagnostics without positions, which a nesting
+// shifts: the code and message of each, sorted.
+func diagCauses(src string) []string {
+	_, diags := CheckSource(src)
+	out := make([]string, len(diags))
+	for i, d := range diags {
+		out[i] = d.Code + " " + d.Message
+	}
+	sort.Strings(out)
+	return out
+}
+
+// nestedCheck checks the nested programs of one seed: each agrees with
+// go/types (verdicts and Info), and has exactly the flat program's
+// diagnostics, so a failed or refused call inside another reports one
+// diagnostic per root cause, never a dependent one (round-8 M5; D3).
+func nestedCheck(seed int64) []string {
+	flat := diagCauses(inferProgram(rand.New(rand.NewSource(seed)), wrapNone))
+	var out []string
+	for _, wrap := range []int{wrapId, wrapPair} {
+		src := inferProgram(rand.New(rand.NewSource(seed)), wrap)
+		if d := diffCheck(src, false); len(d) > 0 {
+			out = append(out, d...)
+		}
+		if got := diagCauses(src); strings.Join(got, "\n") != strings.Join(flat, "\n") {
+			out = append(out, fmt.Sprintf("nesting %d changes the diagnostics:\nflat   %q\nnested %q\n%s", wrap, flat, got, src))
+		}
+	}
+	return out
 }
 
 // inferConstants are the untyped constant arguments the inference generator
@@ -789,7 +841,7 @@ var inferConstants = []string{
 func TestDifferentialInference(t *testing.T) {
 	accepted, rejected, refused := 0, 0, 0
 	for seed := int64(0); seed < diffSeeds; seed++ {
-		src := inferProgram(rand.New(rand.NewSource(seed)))
+		src := inferProgram(rand.New(rand.NewSource(seed)), wrapNone)
 		d, refusal := diffCount(src, false)
 		if len(d) > 0 {
 			t.Fatalf("seed %d:\n%s\n%s", seed, strings.Join(d, "\n"), src)
@@ -823,9 +875,33 @@ func FuzzDifferential(f *testing.F) {
 		if d := diffOne(src); len(d) > 0 {
 			t.Fatalf("seed %d:\n%s\n%s", seed, strings.Join(d, "\n"), src)
 		}
-		src = inferProgram(rand.New(rand.NewSource(seed)))
+		src = inferProgram(rand.New(rand.NewSource(seed)), wrapNone)
 		if d := diffCheck(src, false); len(d) > 0 {
 			t.Fatalf("seed %d (inference):\n%s\n%s", seed, strings.Join(d, "\n"), src)
 		}
+		if d := nestedCheck(seed); len(d) > 0 {
+			t.Fatalf("seed %d (nested):\n%s", seed, strings.Join(d, "\n"))
+		}
 	})
+}
+
+// TestDifferentialNested runs the nested programs over the fixed seeds:
+// every generated call inside Id(…) and inside Pair(…, n) agrees with
+// go/types and keeps the flat program's diagnostics, one per root cause
+// (round-8 M5; round 9 class D). It also counts the seeds whose calls fail
+// or are refused, so the nesting reaches invalid inner calls.
+func TestDifferentialNested(t *testing.T) {
+	failing := 0
+	for seed := int64(0); seed < diffSeeds; seed++ {
+		if d := nestedCheck(seed); len(d) > 0 {
+			t.Fatalf("seed %d:\n%s", seed, strings.Join(d, "\n"))
+		}
+		if len(diagCauses(inferProgram(rand.New(rand.NewSource(seed)), wrapNone))) > 0 {
+			failing++
+		}
+	}
+	t.Logf("%d seeds: %d nest a failing or refused call", diffSeeds, failing)
+	if failing < diffSeeds/10 {
+		t.Errorf("only %d seeds nest a failing call", failing)
+	}
 }
