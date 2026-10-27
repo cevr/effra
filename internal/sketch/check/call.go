@@ -318,113 +318,6 @@ func (in *inferer) rowFree(r *Row) bool {
 	return false
 }
 
-func (in *inferer) unify(p, a Type) {
-	if a == nil || isInvalid(a) {
-		return
-	}
-	switch p := p.(type) {
-	case *TypeParam:
-		if in.free(p) && p.Kind == KindType {
-			if isUntyped(a) {
-				return
-			}
-			in.m[p] = a
-		}
-	case *Named:
-		if an, ok := a.(*Named); ok && an.origin() == p.origin() && len(an.TArgs) == len(p.TArgs) {
-			for i := range p.TArgs {
-				if pr, ok := p.TArgs[i].(*RowArg); ok {
-					if ar, ok := an.TArgs[i].(*RowArg); ok {
-						in.unifyRow(pr.Row, ar.Row)
-					}
-					continue
-				}
-				in.unify(p.TArgs[i], an.TArgs[i])
-			}
-		}
-	case *Slice:
-		if as, ok := under(a).(*Slice); ok {
-			in.unify(p.Elem, as.Elem)
-		}
-	case *Array:
-		if as, ok := under(a).(*Array); ok {
-			in.unify(p.Elem, as.Elem)
-		}
-	case *Map:
-		if am, ok := under(a).(*Map); ok {
-			in.unify(p.Key, am.Key)
-			in.unify(p.Elem, am.Elem)
-		}
-	case *Chan:
-		if ac, ok := under(a).(*Chan); ok {
-			in.unify(p.Elem, ac.Elem)
-		}
-	case *Pointer:
-		if ap, ok := a.(*Pointer); ok {
-			in.unify(p.Elem, ap.Elem)
-		}
-	case *Struct:
-		// Field by field when the field names agree, as go/types unifies
-		// struct types (round 5, differential test).
-		as, ok := under(a).(*Struct)
-		if !ok || len(as.Fields) != len(p.Fields) {
-			return
-		}
-		for i, f := range p.Fields {
-			if as.Fields[i].Name != f.Name {
-				return
-			}
-		}
-		for i, f := range p.Fields {
-			in.unify(f.Type, as.Fields[i].Type)
-		}
-	case *Interface:
-		// Method by method when the method names agree.
-		ai, ok := under(a).(*Interface)
-		if !ok || len(ai.Methods) != len(p.Methods) {
-			return
-		}
-		byName := make(map[string]*Method, len(ai.Methods))
-		for _, m := range ai.Methods {
-			byName[m.Name] = m
-		}
-		for _, m := range p.Methods {
-			if byName[m.Name] == nil {
-				return
-			}
-		}
-		for _, m := range p.Methods {
-			if am := byName[m.Name]; m.Sig != nil && am.Sig != nil {
-				in.unify(m.Sig, am.Sig)
-			}
-		}
-	case *Signature:
-		as, ok := under(a).(*Signature)
-		if !ok {
-			return
-		}
-		if len(p.Params) == len(as.Params) {
-			for i := range p.Params {
-				in.unify(p.Params[i].Type, as.Params[i].Type)
-			}
-		}
-		switch {
-		case len(p.Results) == len(as.Results):
-			for i := range p.Results {
-				in.unify(p.Results[i], as.Results[i])
-			}
-		case len(p.Results) == 1 && len(as.Results) == 0:
-			// A no-value result binds a result-position parameter to
-			// "no value" (Q3; Gleam's Nil, Effect's void).
-			if tp, ok := p.Results[0].(*TypeParam); ok && in.free(tp) {
-				in.m[tp] = NoValue
-			}
-		}
-		in.unifyRow(p.Errors, as.Errors)
-		in.unifyRow(p.Uses, as.Uses)
-	}
-}
-
 // unifyRow binds the free row parameter of p to the elements of a that p's
 // other elements do not cover. A row parameter an earlier argument bound
 // is widened to cover a as well: rows are finite sets ordered by inclusion,
@@ -497,6 +390,8 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 		in.m[sig.TParams[i]] = t
 	}
 	n := args.n()
+	allExplicit := len(explicit) == len(sig.TParams)
+	failed := false
 	ops := make([]*operand, n)
 	isLit := func(i int) bool {
 		if i == len(args.exprs) {
@@ -516,10 +411,25 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 		}
 		op := c.valueExpr(args.exprs[i], hint)
 		ops[i] = &op
-		if op.invalid() || isUntyped(op.typ) {
+		// Every type argument written: nothing is inferred, and each
+		// argument is only assigned (Go calls no inference then).
+		if op.invalid() || isUntyped(op.typ) || allExplicit || failed || !in.mentions(pt) {
 			continue
 		}
-		in.unify(pt, op.typ)
+		if !in.unify(pt, op.typ, unifyAssign) {
+			// A typed argument that does not match its parameter, or
+			// conflicts with what an earlier argument inferred (round-5
+			// M3; go/types infer.go).
+			if want := c.subst(pt, in.m); in.hasFree(pt) || identical(want, pt) {
+				c.errorf(args.exprs[i], CodeType, "the argument has type %s, which does not match %s (D6; type inference)", op.typ, pt)
+			} else {
+				c.errorf(args.exprs[i], CodeType, "the argument has type %s, which does not match %s, inferred for %s (D6; type inference)", op.typ, want, pt)
+			}
+			failed = true
+		}
+	}
+	if failed {
+		return bad(x)
 	}
 	for i := 0; i < len(args.exprs); i++ {
 		if ops[i] == nil || ops[i].invalid() || !isUntyped(ops[i].typ) {
@@ -551,7 +461,7 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 			lt = op.typ.(*Signature)
 		}
 		lits[i] = lt
-		in.unify(pt, lt)
+		_ = in.unify(pt, lt, unifyAssign) // a literal's mismatch is the assignment's error below
 	}
 	for _, tp := range sig.TParams {
 		if in.m[tp] != nil {

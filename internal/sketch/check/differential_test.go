@@ -478,8 +478,15 @@ func (k ergoKeys) key(t Type) string {
 // span is an expression's byte range, the key that matches the two ASTs.
 type span struct{ from, to int }
 
-// diffOne checks src with both checkers and returns the disagreements.
-func diffOne(src string) []string {
+// diffOne checks src with both checkers and returns the disagreements; a
+// rejection must be an instantiation cycle in both.
+func diffOne(src string) []string { return diffCheck(src, true) }
+
+// diffCheck checks src with both checkers and returns the disagreements.
+// With cycleOnly, a program both reject must fail by an instantiation
+// cycle in both; otherwise any rejection agrees (the inference programs
+// fail by unification).
+func diffCheck(src string, cycleOnly bool) []string {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "p.go", src, 0)
 	if err != nil {
@@ -496,6 +503,9 @@ func diffOne(src string) []string {
 	}
 	if (len(goErrs) == 0) != (len(ds) == 0) {
 		return []string{fmt.Sprintf("verdicts differ: go %q, ergo %q", goErrs, ds)}
+	}
+	if len(goErrs) > 0 && !cycleOnly {
+		return nil
 	}
 	if len(goErrs) > 0 {
 		// Both reject: the generated programs fail only by instantiation
@@ -621,7 +631,90 @@ func F() func(int) int { return Fn[int] }`,
 	}
 }
 
-// FuzzDifferential runs the generator on any seed (go test -fuzz).
+// inferProgram writes a program of value-argument inference through
+// interfaces (round-5 M1, M3): concrete types whose method M has one of a
+// few signatures, value or pointer receivers, some with a second method N;
+// a named generic interface, a named wider interface and anonymous
+// interfaces; functions whose parameter is an anonymous, a named generic
+// or a wider interface; and Two[T](a, b T), called with two arguments in
+// either order or with T written (the explicit controls). Every value is a
+// parameter of Main, so no zero value is needed. The calls mix matching
+// and mismatching arguments, so both verdicts occur.
+func inferProgram(rng *rand.Rand) string {
+	var b strings.Builder
+	b.WriteString("package p\n\n")
+	b.WriteString("type I0[T any] interface{ M(T) T }\n\n")
+	b.WriteString("type W0 interface {\n\tM(int) int\n\tN()\n}\n\n")
+	b.WriteString("type J0 interface{ M(int) int }\n\n")
+	results := []string{"int", "string"}
+	nS := 1 + rng.Intn(3)
+	var values, types []string
+	for k := range nS {
+		r := results[rng.Intn(2)]
+		fmt.Fprintf(&b, "type S%d struct{}\n\n", k)
+		recv := fmt.Sprintf("S%d", k)
+		if rng.Intn(3) == 0 {
+			recv = "*" + recv
+		}
+		fmt.Fprintf(&b, "func (%s) M(v %s) %s { return v }\n\n", recv, r, r)
+		if rng.Intn(2) == 0 {
+			fmt.Fprintf(&b, "func (%s) N() {}\n\n", recv)
+		}
+		values = append(values, fmt.Sprintf("s%d S%d", k, k), fmt.Sprintf("p%d *S%d", k, k))
+		// A borrow *T is only a parameter or receiver type in Ergo
+		// (types.md, Borrows 1), so no explicit control writes one.
+		types = append(types, fmt.Sprintf("S%d", k))
+	}
+	values = append(values, "w W0", "j J0", "i I0[int]", "a interface{ M(int) int }", "e interface{ M(string) string }", "n int")
+	types = append(types, "W0", "J0", "I0[int]", "interface{ M(int) int }", "interface{ M(string) string }", "int")
+	b.WriteString("func FnA[T any](x interface{ M(T) T }) {}\n\n")
+	b.WriteString("func FnN[T any](x I0[T]) {}\n\n")
+	b.WriteString("func FnW[T any](x interface {\n\tM(T) T\n\tN()\n}) {}\n\n")
+	b.WriteString("func Two[T any](a T, b T) {}\n\n")
+	fmt.Fprintf(&b, "func Main(%s) {\n", strings.Join(values, ", "))
+	name := func(v string) string { return v[:strings.Index(v, " ")] }
+	for range 1 + rng.Intn(2) {
+		v := name(values[rng.Intn(len(values))])
+		w := name(values[rng.Intn(len(values))])
+		switch rng.Intn(5) {
+		case 0:
+			fmt.Fprintf(&b, "\tFnA(%s)\n", v)
+		case 1:
+			fmt.Fprintf(&b, "\tFnN(%s)\n", v)
+		case 2:
+			fmt.Fprintf(&b, "\tFnW(%s)\n", v)
+		case 3:
+			fmt.Fprintf(&b, "\tTwo(%s, %s)\n", v, w)
+		default:
+			fmt.Fprintf(&b, "\tTwo[%s](%s, %s)\n", types[rng.Intn(len(types))], v, w)
+		}
+	}
+	b.WriteString("}\n")
+	return b.String()
+}
+
+// TestDifferentialInference runs the inference generator over a fixed seed
+// set: the verdicts agree with go/types, and on accepted programs every
+// value expression's type does. Both verdicts must occur.
+func TestDifferentialInference(t *testing.T) {
+	accepted, rejected := 0, 0
+	for seed := int64(0); seed < diffSeeds; seed++ {
+		src := inferProgram(rand.New(rand.NewSource(seed)))
+		if d := diffCheck(src, false); len(d) > 0 {
+			t.Fatalf("seed %d:\n%s\n%s", seed, strings.Join(d, "\n"), src)
+		}
+		if _, diags := CheckSource(src); len(diags) == 0 {
+			accepted++
+		} else {
+			rejected++
+		}
+	}
+	if accepted < diffSeeds/10 || rejected < diffSeeds/10 {
+		t.Errorf("the seeds cover %d accepted and %d rejected programs; the generator misses a verdict", accepted, rejected)
+	}
+}
+
+// FuzzDifferential runs both generators on any seed (go test -fuzz).
 func FuzzDifferential(f *testing.F) {
 	for seed := int64(0); seed < 8; seed++ {
 		f.Add(seed)
@@ -631,6 +724,10 @@ func FuzzDifferential(f *testing.F) {
 		src := g.program()
 		if d := diffOne(src); len(d) > 0 {
 			t.Fatalf("seed %d:\n%s\n%s", seed, strings.Join(d, "\n"), src)
+		}
+		src = inferProgram(rand.New(rand.NewSource(seed)))
+		if d := diffCheck(src, false); len(d) > 0 {
+			t.Fatalf("seed %d (inference):\n%s\n%s", seed, strings.Join(d, "\n"), src)
 		}
 	})
 }

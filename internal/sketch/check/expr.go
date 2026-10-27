@@ -594,7 +594,7 @@ func (c *checker) literalType(x *syntax.CompositeLit, hint Type) Type {
 		if op.mode == modeConst {
 			vt = defaultType(vt)
 		}
-		inf.unify(ft, vt)
+		_ = inf.unify(ft, vt, unifyAssign) // a mismatch is the field assignment's error
 	}
 	targs := make([]Type, len(n.TParams))
 	for i, tp := range n.TParams {
