@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Kernel mode links the merged kernel runtime (effra.local/prototype/runtime/rt)
+// Kernel mode links the merged kernel runtime (ergo.local/prototype/runtime/rt)
 // and makes the program traceable by construction. Every definition ID it
 // names comes from the Model, which the checker's declarations determine; the
 // emitter writes them as constants and never computes one at run time.
@@ -24,7 +24,7 @@ import (
 //     error, so the outcome is recorded, not inferred; the runtime links a
 //     handler to the occurrence it caught. With no tracer each costs one load
 //     and compare.
-//   - main reads EFFRA_TRACE. Unset, the root has no tracer and the program
+//   - main reads TraceEnv (ERGO_TRACE). Unset, the root has no tracer and the program
 //     writes nothing; set, a bounded recorder collects the run and main writes
 //     it as JSON Lines when the root task ends.
 
@@ -35,7 +35,7 @@ func (e *emitter) kernelMain() {
 	e.depth++
 	e.line("var t__ *rt.Task")
 	e.line("var rec__ *rttrace.Recorder")
-	e.line("path__ := os.Getenv(\"EFFRA_TRACE\")")
+	e.line("path__ := os.Getenv(%s)", strconv.Quote(TraceEnv))
 	e.line("if path__ != \"\" {")
 	e.line("\trec__ = rttrace.New(rttrace.DefaultCapacity)")
 	e.line("\tt__ = rt.TracedRoot(%s, rec__)", root)

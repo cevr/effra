@@ -5,14 +5,14 @@
 //	sketchc build [-rt embedded|kernel] [-rtroot DIR] FILE -out DIR [-o BIN]
 //	sketchc trace [-json] FILE TRACE
 //
-// build -rt kernel links the kernel runtime, effra.local/prototype/runtime/rt,
-// from the repository checkout (found above FILE or the working directory,
-// or named by -rtroot) instead of copying the embedded prototype runtime. A
-// kernel program records a trace to the file EFFRA_TRACE names.
+// build -rt kernel links the kernel runtime, ergo.local/prototype/runtime/rt,
+// from the repository checkout instead of copying the embedded prototype
+// runtime. The checkout is given, never discovered: -rtroot DIR, or
+// ERGO_REPO_ROOT when the flag is absent; with neither the build fails. A
+// kernel program records a trace to the file ERGO_TRACE names.
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -22,7 +22,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"effra.local/sketch9/sketch"
 )
@@ -35,7 +34,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: sketchc check FILE | sketchc build [-rt embedded|kernel] [-rtroot DIR] FILE -out DIR [-o BIN] | sketchc trace [-json] FILE TRACE")
+	return errors.New("usage: sketchc check FILE | sketchc build [-rt embedded|kernel] [-rtroot DIR] FILE -out DIR [-o BIN] (-rt kernel needs -rtroot DIR or ERGO_REPO_ROOT) | sketchc trace [-json] FILE TRACE")
 }
 
 // parseInterspersed parses flags that may come before and after the
@@ -68,7 +67,7 @@ func run(args []string, stdout io.Writer) error {
 		out := fs.String("out", "", "directory for the emitted Go module")
 		bin := fs.String("o", "", "path of the executable to build; empty skips go build")
 		rtMode := fs.String("rt", "embedded", "runtime to link: embedded (the prototype runtime copied into the module) or kernel (runtime/rt)")
-		rtRoot := fs.String("rtroot", "", "repository root that holds runtime/rt, for -rt kernel; found by default")
+		rtRoot := fs.String("rtroot", "", "repository root that holds runtime/rt, for -rt kernel; default $"+sketch.KernelRootEnv+", and one of the two is required")
 		pos, err := parseInterspersed(fs, args[1:])
 		if err != nil {
 			return err
@@ -76,7 +75,9 @@ func run(args []string, stdout io.Writer) error {
 		if len(pos) != 1 || *out == "" || (*rtMode != "embedded" && *rtMode != "kernel") {
 			return usage()
 		}
-		return build(pos[0], *out, *bin, *rtMode == "kernel", *rtRoot)
+		rt := rootFlag{value: *rtRoot}
+		fs.Visit(func(f *flag.Flag) { rt.set = rt.set || f.Name == "rtroot" })
+		return build(pos[0], *out, *bin, *rtMode == "kernel", rt)
 	case "trace":
 		fs := flag.NewFlagSet("trace", flag.ContinueOnError)
 		asJSON := fs.Bool("json", false, "print the trace-evidence-1 envelope as JSON")
@@ -113,7 +114,15 @@ func load(file string) (*sketch.Checked, string, error) {
 	return c, string(src), nil
 }
 
-func build(file, out, bin string, kernel bool, rtRoot string) error {
+func build(file, out, bin string, kernel bool, rt rootFlag) error {
+	var rtRoot string
+	if kernel {
+		root, err := kernelRoot(rt, os.LookupEnv)
+		if err != nil {
+			return err
+		}
+		rtRoot = root
+	}
 	c, src, err := load(file)
 	if err != nil {
 		return err
@@ -122,11 +131,6 @@ func build(file, out, bin string, kernel bool, rtRoot string) error {
 	var code string
 	var emitErr error
 	if kernel {
-		if rtRoot == "" {
-			if rtRoot, err = findKernelRoot(file); err != nil {
-				return err
-			}
-		}
 		code, emitErr = sketch.EmitWith(c, sketch.Options{Kernel: true, Revision: sketch.Revision(src)})
 		files["go.mod"] = sketch.KernelGoMod(rtRoot)
 	} else {
@@ -160,45 +164,34 @@ func build(file, out, bin string, kernel bool, rtRoot string) error {
 	return gobuild.Run()
 }
 
-// findKernelRoot finds the checkout that holds the kernel runtime: the
-// nearest directory above file, or else above the working directory, whose
-// go.mod declares module effra.local/prototype.
-func findKernelRoot(file string) (string, error) {
-	var starts []string
-	if abs, err := filepath.Abs(file); err == nil {
-		starts = append(starts, filepath.Dir(abs))
-	}
-	if wd, err := os.Getwd(); err == nil {
-		starts = append(starts, wd)
-	}
-	for _, dir := range starts {
-		for {
-			if declaresModule(filepath.Join(dir, "go.mod"), sketch.KernelModule) {
-				return dir, nil
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
-	}
-	return "", fmt.Errorf("no checkout of %s above %s or the working directory; pass -rtroot", sketch.KernelModule, file)
+// rootFlag is -rtroot: its value, and whether the command line gave it.
+type rootFlag struct {
+	value string
+	set   bool
 }
 
-func declaresModule(gomod, module string) bool {
-	f, err := os.Open(gomod)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		if fields := strings.Fields(sc.Text()); len(fields) == 2 && fields[0] == "module" {
-			return fields[1] == module
+// kernelRoot returns the checkout whose runtime/rt a kernel build links. It
+// is always given, never discovered: -rtroot when the command line has it,
+// else sketch.KernelRootEnv when lookupEnv finds it. sketch.KernelRoot checks
+// the given root, and an empty value, a root that fails the check or neither
+// source is an error that names it.
+func kernelRoot(flag rootFlag, lookupEnv func(string) (string, bool)) (string, error) {
+	from, dir := "-rtroot", flag.value
+	if !flag.set {
+		env, ok := lookupEnv(sketch.KernelRootEnv)
+		if !ok {
+			return "", fmt.Errorf("build -rt kernel needs the repository root: pass -rtroot DIR or set %s", sketch.KernelRootEnv)
 		}
+		from, dir = sketch.KernelRootEnv, env
 	}
-	return false
+	if dir == "" {
+		return "", fmt.Errorf("%s is empty; name the repository root", from)
+	}
+	root, err := sketch.KernelRoot(dir)
+	if err != nil {
+		return "", fmt.Errorf("%s %s: %w", from, dir, err)
+	}
+	return root, nil
 }
 
 func trace(file, tracePath string, asJSON bool, stdout io.Writer) error {
