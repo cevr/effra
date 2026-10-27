@@ -20,8 +20,10 @@ import (
 //   - every fence has the one strict style (markdownlint MD046/MD048): a
 //     backtick fence at column 0, opened as ```<lang> with lowercase
 //     letters and closed by a bare ``` on its own line. Any other line
-//     that looks like a fence fails, and so does an unclosed fence, so the
-//     blocks read here are exactly the blocks CommonMark renders;
+//     that contains ``` or ~~~ fails, whatever its prefix (indent,
+//     blockquote, list item), and so do an unclosed fence and a carriage
+//     return anywhere, so the blocks read here are exactly the blocks
+//     CommonMark renders;
 //   - every go block parses and is canonical under the 2026 parser and formatter, with a
 //     package clause added, and uses no form the specification removed:
 //     `uses` (#217), `nil` (types.md) or a prefix catch (rows.md); nor a
@@ -37,9 +39,10 @@ import (
 // drops a failure from a row fails here too.
 
 var (
-	// readmeSmokeFenceLike is any line CommonMark might read as a fence:
-	// optional white space, then three backticks or three tildes.
-	readmeSmokeFenceLike = regexp.MustCompile("^[ \t]*(```|~~~)")
+	// readmeSmokeFenceLike is any line that holds three backticks or three
+	// tildes: CommonMark may read it as a fence inside a container
+	// (blockquote, list item) or after an indent.
+	readmeSmokeFenceLike = regexp.MustCompile("```|~~~")
 	// readmeSmokeOpener is the one admitted opening fence.
 	readmeSmokeOpener = regexp.MustCompile("^```([a-z]+)$")
 	// readmeSmokeDiagnostics is the console block that quotes the S102 line.
@@ -123,6 +126,9 @@ func readmeGoBlocks(readme string) ([]string, []string) {
 // every inadmissible go block of a README.
 func readmeProblems(readme string) []string {
 	blocks, problems := readmeGoBlocks(readme)
+	if index := strings.IndexByte(readme, '\r'); index >= 0 {
+		problems = append(problems, fmt.Sprintf("line %d: carriage return: the README uses LF line endings only", strings.Count(readme[:index], "\n")+1))
+	}
 	if len(blocks) < readmeSmokeMinBlocks {
 		return append(problems, fmt.Sprintf("README has %d go blocks, want at least %d", len(blocks), readmeSmokeMinBlocks))
 	}
@@ -235,6 +241,11 @@ func TestReadmeSmoke(t *testing.T) {
 			{"opener of four backticks", uses(first("````go\n")), fence},
 			{"bare opener with no language", readme + "\n```\nfunc bad() uses Console {}\n```\n", fence},
 			{"closer with trailing text", strings.Replace(readme, "\tT.Equal(r.ID, \"timed-out\")\n}\n```\n", "\tT.Equal(r.ID, \"timed-out\")\n}\n``` end\n", 1), fence},
+			// The reviewer's round-3 cases (round-3-findings, T1).
+			{"quoted fence", readme + "\n> ```go\n> func bad() uses Console {\n> \twork()\n> }\n> ```\n", fence},
+			{"nested quoted tilde fence", readme + "\n>> ~~~go\n>> func bad() uses Console {\n>> \twork()\n>> }\n>> ~~~\n", fence},
+			{"list item holding a quoted fence", readme + "\n- > ```go\n  > func bad() uses Console {\n  > \twork()\n  > }\n  > ```\n", fence},
+			{"CR line endings", strings.ReplaceAll(readme, "\n", "\r\n"), "carriage return"},
 			{"closer of four backticks", strings.Replace(readme, "\tT.Equal(r.ID, \"timed-out\")\n}\n```\n", "\tT.Equal(r.ID, \"timed-out\")\n}\n````\n", 1), fence},
 		} {
 			problems := strings.Join(readmeProblems(mutant.doc), "\n")
