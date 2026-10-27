@@ -36,16 +36,24 @@ A `Get` built around an `actor.Reply[string]` is a type error. A handler that dr
 ## Proposed: the same protocol as calls on a state value
 
 ```go
-func JoinRoom(room actor.Agent[Room], name string) (int64, error[RoomFull | actor.Stopped | actor.NoReply]) {
-	return actor.Call(room, func(r Room) (Room, int64, error[RoomFull]) { return r.Join(name) })
+func (r *Room) Join(name string) (int64, error[RoomFull]) {
+	if len(r.names) >= r.limit {
+		return RoomFull{r.limit}
+	}
+	r.names = append(r.names, name)
+	return len(r.names)
+}
+
+func JoinRoom(room actor.AgentAddress[Room], name string) (int64, error[RoomFull | actor.Stopped | actor.NoReply]) {
+	return actor.Call(room, func(r *Room) (int64, error[RoomFull]) { return r.Join(name) })
 }
 ```
 
-The reply is the call's return value, so there is no message union and no reply address.
+The protocol is `Room`'s methods with a `*Room` receiver. `actor.Call` lends the state to the function literal for one call, and the borrow cannot escape it. The reply is the literal's return value, so there is no message union and no reply address. The literal's parameter types are spelled until [#214](https://github.com/cevr/effra/issues/214) infers them from `Call`'s expected type: `actor.Call(room, func(r) { r.Join(name) })`.
 
 ## Not claimed
 
-- No checker accepts these snippets. The resource rules they rely on are spec Gaps 33 to 42, for #196 and #197.
+- No checker accepts these snippets. The rules they rely on are spec Gaps 35 to 46, for #196 and #197.
 - No actor syntax is proposed. The note's route-2 sketches exist only to measure size: route 1 costs 2.65x to 3.38x the tokens for handler actors and 1.06x for a machine.
 - No performance parity: `Ask` and start/stop cost more than the hand-written Go actor (the note's Q8 table).
 - No supervision, durable addresses or byte budgets.

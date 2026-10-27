@@ -26,7 +26,7 @@ The standard library is the "Effect for Go" track, [#206](https://github.com/cev
 | HTTP | [#51](https://github.com/cevr/effra/issues/51) | HttpClient, HttpServer, HttpRouter, HttpApi | `func(http.Request) http.Response`, total `catch` | library + host |
 | RPC | [#53](https://github.com/cevr/effra/issues/53) | Rpc, RpcGroup | over `http` and `json` | library |
 | HTML | [#212](https://github.com/cevr/effra/issues/212) | (none; Lustre and Elm prior art) | `html` functions | library |
-| Actors | [#57](https://github.com/cevr/effra/issues/57) | cluster Entity (OTP, Gleam and Akka Typed prior art) | `actor.Start`, `actor.Ask` with an `actor.Reply[T, E]` in the message, `actor.Address[M]`, `actor.StartMachine(m, n)`, `actor.StartAgent` and `actor.Call` ([#101 note](../research/actor-library.md)) | library: no compiler rule names it (#101) |
+| Actors | [#57](https://github.com/cevr/effra/issues/57) | cluster Entity (OTP, Gleam and Akka Typed prior art) | `actor.Start`, `actor.Ask` with an `actor.Reply[T, E]` in the message, `actor.Address[M]`, `actor.StartMachine(m, n)`, `actor.StartAgent` and `actor.Call` with a function on a lent `*S` ([#101 note](../research/actor-library.md)) | library: no compiler rule names it (#101) |
 | Host packages | [#210](https://github.com/cevr/effra/issues/210) | platform FileSystem, Path, Command, Socket; sql | `os`, `fs`, `net`, `sql` with cancel hooks | host |
 | Core data | [#211](https://github.com/cevr/effra/issues/211) | Option, Array, Record, HashMap, HashSet, Chunk, Order, Equivalence, Equal, Hash, Data | prelude `Option`, `slices`, `maps`, `cmp` | library + built-in constraints |
 
