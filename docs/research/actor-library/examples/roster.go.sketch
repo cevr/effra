@@ -1,0 +1,62 @@
+// Label: Proposed. Route 1: a room roster as a handler actor with three
+// replies of three types and one per-request failure. Hand-lowered in
+// prototypes/actorlib/examples/roster.go.
+package roster
+
+import (
+	"actor"
+	"slices"
+)
+
+type RoomFull struct{ Limit int64 }
+
+type Room struct {
+	limit int64
+	names []string
+}
+
+type RosterMsg interface{ Join | Leave | Members }
+
+type Join struct {
+	Name  string
+	Reply actor.Reply[int64, RoomFull]
+}
+type Leave struct {
+	Name  string
+	Reply actor.Reply[int64]
+}
+type Members struct{ Reply actor.Reply[[]string] }
+
+func serveRoom(r Room, m RosterMsg) actor.Next[Room] {
+	switch m := m.(type) {
+	case Join:
+		if len(r.names) >= r.limit {
+			m.Reply.Fail(RoomFull{r.limit})
+			return actor.Continue(r)
+		}
+		r.names = append(r.names, m.Name)
+		m.Reply.Send(len(r.names))
+	case Leave:
+		r.names = slices.DeleteFunc(r.names, func(n string) bool { return n == m.Name })
+		m.Reply.Send(len(r.names))
+	case Members:
+		m.Reply.Send(r.names) // a copy: value semantics (Q7)
+	}
+	return actor.Continue(r)
+}
+
+func StartRoom(limit int64) actor.Actor[RosterMsg] {
+	return actor.Start(Room{limit: limit}, 64, serveRoom)
+}
+
+func JoinRoom(room actor.Address[RosterMsg], name string) (int64, error[RoomFull | actor.Stopped | actor.NoReply]) {
+	return actor.Ask(room, func(r actor.Reply[int64, RoomFull]) RosterMsg { return Join{name, r} })
+}
+
+func LeaveRoom(room actor.Address[RosterMsg], name string) (int64, error[actor.Stopped | actor.NoReply]) {
+	return actor.Ask(room, func(r actor.Reply[int64]) RosterMsg { return Leave{name, r} })
+}
+
+func RoomMembers(room actor.Address[RosterMsg]) ([]string, error[actor.Stopped | actor.NoReply]) {
+	return actor.Ask(room, func(r actor.Reply[[]string]) RosterMsg { return Members{r} })
+}

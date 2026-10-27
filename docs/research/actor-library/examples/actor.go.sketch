@@ -1,0 +1,248 @@
+// Label: Proposed. The std `actor` package as ordinary Effra library code, in
+// the provisional generic spelling of docs/spec/types.md (#135). Hand-lowered
+// in prototypes/actorlib (actor.go, machine.go, agent.go). Every feature it
+// uses is a general one; the ones docs/spec does not have yet are Gaps A1-A9
+// in docs/research/actor-library.md. No compiler rule names this package.
+package actor
+
+import "sync"
+
+// Stopped: the actor refused or discarded the request because it was
+// stopping or had ended.
+type Stopped struct{}
+
+// NoReply: the actor dequeued the request, then released its reply
+// unanswered while it was running.
+type NoReply struct{}
+
+// Reply is a one-shot reply address carried in a message. It has Close, so it
+// is a resource (R1): a dropped reply is released at its owner's scope end,
+// and its release answers the caller.
+type Reply[T, E] struct {
+	slot chan Exit[T, E | Stopped | NoReply] // capacity 1 (Gap A7: Exit)
+	from control
+}
+
+// Send answers with v. Its body consumes r, so Send consumes r (Gap A1), and
+// a second answer is a use after consume (R20).
+func (r Reply[T, E]) Send(v T) {
+	select {
+	case r.slot <- Succeed(v):
+	default:
+	}
+	r.Close() // the answer is buffered or taken, so this refusal is never read
+}
+
+// Fail answers with the typed failure e (Gap A7: a failure as a value).
+func (r Reply[T, E]) Fail(e E) {
+	select {
+	case r.slot <- Fail(e):
+	default:
+	}
+	r.Close()
+}
+
+// Close answers an unanswered request: Stopped while the actor stops,
+// NoReply while it runs.
+func (r Reply[T, E]) Close() {
+	select {
+	case r.slot <- Fail(r.from.refusal()):
+	default:
+	}
+}
+
+// Address is the copyable half: its fields are synchronised handles, so it
+// is shared by copy into tasks (runtime.md Tasks rule 6) and is not a
+// resource.
+type Address[M] struct {
+	mailbox chan M // a channel of resources when M holds a Reply (Gap A3)
+	control control
+}
+
+// Send admits m, waiting while the mailbox is full. It moves m (Gap A1): on
+// success into the mailbox, on failure into Send's own scope, which releases
+// it, so a reply inside m is answered.
+func (a Address[M]) Send(m M) error[Stopped] {
+	admit := a.control.admission.RLock() // a held lock is a resource: released at scope end
+	if a.control.closed.Load() {
+		return Stopped{}
+	}
+	select {
+	case a.mailbox <- m:
+		return
+	case <-a.control.stopping:
+		return Stopped{}
+	}
+}
+
+// Ask builds a message around a fresh reply address and waits for the
+// answer. T and E come from request's parameter type alone.
+func Ask(to Address[M], request func(Reply[T, E]) M) (T, error[E | Stopped | NoReply]) {
+	slot := make(chan Exit[T, E | Stopped | NoReply], 1)
+	try to.Send(request(Reply[T, E]{slot, to.control}))
+	return (<-slot).Get() // an interruption point: a stopped caller detaches
+}
+
+// Next is a handler's decision (Gleam OTP actor.continue and actor.stop).
+type Next[S] struct {
+	State S
+	End   bool
+}
+
+func Continue(s S) Next[S] { return Next[S]{s, false} }
+func End(s S) Next[S]      { return Next[S]{s, true} }
+
+// Actor is the owner handle. It holds a Task, so it is a resource (R1, R14):
+// its owner scope stops it at scope end, and Stop consumes it.
+type Actor[M, E] struct {
+	address Address[M]
+	task    Task[struct{}, E]
+}
+
+func (a Actor[M, E]) Address() Address[M]          { return a.address }
+func (a Actor[M, E]) Send(m M) error[Stopped]      { return a.address.Send(m) }
+func (a Actor[M, E]) Stop() error[E]               { return a.task.Stop() } // Gap A9
+
+// Start runs handle over a mailbox of the given capacity. handle escapes into
+// the actor's task, and its requirements R are charged here, where they are
+// captured (rows.md, Footprints rule 5 keeps the actor inside the `with` that
+// binds them). A handler failure ends the actor; Stop returns it.
+func Start(initial S, capacity int64, handle func(S, M) (Next[S], error[E]) uses R) Actor[M, E] uses R {
+	c := newControl()
+	mailbox := make(chan M, capacity)
+	task := go serve(initial, mailbox, c, handle)
+	return Actor[M, E]{Address[M]{mailbox, c}, task}
+}
+
+func serve(s S, mailbox chan M, c control, handle func(S, M) (Next[S], error[E]) uses R) error[E] uses R {
+	defer drain(mailbox, c) // runs masked (I2) on every exit
+	for {
+		m := <-mailbox             // an interruption point
+		next := try handle(s, m)   // moves s and m into handle (Gap A5)
+		if next.End {
+			return
+		}
+		s = next.State
+	}
+}
+
+// drain refuses admission, then releases every queued message, so a queued
+// request is answered Stopped.
+func drain(mailbox chan M, c control) {
+	c.close()
+	for {
+		select {
+		case m := <-mailbox:
+			release(m) // m is released here (R5); a value of type M may be a resource (Gap A8)
+		default:
+			return
+		}
+	}
+}
+
+type control struct {
+	admission sync.RWMutex
+	closed    sync.Flag
+	stopping  sync.Latch
+	task      TaskID
+}
+
+func (c control) refusal() Stopped | NoReply { /* Stopped once the actor stops, else NoReply */ }
+func (c control) close()                      { /* raise stopping, then fence admission */ }
+
+// Machine-backed actors: ordinary code over Start.
+
+type envelope[S, E, O, F] interface{ event[S, E, O, F] | snapshot[S] }
+
+type event[S, E, O, F] struct {
+	ev    E
+	reply Option[Reply[Decision[S, O], F]] // None for Send
+}
+
+type snapshot[S] struct{ reply Reply[S] }
+
+type Machine[S, E, O, F] struct{ actor Actor[envelope[S, E, O, F], F] }
+
+// Start over a machine value. The step's rows pass through: its failure row
+// F goes to the asker, and its requirements R are charged here.
+func StartMachine(m machine[S, E], capacity int64) Machine[S, E, O, F] uses R {
+	return Machine[S, E, O, F]{Start(m.initial, capacity, func(s S, msg envelope[S, E, O, F]) (Next[S], error[F]) {
+		switch msg := msg.(type) {
+		case snapshot[S]:
+			msg.reply.Send(s)
+			return Continue(s)
+		case event[S, E, O, F]:
+			d := m.step(s, msg.ev) catch e {
+				case F:
+					switch r := msg.reply.(type) {
+					case Some:
+						r.Value.Fail(e) // the asker observes the step failure
+						return Continue(s)
+					case None:
+						return e // no asker: the failure ends the actor
+					}
+			}
+			next := apply(s, d)
+			if r, ok := msg.reply.Take(); ok {
+				r.Send(d)
+			}
+			return next
+		}
+	})}
+}
+
+func (b Machine[S, E, O, F]) Send(e E) error[Stopped] {
+	return b.actor.Send(event[S, E, O, F]{e, None})
+}
+
+func (b Machine[S, E, O, F]) Ask(e E) (Decision[S, O], error[F | Stopped | NoReply]) {
+	return Ask(b.actor.Address(), func(r Reply[Decision[S, O], F]) envelope[S, E, O, F] {
+		return event[S, E, O, F]{e, Some(r)}
+	})
+}
+
+func (b Machine[S, E, O, F]) State() (S, error[Stopped | NoReply]) {
+	return Ask(b.actor.Address(), func(r Reply[S]) envelope[S, E, O, F] { return snapshot[S]{r} })
+}
+
+func (b Machine[S, E, O, F]) Stop() error[F] { return b.actor.Stop() }
+
+// Agents: calls on a state value. The reply is the call's return value, so
+// every admitted call is answered once by construction, with no Reply
+// resource. f has no `uses` row: a detached caller's call may still run after
+// the caller's `with` has released its providers.
+
+type call[S] struct {
+	run    func(s S) S
+	refuse func()
+}
+
+// Close makes a call a resource: the drain releases a queued call, which
+// answers its caller Stopped without running it.
+func (c call[S]) Close() { c.refuse() }
+
+type Agent[S] struct{ actor Actor[call[S]] }
+
+func StartAgent(initial S, capacity int64) Agent[S] {
+	return Agent[S]{Start(initial, capacity, func(s S, c call[S]) Next[S] { return Continue(c.run(s)) })}
+}
+
+func Call(a Agent[S], f func(S) (S, T, error[E])) (T, error[E | Stopped | NoReply]) {
+	slot := make(chan Exit[T, E | Stopped | NoReply], 1)
+	refuse := func() {
+		select {
+		case slot <- Fail(Stopped{}):
+		default:
+		}
+	}
+	try a.actor.Send(call[S]{refuse: refuse, run: func(s S) S {
+		next, v := f(s) catch e {
+			case E:
+				slot <- Fail(e)
+				return s
+		}
+		slot <- Succeed(v)
+		return next
+	}})
+	return (<-slot).Get()
+}

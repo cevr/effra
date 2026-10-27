@@ -1,0 +1,18 @@
+// Label: Proposed, route 2, hypothetical. NOT adopted: written only to
+// measure what actor syntax would save on the same program. The compiler
+// would derive the message union, the reply plumbing and the client methods
+// from the `actor` declaration.
+package counter
+
+type Counter actor {
+	n int64
+
+	func Inc(by int64) { n = n + by }
+	func Get() int64   { return n }
+}
+
+func main() error[actor.Stopped] uses Console {
+	c := spawn Counter{n: 0} cap 64
+	try post c.Inc(2)
+	Console.Println(try c.Get())
+}

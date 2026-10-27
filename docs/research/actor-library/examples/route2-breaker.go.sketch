@@ -1,0 +1,63 @@
+// Label: Proposed, route 2, hypothetical. NOT adopted: the breaker with a
+// `spawn` form, written only to measure what syntax would save. The machine
+// declaration is the same as in breaker.go.sketch; only the caller changes.
+package breaker
+
+type State interface{ Closed | Open | HalfOpen }
+type Closed struct{ Failures int64 }
+type Open struct{ Endpoint string }
+type HalfOpen struct{ Endpoint string }
+
+type Signal interface{ Failure | Success | Retry | Retire }
+type Failure struct{ Endpoint string }
+type Success struct{}
+type Retry struct{}
+type Retire struct{}
+
+type ProbeDown struct{ Endpoint string }
+
+type Probe interface {
+	Check(endpoint string) error[ProbeDown]
+}
+
+func step(s State, sig Signal) (Decision[State, string], error[ProbeDown]) uses Probe {
+	switch s, sig := s.(type), sig.(type) {
+	case (Closed, Failure):
+		if s.Failures+1 >= 3 {
+			return Enter{Open{sig.Endpoint}}
+		}
+		return Stay{Closed{s.Failures + 1}}
+	case (Closed, Success):
+		return Stay{Closed{0}}
+	case (Open, Retry):
+		try Probe.Check(s.Endpoint)
+		return Enter{HalfOpen{s.Endpoint}}
+	case (HalfOpen, Success):
+		return Enter{Closed{0}}
+	case (HalfOpen, Failure):
+		return Enter{Open{sig.Endpoint}}
+	case (_, Retire):
+		return Done{"retired"}
+	case (Open, _):
+		return Reject{}
+	case (_, _):
+		return Ignore{}
+	}
+}
+
+type Breaker machine[State, Signal] {
+	initial Closed{0}
+	step    step
+}
+
+func guard(b actor Breaker) (Decision[State, string], error[actor.Stopped]) {
+	return try b.Ask(Retry{}) catch { case ProbeDown: Reject{} }
+}
+
+func run(signals chan Signal) error[actor.Stopped] uses Probe {
+	b := spawn Breaker{} cap 16
+	for sig := range signals {
+		try post b.Send(sig)
+	}
+	try guard(b)
+}
