@@ -175,3 +175,52 @@ func TestTraceCarriesEmittedSites(t *testing.T) {
 	untraced := rt.Root("app.main")
 	untraced.Trace(rt.TraceCall, "app.Gateway.Authorize", "app.sketch:9:14") // no tracer: nothing to do
 }
+
+// A cancel-request is recorded before the stop flag is set, so the child's
+// observation of the stop is always recorded after it. A child started under
+// a stopped owner records its request too.
+func TestTraceCancelRequestPrecedesObservation(t *testing.T) {
+	for i := 0; i < 200; i++ {
+		rec := rttrace.New(64)
+		root := rt.TracedRoot("app.main", rec)
+		var child uint64
+		_, _ = rt.Run(root, func(t0 *rt.Task) (struct{}, error) {
+			s := rt.NewScope(t0)
+			defer s.End(nil)
+			started := make(chan struct{})
+			h := rt.Go(&s, "app.child", func(c *rt.Task) (struct{}, error) {
+				child = c.ID()
+				close(started)
+				for !c.Stopped() {
+				}
+				c.Trace(rt.TraceInterrupt, "app.child", "app.sketch:4:2")
+				return struct{}{}, rt.Interrupted
+			})
+			<-started
+			return struct{}{}, h.Stop()
+		})
+		recs := records(t, rec)
+		cancel, okC := find(recs, rt.TraceCancelRequest, child)
+		seen, okS := find(recs, rt.TraceInterrupt, child)
+		if !okC || !okS || cancel.Seq > seen.Seq {
+			t.Fatalf("run %d: cancel-request %+v (%v), interrupt %+v (%v); want the request first", i, cancel, okC, seen, okS)
+		}
+	}
+
+	rec := rttrace.New(64)
+	root := rt.TracedRoot("app.main", rec)
+	var late uint64
+	_, _ = rt.Run(root, func(t0 *rt.Task) (struct{}, error) {
+		t0.Interrupt()
+		s := rt.NewScope(t0)
+		defer s.End(nil)
+		h := rt.Go(&s, "app.late", func(c *rt.Task) (struct{}, error) {
+			late = c.ID()
+			return struct{}{}, nil
+		})
+		return h.Wait()
+	})
+	if _, ok := find(records(t, rec), rt.TraceCancelRequest, late); !ok {
+		t.Fatalf("a child started under a stopped owner recorded no cancel-request")
+	}
+}

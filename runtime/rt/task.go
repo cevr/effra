@@ -70,6 +70,9 @@ func (t *Task) init(parent *Task, span string, masked bool) {
 	}
 	parent.mu.Lock()
 	if !t.shielded && parent.stopped.Load() {
+		if t.trace != nil {
+			t.traceTask(TraceCancelRequest, nil) // born stopped: the request precedes its start
+		}
 		t.stopped.Store(true)
 	}
 	t.next = parent.first
@@ -129,12 +132,14 @@ func (t *Task) Chain() []Frame {
 func (t *Task) Interrupt() {
 	t.mu.Lock()
 	if !t.stopped.Load() {
+		// The event is recorded before the flag is set, so it happens before
+		// any observation of the stop and a recorder orders it first.
+		if t.trace != nil {
+			t.traceTask(TraceCancelRequest, nil)
+		}
 		t.stopped.Store(true)
 		if t.stop != nil {
 			close(t.stop)
-		}
-		if t.trace != nil {
-			t.traceTask(TraceCancelRequest, nil)
 		}
 		// Locks are taken ancestor first; detach takes only the parent's
 		// lock, so the walk cannot deadlock with a finishing child.
