@@ -8,7 +8,7 @@
 // build -rt kernel links the kernel runtime, ergo.local/prototype/runtime/rt,
 // from the repository checkout (found above FILE or the working directory,
 // or named by -rtroot) instead of copying the embedded prototype runtime. A
-// kernel program records a trace to the file EFFRA_TRACE names.
+// kernel program records a trace to the file ERGO_TRACE names.
 package main
 
 import (

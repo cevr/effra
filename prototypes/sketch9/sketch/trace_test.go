@@ -68,7 +68,7 @@ func TestModelIDsAreDerivedAndStable(t *testing.T) {
 		t.Fatalf("%v\n%s", err, code)
 	}
 	for _, s := range []string{
-		`"latency.checkout/timeout.After#1"`, `rt.AfterSpan(t__,`, `rt.TracedRoot(`, `os.Getenv("EFFRA_TRACE")`,
+		`"latency.checkout/timeout.After#1"`, `rt.AfterSpan(t__,`, `rt.TracedRoot(`, `os.Getenv("ERGO_TRACE")`,
 		`const revision__ = "` + Revision(src) + `"`, `t__.TraceCall(`, `t__.TraceCallExit(`, `"timeout.sketch:32:2"`,
 	} {
 		if !strings.Contains(code, s) {
@@ -569,7 +569,7 @@ func TestKernelTimeoutTrace(t *testing.T) {
 	}
 	run := exec.Command(bin)
 	run.Dir = t.TempDir()
-	run.Env = append(os.Environ(), "EFFRA_TRACE=")
+	run.Env = append(os.Environ(), "ERGO_TRACE=")
 	out, err := run.Output()
 	if err != nil || string(out) != "gateway timed out\n" {
 		t.Fatalf("untraced run: %q, %v", out, err)
@@ -577,15 +577,22 @@ func TestKernelTimeoutTrace(t *testing.T) {
 	if entries, _ := os.ReadDir(run.Dir); len(entries) != 0 {
 		t.Fatalf("untraced run wrote %d files", len(entries))
 	}
+	// The variable is named literally, not through TraceEnv: it is the
+	// documented contract (README), and a program that reads another name
+	// would turn tracing off without a word.
 	tracePath := filepath.Join(dir, "timeout.jsonl")
 	traced := exec.Command(bin)
-	traced.Env = append(os.Environ(), "EFFRA_TRACE="+tracePath)
+	traced.Env = append(os.Environ(), "ERGO_TRACE="+tracePath)
 	if out, err := traced.Output(); err != nil || string(out) != "gateway timed out\n" {
 		t.Fatalf("traced run: %q, %v", out, err)
 	}
 	data, err := os.ReadFile(tracePath)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("a run with ERGO_TRACE set recorded no trace: %v", err)
+	}
+	var header TraceHeader
+	if line, _, _ := strings.Cut(string(data), "\n"); json.Unmarshal([]byte(line), &header) != nil || header.Schema != TraceSchema || header.Events == 0 {
+		t.Fatalf("a run with ERGO_TRACE set recorded header %+v; want schema %s and events", header, TraceSchema)
 	}
 	ev, err := QueryTrace(NewModel(c), Revision(src), data)
 	if err != nil {
@@ -648,7 +655,7 @@ func TestKernelProbeTraces(t *testing.T) {
 		}
 		tracePath := filepath.Join(dir, tc.name+".jsonl")
 		run := exec.Command(bin)
-		run.Env = append(os.Environ(), "EFFRA_TRACE="+tracePath)
+		run.Env = append(os.Environ(), "ERGO_TRACE="+tracePath)
 		if out, err := run.Output(); err != nil || string(out) != tc.out {
 			t.Fatalf("%s: traced run: %q, %v", tc.name, out, err)
 		}

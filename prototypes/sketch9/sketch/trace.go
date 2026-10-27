@@ -35,7 +35,10 @@ const (
 	TraceSchema = "ergo-trace-3"
 	// traceSchemaEffra is TraceSchema's name before the root module was
 	// renamed (#218, 2026-10-27). Only the name changed, so the query reads
-	// both; the traces recorded before the rename carry it.
+	// both; the traces recorded before the rename carry it. Reading it keeps
+	// history data readable (testdata/trace/*.jsonl, recorded runs that stay
+	// unrewritten); it is not syntax compatibility, and the kernel never
+	// writes it.
 	traceSchemaEffra = "effra-trace-3"
 	// TraceEvidenceSchema is the envelope a query answers with. Its envelope
 	// fields are those of the review evidence schema (#156): schema,

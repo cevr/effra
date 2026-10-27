@@ -22,6 +22,12 @@ const GoMod = "module sketchgen\n\ngo 1.27\n"
 // KernelModule is the module that holds the kernel runtime, runtime/rt.
 const KernelModule = "ergo.local/prototype"
 
+// TraceEnv is the environment variable whose value, a file path, makes a
+// kernel program record its run there. The kernel runtime reads no variable
+// itself (runtime/rt TracedRoot: emitted main decides); the name follows the
+// root's ERGO_* variables (EFFRA_TRACE until #218, 2026-10-27).
+const TraceEnv = "ERGO_TRACE"
+
 // KernelGoMod is the go.mod of a program emitted in kernel mode. It links the
 // kernel runtime from the repository checkout at root, which needs no network
 // and no checksum.
@@ -33,7 +39,7 @@ func KernelGoMod(root string) string {
 type Options struct {
 	// Kernel links the kernel runtime ergo.local/prototype/runtime/rt instead
 	// of the embedded prototype runtime. The program carries its definition
-	// IDs and sites as constants and records a trace when EFFRA_TRACE names a
+	// IDs and sites as constants and records a trace when TraceEnv names a
 	// file.
 	Kernel bool
 	// Revision is the source revision (Revision), written into the trace
