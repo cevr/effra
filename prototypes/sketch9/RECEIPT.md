@@ -267,8 +267,8 @@ The "without" binary is the same emitted program with the trace switch removed b
 
 | Command (from the worktree root) | Exit |
 | --- | --- |
-| `bash /home/exedev/.cache/baton/wf10/trace-188/accept.sh` | see `accept-r3.log` |
-| `./scripts/gate.sh` | see `gate-r3.log` |
+| `bash /home/exedev/.cache/baton/wf10/trace-188/accept.sh` | 1 (`accept-r3.log`): its only failure is `root go.mod or go.sum changed` against base `854f21e7`, from main's `f883c1c7` merged in; the branch's `go.mod` equals main's. With that check pointed at main (`accept-r3-mainbase.sh`): 0, `ACCEPT OK` (`accept-r3-mainbase.log`) |
+| `./scripts/gate.sh` | 0 (`gate: passed 30 steps in 83.6s`, `gate-r3.log`) |
 | `cd prototypes/sketch9 && go vet ./... && go test -count=1 ./...` | 0 |
 
 - Schema `effra-trace-3`: a `body-exit` has no `link`; each reason of its cause carries its own `origin`. `sketch/trace.go` checks each origin against the reason it explains (`checkOrigins`), refuses a `body-exit` link, and explains each reason from its own origin; a reason without one says "origin not recorded". The events table prints the origins.
