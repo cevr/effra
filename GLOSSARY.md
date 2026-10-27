@@ -355,6 +355,10 @@ These terms describe the `.ef` language that `internal/compiler` and `runtime/ef
 
 ## Tooling and testing
 
+**Edition**: The language version that governs a source file and selects its front-end. `legacy` is the earlier `.ef` language of `internal/compiler`; `2026` is the Go-shaped language of `docs/spec/` v0. Files of both editions keep the `.ef` extension and build in one workspace. The edition comes only from an edition manifest, never from file content; a file that no manifest governs is `legacy` until [#205](https://github.com/cevr/effra/issues/205). See [editions](docs/specs/editions.md).
+
+**Edition manifest**: A file named `effra.json` that holds exactly one JSON object, `{"edition": "<id>"}`. It governs the source files in its directory and in subdirectories without a nearer manifest, up to the nearest Go module root. A manifest that is unsupported or malformed is the EF144 refusal, never a fallback.
+
 **Lint advice**: Optional guidance about an admitted program, distinct from diagnostics that determine whether its contracts are valid.
 
 **Justifier rule**: A default-preset lint rule that flags a legal but reviewable choice, such as an `unbounded` budget, until a suppression records the reason.

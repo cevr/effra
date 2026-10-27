@@ -105,6 +105,15 @@ Codes are stable and grouped by the seam that owns them: `EF001` lexical errors,
 
 The table publishes the compiler's catalog: a test fails when a row's construct, backticked spellings or status drifts from it. Each help is cross-checked by a checked replacement program in `cmd/ef/absent_syntax_process_test.go`. The `unit` type and `throws` row keyword keep their own retired-spelling messages under `EF102` and `EF002`.
 
+### Edition diagnostics
+
+Every surface resolves a file's [edition](../GLOSSARY.md) before any front-end reads the file ([editions](specs/editions.md)). These codes are refusals of that step, like `EF110` for a target: they have no source location, and no front-end diagnostic accompanies them. They are declared once in `internal/edition`; `TestEditionDiagnosticsAreDocumented` fails when this table and the declarations drift. The diagnostic registry ([#79](https://github.com/cevr/effra/issues/79)) absorbs them later.
+
+| Code | Meaning | Message names |
+| --- | --- | --- |
+| EF144 | The edition manifest that governs the file is unsupported or malformed: an unknown id, invalid JSON, an unknown or repeated field, trailing data, a missing `edition`, a non-object, a non-regular file or a file over 64 KiB. | the manifest path, the value or defect found, and the supported ids `"legacy"` and `"2026"` |
+| EF145 | The operation is not available for the file's edition yet. | the operation, the edition, and the ticket that adds it: [#195](https://github.com/cevr/effra/issues/195) formatting; [#196](https://github.com/cevr/effra/issues/196) types, inspection, explanation, queries, graphs and lint; [#204](https://github.com/cevr/effra/issues/204) tests |
+
 ## Lint
 
 `EFL001 unused-recipe` warns when a local lazy effect binding is never referenced. Uses inside branches and nested scopes count; bindings in separate functions remain distinct. `let _ = recipe()` acknowledges intentional omission. No deletion fix is offered: constructing arguments may itself execute nested effects.
