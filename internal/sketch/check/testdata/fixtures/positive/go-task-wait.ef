@@ -1,0 +1,16 @@
+package demo
+
+type Fault struct{}
+
+func work(n int64) (int64, error[Fault]) {
+	if n < 0 {
+		return Fault{}
+	}
+	return n * 2
+}
+
+func main() error[Fault] uses Console {
+	t := go work(21)
+	v := try t.Wait()
+	Console.Println(v)
+}

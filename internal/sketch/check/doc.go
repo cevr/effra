@@ -1,0 +1,47 @@
+// Package check is the checker of the 2026 edition (#196). It takes the
+// parsed files of one package (internal/sketch/syntax) and an Importer, and
+// returns the checked package (scopes, objects, the type of every checked
+// expression, the declared or inferred rows of every function and literal)
+// and its diagnostics, sorted by position, with UTF-8 byte spans.
+//
+// docs/spec/ is normative: types.md, rows.md, grammar.md, runtime.md
+// (machines and tasks) and diagnostics.md, with
+// docs/research/rows-and-constraints.md §2, §3, §4 and §7. Where the spec is
+// silent, the checker follows the Go specification's typing as go/types
+// implements it, minus what the spec removes (no nil, no const, no pointer
+// values outside parameters and receivers, no generic methods).
+//
+// Phases: collect the package's declarations; resolve type declarations
+// lazily with cycle colouring; resolve signatures; check bodies one strongly
+// connected component of the reference graph at a time, so the inferred
+// rows of a callee are final before its callers; then the package rules
+// that need every body (named wires, wire cycles, Error methods, unused
+// imports). An invalid operand or type suppresses every diagnostic that
+// would follow from it: one mistake, one diagnostic.
+//
+// The prelude (internal/sketch/std/prelude.ef) and the standard library are
+// Effra source checked by this checker, so no library item is a checker
+// branch (timeout.After is an ordinary bodiless declaration).
+//
+// Prior art:
+//   - Go types2 (cmd/compile/internal/types2): the phase order, the Importer
+//     seam, the invalid type that stops cascades, object colouring for
+//     declaration cycles, keyed method sets, and function argument type
+//     inference by unification (infer.go).
+//   - Gleam: module-wide inference with every error reported, and its
+//     exhaustiveness checker for case expressions.
+//   - ReScript and OCaml: constructors disambiguated by the expected type
+//     (generic literals and case variants without type arguments); OCaml's
+//     Parmatch usefulness algorithm (Maranget 2007) for totality over a case
+//     matrix, never the product of the subjects.
+//   - Koka and Effekt: effect rows inferred for unannotated functions and
+//     discharged by handlers; here a with block subtracts the capabilities
+//     its wire binds, and a catch subtracts the caught error types.
+//   - Effect: Effect<A, E, R>, where catchTag removes a tag from E and
+//     provide removes a service from R; a function value widens to a type
+//     whose rows are supersets, never the reverse.
+//   - Elixir: inference stays inside the module; the exported surface spells
+//     its contract, the cross-module trade-off its type system states.
+//   - MoonBit: top-level signatures are annotated and locals inferred, and
+//     its raise rows are part of the function type.
+package check

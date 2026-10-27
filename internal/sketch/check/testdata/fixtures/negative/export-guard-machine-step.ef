@@ -1,0 +1,22 @@
+package demo
+
+type Down struct{}
+type On struct{}
+type Off struct{}
+type Light interface{ On | Off }
+type Flip struct{}
+type Signal interface{ Flip }
+
+func probe() error[Down] { return Down{} }
+
+func step(s Light, e Signal) Decision[Light, string] {
+	try probe() // want S101
+	return Stay{s}
+}
+
+type Switch machine[Light, Signal] {
+	initial Off{}
+	step    step
+}
+
+func main() {}

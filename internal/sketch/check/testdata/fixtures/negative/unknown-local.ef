@@ -1,0 +1,5 @@
+package demo
+
+func main() uses Console {
+	Console.Println(missing) // want S104
+}

@@ -1,0 +1,25 @@
+package demo
+
+type A struct{}
+type B struct{}
+type X struct{}
+type Y struct{}
+type AB interface{ A | B }
+type XY interface{ X | Y }
+
+func label(a A, b X) string { return "ax" }
+
+func pair(p AB, q XY) string {
+	switch a, b := p.(type), q.(type) {
+	case (A, X):
+		return label(a, b)
+	case (A, Y):
+		return "ay"
+	case (B, _):
+		return "b"
+	}
+}
+
+func main() uses Console {
+	Console.Println(pair(A{}, X{}))
+}

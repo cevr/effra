@@ -1,0 +1,14 @@
+package demo
+
+type A struct{}
+type B struct{}
+type Choice interface{ A | B }
+type Box struct {
+	C    Choice
+	Name string
+}
+
+func main() uses Console {
+	b := Box{Name: "x"} // want S108
+	Console.Println(b.Name)
+}

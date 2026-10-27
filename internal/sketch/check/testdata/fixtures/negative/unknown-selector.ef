@@ -1,0 +1,8 @@
+package demo
+
+type Order struct{ ID string }
+
+func main() uses Console {
+	o := Order{ID: "x"}
+	Console.Println(o.Total) // want S104
+}

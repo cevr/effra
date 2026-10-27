@@ -1,0 +1,37 @@
+package demo
+
+type Fault struct{}
+type Store interface{ Get() string }
+type Mem struct{}
+
+func (Mem) Get() string { return "m" }
+
+func fail() error[Fault] { return Fault{} }
+
+func even(n int64) string {
+	if n == 0 {
+		try fail()
+		return Store.Get()
+	}
+	return odd(n - 1)
+}
+
+func odd(n int64) string {
+	if n == 0 {
+		return "odd"
+	}
+	return even(n - 1)
+}
+
+func Run(n int64) (string, error[Fault]) uses Store {
+	f := func() string { return even(n) }
+	return f()
+}
+
+func main() uses Console {
+	v := with(wire{ Store = Mem{} }) { Run(3) } catch {
+	case Fault:
+		"fault"
+	}
+	Console.Println(v)
+}

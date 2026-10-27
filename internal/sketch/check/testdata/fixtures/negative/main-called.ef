@@ -1,0 +1,5 @@
+package demo
+
+func helper() { main() } // want S113
+
+func main() {}

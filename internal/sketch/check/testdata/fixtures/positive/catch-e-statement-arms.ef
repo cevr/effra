@@ -1,0 +1,26 @@
+package demo
+
+type NotFound struct{ ID string }
+type Down struct{}
+
+func find(id string) (string, error[NotFound | Down]) {
+	if id == "" {
+		return Down{}
+	}
+	return NotFound{ID: id}
+}
+
+func lookup(id string) string {
+	v := find(id) catch e {
+	case NotFound:
+		msg := "missing " + e.ID
+		msg
+	case Down:
+		return "down"
+	}
+	return v
+}
+
+func main() uses Console {
+	Console.Println(lookup("7"))
+}

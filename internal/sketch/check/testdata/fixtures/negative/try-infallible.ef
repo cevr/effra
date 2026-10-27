@@ -1,0 +1,7 @@
+package demo
+
+func word() string { return "w" }
+
+func main() uses Console {
+	Console.Println(try word()) // want S108
+}

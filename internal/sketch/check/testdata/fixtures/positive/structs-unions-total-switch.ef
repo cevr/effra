@@ -1,0 +1,21 @@
+package demo
+
+type Pending struct{}
+type Authorized struct{ AuthID string }
+type Declined struct{ Reason string }
+type Payment interface{ Pending | Authorized | Declined }
+
+func describe(p Payment) string {
+	switch v := p.(type) {
+	case Pending:
+		return "pending"
+	case Authorized:
+		return "authorized " + v.AuthID
+	case Declined:
+		return "declined " + v.Reason
+	}
+}
+
+func main() uses Console {
+	Console.Println(describe(Authorized{AuthID: "a1"}), describe(Declined{"no"}), describe(Pending{}))
+}

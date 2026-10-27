@@ -1,0 +1,9 @@
+package demo
+
+type Fault struct{}
+
+func fail() (string, error[Fault]) { return Fault{} }
+
+func main() uses Console {
+	Console.Println(fail()) // want S105
+}

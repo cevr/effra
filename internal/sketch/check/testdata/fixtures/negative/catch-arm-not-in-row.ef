@@ -1,0 +1,16 @@
+package demo
+
+type A struct{}
+type B struct{}
+
+func fail() (string, error[A]) { return A{} }
+
+func main() uses Console {
+	v := fail() catch {
+	case A:
+		"a"
+	case B: // want S108
+		"b"
+	}
+	Console.Println(v)
+}

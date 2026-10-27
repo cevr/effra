@@ -1,0 +1,22 @@
+package demo
+
+type Quantity struct{ units int64 }
+
+func ParseQuantity(s string) Quantity
+func (q Quantity) Wire() string
+
+type Order struct{ ID string }
+type Store interface {
+	Put(id string, v Order)
+	Find(id string) Order
+}
+
+func LawRoundTrip(q Quantity) bool {
+	return ParseQuantity(q.Wire()) == q
+}
+
+func LawFindAfterPut(id string, v Order) bool uses Store {
+	Store.Put(id, v)
+	return Store.Find(id) == v
+}
+func main() {}

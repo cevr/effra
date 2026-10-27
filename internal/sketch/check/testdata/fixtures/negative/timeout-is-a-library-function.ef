@@ -1,0 +1,9 @@
+package demo
+
+import "timeout"
+
+func Run() string uses Scheduler {
+	return timeout.After(1s) { "ok" } // want S101
+}
+
+func main() {}

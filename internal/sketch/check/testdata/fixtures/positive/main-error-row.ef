@@ -1,0 +1,10 @@
+package demo
+
+type Fault struct{}
+
+func fail() error[Fault] { return Fault{} }
+
+func main() error[Fault] uses Console {
+	try fail()
+	Console.Println("unreachable")
+}

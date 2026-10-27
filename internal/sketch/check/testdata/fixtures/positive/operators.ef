@@ -1,0 +1,15 @@
+package demo
+
+type Point struct {
+	X int64
+	Y int64
+}
+
+func main() uses Console {
+	a := int64(7)
+	b := a*2 - 3/1 + a%2
+	same := Point{1, 2} == Point{1, 2}
+	ok := (a < b && b != 0) || !same
+	d := 2s + 500ms
+	Console.Println(b, same, ok, d == 2500ms, d > 1s)
+}

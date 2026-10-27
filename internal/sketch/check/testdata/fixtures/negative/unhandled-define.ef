@@ -1,0 +1,10 @@
+package demo
+
+type Fault struct{}
+
+func fail() (string, error[Fault]) { return Fault{} }
+
+func main() uses Console {
+	v := fail() // want S105
+	Console.Println(v)
+}

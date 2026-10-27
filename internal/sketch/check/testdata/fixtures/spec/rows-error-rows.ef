@@ -1,0 +1,35 @@
+package demo
+
+type OrderNotFound struct{ ID string }
+type GatewayDown struct{}
+
+type Order struct {
+	ID    string
+	Total int64
+}
+
+type Orders interface {
+	Find(id string) (Order, error[OrderNotFound])
+}
+
+type Gateway interface {
+	Charge(order Order) (string, error[GatewayDown])
+}
+
+type MemoryOrders struct{}
+
+func (MemoryOrders) Find(id string) (Order, error[OrderNotFound]) {
+	return Order{ID: id, Total: 1999}
+}
+
+type FakeGateway struct{ AuthID string }
+
+func (g FakeGateway) Charge(order Order) (string, error[GatewayDown]) {
+	return g.AuthID
+}
+
+func pay(id string) (string, error[OrderNotFound | GatewayDown]) uses Orders, Gateway {
+	order := try Orders.Find(id)
+	return Gateway.Charge(order)
+}
+func main() {}

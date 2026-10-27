@@ -1,0 +1,9 @@
+package demo
+
+type Fault struct{}
+
+func (Fault) Error() string { return "manual" } // want S108
+
+func fail() error[Fault] { return Fault{} }
+
+func main() {}

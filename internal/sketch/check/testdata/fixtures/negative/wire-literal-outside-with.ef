@@ -1,0 +1,11 @@
+package demo
+
+type Store interface{ Get() string }
+type Mem struct{}
+
+func (Mem) Get() string { return "m" }
+
+func main() uses Console {
+	w := wire{ Store = Mem{} } // want S108
+	Console.Println(w)
+}

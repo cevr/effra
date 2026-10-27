@@ -138,7 +138,7 @@ type State interface{ Closed | Open | HalfOpen }
 type Signal interface{ Failure | Success | Retry }
 
 func step(s State, sig Signal) (Decision[State, string], error[ProbeDown]) uses Probe {
-	switch s, sig := s.(type), sig.(type) {
+	switch _, sig := s.(type), sig.(type) {
 	case (Closed, Failure):
 		return Enter{Open{sig.Endpoint}}
 	case (HalfOpen, Success):

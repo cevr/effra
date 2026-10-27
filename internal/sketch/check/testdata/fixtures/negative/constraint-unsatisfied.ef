@@ -1,0 +1,8 @@
+package demo
+
+func same[T comparable](a, b T) bool { return a == b }
+
+func main() uses Console {
+	xs := []int64{1}
+	Console.Println(same(xs, xs)) // want S108
+}

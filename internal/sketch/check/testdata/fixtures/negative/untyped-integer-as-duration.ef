@@ -1,0 +1,7 @@
+package demo
+
+func wait() uses Scheduler {
+	Scheduler.Sleep(2) // want S108
+}
+
+func main() {}

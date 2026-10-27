@@ -1,0 +1,2 @@
+go test fuzz v1
+string("package A\nimport(\"\"\n\"\"\n\"\"\n\"\"\n\"\")\ntype A00000000 struct{A000 A00000\nA A00}\nfunc s(a,*AA){s(0,func(A){})}")

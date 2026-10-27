@@ -1,0 +1,14 @@
+package demo
+
+type Store interface{ Get() string }
+type Mem struct{}
+
+func (Mem) Get() string { return "m" }
+
+func viaValue(s Store) string { return s.Get() }
+func Exported(s Store) string { return s.Get() }
+func viaCap() string uses Store { return Store.Get() }
+
+func main() uses Console {
+	Console.Println(Exported(Mem{}), viaValue(Mem{}), with(wire{ Store = Mem{} }) { viaCap() })
+}

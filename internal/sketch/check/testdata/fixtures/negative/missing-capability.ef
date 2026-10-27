@@ -1,0 +1,9 @@
+package demo
+
+type Store interface{ Get() string }
+
+func Read() string {
+	return Store.Get() // want S102
+}
+
+func main() {}

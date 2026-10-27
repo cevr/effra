@@ -1,0 +1,163 @@
+package check_test
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+
+	"effra.local/prototype/internal/sketch/check"
+)
+
+var wantMarker = regexp.MustCompile(`// want (S\d{3})\s*$`)
+
+// expected lists the `// want CODE` markers of a source as CODE@LINE.
+func expected(src string) []string {
+	var out []string
+	for i, line := range strings.Split(src, "\n") {
+		if m := wantMarker.FindStringSubmatch(line); m != nil {
+			out = append(out, fmt.Sprintf("%s@%d", m[1], i+1))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func got(diags []check.Diagnostic) []string {
+	var out []string
+	for _, d := range diags {
+		out = append(out, fmt.Sprintf("%s@%d", d.Code, d.Line))
+	}
+	sort.Strings(out)
+	return out
+}
+
+func describe(diags []check.Diagnostic) string {
+	var parts []string
+	for _, d := range diags {
+		parts = append(parts, d.String())
+	}
+	return strings.Join(parts, "\n\t")
+}
+
+// deviations are the acceptance fixtures whose expected outcome contradicts
+// a normative text or an orchestrator answer; the checker follows the text,
+// and the round request names each one with its evidence. The value is the
+// outcome the checker gives, as CODE@LINE separated by blanks.
+var deviations = map[string]string{
+	// types.md Error types 1: "A type named in any error row is an error
+	// type." Fault is in no error row, so returning it is an ordinary value.
+	// The prototype probe error-as-value has `func fallible() error[Fault]`;
+	// the restatement dropped it.
+	"negative/error-as-value-exported": "",
+	// Orchestrator answer Q1: `wire X uses` stays S109 (README Gap 33).
+	"negative/wire-exposure-hides-entry": "S109@9",
+	"positive/wire-exposure":             "S109@9",
+}
+
+// parityDeviations are the prototype fixtures in the same position.
+var parityDeviations = map[string]string{
+	// D2 and Q5: Go's typing; `n := 1` is an int, and f takes an int64.
+	"probes/integer-local.sketch": "S108",
+}
+
+// TestFixtures checks the mirror of the acceptance fixtures (negative,
+// positive and the spec-example programs): the diagnostics are exactly the
+// `// want` markers, one per marked line, and no cascade (spec D3).
+func TestFixtures(t *testing.T) {
+	for _, dir := range []string{"negative", "positive", "spec"} {
+		files, _ := filepath.Glob(filepath.Join("testdata", "fixtures", dir, "*.ef"))
+		if len(files) == 0 {
+			t.Fatalf("no fixtures in %s", dir)
+		}
+		for _, file := range files {
+			name := dir + "/" + strings.TrimSuffix(filepath.Base(file), ".ef")
+			t.Run(name, func(t *testing.T) {
+				data, err := os.ReadFile(file)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, diags := check.CheckSource(string(data))
+				want, have := expected(string(data)), got(diags)
+				if d, ok := deviations[name]; ok {
+					want = strings.Fields(d)
+				}
+				if strings.Join(want, " ") != strings.Join(have, " ") {
+					t.Errorf("want %v, got %v\n\t%s", want, have, describe(diags))
+				}
+				for _, d := range diags {
+					if !check.Registered(d.Code) {
+						t.Errorf("unregistered code %s", d.Code)
+					}
+					if d.Line == 0 || d.Length < 0 {
+						t.Errorf("unlocated diagnostic %s", d)
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestParity checks the prototype's fixtures: each keeps its `// want` code
+// (or stays clean), except the overrides the designed rules change (spec
+// D11, mirrored in testdata/parity.overrides).
+func TestParity(t *testing.T) {
+	base := filepath.Join("..", "..", "..", "prototypes", "sketch9", "testdata")
+	overrides := map[string]string{}
+	data, err := os.ReadFile(filepath.Join("testdata", "parity.overrides"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		rel, code, _ := strings.Cut(line, " ")
+		overrides[rel] = code
+	}
+	var files []string
+	for _, pattern := range []string{"*.sketch", "probes/*.sketch", "reject/*.sketch"} {
+		m, _ := filepath.Glob(filepath.Join(base, pattern))
+		files = append(files, m...)
+	}
+	if len(files) < 100 {
+		t.Fatalf("found %d prototype fixtures", len(files))
+	}
+	want := regexp.MustCompile(`^// want (S\d{3})`)
+	for _, file := range files {
+		rel, _ := filepath.Rel(base, file)
+		rel = filepath.ToSlash(rel)
+		t.Run(rel, func(t *testing.T) {
+			data, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			expect := "clean"
+			if m := want.FindStringSubmatch(strings.SplitN(string(data), "\n", 2)[0]); m != nil {
+				expect = m[1]
+			}
+			if o, ok := overrides[rel]; ok {
+				expect = o
+			}
+			if o, ok := parityDeviations[rel]; ok {
+				expect = o
+			}
+			if expect == "skip" {
+				t.Skip("restated as a fixture")
+			}
+			_, diags := check.CheckSource(string(data))
+			if expect == "clean" {
+				if len(diags) > 0 {
+					t.Errorf("want no diagnostics, got\n\t%s", describe(diags))
+				}
+				return
+			}
+			for _, d := range diags {
+				if d.Code == expect {
+					return
+				}
+			}
+			t.Errorf("want %s, got\n\t%s", expect, describe(diags))
+		})
+	}
+}

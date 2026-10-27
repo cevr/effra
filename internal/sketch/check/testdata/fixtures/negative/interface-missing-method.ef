@@ -1,0 +1,10 @@
+package demo
+
+type Store interface{ Get() string }
+type Mem struct{}
+
+func NewStore() Store {
+	return Mem{} // want S108
+}
+
+func main() {}

@@ -1,0 +1,13 @@
+package demo
+
+type A struct{}
+type B struct{}
+
+func fail() (string, error[A | B]) { return A{} }
+
+func Run() (string, error[B]) {
+	v := try fail() catch { case B: "b" } // want S101
+	return v
+}
+
+func main() {}

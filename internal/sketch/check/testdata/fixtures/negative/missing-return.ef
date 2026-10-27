@@ -1,0 +1,5 @@
+package demo
+
+func pick(b bool) string { if b { return "yes" } } // want S107
+
+func main() {}

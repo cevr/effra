@@ -1,0 +1,12 @@
+package demo
+
+type Fault struct{}
+
+func fail() error[Fault] { return Fault{} }
+func helper() { try fail() }
+
+func Run() {
+	helper() // want S105
+}
+
+func main() {}
