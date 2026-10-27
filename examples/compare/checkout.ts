@@ -1,7 +1,7 @@
-// The checkout example in TypeScript with Effect 4.0.1, for the README comparison.
-// TestReadmeSmoke (cmd/ergo/readme_smoke_test.go) runs it with Bun and compares its output with the Ergo and Go
-// versions. When tsc is on PATH, as in the gate, it also typechecks this file strictly
-// (with exactOptionalPropertyTypes); the repository itself has no TypeScript dependency.
+// The checkout example in TypeScript with Effect 4.0.1, from the earlier
+// language's README comparison with examples/checkout.ef. It is text only:
+// nothing runs or typechecks it, and the repository has no TypeScript
+// dependency. It goes with the earlier language (#205).
 import { Cause, Context, Data, Effect, Layer } from "effect"
 
 class OrderNotFound extends Data.TaggedError("OrderNotFound")<{ readonly id: string }> {}
