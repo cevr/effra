@@ -8,7 +8,8 @@ import (
 )
 
 // FuzzFormat: for every input that parses, the output parses, formatting is
-// idempotent, and comments are kept in order. The corpus, the spec fences
+// idempotent, and the tree and the place of every comment are kept
+// (contracts). The corpus, the spec fences
 // and the fixture tables are the seeds.
 func FuzzFormat(f *testing.F) {
 	positive, err := sketchtest.Positive()
@@ -37,12 +38,8 @@ func FuzzFormat(f *testing.F) {
 		if again != out {
 			t.Fatalf("not idempotent at line %d\n--- first\n%s\n--- second\n%s", firstDiffLine(out, again), out, again)
 		}
-		c1, ok1 := sketchtest.Comments(src)
-		c2, ok2 := sketchtest.Comments(out)
-		if ok1 && ok2 {
-			if i, a, b := sketchtest.FirstDiff(c1, c2); i >= 0 {
-				t.Fatalf("comment %d changed: %q became %q", i+1, a, b)
-			}
+		if msg := contracts(src, out); msg != "" {
+			t.Fatalf("%s\n--- output\n%s", msg, out)
 		}
 	})
 }

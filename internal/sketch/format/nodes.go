@@ -163,13 +163,22 @@ func (p *printer) varSpec(s *syntax.VarSpec, aligned, typeColumn bool) {
 	}
 }
 
+// identList prints grouped names; a line break after a comma follows the
+// source and indents the rest one level, as gofmt keeps it.
 func (p *printer) identList(list []*syntax.Ident) {
+	broken := false
 	for i, x := range list {
 		if i > 0 {
 			p.synth(",")
-			p.space()
+			if p.gap(x.Pos(), true) && !broken {
+				broken = true
+				p.indent++
+			}
 		}
 		p.ident(x)
+	}
+	if broken {
+		p.indent--
 	}
 }
 
@@ -599,7 +608,15 @@ func (p *printer) stmt(s syntax.Stmt) {
 		p.ident(s.Label)
 		p.token(s.Colon, ":")
 		p.indent++
-		if _, empty := s.Stmt.(*syntax.EmptyStmt); !empty {
+		switch body := s.Stmt.(type) {
+		case *syntax.EmptyStmt:
+			// gofmt: an explicit empty statement stays, on its own line,
+			// so the statement after it stays unlabelled.
+			if !body.Implicit {
+				p.newline()
+				p.token(body.Semicolon, ";")
+			}
+		default:
 			p.newline()
 			p.stmt(s.Stmt)
 		}
@@ -1051,7 +1068,7 @@ func (p *printer) slice(x *syntax.SliceExpr, depth int) {
 // above the expression's cutoff is written without blanks (x*y + z).
 func (p *printer) binary(x *syntax.BinaryExpr, depth int) {
 	prec := x.Op.Precedence()
-	blank := prec < cutoff(x, depth)
+	blank := prec < p.cutoff(x, depth)
 	p.binaryOperand(x.X, depth+diffPrec(x.X, prec))
 	if blank {
 		p.space()
@@ -1083,8 +1100,8 @@ func binaryBreaks(p *printer, x *syntax.BinaryExpr) bool {
 	return false
 }
 
-func cutoff(e *syntax.BinaryExpr, depth int) int {
-	has4, has5, maxProblem := walkBinary(e)
+func (p *printer) cutoff(e *syntax.BinaryExpr, depth int) int {
+	has4, has5, maxProblem := p.walkBinary(e)
 	if maxProblem > 0 {
 		return maxProblem + 1
 	}
@@ -1108,7 +1125,13 @@ func diffPrec(x syntax.Expr, prec int) int {
 	return 0
 }
 
-func walkBinary(e *syntax.BinaryExpr) (has4, has5 bool, maxProblem int) {
+// walkBinary is go/printer's walkBinary, memoised per node: cutoff asks it for
+// every operator of a chain, which would be quadratic in the chain's length.
+func (p *printer) walkBinary(e *syntax.BinaryExpr) (has4, has5 bool, maxProblem int) {
+	if r, ok := p.walked[e]; ok {
+		return r.has4, r.has5, r.maxProblem
+	}
+	defer func() { p.walked[e] = walkResult{has4, has5, maxProblem} }()
 	switch e.Op.Precedence() {
 	case 4:
 		has4 = true
@@ -1116,13 +1139,13 @@ func walkBinary(e *syntax.BinaryExpr) (has4, has5 bool, maxProblem int) {
 		has5 = true
 	}
 	if l, ok := e.X.(*syntax.BinaryExpr); ok && l.Op.Precedence() >= e.Op.Precedence() {
-		h4, h5, mp := walkBinary(l)
+		h4, h5, mp := p.walkBinary(l)
 		has4, has5, maxProblem = has4 || h4, has5 || h5, max(maxProblem, mp)
 	}
 	switch r := e.Y.(type) {
 	case *syntax.BinaryExpr:
 		if r.Op.Precedence() > e.Op.Precedence() {
-			h4, h5, mp := walkBinary(r)
+			h4, h5, mp := p.walkBinary(r)
 			has4, has5, maxProblem = has4 || h4, has5 || h5, max(maxProblem, mp)
 		}
 	case *syntax.StarExpr:

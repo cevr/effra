@@ -87,12 +87,14 @@ func Format(source string, maxOutputBytes int) (compiler.FormatResult, error) {
 	}
 	inputDigest := compiler.FormatDigest(source)
 	partial := compiler.FormatResult{SchemaVersion: compiler.FormatterSchemaVersion, InputDigest: inputDigest}
-	text, err := format.Source(source)
-	if err != nil {
-		return partial, compiler.FormatFailure{Diagnostics: []compiler.Diagnostic{syntaxDiagnostic(err)}}
-	}
-	if maxOutputBytes > 0 && len(text) > maxOutputBytes {
+	// The bound is checked while rendering, before the text is built.
+	text, err := format.SourceBounded(source, maxOutputBytes)
+	var limit *format.LimitError
+	switch {
+	case errors.As(err, &limit):
 		return partial, compiler.FormatLimitError{Limit: maxOutputBytes}
+	case err != nil:
+		return partial, compiler.FormatFailure{Diagnostics: []compiler.Diagnostic{syntaxDiagnostic(err)}}
 	}
 	return compiler.FormatResult{
 		SchemaVersion: compiler.FormatterSchemaVersion,

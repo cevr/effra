@@ -44,17 +44,29 @@ const Identity = "effra-2026/formatter-1"
 
 // Source formats a 2026 source file. A syntax error is returned as the
 // parser's *syntax.Error, and no text.
-func Source(src string) (string, error) {
+func Source(src string) (string, error) { return SourceBounded(src, 0) }
+
+// SourceBounded formats like Source with the output bounded to maxBytes
+// when it is positive: a larger output is a *LimitError, decided before
+// the text is built.
+func SourceBounded(src string, maxBytes int) (string, error) {
 	file, err := syntax.Parse(src)
 	if err != nil {
 		return "", err
 	}
-	return File(file), nil
+	return FileBounded(file, maxBytes)
 }
 
 // File prints a parsed file in the canonical layout.
 func File(f *syntax.File) string {
+	out, _ := FileBounded(f, 0)
+	return out
+}
+
+// FileBounded prints a parsed file with the output bounded as in
+// SourceBounded.
+func FileBounded(f *syntax.File, maxBytes int) (string, error) {
 	p := newPrinter(f)
 	p.printFile(f)
-	return p.render()
+	return p.render(maxBytes)
 }

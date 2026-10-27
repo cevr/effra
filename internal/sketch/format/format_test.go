@@ -2,6 +2,8 @@ package format
 
 import (
 	"errors"
+	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -37,18 +39,10 @@ func check(t *testing.T, name, src string, perturbations uint64) string {
 			break
 		}
 	}
-	c1, ok1 := sketchtest.Comments(src)
-	c2, ok2 := sketchtest.Comments(out)
-	if ok1 && ok2 {
-		if i, a, b := sketchtest.FirstDiff(c1, c2); i >= 0 {
-			t.Errorf("%s: comment %d changed: %q became %q", name, i+1, a, b)
-		}
-		t1, _ := sketchtest.Tokens(src)
-		t2, _ := sketchtest.Tokens(out)
-		if i, a, b := sketchtest.FirstDiff(t1, t2); i >= 0 {
-			t.Errorf("%s: token %d changed: %q became %q", name, i+1, a, b)
-		}
+	if msg := contracts(src, out); msg != "" {
+		t.Errorf("%s: %s\n--- output\n%s", name, msg, out)
 	}
+	_, ok1 := sketchtest.Comments(src)
 	for seed := uint64(1); seed <= perturbations && ok1; seed++ {
 		p, _ := sketchtest.Perturb(src, seed)
 		got, err := Source(p)
@@ -62,6 +56,37 @@ func check(t *testing.T, name, src string, perturbations uint64) string {
 		}
 	}
 	return out
+}
+
+// contracts checks what formatting keeps between a parseable source and its
+// formatted text, and describes the first broken one: the tree (without
+// positions and comments) is the same, and every comment stays between the
+// same two tokens, in order.
+func contracts(src, out string) string {
+	f1, err := syntax.Parse(src)
+	if err != nil {
+		return "the input does not parse: " + err.Error()
+	}
+	f2, err := syntax.Parse(out)
+	if err != nil {
+		return "the output does not parse: " + err.Error()
+	}
+	if a, b := treeShape(f1), treeShape(f2); a != b {
+		i := 0
+		for i < len(a) && i < len(b) && a[i] == b[i] {
+			i++
+		}
+		lo := max(0, i-80)
+		return fmt.Sprintf("the tree changed at\n  in:  …%s\n  out: …%s", a[lo:min(len(a), i+80)], b[lo:min(len(b), i+80)])
+	}
+	s1, ok1 := sketchtest.Interleaved(src)
+	s2, ok2 := sketchtest.Interleaved(out)
+	if ok1 && ok2 {
+		if i, a, b := sketchtest.FirstDiff(s1, s2); i >= 0 {
+			return fmt.Sprintf("token or comment %d changed: %q became %q", i+1, a, b)
+		}
+	}
+	return ""
 }
 
 func firstDiffLine(a, b string) int {
@@ -163,9 +188,52 @@ func f(a /* first */ int, // after a
 }
 // end of file
 `
-	out := check(t, "comments", src, 8)
-	if testing.Verbose() {
-		t.Log("\n" + out)
+	// The layout is pinned: each comment stays between the same two tokens
+	// (`A /* x */ | B` keeps its comment before the `|`), an own-line
+	// comment takes its block's indentation, and a comment between a
+	// clause's last statement and the next case belongs to the clause
+	// above unless a blank line separates them.
+	want := strings.Replace(strings.Replace(src,
+		"\t\ta()\n\t// still A\n", "\t\ta()\n\t\t// still A\n", 1),
+		"\tcase B:\n\t// still B, empty\n", "\tcase B:\n\t\t// still B, empty\n", 1)
+	if out := check(t, "comments", src, 8); out != want {
+		t.Errorf("layout at line %d\n--- got\n%s\n--- want\n%s", firstDiffLine(out, want), out, want)
+	}
+}
+
+// TestOutputBound (review M2): one long field name among many short ones
+// starts its own alignment section, so the output stays near the input's
+// size; and a bound below the output is refused before the text is built,
+// so the allocation stays near the input's size too.
+func TestOutputBound(t *testing.T) {
+	src := "package p\n\ntype Big struct {\n\t" + strings.Repeat("L", 4096) + " int64\n" + strings.Repeat("\tx int64\n", 2000) + "}\n"
+	out, err := SourceBounded(src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) > len(src)+len(src)/10 {
+		t.Fatalf("output %d bytes for a %d-byte input: the long name pads its neighbours", len(out), len(src))
+	}
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_, err = SourceBounded(src, 1024)
+	runtime.ReadMemStats(&after)
+	var limit *LimitError
+	if !errors.As(err, &limit) || limit.Limit != 1024 {
+		t.Fatalf("bound 1024 gave %v", err)
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 200*uint64(len(src)) {
+		t.Fatalf("a refused %d-byte input allocated %d bytes", len(src), allocated)
+	}
+	// An exact bound is not a refusal.
+	if exact, err := SourceBounded(src, len(out)); err != nil || exact != out {
+		t.Fatalf("bound equal to the output: %v", err)
+	}
+	// Aligned columns of similar widths still align (gofmt).
+	got, _ := Source("package p\n\ntype T struct {\n\tshort int\n\tsomewhatLongerName string\n}\n")
+	if want := "package p\n\ntype T struct {\n\tshort              int\n\tsomewhatLongerName string\n}\n"; got != want {
+		t.Fatalf("alignment\n%s", got)
 	}
 }
 
@@ -240,6 +308,43 @@ func TestLayout(t *testing.T) {
 			"directive stays attached",
 			"package p\n\n//ef:go net/url.Parse\nfunc parse(raw string) (url.URL, error[go.Error]) uses go.Foreign\n",
 			"package p\n\n//ef:go net/url.Parse\nfunc parse(raw string) (url.URL, error[go.Error]) uses go.Foreign\n",
+		},
+		{
+			// Review M1: a comment inside a delimiter stays before its
+			// closer, so no semicolon is inserted after the closer.
+			"comments stay inside delimiters",
+			"package p\nvar xs [ // c\n]int\nvar ys [ /* c\n d */ ]int\nvar m map[ /* k */ string /* v */ ]int\nvar s = a /* x */ .b\nvar c <- /* y */ chan int\n",
+			"package p\nvar xs [ // c\n]int\nvar ys [ /* c\n d */ ]int\nvar m map[ /* k */ string /* v */]int\nvar s = a /* x */ .b\nvar c <- /* y */ chan int\n",
+		},
+		{
+			// go/printer: no blank between a block comment and `,`, nor `)`
+			// unless the comment follows the opener.
+			"block comment before a comma or closer",
+			"package p\nvar x = f(a /* x */ , b)\nvar y = f( /* y */ )\nvar z = f(a /* z */ )\n",
+			"package p\nvar x = f(a /* x */, b)\nvar y = f( /* y */ )\nvar z = f(a /* z */)\n",
+		},
+		{
+			"grouped names keep their line breaks",
+			"package p\nfunc f(a,\nb int) {}\n\ntype T struct {\n\tx,\n\ty int\n}\n",
+			"package p\nfunc f(a,\n\tb int) {}\n\ntype T struct {\n\tx,\n\t\ty int\n}\n",
+		},
+		{
+			// Review M9: the explicit empty statement keeps the label; the
+			// loop after it stays unlabelled.
+			"labelled empty statement",
+			"package p\nfunc f() { L:; for {break L} }\n",
+			"package p\nfunc f() {\nL:\n\t;\n\tfor {\n\t\tbreak L\n\t}\n}\n",
+		},
+		{
+			// Review M7: gofmt writes an inserted header semicolon as `; `.
+			"header semicolons at line breaks",
+			"package p\nfunc f() { if x := g()\nx {}; switch g()\n{default:}; for i := 0\ni < 3\ni++ {} }\n",
+			"package p\nfunc f() {\n\tif x := g(); x {\n\t}\n\tswitch g(); {\n\tdefault:\n\t}\n\tfor i := 0; i < 3; i++ {\n\t}\n}\n",
+		},
+		{
+			"parenthesised receives and inferred array length",
+			"package p\nfunc f() { select { case (<-ch): case x = (<-ch): } }\nvar x = [...]int{1, 2}\n",
+			"package p\nfunc f() {\n\tselect {\n\tcase (<-ch):\n\tcase x = (<-ch):\n\t}\n}\nvar x = [...]int{1, 2}\n",
 		},
 		{
 			"unary operators never merge",

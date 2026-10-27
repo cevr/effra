@@ -122,6 +122,58 @@ func Tokens(src string) ([]string, bool) {
 	return out, ok
 }
 
+// Interleaved returns the tokens and comments in source order, as Tokens
+// and Comments give them: formatting keeps every comment between the same
+// two tokens, so a comment never crosses a token.
+func Interleaved(src string) ([]string, bool) {
+	lexemes, ok := lexAll(src)
+	nextCode := func(i int) token.Token {
+		for j := i + 1; j < len(lexemes); j++ {
+			if t := lexemes[j].tok; t != token.COMMENT && t != token.SEMICOLON {
+				return t
+			}
+		}
+		return token.EOF
+	}
+	var out []string
+	for i, l := range lexemes {
+		switch l.tok {
+		case token.SEMICOLON:
+			continue
+		case token.COMMA:
+			switch nextCode(i) {
+			case token.RPAREN, token.RBRACK, token.RBRACE:
+				continue
+			}
+		case token.COMMENT:
+			c, _ := Comments(l.text)
+			out = append(out, "comment "+c[0])
+			continue
+		}
+		out = append(out, l.text)
+	}
+	return out, ok
+}
+
+// Boundaries returns the offset of every token but semicolons and
+// comments: the places a comment can be inserted before a token.
+func Boundaries(src string) []int {
+	lexemes, _ := lexAll(src)
+	var out []int
+	for _, l := range lexemes {
+		if l.tok != token.SEMICOLON && l.tok != token.COMMENT {
+			out = append(out, l.start)
+		}
+	}
+	return out
+}
+
+// CommentKinds are the comments a generated test inserts at a boundary: an
+// inline block comment, one that spans lines (which ends a line for
+// semicolon insertion), a line comment, and a block comment followed by a
+// blank line.
+var CommentKinds = []string{" /* marker */ ", " /* one\n two */ ", " // marker\n ", " /* marker */\n\n"}
+
 // FirstDiff returns the first index where a and b differ, or -1.
 func FirstDiff(a, b []string) (int, string, string) {
 	for i := 0; i < len(a) || i < len(b); i++ {
