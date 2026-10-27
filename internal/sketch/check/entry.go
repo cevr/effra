@@ -19,29 +19,35 @@ func (c *checker) checkTypeDecls() {
 }
 
 // checkRecursiveStructs reports each struct type that contains itself by
-// value through its fields (directly, through an array or an anonymous
-// struct): its size would be infinite. Slices, maps, channels, interfaces
-// and unions break the cycle, as in Go. One diagnostic per cycle, at the
-// first declaration of the cycle in source order.
+// value through its fields (directly, through an array, an anonymous struct
+// or an instance of a generic struct): its size would be infinite. Slices,
+// maps, channels, interfaces and unions break the cycle, as in Go. The walk
+// follows instances with their type arguments substituted, so
+// `type U struct{ F Wrap[U] }` closes through Wrap's `Value T` (M7). One
+// diagnostic per cycle, at the declaration the cycle closes on.
 func (c *checker) checkRecursiveStructs() {
 	const (
 		white = iota
 		grey
 		black
 	)
+	// maxDepth bounds a walk through instances that grow without end,
+	// `type L[T] struct{ next L[[1]T] }`: such a type is infinite too.
+	const maxDepth = 256
 	colour := map[*Named]int{}
 	reported := map[*Named]bool{}
-	var visit func(n *Named) *Named
-	// visit returns the grey type a cycle found below n closes on, if any.
 	var fields func(t Type, out *[]*Named)
 	fields = func(t Type, out *[]*Named) {
 		switch t := t.(type) {
 		case *Named:
-			o := t.origin()
-			if o.Obj.Pkg == c.pkg && o.Obj.Decl != nil {
-				if _, ok := o.under.(*Struct); ok {
-					*out = append(*out, o)
-				}
+			if t.foreign {
+				return
+			}
+			if t.Orig == nil && t.Obj.Decl == nil {
+				return
+			}
+			if _, ok := t.underlying().(*Struct); ok {
+				*out = append(*out, t)
 			}
 		case *Array:
 			fields(t.Elem, out)
@@ -51,10 +57,15 @@ func (c *checker) checkRecursiveStructs() {
 			}
 		}
 	}
-	visit = func(n *Named) *Named {
+	var visit func(n *Named, depth int) *Named
+	// visit returns the grey type a cycle found below n closes on, if any.
+	visit = func(n *Named, depth int) *Named {
+		if depth > maxDepth {
+			return n
+		}
 		colour[n] = grey
 		defer func() { colour[n] = black }()
-		s, ok := n.under.(*Struct)
+		s, ok := n.underlying().(*Struct)
 		if !ok {
 			return nil
 		}
@@ -67,7 +78,7 @@ func (c *checker) checkRecursiveStructs() {
 			case grey:
 				return m
 			case white:
-				if closes := visit(m); closes != nil {
+				if closes := visit(m, depth+1); closes != nil {
 					return closes
 				}
 			}
@@ -79,11 +90,20 @@ func (c *checker) checkRecursiveStructs() {
 		if !ok || colour[n] != white {
 			continue
 		}
-		if closes := visit(n); closes != nil && !reported[closes] {
-			reported[closes] = true
-			c.cur = closes.Obj.file
-			c.errorf(closes.Obj.Decl.Name, CodeType, "struct %s contains itself by value; its size would be infinite (types.md, Structs 4)", closes.Obj.Name)
+		closes := visit(n, 0)
+		if closes == nil {
+			continue
 		}
+		at := closes.origin()
+		if at.Obj.Pkg != c.pkg || at.Obj.Decl == nil {
+			at = n
+		}
+		if reported[at] {
+			continue
+		}
+		reported[at] = true
+		c.cur = at.Obj.file
+		c.errorf(at.Obj.Decl.Name, CodeType, "struct %s contains itself by value; its size would be infinite (types.md, Structs 4)", at.Obj.Name)
 	}
 }
 

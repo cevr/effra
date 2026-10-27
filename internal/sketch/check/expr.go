@@ -37,8 +37,11 @@ type operand struct {
 	expr syntax.Expr
 	// addressable marks a variable, field or element: &x and assignment.
 	addressable bool
-	fn          *Func // the function an identifier names (main is S113 when called)
-	recvVar     *Var
+	// mapElem marks a map index: assignable, as in Go, but not
+	// addressable, so neither &m[k] nor m[k].f = v (M17).
+	mapElem bool
+	fn      *Func // the function an identifier names (main is S113 when called)
+	recvVar *Var
 }
 
 func (o *operand) invalid() bool { return o.mode == modeInvalid }
@@ -101,9 +104,47 @@ func (c *checker) needValue(op *operand) {
 	case modeBuiltin:
 		c.errorf(op.expr, CodeType, "%s is only called", exprText(op.expr))
 	case modeGeneric:
+		if ea, ok := op.obj.(*explicitArgs); ok {
+			sig := op.typ.(*Signature)
+			if len(ea.targs) == len(sig.TParams) {
+				// Every parameter is written: Id[int] is a function value
+				// (Go's explicit instantiation; M10).
+				if c.instantiateValue(op, sig, ea.targs) {
+					return
+				}
+				break
+			}
+			c.errorf(op.expr, CodeType, "%s has implicit type parameters, which only a call infers; call it or write a function literal", exprText(op.expr))
+			break
+		}
 		c.errorf(op.expr, CodeType, "the generic function %s is only called or instantiated", exprText(op.expr))
 	}
 	op.mode, op.typ, op.errs = modeInvalid, invalid, nil
+}
+
+// instantiateValue turns a fully instantiated generic function into a
+// function value: each type argument satisfies its constraint (S108), and
+// the value's type is the signature with the arguments substituted.
+func (c *checker) instantiateValue(op *operand, sig *Signature, targs []Type) bool {
+	m := map[*TypeParam]Type{}
+	for i, tp := range sig.TParams {
+		m[tp] = targs[i]
+	}
+	for i, tp := range sig.TParams {
+		if tp.Kind != KindType || tp.Constraint == nil {
+			continue
+		}
+		cons := c.subst(tp.Constraint, m)
+		if why := c.satisfies(targs[i], cons); why != "" {
+			c.errorf(op.expr, CodeType, "%s does not satisfy the constraint %s of %s: %s (types.md, Generics 2)", targs[i], cons, tp.Name, why)
+			return false
+		}
+	}
+	inst := c.subst(sig, m).(*Signature)
+	inst.TParams = nil
+	inst.NBracket = 0
+	op.mode, op.typ, op.obj = modeValue, inst, nil
+	return true
 }
 
 func exprText(x syntax.Expr) string {
@@ -125,9 +166,9 @@ func (c *checker) expr0(x syntax.Expr, hint Type) operand {
 	case *syntax.BasicLit:
 		return c.basicLit(x)
 	case *syntax.ParenExpr:
-		op := c.expr(x.X, hint)
-		op.addressable = false
-		return op
+		// Parentheses keep what the operand denotes: (x) = 1 assigns x,
+		// as in Go (N4).
+		return c.expr(x.X, hint)
 	case *syntax.CompositeLit:
 		return c.compositeLit(x, hint)
 	case *syntax.FuncLit:
@@ -267,6 +308,12 @@ func (c *checker) ident(x *syntax.Ident) operand {
 		}
 		return operand{mode: modeValue, typ: o.Type, addressable: !o.pkg, recvVar: o}
 	case *Func:
+		if c.isEntry(o) {
+			// Only the host calls main, so it is never a value: an alias
+			// or an argument would let ordinary code call it (D10; M15).
+			c.errorf(x, CodeEntry, "main is called only by the host, so it is not a value (rows.md, Capability rows 4)")
+			return bad(x)
+		}
 		sig := c.funcSig(o)
 		if c.fn != nil && c.fn.reach != nil {
 			c.fn.reach.funcs = append(c.fn.reach.funcs, o)
@@ -409,6 +456,9 @@ func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 			c.elements(x, u.Elem, u.Len)
 		}
 	case *Map:
+		// A constant key appears once, compared after conversion to the
+		// key type, as in Go (N3).
+		seen := map[string]bool{}
 		for _, e := range x.Elts {
 			kv, ok := e.(*syntax.KeyValueExpr)
 			if !ok {
@@ -416,7 +466,13 @@ func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 				continue
 			}
 			k := c.valueExpr(kv.Key, u.Key)
-			c.assign(&k, u.Key, "map key")
+			if c.assign(&k, u.Key, "map key") && k.mode == modeConst && k.val != nil {
+				key := k.val.Kind().String() + ":" + k.val.ExactString()
+				if seen[key] {
+					c.errorf(kv.Key, CodeType, "the key %s appears twice in this map literal", k.val.ExactString())
+				}
+				seen[key] = true
+			}
 			v := c.valueExpr(kv.Value, u.Elem)
 			c.assign(&v, u.Elem, "map value")
 		}
@@ -515,6 +571,15 @@ func (c *checker) literalType(x *syntax.CompositeLit, hint Type) Type {
 			}
 		}
 		targs[i] = b
+	}
+	// Inferred arguments meet the same constraints as written ones (D6; M5).
+	for i, tp := range n.TParams {
+		if tp.Kind == KindType && tp.Constraint != nil {
+			if why := c.satisfies(targs[i], tp.Constraint); why != "" {
+				c.errorf(x.Type, CodeType, "the inferred type argument %s of %s does not satisfy %s: %s (types.md, Generics 2)", targs[i], n.Obj.Name, tp.Constraint, why)
+				return nil
+			}
+		}
 	}
 	return c.instantiate(n, targs)
 }
@@ -718,6 +783,9 @@ func isPointer(t Type) bool {
 // Visibility 2).
 func (c *checker) qualified(x *syntax.SelectorExpr, pn *PkgName) operand {
 	pn.used = true
+	if pn.broken {
+		return bad(x)
+	}
 	o, ok := pn.Pkg.Scope.names[x.Sel.Name]
 	if !ok || !isExported(x.Sel.Name) {
 		c.errorf(x.Sel, CodeUnknown, "%s.%s is not an exported declaration of package %s", pn.Name, x.Sel.Name, pn.Pkg.Path)
@@ -774,16 +842,22 @@ func (c *checker) index(x *syntax.IndexExpr, hint Type) operand {
 	case *Map:
 		k := c.valueExpr(x.Indices[0], u.Key)
 		c.assign(&k, u.Key, "map key")
-		return operand{mode: modeValue, typ: u.Elem, addressable: true}
+		return operand{mode: modeValue, typ: u.Elem, mapElem: true}
 	case *Slice:
 		c.intIndex(x.Indices[0])
 		return operand{mode: modeValue, typ: u.Elem, addressable: true}
 	case *Array:
-		c.intIndex(x.Indices[0])
+		if i, ok := c.intIndex(x.Indices[0]); ok && i >= u.Len {
+			c.errorf(x.Indices[0], CodeType, "index %d is out of bounds of %s (length %d)", i, base.typ, u.Len)
+		}
 		return operand{mode: modeValue, typ: u.Elem, addressable: base.addressable}
 	case *Basic:
 		if isString(t) {
-			c.intIndex(x.Indices[0])
+			if i, ok := c.intIndex(x.Indices[0]); ok {
+				if n, known := constLength(base); known && i >= n {
+					c.errorf(x.Indices[0], CodeType, "index %d is out of bounds of a string of length %d", i, n)
+				}
+			}
 			return operand{mode: modeValue, typ: Typ[Uint8]}
 		}
 	}
@@ -791,26 +865,71 @@ func (c *checker) index(x *syntax.IndexExpr, hint Type) operand {
 	return bad(x)
 }
 
-func (c *checker) intIndex(x syntax.Expr) {
+// intIndex checks an index, a slice bound or a make size: an integer, and a
+// constant one is a nonnegative int (S108), as in Go. It returns the
+// constant's value when there is one.
+func (c *checker) intIndex(x syntax.Expr) (int64, bool) {
 	op := c.valueExpr(x, Typ[Int])
 	if op.invalid() {
-		return
+		return 0, false
 	}
 	if !isInteger(op.typ) {
 		c.errorf(x, CodeType, "an index must be an integer, not %s", op.typ)
-		return
+		return 0, false
 	}
-	if op.mode == modeConst {
-		c.assign(&op, Typ[Int], "index")
+	if op.mode != modeConst || op.val == nil {
+		return 0, false
 	}
+	if !c.assign(&op, Typ[Int], "index") {
+		return 0, false
+	}
+	v, exact := constant.Int64Val(constant.ToInt(op.val))
+	if !exact {
+		return 0, false
+	}
+	if v < 0 {
+		c.errorf(x, CodeType, "the index %d is negative", v)
+		return 0, false
+	}
+	return v, true
+}
+
+// constLength returns the length of a constant string operand.
+func constLength(op operand) (int64, bool) {
+	if op.mode != modeConst || op.val == nil || op.val.Kind() != constant.String {
+		return 0, false
+	}
+	return int64(len(constant.StringVal(op.val))), true
 }
 
 func (c *checker) sliceExpr(x *syntax.SliceExpr) operand {
 	base := c.valueExpr(x.X, nil)
-	for _, e := range []syntax.Expr{x.Low, x.High, x.Max} {
-		if e != nil {
-			c.intIndex(e)
+	// The constant bounds: ordered low <= high <= max, and within the
+	// length of an array or a constant string (S108; Go's rule).
+	limit, limited := int64(0), false
+	if !base.invalid() {
+		if a, ok := under(base.typ).(*Array); ok {
+			limit, limited = a.Len, true
+		} else if n, ok := constLength(base); ok {
+			limit, limited = n, true
 		}
+	}
+	last, haveLast := int64(0), false
+	for _, e := range []syntax.Expr{x.Low, x.High, x.Max} {
+		if e == nil {
+			continue
+		}
+		v, ok := c.intIndex(e)
+		if !ok {
+			continue
+		}
+		switch {
+		case limited && v > limit:
+			c.errorf(e, CodeType, "the slice bound %d is out of bounds of length %d", v, limit)
+		case haveLast && v < last:
+			c.errorf(e, CodeType, "the slice bounds are out of order: %d is less than %d", v, last)
+		}
+		last, haveLast = v, true
 	}
 	if base.invalid() {
 		return bad(x)
@@ -900,7 +1019,7 @@ func (c *checker) convertUntyped(op *operand, t Type, what string) bool {
 	case UntypedString:
 		compatible = b.Kind == String
 	case UntypedInt, UntypedRune, UntypedFloat:
-		compatible = b.Kind >= Int && b.Kind <= Float64
+		compatible = b.Kind >= Int && b.Kind <= Complex128
 	}
 	if !compatible {
 		if b.Kind == Duration && (src.Kind == UntypedInt || src.Kind == UntypedRune) {

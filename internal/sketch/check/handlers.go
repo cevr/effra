@@ -35,7 +35,9 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 	case modeValue, modeConst, modeNoValue:
 	default:
 		c.needValue(&op)
-		return bad(x)
+		if op.invalid() {
+			return bad(x)
+		}
 	}
 	if !op.fallible() {
 		c.errorf(x, CodeType, "try on an expression that cannot fail (rows.md, Error rows 6)")
@@ -61,7 +63,7 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 		case modeValue, modeConst, modeNoValue:
 		default:
 			c.needValue(&op)
-			valid = false
+			valid = !op.invalid()
 		}
 	}
 	row := op.errs
@@ -191,7 +193,9 @@ func (c *checker) catchArm(arm *syntax.CatchArm, valueType Type, hasValue, yield
 	case modeValue, modeConst, modeNoValue:
 	default:
 		c.needValue(&op)
-		return
+		if op.invalid() {
+			return
+		}
 	}
 	c.handled(&op)
 	switch {

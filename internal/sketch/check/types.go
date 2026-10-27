@@ -38,6 +38,8 @@ const (
 	Uintptr
 	Float32
 	Float64
+	Complex64
+	Complex128
 	Duration
 	UntypedBool
 	UntypedInt
@@ -212,7 +214,7 @@ var Typ = func() []*Basic {
 	names := map[BasicKind]string{
 		Invalid: "invalid type", Bool: "bool", String: "string", Int: "int", Int8: "int8", Int16: "int16", Int32: "int32", Int64: "int64",
 		Uint: "uint", Uint8: "uint8", Uint16: "uint16", Uint32: "uint32", Uint64: "uint64", Uintptr: "uintptr",
-		Float32: "float32", Float64: "float64", Duration: "duration",
+		Float32: "float32", Float64: "float64", Complex64: "complex64", Complex128: "complex128", Duration: "duration",
 		UntypedBool: "untyped bool", UntypedInt: "untyped int", UntypedRune: "untyped rune", UntypedFloat: "untyped float", UntypedString: "untyped string",
 	}
 	out := make([]*Basic, UntypedString+1)
@@ -582,7 +584,16 @@ func isFloat(t Type) bool {
 	return ok && (b.Kind == Float32 || b.Kind == Float64 || b.Kind == UntypedFloat)
 }
 
-func isNumeric(t Type) bool { return isInteger(t) || isFloat(t) }
+// isComplex reports a complex type. Complex values have arithmetic and ==,
+// no ordering, and convert only to and from complex types (Go's rules; Q5
+// admits every Go numeric type, N2). There is no imaginary literal and no
+// complex, real or imag builtin, so no untyped complex constant arises.
+func isComplex(t Type) bool {
+	b, ok := under(t).(*Basic)
+	return ok && (b.Kind == Complex64 || b.Kind == Complex128)
+}
+
+func isNumeric(t Type) bool { return isInteger(t) || isFloat(t) || isComplex(t) }
 
 func isString(t Type) bool {
 	b, ok := under(t).(*Basic)
@@ -644,6 +655,10 @@ func asStruct(t Type) *Struct {
 }
 
 func asUnion(t Type) *Union {
+	if u, ok := t.(*Union); ok {
+		// The binding of a catch arm with several types (rows.md, Catch 7).
+		return u
+	}
 	if _, ok := t.(*Named); !ok {
 		return nil
 	}

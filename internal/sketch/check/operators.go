@@ -50,15 +50,42 @@ func (c *checker) representable(op *operand, t *Basic) bool {
 			op.mode = modeInvalid
 			return false
 		}
-		if t.Kind == Float32 {
+		switch t.Kind {
+		case Float32:
 			f32, _ := constant.Float32Val(fv)
 			if math.IsInf(float64(f32), 0) {
 				c.errorf(op.expr, CodeType, "the constant %s overflows float32", v.ExactString())
 				op.mode = modeInvalid
 				return false
 			}
+			// A typed constant holds its type's correctly rounded value, so
+			// later constant arithmetic sees what Go sees (types2
+			// roundFloat32; M12).
+			fv = constant.MakeFloat64(float64(f32))
+		case Float64:
+			fv = constant.MakeFloat64(f)
 		}
 		op.val = fv
+	case t.Kind == Complex64 || t.Kind == Complex128:
+		cv := constant.ToComplex(v)
+		if cv.Kind() != constant.Complex {
+			ok = false
+			break
+		}
+		re, _ := constant.Float64Val(constant.Real(cv))
+		im, _ := constant.Float64Val(constant.Imag(cv))
+		if t.Kind == Complex64 {
+			re32, _ := constant.Float32Val(constant.Real(cv))
+			im32, _ := constant.Float32Val(constant.Imag(cv))
+			re, im = float64(re32), float64(im32)
+		}
+		if math.IsInf(re, 0) || math.IsInf(im, 0) {
+			c.errorf(op.expr, CodeType, "the constant %s overflows %s", v.ExactString(), t)
+			op.mode = modeInvalid
+			return false
+		}
+		// Rounded per part to the type's float size, as for floats (M12).
+		op.val = constant.BinaryOp(constant.MakeFloat64(re), token.ADD, constant.MakeImag(constant.MakeFloat64(im)))
 	}
 	if !ok {
 		c.errorf(op.expr, CodeType, "the constant %s is not representable as %s", v.ExactString(), t)
@@ -332,7 +359,7 @@ func (c *checker) untypedTo(op *operand, t Type, x *syntax.BinaryExpr) bool {
 
 func ordered(t Type) bool {
 	b, ok := under(t).(*Basic)
-	return ok && b.Kind != Bool && b.Kind != UntypedBool && b.Kind != Invalid
+	return ok && b.Kind != Bool && b.Kind != UntypedBool && b.Kind != Invalid && !isComplex(b)
 }
 
 func (c *checker) opDefined(x syntax.Node, op syntax.Token, t Type) bool {
@@ -467,7 +494,7 @@ func (c *checker) convertible(v, t Type) bool {
 	tb, tok := tu.(*Basic)
 	if vok && tok {
 		switch {
-		case isNumeric(vb) && isNumeric(tb):
+		case isNumeric(vb) && isNumeric(tb) && isComplex(vb) == isComplex(tb):
 			return true
 		case vb.Kind == Duration && isInteger(tb), tb.Kind == Duration && isInteger(vb):
 			return true

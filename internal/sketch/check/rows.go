@@ -24,6 +24,10 @@ type target struct {
 	isFunc      bool // return is allowed (a function or a func literal)
 	main        bool
 	wire        bool // a named wire's build: closed (README Gap 6)
+	// internal is what a named wire binds itself: its providers may use it
+	// (rows.md, Wire 4); charged collects the internal capabilities the
+	// entry being checked uses, for the wire's entry-cycle check (M14).
+	internal, charged *Row
 }
 
 func (t *target) row(declared, inferred *Row) *Row {
@@ -42,9 +46,15 @@ func (c *checker) charge(n syntax.Node, cap Type) {
 	}
 	t := c.fn.t
 	for i := len(t.withs) - 1; i >= 0; i-- {
-		if t.withs[i].Has(cap) {
+		// A nil scope is a with whose wire is unknown (reported): it
+		// discharges everything, so no charge cascades from it (D3; M18).
+		if t.withs[i] == nil || t.withs[i].Has(cap) {
 			return
 		}
+	}
+	if t.wire && t.internal.Has(cap) {
+		t.charged = t.charged.with(cap)
+		return
 	}
 	if t.declUses == nil {
 		t.uses = t.uses.with(cap)
@@ -199,23 +209,55 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 		}
 	}
 	if cyclic && inferred {
-		c.silent++
-		for round := 0; ; round++ {
-			changed := false
-			for _, n := range scc {
-				if c.checkNode(n) {
-					changed = true
-				}
-			}
-			if !changed || round > 64 {
-				break
-			}
-		}
-		c.silent--
+		c.converge(scc)
 	}
 	for _, n := range scc {
 		c.checkNode(n)
 	}
+}
+
+// converge joins the inferred rows of a cyclic component to their fixpoint,
+// silently, with a dependency worklist: a body is checked again only when a
+// body it references grew. Rows are finite sets that only grow (a body's
+// rows are monotone in its callees' rows), so the worklist empties; no row
+// is published to another component before it has converged.
+//
+// Prior art: Koka and Gleam infer per strongly connected component; the
+// worklist is the standard chaotic-iteration solver of dataflow analysis.
+func (c *checker) converge(scc []*bodyNode) {
+	in := make(map[*bodyNode]bool, len(scc))
+	for _, n := range scc {
+		in[n] = true
+	}
+	preds := map[*bodyNode][]*bodyNode{}
+	for _, n := range scc {
+		for _, e := range n.edges {
+			if in[e] {
+				preds[e] = append(preds[e], n)
+			}
+		}
+	}
+	queue := append([]*bodyNode(nil), scc...)
+	queued := make(map[*bodyNode]bool, len(scc))
+	for _, n := range scc {
+		queued[n] = true
+	}
+	c.silent++
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		queued[n] = false
+		if !c.checkNode(n) {
+			continue
+		}
+		for _, p := range preds[n] {
+			if !queued[p] {
+				queued[p] = true
+				queue = append(queue, p)
+			}
+		}
+	}
+	c.silent--
 }
 
 // checkNode checks one body and reports whether its inferred rows grew.
@@ -472,10 +514,16 @@ func (c *checker) reportUnused(fc *funcCtx) {
 // checkPkgVar checks a package-level var's initializer: a closed context,
 // with no row (grammar.md, Declarations 6: package-level var is immutable).
 func (c *checker) checkPkgVar(pv *pkgVar) {
-	if pv.done {
+	if pv.done || pv.checking {
 		return
 	}
-	pv.done = true
+	pv.checking = true
+	defer func() { pv.checking = false }()
+	// A silent check (a fixpoint round) does not count: the reporting
+	// pass checks the initializer again against converged rows.
+	if c.silent == 0 {
+		pv.done = true
+	}
 	saved := c.cur
 	c.cur = pv.file
 	defer func() { c.cur = saved }()

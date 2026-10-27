@@ -2,6 +2,7 @@ package check
 
 import (
 	"strconv"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 
@@ -31,9 +32,11 @@ func (c *checker) run(files []*syntax.File) *Package {
 		c.funcSig(f)
 	}
 	c.collectBodyErrorRows()
-	c.checkTypeDecls()
 	c.checkEntry()
+	// Bodies converge first: a machine's initial value and the named wires
+	// are closed contexts that read the converged inferred rows (M2).
 	c.checkBodies()
+	c.checkTypeDecls()
 	c.checkWires()
 	c.checkWireCycles()
 	c.checkErrorMethods()
@@ -46,31 +49,73 @@ func (c *checker) run(files []*syntax.File) *Package {
 	return c.pkg
 }
 
-// collectBodyErrorRows records the error types that error rows inside bodies
-// name (function literal types, conversions), before any body is checked,
-// so whether a type is an error type (types.md, Error types 1) does not
-// depend on the order of the bodies. It resolves names silently; the body
-// check reports.
+// collectBodyErrorRows records every struct type that an error row of the
+// package names, anywhere: signatures, bodies, function literals, package
+// var initializers, machine initial values and wire providers, before any
+// body is checked, so whether a type is an error type (types.md, Error types
+// 1) does not depend on declaration order (M3). It reads each element's
+// head type name syntactically (`Fault`, `pkg.Fault`, `Fault[T]`), so an
+// element whose type arguments name a body's type parameter still counts.
+// It reports nothing; the checks of the rows report.
 func (c *checker) collectBodyErrorRows() {
-	c.silent++
-	defer func() { c.silent-- }()
-	for _, f := range c.funcs {
-		if f.Decl.Body == nil {
-			continue
-		}
-		c.cur = f.file
-		syntax.Inspect(f.Decl.Body, func(n syntax.Node) bool {
+	for _, fi := range c.files {
+		c.cur = fi
+		syntax.Inspect(fi.syntax, func(n syntax.Node) bool {
 			if er, ok := n.(*syntax.ErrorRow); ok {
 				for _, x := range er.Types {
-					switch x.(type) {
-					case *syntax.Ident, *syntax.SelectorExpr:
-						c.rowElem(x, KindErrors, &typeCtx{params: map[string]*TypeParam{}})
+					if n := c.errorRowHead(x); n != nil {
+						if _, seen := c.errorTypes[n]; !seen {
+							c.errorTypes[n] = x.Pos()
+						}
 					}
 				}
 			}
 			return true
 		})
 	}
+}
+
+// errorRowHead returns the origin struct type an error-row element names by
+// its head, or nil.
+func (c *checker) errorRowHead(x syntax.Expr) *Named {
+	if ix, ok := x.(*syntax.IndexExpr); ok {
+		x = ix.X
+	}
+	tn, n := c.namedHead(x)
+	if n == nil || tn.Decl == nil {
+		return nil
+	}
+	if _, isStruct := tn.Decl.Spec.(*syntax.StructType); !isStruct {
+		return nil
+	}
+	return n.origin()
+}
+
+// namedHead returns the declared type a name or a qualified name denotes,
+// without resolving it, or nil.
+func (c *checker) namedHead(x syntax.Expr) (*TypeName, *Named) {
+	var o Object
+	switch x := x.(type) {
+	case *syntax.Ident:
+		o = c.lookupType(x.Name, nil)
+	case *syntax.SelectorExpr:
+		id, ok := x.X.(*syntax.Ident)
+		if !ok {
+			return nil, nil
+		}
+		if pn, ok := c.lookupType(id.Name, nil).(*PkgName); ok {
+			o = pn.Pkg.Scope.names[x.Sel.Name]
+		}
+	}
+	tn, ok := o.(*TypeName)
+	if !ok {
+		return nil, nil
+	}
+	n, ok := tn.Type.(*Named)
+	if !ok {
+		return nil, nil
+	}
+	return tn, n
 }
 
 // ---------------------------------------------------------------- collection
@@ -162,6 +207,7 @@ func (c *checker) importSpec(fi *fileInfo, spec *syntax.ImportSpec) {
 	switch spec.Kind {
 	case syntax.ImportGo:
 		c.errorf(spec, CodeOutside, "import go %q is #202's (Go imports); it is not checked yet", path)
+		c.bindBrokenImport(fi, spec, path)
 		return
 	case syntax.ImportDot:
 		c.errorf(spec, CodeOutside, "a dot import is not checked yet (#206)")
@@ -170,6 +216,7 @@ func (c *checker) importSpec(fi *fileInfo, spec *syntax.ImportSpec) {
 	pkg, err := c.imp.Import(path)
 	if err != nil || pkg == nil {
 		c.errorf(spec.Path, CodeUnknown, "unknown package %q", path)
+		c.bindBrokenImport(fi, spec, path)
 		return
 	}
 	name := pkg.Name
@@ -186,6 +233,23 @@ func (c *checker) importSpec(fi *fileInfo, spec *syntax.ImportSpec) {
 	}
 	fi.scope.insert(name, pn)
 	fi.imports = append(fi.imports, pn)
+}
+
+// bindBrokenImport binds the name of a failed import to an empty package,
+// so its uses add no diagnostic of their own (D3).
+func (c *checker) bindBrokenImport(fi *fileInfo, spec *syntax.ImportSpec, path string) {
+	name := path[strings.LastIndex(path, "/")+1:]
+	if spec.Kind == syntax.ImportNamed && spec.Name != nil {
+		name = spec.Name.Name
+	}
+	if name == "_" || name == "" {
+		return
+	}
+	if _, dup := fi.scope.names[name]; dup {
+		return
+	}
+	empty := &Package{Path: path, Name: name, Scope: newScope(nil)}
+	fi.scope.insert(name, &PkgName{Name: name, Pos: spec.Pos(), Pkg: empty, spec: spec, used: true, broken: true})
 }
 
 func (c *checker) checkUnusedImports() {
@@ -214,7 +278,7 @@ func (c *checker) resolveNamed(n *Named) {
 	d := n.Obj.Decl
 	ctx := &typeCtx{params: map[string]*TypeParam{}, decl: true}
 	if d.TypeParams != nil {
-		kinds, conflicts := bracketKinds(d)
+		kinds, conflicts := c.bracketKinds(d)
 		for _, field := range d.TypeParams.List {
 			for _, name := range field.Names {
 				tp := &TypeParam{Name: name.Name, Pos: name.Pos(), id: newID()}
@@ -270,7 +334,7 @@ func (c *checker) resolveNamed(n *Named) {
 // type declaration from its positions in the body: inside error[…] an error
 // row, after the capability-row keyword a capability row, elsewhere a type
 // (D6: Task[T, E] has a row-kinded E).
-func bracketKinds(d *syntax.TypeDecl) (map[string]Kind, map[string]bool) {
+func (c *checker) bracketKinds(d *syntax.TypeDecl) (map[string]Kind, map[string]bool) {
 	names := map[string]bool{}
 	for _, f := range d.TypeParams.List {
 		for _, n := range f.Names {
@@ -279,7 +343,7 @@ func bracketKinds(d *syntax.TypeDecl) (map[string]Kind, map[string]bool) {
 	}
 	kinds := map[string]Kind{}
 	conflicts := map[string]bool{}
-	walkTypePositions(d.Spec, KindType, func(id *syntax.Ident, k Kind) {
+	typeWalker{slots: c.slotKinds, f: func(id *syntax.Ident, k Kind) {
 		if !names[id.Name] {
 			return
 		}
@@ -287,7 +351,7 @@ func bracketKinds(d *syntax.TypeDecl) (map[string]Kind, map[string]bool) {
 			conflicts[id.Name] = true
 		}
 		kinds[id.Name] = k
-	})
+	}}.walk(d.Spec, KindType)
 	return kinds, conflicts
 }
 
@@ -578,6 +642,9 @@ func (c *checker) qualifiedType(x *syntax.SelectorExpr) Type {
 		return invalid
 	}
 	pn.used = true
+	if pn.broken {
+		return invalid
+	}
 	m, ok := pn.Pkg.Scope.names[x.Sel.Name]
 	if !ok || !isExported(x.Sel.Name) {
 		c.errorf(x.Sel, CodeUnknown, "%s.%s is not an exported declaration of package %s", id.Name, x.Sel.Name, pn.Pkg.Path)
@@ -802,63 +869,108 @@ func kindNoun(k Kind) string {
 // walkTypePositions calls f for every name in a type position of x, with
 // the kind its position gives (rows-and-constraints §3).
 func walkTypePositions(x syntax.Node, k Kind, f func(*syntax.Ident, Kind)) {
+	typeWalker{f: f}.walk(x, k)
+}
+
+// typeWalker visits the names in type positions with the kind of the
+// position. slots, when set, gives the parameter kinds of a generic type
+// named as the head of an index expression, so `Task[T, E]` puts E in a row
+// position (D6; M6).
+type typeWalker struct {
+	f     func(*syntax.Ident, Kind)
+	slots func(head syntax.Expr) []Kind
+}
+
+func (w typeWalker) walk(x syntax.Node, k Kind) {
 	switch x := x.(type) {
 	case nil:
 	case *syntax.Ident:
-		f(x, k)
+		w.f(x, k)
 	case *syntax.SelectorExpr:
 	case *syntax.ParenExpr:
-		walkTypePositions(x.X, k, f)
+		w.walk(x.X, k)
+	case *syntax.BinaryExpr:
+		// A row argument written as a union, E | Expired.
+		w.walk(x.X, k)
+		w.walk(x.Y, k)
 	case *syntax.IndexExpr:
-		walkTypePositions(x.X, KindType, f)
-		for _, i := range x.Indices {
-			walkTypePositions(i, KindType, f)
+		w.walk(x.X, KindType)
+		var kinds []Kind
+		if w.slots != nil {
+			kinds = w.slots(x.X)
+		}
+		for i, idx := range x.Indices {
+			kind := KindType
+			if i < len(kinds) {
+				kind = kinds[i]
+			}
+			w.walk(idx, kind)
 		}
 	case *syntax.ArrayType:
-		walkTypePositions(x.Elt, KindType, f)
+		w.walk(x.Elt, KindType)
 	case *syntax.MapType:
-		walkTypePositions(x.Key, KindType, f)
-		walkTypePositions(x.Value, KindType, f)
+		w.walk(x.Key, KindType)
+		w.walk(x.Value, KindType)
 	case *syntax.ChanType:
-		walkTypePositions(x.Value, KindType, f)
+		w.walk(x.Value, KindType)
 	case *syntax.StarExpr:
-		walkTypePositions(x.X, KindType, f)
+		w.walk(x.X, KindType)
 	case *syntax.Ellipsis:
-		walkTypePositions(x.Elt, KindType, f)
+		w.walk(x.Elt, KindType)
 	case *syntax.FuncType:
-		walkFields(x.Params, f)
-		walkFields(x.Results, f)
+		w.fields(x.Params)
+		w.fields(x.Results)
 		if x.Uses != nil {
 			for _, n := range x.Uses.Names {
-				walkTypePositions(n, KindUses, f)
+				w.walk(n, KindUses)
 			}
 		}
 	case *syntax.ErrorRow:
 		for _, t := range x.Types {
-			walkTypePositions(t, KindErrors, f)
+			w.walk(t, KindErrors)
 		}
 	case *syntax.StructType:
-		walkFields(x.Fields, f)
+		w.fields(x.Fields)
 	case *syntax.InterfaceType:
 		for _, m := range x.Methods {
-			walkTypePositions(m.Type, KindType, f)
+			w.walk(m.Type, KindType)
 		}
 		for _, u := range x.Union {
-			walkTypePositions(u, KindType, f)
+			w.walk(u, KindType)
 		}
 	case *syntax.MachineType:
-		walkTypePositions(x.State, KindType, f)
-		walkTypePositions(x.Signal, KindType, f)
+		w.walk(x.State, KindType)
+		w.walk(x.Signal, KindType)
 	}
 }
 
-func walkFields(l *syntax.FieldList, f func(*syntax.Ident, Kind)) {
+func (w typeWalker) fields(l *syntax.FieldList) {
 	if l == nil {
 		return
 	}
 	for _, field := range l.List {
-		walkTypePositions(field.Type, KindType, f)
+		w.walk(field.Type, KindType)
 	}
+}
+
+// slotKinds returns the parameter kinds of the generic type a head names,
+// or nil when the head is not a generic type or is still resolving.
+func (c *checker) slotKinds(head syntax.Expr) []Kind {
+	_, n := c.namedHead(head)
+	if n == nil {
+		return nil
+	}
+	if n.state == 0 {
+		c.resolveNamed(n)
+	}
+	if n.state != 2 {
+		return nil
+	}
+	kinds := make([]Kind, len(n.TParams))
+	for i, tp := range n.TParams {
+		kinds[i] = tp.Kind
+	}
+	return kinds
 }
 
 // prescanImplicit creates the implicit type parameters of a function
@@ -872,7 +984,7 @@ func (c *checker) prescanImplicit(ft *syntax.FuncType, ctx *typeCtx) {
 	found := map[string]*seen{}
 	var order []string
 	conflict := map[string]bool{}
-	walkTypePositions(ft, KindType, func(id *syntax.Ident, k Kind) {
+	typeWalker{slots: c.slotKinds, f: func(id *syntax.Ident, k Kind) {
 		if !isParamName(id.Name) || conflict[id.Name] {
 			return
 		}
@@ -896,7 +1008,7 @@ func (c *checker) prescanImplicit(ft *syntax.FuncType, ctx *typeCtx) {
 		}
 		found[id.Name] = &seen{kind: k, at: id}
 		order = append(order, id.Name)
-	})
+	}}.walk(ft, KindType)
 	if ctx.implicit == nil {
 		ctx.implicit = map[string]*TypeParam{}
 	}

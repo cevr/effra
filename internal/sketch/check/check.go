@@ -91,11 +91,12 @@ type checker struct {
 }
 
 type pkgVar struct {
-	obj  *Var
-	spec *syntax.VarSpec
-	idx  int
-	file *fileInfo
-	done bool
+	obj      *Var
+	spec     *syntax.VarSpec
+	idx      int
+	file     *fileInfo
+	done     bool // checked with diagnostics
+	checking bool // being checked: a self-reference stops here
 }
 
 var nextID struct {
@@ -220,7 +221,7 @@ func universe() *Scope {
 		basic := func(name string, k BasicKind) {
 			s.insert(name, &TypeName{Name: name, Pkg: u, Type: Typ[k], id: newID()})
 		}
-		for _, k := range []BasicKind{Bool, String, Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, Uintptr, Float32, Float64, Duration} {
+		for _, k := range []BasicKind{Bool, String, Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, Uintptr, Float32, Float64, Complex64, Complex128, Duration} {
 			basic(Typ[k].Name, k)
 		}
 		basic("byte", Uint8)

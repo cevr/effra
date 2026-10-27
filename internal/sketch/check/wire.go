@@ -2,6 +2,7 @@ package check
 
 import (
 	"sort"
+	"strings"
 
 	"effra.local/prototype/internal/sketch/syntax"
 )
@@ -39,7 +40,13 @@ func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
 	done := c.openScope()
 	c.fn.branches = append(c.fn.branches, branch{kind: brBarrier})
 	var errs *Row
-	res := c.yieldingBlock(x.Trailing, x.Trailing.List, nil, false, func(op *operand) { errs = op.errs })
+	// The with's expected type is the yielded expression's, as a hint: the
+	// block's own result stays its last expression's type (M16).
+	var expect []Type
+	if hint != nil {
+		expect = []Type{hint}
+	}
+	res := c.yieldingBlock(x.Trailing, x.Trailing.List, expect, false, func(op *operand) { errs = op.errs })
 	c.fn.branches = c.fn.branches[:len(c.fn.branches)-1]
 	done()
 	t.withs = t.withs[:len(t.withs)-1]
@@ -57,7 +64,7 @@ func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
 func (c *checker) withArg(arg syntax.Expr) (*Row, bool) {
 	switch a := unparen(arg).(type) {
 	case *syntax.WireLit:
-		return c.wireLit(a), true
+		return c.wireLit(a)
 	case *syntax.Ident:
 		w := c.pkg.Wires[a.Name]
 		if w == nil {
@@ -73,13 +80,18 @@ func (c *checker) withArg(arg syntax.Expr) (*Row, bool) {
 		if c.fn != nil && c.fn.reach != nil {
 			c.fn.reach.wires = append(c.fn.reach.wires, w)
 		}
-		return c.wireBinds(w), true
+		binds := c.wireBinds(w)
+		return binds, !w.unknown
 	case *syntax.SelectorExpr:
 		if id, ok := a.X.(*syntax.Ident); ok {
 			if pn, ok := c.lookup(id.Name).(*PkgName); ok {
 				pn.used = true
+				if pn.broken {
+					return nil, false
+				}
 				if w := pn.Pkg.Wires[a.Sel.Name]; w != nil && isExported(a.Sel.Name) {
-					return c.wireBinds(w), true
+					binds := c.wireBinds(w)
+					return binds, !w.unknown
 				}
 				c.errorf(a.Sel, CodeUnknown, "%s.%s is not an exported wire of package %s", id.Name, a.Sel.Name, pn.Pkg.Path)
 				return nil, false
@@ -93,49 +105,174 @@ func (c *checker) withArg(arg syntax.Expr) (*Row, bool) {
 	return nil, false
 }
 
-// wireLit checks an inline wire's entries and returns what it binds.
-func (c *checker) wireLit(w *syntax.WireLit) *Row {
-	binds := newRow()
+// wireLit checks an inline wire's entries and returns what it binds; known
+// is false when it embeds an unknown wire (reported).
+func (c *checker) wireLit(w *syntax.WireLit) (binds *Row, known bool) {
+	return c.wireBody(w.Body)
+}
+
+// wireBody checks the body of a named or an inline wire and returns what it
+// binds: the embedded wires' capabilities, then the entries. Two embedded
+// wires that bind one capability collide (S111) unless a replace entry of
+// this body overrides it (rows.md, Wire 7), so collisions are reported
+// only after the entries (M13). known is false when an embedded wire is
+// unknown (reported).
+func (c *checker) wireBody(body *syntax.WireBody) (*Row, bool) {
+	known := true
+	type collision struct {
+		cap Type
+		at  syntax.Expr
+	}
+	var collisions []collision
 	embedded := newRow()
-	for _, e := range w.Body.Entries {
+	for _, e := range body.Entries {
 		if e.Kind != syntax.WireEmbed {
 			continue
 		}
 		id, ok := e.Key.(*syntax.Ident)
-		named := (*Wire)(nil)
+		var inner *Wire
 		if ok {
-			named = c.pkg.Wires[id.Name]
+			inner = c.pkg.Wires[id.Name]
 		}
-		if named == nil {
+		if inner == nil {
 			c.errorf(e.Key, CodeUnknown, "unknown wire %s", exprText(e.Key))
+			known = false
 			continue
 		}
 		if c.fn != nil && c.fn.reach != nil {
-			c.fn.reach.wires = append(c.fn.reach.wires, named)
+			c.fn.reach.wires = append(c.fn.reach.wires, inner)
 		}
-		for _, cap := range c.wireBinds(named).Elems() {
+		if c.wireBinds(inner) != nil && inner.unknown {
+			known = false
+		}
+		for _, cap := range c.wireBinds(inner).Elems() {
 			if embedded.Has(cap) {
-				c.errorf(e.Key, CodeDuplicateCap, "%s is bound by two embedded wires; replace one entry (rows.md, Wire 7)", cap)
+				collisions = append(collisions, collision{cap, e.Key})
 			}
 			embedded = embedded.with(cap)
 		}
 	}
-	binds = binds.union(embedded)
-	for _, e := range w.Body.Entries {
+	binds := embedded
+	replaced := newRow()
+	var build *target
+	if c.fn != nil && c.fn.t != nil && c.fn.t.wire {
+		build = c.fn.t
+	}
+	deps := &wireDeps{needs: map[string]*Row{}, at: map[string]syntax.Expr{}}
+	for _, e := range body.Entries {
 		if e.Kind == syntax.WireEmbed {
 			continue
 		}
-		binds = c.wireEntry(e, binds, embedded)
+		if build != nil {
+			build.charged = newRow()
+		}
+		var caps []Type
+		binds, caps = c.wireEntry(e, binds, embedded)
+		if e.Kind == syntax.WireReplace {
+			for _, cap := range caps {
+				replaced = replaced.with(cap)
+			}
+		}
+		if build != nil {
+			deps.add(caps, build.charged, e.Key)
+		}
 	}
-	return binds
+	if build != nil {
+		c.checkEntryCycles(build.name, deps)
+	}
+	for _, k := range collisions {
+		if !replaced.Has(k.cap) {
+			c.errorf(k.at, CodeDuplicateCap, "%s is bound by two embedded wires; replace one entry (rows.md, Wire 7)", k.cap)
+		}
+	}
+	return binds, known
+}
+
+// wireDeps records, for a named wire's entries, the capabilities of the
+// wire each entry's provider uses while it is built.
+type wireDeps struct {
+	order []Type
+	needs map[string]*Row
+	at    map[string]syntax.Expr
+}
+
+func (d *wireDeps) add(caps []Type, needs *Row, at syntax.Expr) {
+	for _, cap := range caps {
+		if _, seen := d.needs[typeKey(cap)]; !seen {
+			d.order = append(d.order, cap)
+			d.at[typeKey(cap)] = at
+			d.needs[typeKey(cap)] = newRow()
+		}
+		d.needs[typeKey(cap)] = d.needs[typeKey(cap)].union(needs)
+	}
+}
+
+// checkEntryCycles reports entries of a named wire that need each other
+// (S108, once per cycle): a provider that uses a capability of its own wire
+// is built after that capability's provider, so a cycle has no first entry
+// (rows.md, Wire 4 and 5).
+func (c *checker) checkEntryCycles(name string, d *wireDeps) {
+	const (
+		white = iota
+		grey
+		black
+	)
+	colour := map[string]int{}
+	var stack []Type
+	var visit func(cap Type) []Type
+	visit = func(cap Type) []Type {
+		colour[typeKey(cap)] = grey
+		stack = append(stack, cap)
+		defer func() {
+			stack = stack[:len(stack)-1]
+			colour[typeKey(cap)] = black
+		}()
+		for _, next := range d.needs[typeKey(cap)].Elems() {
+			if _, entry := d.needs[typeKey(next)]; !entry {
+				continue // bound by an embedded wire, built in its own wire
+			}
+			switch colour[typeKey(next)] {
+			case grey:
+				for i, s := range stack {
+					if typeKey(s) == typeKey(next) {
+						return append([]Type(nil), stack[i:]...)
+					}
+				}
+			case white:
+				if cycle := visit(next); cycle != nil {
+					return cycle
+				}
+			}
+		}
+		return nil
+	}
+	for _, cap := range d.order {
+		if colour[typeKey(cap)] != white {
+			continue
+		}
+		cycle := visit(cap)
+		if cycle == nil {
+			continue
+		}
+		for _, m := range cycle {
+			colour[typeKey(m)] = black
+		}
+		parts := make([]string, 0, len(cycle)+1)
+		for _, m := range cycle {
+			parts = append(parts, m.String())
+		}
+		parts = append(parts, cycle[0].String())
+		c.errorf(d.at[typeKey(cycle[0])], CodeType, "the entries of %s need each other (%s), so none can be built first (rows.md, Wire 4 and 5)", name, strings.Join(parts, " -> "))
+	}
 }
 
 // wireEntry checks one `Cap = provider` or `replace Cap = provider` entry.
 // The provider must implement each capability by method-row compatibility
 // (S106); a second entry for one capability without replace is S111 (README
 // Gap 28); one value may serve several capabilities (README Gap 34). A
-// constructor entry is #37's (S109).
-func (c *checker) wireEntry(e *syntax.WireEntry, binds, embedded *Row) *Row {
+// constructor entry is #37's (S109). It returns the binds and the
+// capabilities the entry names.
+func (c *checker) wireEntry(e *syntax.WireEntry, binds, embedded *Row) (*Row, []Type) {
 	keys := append([]syntax.Expr{e.Key}, e.Keys...)
 	var caps []Type
 	var capKeys []syntax.Expr
@@ -151,7 +288,7 @@ func (c *checker) wireEntry(e *syntax.WireEntry, binds, embedded *Row) *Row {
 		for _, cap := range caps {
 			binds = binds.with(cap)
 		}
-		return binds
+		return binds, caps
 	}
 	op := c.valueExpr(e.Value, nil)
 	for i, cap := range caps {
@@ -183,7 +320,7 @@ func (c *checker) wireEntry(e *syntax.WireEntry, binds, embedded *Row) *Row {
 			c.providers[cn] = append(c.providers[cn], pn)
 		}
 	}
-	return binds
+	return binds, caps
 }
 
 // isConstructor reports whether a provider expression names a function
@@ -234,10 +371,17 @@ func (c *checker) wireBinds(w *Wire) *Row {
 	binds := newRow()
 	for _, e := range w.Decl.Body.Entries {
 		if e.Kind == syntax.WireEmbed {
+			var inner *Wire
 			if id, ok := e.Key.(*syntax.Ident); ok {
-				if inner := w.pkg.Wires[id.Name]; inner != nil {
-					binds = binds.union(c.wireBinds(inner))
-				}
+				inner = w.pkg.Wires[id.Name]
+			}
+			if inner == nil {
+				w.unknown = true
+				continue
+			}
+			binds = binds.union(c.wireBinds(inner))
+			if inner.unknown {
+				w.unknown = true
 			}
 			continue
 		}
@@ -277,36 +421,10 @@ func (c *checker) checkWires() {
 			c.errorf(d.Uses, CodeOutside, "a capability row on a wire is open (README Gap 33): the corpus means exposure, and its spelling is an owner question; it is not checked yet")
 		}
 		t := &target{name: "wire " + w.Name, declErrors: newRow(), declUses: newRow(), wire: true}
+		// The wire's providers may use what the wire binds (Wire 4).
+		t.internal = c.wireBinds(w)
 		c.fn = &funcCtx{t: t, scope: newScope(c.pkg.Scope), reach: c.reachOf(w)}
-		embedded := newRow()
-		for _, e := range d.Body.Entries {
-			if e.Kind != syntax.WireEmbed {
-				continue
-			}
-			id, ok := e.Key.(*syntax.Ident)
-			var inner *Wire
-			if ok {
-				inner = c.pkg.Wires[id.Name]
-			}
-			if inner == nil {
-				c.errorf(e.Key, CodeUnknown, "unknown wire %s", exprText(e.Key))
-				continue
-			}
-			c.fn.reach.wires = append(c.fn.reach.wires, inner)
-			for _, cap := range c.wireBinds(inner).Elems() {
-				if embedded.Has(cap) {
-					c.errorf(e.Key, CodeDuplicateCap, "%s is bound by two embedded wires; replace one entry (rows.md, Wire 7)", cap)
-				}
-				embedded = embedded.with(cap)
-			}
-		}
-		binds := embedded
-		for _, e := range d.Body.Entries {
-			if e.Kind == syntax.WireEmbed {
-				continue
-			}
-			binds = c.wireEntry(e, binds, embedded)
-		}
+		c.wireBody(d.Body)
 		c.fn = nil
 	}
 }

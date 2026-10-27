@@ -316,15 +316,18 @@ func (c *checker) methodOf(t Type, name string) (*Signature, *Func) {
 // assignability 1; rows.md, Wire 2). Each lookup is a keyed map access, so
 // the check is linear in the method count (#122).
 func (c *checker) implements(v Type, it *Interface) string {
+	// The method set of *T holds the *T-receiver methods too, as in Go
+	// (N1); T's holds only the value-receiver ones.
+	ptr := false
 	if p, ok := v.(*Pointer); ok {
-		v = p.Elem
+		v, ptr = p.Elem, true
 	}
 	for _, m := range it.Methods {
 		got, fn := c.methodOf(v, m.Name)
 		if got == nil {
 			return fmt.Sprintf("%s has no method %s", v, m.Name)
 		}
-		if fn != nil && fn.Ptr {
+		if fn != nil && fn.Ptr && !ptr {
 			return fmt.Sprintf("%s.%s has a *T receiver", v, m.Name)
 		}
 		if !sameShape(got, m.Sig) {

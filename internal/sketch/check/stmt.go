@@ -171,7 +171,9 @@ func (c *checker) exprStmt(s *syntax.ExprStmt) {
 	case modeValue, modeConst, modeNoValue:
 	default:
 		c.needValue(&op)
-		return
+		if op.invalid() {
+			return
+		}
 	}
 	c.handled(&op)
 	if !isCallLike(x) {
@@ -308,21 +310,49 @@ func (c *checker) assignStmt(s *syntax.AssignStmt) {
 			}
 			ids[i] = id
 		}
+		reuse := c.defineTargets(s, ids)
 		var types []Type
 		switch {
 		case len(s.Rhs) == len(ids):
 			types = make([]Type, len(ids))
 			for i, r := range s.Rhs {
+				if v := reuse[i]; v != nil {
+					op := c.valueExpr(r, v.Type)
+					if !isInvalid(v.Type) {
+						c.assign(&op, v.Type, "assignment")
+					}
+					continue
+				}
 				op := c.valueExpr(r, nil)
 				types[i] = c.defaultOf(&op)
 			}
 		case len(s.Rhs) == 1:
 			types = c.multiValue(s.Rhs[0], len(ids))
+			for i, v := range reuse {
+				if v == nil || isInvalid(types[i]) || isInvalid(v.Type) {
+					continue
+				}
+				if ok, why := c.assignable(types[i], v.Type); !ok {
+					c.errorf(ids[i], CodeType, "cannot assign %s to %s: %s", types[i], v.Type, why)
+				}
+			}
 		default:
 			c.errorf(s, CodeType, "%d names and %d values", len(ids), len(s.Rhs))
 			types = make([]Type, len(ids))
 		}
+		declared := map[string]bool{}
 		for i, id := range ids {
+			if v := reuse[i]; v != nil {
+				// Reassigning an existing local does not read it.
+				c.recordUse(id, v)
+				continue
+			}
+			if declared[id.Name] {
+				continue // repeated on the left: reported
+			}
+			if id.Name != "_" {
+				declared[id.Name] = true
+			}
 			c.declareLocal(id, types[i])
 		}
 	case syntax.ASSIGN:
@@ -383,6 +413,35 @@ func (c *checker) assignStmt(s *syntax.AssignStmt) {
 	}
 }
 
+// defineTargets classifies the names on the left of :=, as Go does: a name
+// already declared as a local of this block is reassigned, not redeclared,
+// and at least one non-blank name must be new (S108). A name repeated on
+// the left is S108. It returns, per name, the local it reassigns or nil.
+func (c *checker) defineTargets(s *syntax.AssignStmt, ids []*syntax.Ident) []*Var {
+	reuse := make([]*Var, len(ids))
+	seen := map[string]bool{}
+	fresh := false
+	for i, id := range ids {
+		if id.Name == "_" {
+			continue
+		}
+		if seen[id.Name] {
+			c.errorf(id, CodeType, "%s is repeated on the left of :=", id.Name)
+			continue
+		}
+		seen[id.Name] = true
+		if v, ok := c.fn.scope.names[id.Name].(*Var); ok {
+			reuse[i] = v
+			continue
+		}
+		fresh = true
+	}
+	if !fresh {
+		c.errorf(s, CodeType, "no new names on the left of :=; use = to assign")
+	}
+	return reuse
+}
+
 func isBlank(x syntax.Expr) bool {
 	id, ok := x.(*syntax.Ident)
 	return ok && id.Name == "_"
@@ -420,7 +479,7 @@ func assignOp(t syntax.Token) syntax.Token {
 // package-level var is immutable (grammar.md, Declarations 6). Assigning
 // does not read the variable.
 func (c *checker) lhs(x syntax.Expr) operand {
-	if id, ok := x.(*syntax.Ident); ok {
+	if id, ok := unparen(x).(*syntax.Ident); ok {
 		o := c.lookup(id.Name)
 		if v, ok := o.(*Var); ok {
 			if v.pkg {
@@ -443,7 +502,7 @@ func (c *checker) lhs(x syntax.Expr) operand {
 }
 
 func (c *checker) assignable0(x syntax.Expr, op *operand) {
-	if !op.addressable {
+	if !op.addressable && !op.mapElem {
 		c.errorf(x, CodeType, "cannot assign to %s", exprText(x))
 		op.mode = modeInvalid
 	}
@@ -488,7 +547,9 @@ func (c *checker) returnStmt(s *syntax.ReturnStmt) {
 		case modeValue, modeConst, modeNoValue:
 		default:
 			c.needValue(&op)
-			return
+			if op.invalid() {
+				return
+			}
 		}
 		if op.fallible() {
 			c.escape(s.Results[0], op.errs)
@@ -503,8 +564,8 @@ func (c *checker) returnStmt(s *syntax.ReturnStmt) {
 			}
 			return
 		}
-		if c.isErrorValue(op.typ) && op.mode == modeValue {
-			c.escape(s.Results[0], newRow(op.typ))
+		if row := c.errorValueRow(op.typ); row != nil && op.mode == modeValue {
+			c.escape(s.Results[0], row)
 			return
 		}
 		switch {
@@ -541,6 +602,26 @@ func (c *checker) returnTuple(x syntax.Expr, op operand, results []Type) {
 			c.errorf(x, CodeType, "cannot return %s as %s: %s", tup.Types[i], results[i], why)
 		}
 	}
+}
+
+// errorValueRow returns the failures that returning a value of type t
+// escapes: {t} for an error type, the variants for the binding of a catch
+// arm that names several error types (rows.md, Catch 7; M4), else nil.
+func (c *checker) errorValueRow(t Type) *Row {
+	if u, ok := t.(*Union); ok {
+		row := newRow()
+		for _, v := range u.Variants {
+			if !c.isErrorValue(v) {
+				return nil
+			}
+			row = row.with(v)
+		}
+		return row
+	}
+	if c.isErrorValue(t) {
+		return newRow(t)
+	}
+	return nil
 }
 
 // isErrorValue reports whether t is an error type: a type named in an error

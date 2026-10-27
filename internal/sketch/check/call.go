@@ -6,11 +6,24 @@ import (
 	"effra.local/prototype/internal/sketch/syntax"
 )
 
+// isEntry reports whether f is this package's entry function, main.
+func (c *checker) isEntry(f *Func) bool {
+	return f.Name == "main" && f.Recv == nil && f.Pkg == c.pkg
+}
+
 // call checks a call, a conversion, a builtin or the with construct. In call
 // position, with is always the construct (grammar.md, Reserved names 2).
 func (c *checker) call(x *syntax.CallExpr, hint Type) operand {
 	if id, ok := x.Fun.(*syntax.Ident); ok && id.Name == "with" {
 		return c.with(x, hint)
+	}
+	if id, ok := unparen(x.Fun).(*syntax.Ident); ok {
+		if f, ok := c.lookup(id.Name).(*Func); ok && c.isEntry(f) {
+			c.recordUse(id, f)
+			c.errorf(x, CodeEntry, "main is called only by the host (rows.md, Capability rows 4)")
+			c.silentArgs(x)
+			return bad(x)
+		}
 	}
 	fun := c.expr(x.Fun, nil)
 	switch fun.mode {
@@ -35,11 +48,6 @@ func (c *checker) call(x *syntax.CallExpr, hint Type) operand {
 		sig, ok := under(fun.typ).(*Signature)
 		if !ok {
 			c.errorf(x.Fun, CodeType, "cannot call %s, a value of type %s", exprText(x.Fun), fun.typ)
-			c.silentArgs(x)
-			return bad(x)
-		}
-		if fun.fn != nil && fun.fn.Name == "main" && fun.fn.Recv == nil && fun.fn.Pkg == c.pkg {
-			c.errorf(x, CodeEntry, "main is called only by the host (rows.md, Capability rows 4)")
 			c.silentArgs(x)
 			return bad(x)
 		}
@@ -253,6 +261,9 @@ type inferer struct {
 	c   *checker
 	m   map[*TypeParam]Type
 	set map[*TypeParam]bool
+	// joined marks the row parameters bound by unification, not written:
+	// a later argument widens them (see unifyRow).
+	joined map[*TypeParam]bool
 }
 
 func (in *inferer) free(tp *TypeParam) bool { return in.set[tp] && in.m[tp] == nil }
@@ -380,9 +391,14 @@ func (in *inferer) unify(p, a Type) {
 }
 
 // unifyRow binds the free row parameter of p to the elements of a that p's
-// other elements do not cover.
+// other elements do not cover. A row parameter an earlier argument bound
+// is widened to cover a as well: rows are finite sets ordered by inclusion,
+// and a function with a narrower row is assignable where a wider one is
+// expected, so the least binding that admits every argument is the union
+// (D6; Koka's row unification reaches the same row through open tails).
+// A written type argument is never widened.
 func (in *inferer) unifyRow(p, a *Row) {
-	var free []*TypeParam
+	var free, joined []*TypeParam
 	rest := newRow()
 	for _, e := range p.Elems() {
 		if tp, ok := e.(*TypeParam); ok {
@@ -391,18 +407,31 @@ func (in *inferer) unifyRow(p, a *Row) {
 				continue
 			}
 			if b, ok := in.m[tp].(*RowArg); ok {
+				if in.joined[tp] {
+					joined = append(joined, tp)
+				}
 				rest = rest.union(b.Row)
 				continue
 			}
 		}
 		rest = rest.with(e)
 	}
-	if len(free) == 0 {
-		return
-	}
-	in.m[free[0]] = &RowArg{Row: a.minus(rest)}
-	for _, tp := range free[1:] {
-		in.m[tp] = &RowArg{Row: newRow()}
+	extra := a.minus(rest)
+	switch {
+	case len(free) > 0:
+		in.m[free[0]] = &RowArg{Row: extra}
+		for _, tp := range free[1:] {
+			in.m[tp] = &RowArg{Row: newRow()}
+		}
+		if in.joined == nil {
+			in.joined = map[*TypeParam]bool{}
+		}
+		for _, tp := range free {
+			in.joined[tp] = true
+		}
+	case len(joined) > 0 && !extra.Empty():
+		tp := joined[0]
+		in.m[tp] = &RowArg{Row: in.m[tp].(*RowArg).Row.union(extra)}
 	}
 }
 
@@ -660,8 +689,10 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 // yieldingBlock checks a block that yields its last expression: a with
 // block, a trailing block, a go block. When results are known, the last
 // expression is assigned to them; otherwise the result is its type (an
-// untyped constant's default type), or no value. pass receives the last
-// expression's failure row, which passes through (rows.md, With 6).
+// untyped constant's default type), or no value; a single unknown result
+// is still the expected type of the last expression, as a hint (M16). pass
+// receives the last expression's failure row, which passes through
+// (rows.md, With 6).
 func (c *checker) yieldingBlock(at syntax.Node, list []syntax.Stmt, results []Type, known bool, pass func(*operand)) Type {
 	if len(list) == 0 {
 		if known && len(results) > 0 {
@@ -679,7 +710,7 @@ func (c *checker) yieldingBlock(at syntax.Node, list []syntax.Stmt, results []Ty
 	}
 	c.stmtList(list[:len(list)-1], true)
 	var hint Type
-	if known && len(results) == 1 {
+	if len(results) == 1 {
 		hint = results[0]
 	}
 	op := c.expr(last.X, hint)
@@ -693,7 +724,9 @@ func (c *checker) yieldingBlock(at syntax.Node, list []syntax.Stmt, results []Ty
 		case modeValue, modeConst, modeNoValue:
 		default:
 			c.needValue(&op)
-			return nil
+			if op.invalid() {
+				return nil
+			}
 		}
 	}
 	if op.fallible() {
@@ -847,8 +880,17 @@ func (c *checker) builtin(x *syntax.CallExpr, b *Builtin, hint Type) operand {
 			c.errorf(x.Args[0], CodeType, "cannot make %s", t)
 			return bad(x)
 		}
+		// Constant sizes are nonnegative, and a constant length is at most
+		// a constant capacity (S108; Go's rule).
+		var sizes []int64
+		known := true
 		for _, a := range x.Args[1:] {
-			c.intIndex(a)
+			v, ok := c.intIndex(a)
+			sizes = append(sizes, v)
+			known = known && ok
+		}
+		if known && len(sizes) == 2 && sizes[0] > sizes[1] {
+			c.errorf(x.Args[2], CodeType, "the length %d is larger than the capacity %d", sizes[0], sizes[1])
 		}
 		return operand{mode: modeValue, typ: t}
 	case "copy":

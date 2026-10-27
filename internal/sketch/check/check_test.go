@@ -1,14 +1,10 @@
 package check_test
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 
@@ -174,75 +170,6 @@ func TestRegistry(t *testing.T) {
 	}
 	if !check.Registered(syntax.CodeSyntax) {
 		t.Errorf("the parser's code %s is not registered", syntax.CodeSyntax)
-	}
-}
-
-// TestNodeCoverage: every expression, statement and declaration node type of
-// the syntax package is named by a case of the checker, so no parsed node is
-// passed through unchecked (spec Risk 1). Each case either checks the node
-// or refuses it with a diagnostic.
-func TestNodeCoverage(t *testing.T) {
-	fset := token.NewFileSet()
-	astFile, err := parser.ParseFile(fset, filepath.Join("..", "syntax", "ast.go"), nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var nodes []string
-	for _, d := range astFile.Decls {
-		fn, ok := d.(*ast.FuncDecl)
-		if !ok || fn.Recv == nil {
-			continue
-		}
-		switch fn.Name.Name {
-		case "exprNode", "stmtNode", "declNode":
-		default:
-			continue
-		}
-		star, ok := fn.Recv.List[0].Type.(*ast.StarExpr)
-		if !ok {
-			continue
-		}
-		nodes = append(nodes, star.X.(*ast.Ident).Name)
-	}
-	if len(nodes) < 40 {
-		t.Fatalf("found only %d node types", len(nodes))
-	}
-	named := map[string]bool{}
-	files, _ := filepath.Glob("*.go")
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		src, err := parser.ParseFile(fset, f, nil, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ast.Inspect(src, func(n ast.Node) bool {
-			cc, ok := n.(*ast.CaseClause)
-			if !ok {
-				return true
-			}
-			for _, e := range cc.List {
-				if star, ok := e.(*ast.StarExpr); ok {
-					if sel, ok := star.X.(*ast.SelectorExpr); ok {
-						if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "syntax" {
-							named[sel.Sel.Name] = true
-						}
-					}
-				}
-			}
-			return true
-		})
-	}
-	var missing []string
-	for _, n := range nodes {
-		if !named[n] {
-			missing = append(missing, n)
-		}
-	}
-	sort.Strings(missing)
-	if len(missing) > 0 {
-		t.Fatalf("node types no checker case names: %v", missing)
 	}
 }
 

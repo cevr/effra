@@ -73,6 +73,9 @@ type PkgName struct {
 	Pkg  *Package
 	used bool
 	spec *syntax.ImportSpec
+	// broken marks an import that failed (reported at the import): its
+	// name is bound to an empty package, so a use of it adds nothing (D3).
+	broken bool
 }
 
 // Builtin is a predeclared function such as len or append, or the with
@@ -98,8 +101,12 @@ type Wire struct {
 	Decl  *syntax.WireDecl
 	file  *fileInfo
 	binds *Row // capabilities the wire binds; nil until resolved
-	state int
-	pkg   *Package
+	// unknown marks a wire that embeds, directly or not, a wire that does
+	// not exist (reported at the embedding): what it binds is unknown, so
+	// a with of it discharges everything (D3; M18).
+	unknown bool
+	state   int
+	pkg     *Package
 }
 
 func (o *TypeName) name() string { return o.Name }
