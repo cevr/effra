@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/sketch/sketchtest"
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/sketchtest"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // check asserts the formatter's properties on one parseable input: the
@@ -147,7 +147,7 @@ type U interface{ A /* x */ | B }
 
 // doc
 //ef:go net/url.Parse
-func parse(raw string) (url.URL, error[go.Error /* row */ | E]) uses go.Foreign
+func parse(raw string) (url.URL, error[go.Error /* row */ | E]) needs go.Foreign
 
 func f(a /* first */ int, // after a
 	b int, /* after b */
@@ -282,8 +282,8 @@ func TestLayout(t *testing.T) {
 	cases := []struct{ name, src, want string }{
 		{
 			"gofmt layout",
-			"package p\n\n\n\nimport (\n\"a\"; . \"b\"\n  go \"c\")\nfunc f( a,b int,\n) (int, error[A|B]) uses X,Y { return a*b+1 }\n",
-			"package p\n\nimport (\n\t\"a\"\n\t. \"b\"\n\tgo \"c\"\n)\nfunc f(a, b int,\n) (int, error[A | B]) uses X, Y { return a*b + 1 }\n",
+			"package p\n\n\n\nimport (\n\"a\"; . \"b\"\n  go \"c\")\nfunc f( a,b int,\n) (int, error[A|B]) needs X,Y { return a*b+1 }\n",
+			"package p\n\nimport (\n\t\"a\"\n\t. \"b\"\n\tgo \"c\"\n)\nfunc f(a, b int,\n) (int, error[A | B]) needs X, Y { return a*b + 1 }\n",
 		},
 		{
 			"explicit semicolons become line breaks",
@@ -332,8 +332,8 @@ func TestLayout(t *testing.T) {
 		},
 		{
 			"directive stays attached",
-			"package p\n\n//ef:go net/url.Parse\nfunc parse(raw string) (url.URL, error[go.Error]) uses go.Foreign\n",
-			"package p\n\n//ef:go net/url.Parse\nfunc parse(raw string) (url.URL, error[go.Error]) uses go.Foreign\n",
+			"package p\n\n//ef:go net/url.Parse\nfunc parse(raw string) (url.URL, error[go.Error]) needs go.Foreign\n",
+			"package p\n\n//ef:go net/url.Parse\nfunc parse(raw string) (url.URL, error[go.Error]) needs go.Foreign\n",
 		},
 		{
 			// Review M1: a comment inside a delimiter stays before its

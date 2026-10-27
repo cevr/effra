@@ -1,4 +1,4 @@
-import Outcomes "effra/data"
+import Outcomes "ergo/data"
 
 record Settings {
     enabled: bool

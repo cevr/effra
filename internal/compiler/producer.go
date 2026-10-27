@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"effra.local/prototype/internal/producer"
+	"ergo.local/prototype/internal/producer"
 )
 
 // SnapshotQualification scopes canonical references without changing source

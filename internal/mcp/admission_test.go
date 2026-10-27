@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/edition"
+	"ergo.local/prototype/internal/edition"
 )
 
 // retargetWorkspace is a workspace whose src.ef links to a legacy file
@@ -123,10 +123,10 @@ func TestRetargetedSourceInsideTheWorkspaceNeverMixesFiles(t *testing.T) {
 
 func retargetInsideTheWorkspace(t *testing.T, stage string) {
 	root, link, _ := retargetWorkspace(t)
-	if err := os.WriteFile(filepath.Join(root, "inside", "effra.json"), []byte(`{"edition":"2026"}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "inside", "ergo.json"), []byte(`{"edition":"2026"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "inside", "main.ef"), []byte("package p\n\nfunc main() uses Console {\n\tConsole.Println(\"ok\")\n}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "inside", "main.ef"), []byte("package p\n\nfunc main() needs Console {\n\tConsole.Println(\"ok\")\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	legacy := filepath.Join(root, "old", "main.ef")
@@ -166,7 +166,7 @@ func TestDirectoryMovedDuringAdmissionNeverFormatsAsLegacy(t *testing.T) {
 			}
 			for path, text := range map[string]string{
 				filepath.Join(root, "go.mod"):           "module x\n",
-				filepath.Join(pkg, "effra.json"):        `{"edition":"2026"}`,
+				filepath.Join(pkg, "ergo.json"):         `{"edition":"2026"}`,
 				filepath.Join(pkg, "nested", "main.ef"): "fn oldSyntax() -> string { \"legacy\" }\n",
 			} {
 				if err := os.WriteFile(path, []byte(text), 0o644); err != nil {

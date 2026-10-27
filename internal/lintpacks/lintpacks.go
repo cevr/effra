@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"effra.local/prototype/internal/compiler"
-	"effra.local/prototype/lint"
+	"ergo.local/prototype/internal/compiler"
+	"ergo.local/prototype/lint"
 )
 
 // Selection names the lint configuration a surface was started with: an

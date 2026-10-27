@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
-const codecEmissionTypes = `import Json "effra/json"
+const codecEmissionTypes = `import Json "ergo/json"
 
 record User {
     id: i64
@@ -139,7 +139,7 @@ func TestUnexecutedCodecsOmitTheCodecModule(t *testing.T) {
 // arithmetic without passing through JSON numbers or changing record/enum
 // refusal behavior.
 func TestI64CodecDecimalStringsComposeWithArithmeticOnBothTargets(t *testing.T) {
-	const source = `import Json "effra/json"
+	const source = `import Json "ergo/json"
 
 record Account { balance: i64 }
 enum Ledger { Posted { amount: i64 } Rejected { reason: string } }
@@ -212,8 +212,8 @@ func TestCodecEmissionIsDeterministic(t *testing.T) {
 // Direction functions are ordinary function values: bound to a local, passed
 // to a typed parameter and forwarded through a bundled callback function.
 func TestDerivedDirectionsAreOrdinaryFunctionValues(t *testing.T) {
-	source := `import Json "effra/json"
-import Fns "effra/functions"
+	source := `import Json "ergo/json"
+import Fns "ergo/functions"
 
 derive textJson = Json.codec<string>(maxBodyBytes: 1048576, maxDepth: 512)
 
@@ -247,7 +247,7 @@ effect fn main() -> string raises { JsonDecodeFailure } {
 func TestCodecWitnessNamesDoNotShadowModuleBindings(t *testing.T) {
 	for _, name := range []string{"Object", "TextEncoder", "Effect", "__ef_codecText"} {
 		t.Run(name, func(t *testing.T) {
-			source := `import Json "effra/json"
+			source := `import Json "ergo/json"
 
 derive ` + name + ` = Json.codec<string>(maxBodyBytes: 1048576, maxDepth: 512)
 

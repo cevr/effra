@@ -15,7 +15,7 @@ Usage:
                              [--known FILE] [--update-known] [--write-truth PATH]
 
   DIR holds programs.json, written by
-    EFFRA_OWNERSHIP_DUMP=DIR EFFRA_OWNERSHIP_FIXTURE=DIR/fixture.txt \\
+    ERGO_OWNERSHIP_DUMP=DIR ERGO_OWNERSHIP_FIXTURE=DIR/fixture.txt \\
       go test ./internal/compiler -run TestOwnershipMatrixDump -count=1
   Without --erased, BIN is built from the current tree with the two refusals
   erased (scripts/ownership_truth.py --build).
@@ -78,14 +78,14 @@ def build_erased(out, root, scratch):
     head = "func (c *checker) diagnostic(code, message string, span Span) {\n"
     assert head in src, "diagnostic function not found"
     open(path, "w").write(src.replace(head, head + ERASE, 1))
-    built = subprocess.run(["go", "build", "-o", out, "./cmd/ef"], cwd=tmp, env=env(os.path.join(scratch, "tmp")), capture_output=True, text=True)
+    built = subprocess.run(["go", "build", "-o", out, "./cmd/ergo"], cwd=tmp, env=env(os.path.join(scratch, "tmp")), capture_output=True, text=True)
     if built.returncode:
         sys.exit("erased build failed: " + built.stderr)
     shutil.rmtree(tmp, ignore_errors=True)
 
 
 def discard_build(directory, path):
-    """Remove what `ef run` built beside the program (a native binary or a bundle of several MB per program)."""
+    """Remove what `ergo run` built beside the program (a native binary or a bundle of several MB per program)."""
     import glob
     import shutil
     stem = os.path.join(directory, "dist", os.path.splitext(os.path.basename(path))[0])

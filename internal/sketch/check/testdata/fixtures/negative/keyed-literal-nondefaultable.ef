@@ -8,7 +8,7 @@ type Box struct {
 	Name string
 }
 
-func main() uses Console {
+func main() needs Console {
 	b := Box{Name: "x"} // want S108
 	Console.Println(b.Name)
 }

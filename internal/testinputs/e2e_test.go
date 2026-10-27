@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"effra.local/prototype/internal/testinputs/testenv"
+	"ergo.local/prototype/internal/testinputs/testenv"
 )
 
 // The end-to-end cases run Go's real test cache over a fixture module whose
@@ -29,7 +29,7 @@ import (
 // (modelled) design that observation replaces, plus a subprocess started by
 // production code, a variable change, names that need no quoting and the
 // fail-closed paths. The rounds found them with Bun, Node and tsc; since
-// 2026-10-26 Go is Effra's only target, so each case whose mechanism is not
+// 2026-10-26 Go is Ergo's only target, so each case whose mechanism is not
 // specific to a JavaScript resolver runs on sh, cat or go instead, and the
 // resolver-specific ones (bunfig preloads, tsconfig paths, package exports,
 // bunx and npx) are gone with the tools.
@@ -659,18 +659,18 @@ func init() {
 		want:   "connection refused",
 	},
 	{
-		name:       "c2-2 N5 inherited EFFRA_TESTINPUTS_FILTERED",
+		name:       "c2-2 N5 inherited ERGO_TESTINPUTS_FILTERED",
 		files:      map[string]string{"data/value.txt": "v-1\n"},
-		env:        []string{"EFFRA_TESTINPUTS_FILTERED=1"},
+		env:        []string{"ERGO_TESTINPUTS_FILTERED=1"},
 		run:        `return os.ReadFile(filepath.Join(root(), "data", "value.txt"))`,
-		unobserved: "result not cacheable, inputs unobserved: EFFRA_TESTINPUTS_FILTERED is set, but ",
+		unobserved: "result not cacheable, inputs unobserved: ERGO_TESTINPUTS_FILTERED is set, but ",
 	},
 	{
-		name:       "c2-2 N5 inherited EFFRA_TESTINPUTS_LISTENER",
+		name:       "c2-2 N5 inherited ERGO_TESTINPUTS_LISTENER",
 		files:      map[string]string{"data/value.txt": "v-1\n"},
-		env:        []string{"EFFRA_TESTINPUTS_LISTENER=3"},
+		env:        []string{"ERGO_TESTINPUTS_LISTENER=3"},
 		run:        `return os.ReadFile(filepath.Join(root(), "data", "value.txt"))`,
-		unobserved: "result not cacheable, inputs unobserved: EFFRA_TESTINPUTS_LISTENER is set, but ",
+		unobserved: "result not cacheable, inputs unobserved: ERGO_TESTINPUTS_LISTENER is set, but ",
 	},
 	{
 		name:       "fail closed: bpf",
@@ -959,7 +959,7 @@ func newFixture(t *testing.T, c e2eCase) *fixture {
 		if err != nil {
 			t.Fatal(err)
 		}
-		text := strings.ReplaceAll(string(data), `"effra.local/prototype/internal/testinputs/`, `"fixture/testinputs/`)
+		text := strings.ReplaceAll(string(data), `"ergo.local/prototype/internal/testinputs/`, `"fixture/testinputs/`)
 		f.put(t, "testinputs/"+source, text, f.base)
 	}
 	for rel, content := range c.files {
@@ -1024,7 +1024,7 @@ func (f *fixture) environment() []string {
 		env = append(env, entry)
 	}
 	env = append(env, "GOFLAGS=", "GOWORK=off", ToolDigest+"=e2e")
-	if os.Getenv("EFFRA_E2E_DEBUG") == "1" {
+	if os.Getenv("ERGO_E2E_DEBUG") == "1" {
 		env = append(env, "GODEBUG=gocachetest=1")
 	}
 	env = append(env, f.env...)
@@ -1035,7 +1035,7 @@ func (f *fixture) environment() []string {
 }
 
 // result is one package's outcome in a go test run: its own part of the
-// output, and with EFFRA_E2E_DEBUG=1 the whole output, for failure reports.
+// output, and with ERGO_E2E_DEBUG=1 the whole output, for failure reports.
 type result struct {
 	ok, cached bool
 	output     string
@@ -1084,7 +1084,7 @@ func (f *fixture) goTestFlags(t *testing.T, flags []string, packages ...string) 
 			cached: strings.Contains(status, "(cached)"),
 			output: text[start:match[1]],
 		}
-		if os.Getenv("EFFRA_E2E_DEBUG") == "1" {
+		if os.Getenv("ERGO_E2E_DEBUG") == "1" {
 			r := results[pkg]
 			r.full = text
 			results[pkg] = r
@@ -1243,7 +1243,7 @@ func guardFixture(t *testing.T) *fixture {
 	if resolved, err := filepath.EvalSymlinks(f.root); err == nil {
 		f.root = resolved
 	}
-	f.put(t, "go.mod", "module effra.local/prototype\n\ngo 1.24\n", f.base)
+	f.put(t, "go.mod", "module ergo.local/prototype\n\ngo 1.24\n", f.base)
 	var sources []string
 	for _, pattern := range []string{"*.go", "testenv/*.go", "guard/*.go"} {
 		matches, err := filepath.Glob(pattern)

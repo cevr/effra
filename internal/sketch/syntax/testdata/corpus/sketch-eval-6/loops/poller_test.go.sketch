@@ -30,7 +30,7 @@ layer TestLive {
 	Console = Discard{}
 }
 
-func TestRunBatches() error[FlushFailed] uses Test {
+func TestRunBatches() error[FlushFailed] needs Test {
 	provide(TestLive) {
 		try Run(10500ms)
 		Test.Equal(Recorded.Sizes(), []int{5, 5})

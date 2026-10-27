@@ -6,6 +6,6 @@ type Store interface { Get() string }
 type Mem struct{}
 func pure() string { return "ok" }
 func (Mem) Get() string { return pure() }
-func main() uses Console {
+func main() needs Console {
   with(wire{ Store = Mem{} }) { Console.Println(Store.Get()) }
 }

@@ -18,14 +18,14 @@ import (
 	"sync"
 	"testing"
 
-	"effra.local/prototype/examples/lintpack"
-	"effra.local/prototype/internal/compiler"
-	"effra.local/prototype/internal/lintpacks"
-	"effra.local/prototype/internal/lsp"
-	"effra.local/prototype/internal/mcp"
-	"effra.local/prototype/internal/producer"
-	"effra.local/prototype/internal/testinputs"
-	"effra.local/prototype/lint"
+	"ergo.local/prototype/examples/lintpack"
+	"ergo.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/lintpacks"
+	"ergo.local/prototype/internal/lsp"
+	"ergo.local/prototype/internal/mcp"
+	"ergo.local/prototype/internal/producer"
+	"ergo.local/prototype/internal/testinputs"
+	"ergo.local/prototype/lint"
 )
 
 var built struct {
@@ -48,7 +48,7 @@ func TestMain(m *testing.M) {
 func packs(t *testing.T) string {
 	t.Helper()
 	built.once.Do(func() {
-		built.dir, built.err = os.MkdirTemp("", "effra-lintpacks-")
+		built.dir, built.err = os.MkdirTemp("", "ergo-lintpacks-")
 		if built.err != nil {
 			return
 		}
@@ -456,7 +456,7 @@ func publishFor(t *testing.T, target string, session *lintpacks.Session, snapsho
 	for _, message := range []any{
 		map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{}},
 		map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}},
-		map[string]any{"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": map[string]any{"textDocument": map[string]any{"uri": snapshot.URI, "languageId": "effra", "version": 1, "text": snapshot.Text}}},
+		map[string]any{"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": map[string]any{"textDocument": map[string]any{"uri": snapshot.URI, "languageId": "ergo", "version": 1, "text": snapshot.Text}}},
 	} {
 		body, _ := json.Marshal(message)
 		fmt.Fprintf(&in, "Content-Length: %d\r\n\r\n%s", len(body), body)

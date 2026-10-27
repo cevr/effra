@@ -1,0 +1,1887 @@
+ob.SumWrap STEXT nosplit size=48 align=0x0 args=0x18 locals=0x0 funcid=0x0
+	0x0000 00000 (kernels.go:197)	TEXT	ob.SumWrap(SB), NOSPLIT|NOFRAME|ABIInternal, $0-24
+	0x0000 00000 (kernels.go:197)	MOVQ	AX, ob.items+8(FP)
+	0x0005 00005 (kernels.go:199)	XORL	CX, CX
+	0x0007 00007 (kernels.go:199)	XORL	DX, DX
+	0x0009 00009 (kernels.go:199)	JMP	39
+	0x000b 00011 (kernels.go:200)	LEAQ	(DX)(DX*2), SI
+	0x000f 00015 (kernels.go:201)	MOVQ	(AX)(SI*8), DI
+	0x0013 00019 (kernels.go:201)	MOVQ	8(AX)(SI*8), R8
+	0x0018 00024 (kernels.go:201)	IMULQ	R8, DI
+	0x001c 00028 (kernels.go:201)	SUBQ	16(AX)(SI*8), DI
+	0x0021 00033 (kernels.go:201)	ADDQ	DI, CX
+	0x0024 00036 (kernels.go:199)	INCQ	DX
+	0x0027 00039 (kernels.go:199)	CMPQ	BX, DX
+	0x002a 00042 (kernels.go:199)	JGT	11
+	0x002c 00044 (kernels.go:203)	MOVQ	CX, AX
+	0x002f 00047 (kernels.go:203)	RET
+ob.SumDefectCmp STEXT size=421 align=0x0 args=0x18 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:207)	TEXT	ob.SumDefectCmp(SB), ABIInternal, $24-24
+	0x0000 00000 (kernels.go:207)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:207)	JLS	377
+	0x000a 00010 (kernels.go:207)	PUSHQ	BP
+	0x000b 00011 (kernels.go:207)	MOVQ	SP, BP
+	0x000e 00014 (kernels.go:207)	SUBQ	$16, SP
+	0x0012 00018 (kernels.go:207)	MOVQ	AX, ob.items+32(FP)
+	0x0017 00023 (kernels.go:209)	XORL	CX, CX
+	0x0019 00025 (kernels.go:209)	XORL	DX, DX
+	0x001b 00027 (kernels.go:209)	JMP	32
+	0x001d 00029 (kernels.go:209)	INCQ	DX
+	0x0020 00032 (kernels.go:209)	CMPQ	BX, DX
+	0x0023 00035 (kernels.go:209)	JLE	309
+	0x0029 00041 (kernels.go:210)	LEAQ	(DX)(DX*2), SI
+	0x002d 00045 (kernels.go:211)	MOVQ	(AX)(SI*8), DI
+	0x0031 00049 (kernels.go:211)	MOVQ	8(AX)(SI*8), R8
+	0x0036 00054 (<unknown line number>)	NOP
+	0x0036 00054 (kernels.go:630)	XCHGL	AX, AX
+	0x0037 00055 (kernels.go:74)	MOVQ	DI, R9
+	0x003a 00058 (kernels.go:74)	IMULQ	R8, DI
+	0x003e 00062 (kernels.go:74)	NOP
+	0x0040 00064 (kernels.go:75)	TESTQ	R9, R9
+	0x0043 00067 (kernels.go:75)	JEQ	147
+	0x0045 00069 (kernels.go:78)	CMPQ	R9, $-1
+	0x0049 00073 (kernels.go:78)	JNE	95
+	0x004b 00075 (kernels.go:78)	MOVQ	$-9223372036854775808, R10
+	0x0055 00085 (kernels.go:78)	CMPQ	R8, R10
+	0x0058 00088 (kernels.go:78)	JNE	105
+	0x005a 00090 (kernels.go:78)	JMP	357
+	0x005f 00095 (kernels.go:78)	MOVQ	$-9223372036854775808, R10
+	0x0069 00105 (kernels.go:209)	MOVQ	AX, R11
+	0x006c 00108 (kernels.go:81)	MOVQ	DI, AX
+	0x006f 00111 (kernels.go:209)	MOVQ	DX, R12
+	0x0072 00114 (kernels.go:81)	CMPQ	R9, $-1
+	0x0076 00118 (kernels.go:81)	JNE	127
+	0x0078 00120 (kernels.go:81)	NEGQ	AX
+	0x007b 00123 (kernels.go:81)	XORL	DX, DX
+	0x007d 00125 (kernels.go:81)	JMP	132
+	0x007f 00127 (kernels.go:81)	CQO
+	0x0081 00129 (kernels.go:81)	IDIVQ	R9
+	0x0084 00132 (kernels.go:81)	CMPQ	AX, R8
+	0x0087 00135 (kernels.go:631)	JNE	357
+	0x008d 00141 (kernels.go:212)	MOVQ	R11, AX
+	0x0090 00144 (kernels.go:209)	MOVQ	R12, DX
+	0x0093 00147 (kernels.go:212)	MOVQ	16(AX)(SI*8), SI
+	0x0098 00152 (<unknown line number>)	NOP
+	0x0098 00152 (<unknown line number>)	NOP
+	0x0098 00152 (kernels.go:68)	TESTQ	SI, SI
+	0x009b 00155 (kernels.go:68)	JGE	199
+	0x009d 00157 (kernels.go:68)	MOVQ	$9223372036854775807, R8
+	0x00a7 00167 (kernels.go:68)	LEAQ	(R8)(SI*1), R9
+	0x00ab 00171 (kernels.go:68)	CMPQ	DI, R9
+	0x00ae 00174 (kernels.go:68)	JLE	194
+	0x00b0 00176 (kernels.go:68)	MOVQ	$-9223372036854775808, R9
+	0x00ba 00186 (kernels.go:68)	MOVL	$1, R10
+	0x00c0 00192 (kernels.go:68)	JMP	247
+	0x00c2 00194 (kernels.go:68)	TESTQ	SI, SI
+	0x00c5 00197 (kernels.go:68)	JMP	209
+	0x00c7 00199 (kernels.go:68)	MOVQ	$9223372036854775807, R8
+	0x00d1 00209 (kernels.go:68)	JLE	234
+	0x00d3 00211 (kernels.go:68)	MOVQ	$-9223372036854775808, R9
+	0x00dd 00221 (kernels.go:68)	LEAQ	(SI)(R9*1), R10
+	0x00e1 00225 (kernels.go:68)	CMPQ	DI, R10
+	0x00e4 00228 (kernels.go:68)	SETLT	R10B
+	0x00e8 00232 (kernels.go:68)	JMP	247
+	0x00ea 00234 (kernels.go:68)	MOVQ	$-9223372036854775808, R9
+	0x00f4 00244 (kernels.go:68)	XORL	R10, R10
+	0x00f7 00247 (kernels.go:68)	SUBQ	SI, DI
+	0x00fa 00250 (kernels.go:622)	TESTB	R10B, R10B
+	0x00fd 00253 (kernels.go:623)	JNE	337
+	0x00ff 00255 (kernels.go:213)	XCHGL	AX, AX
+	0x0100 00256 (<unknown line number>)	NOP
+	0x0100 00256 (kernels.go:64)	TESTQ	DI, DI
+	0x0103 00259 (kernels.go:64)	JLE	279
+	0x0105 00261 (kernels.go:64)	SUBQ	DI, R8
+	0x0108 00264 (kernels.go:64)	CMPQ	CX, R8
+	0x010b 00267 (kernels.go:64)	JLE	276
+	0x010d 00269 (kernels.go:64)	MOVL	$1, SI
+	0x0112 00274 (kernels.go:64)	JMP	295
+	0x0114 00276 (kernels.go:64)	TESTQ	DI, DI
+	0x0117 00279 (kernels.go:64)	JGE	293
+	0x0119 00281 (kernels.go:64)	SUBQ	DI, R9
+	0x011c 00284 (kernels.go:64)	CMPQ	CX, R9
+	0x011f 00287 (kernels.go:64)	SETLT	SIB
+	0x0123 00291 (kernels.go:64)	JMP	295
+	0x0125 00293 (kernels.go:64)	XORL	SI, SI
+	0x0127 00295 (kernels.go:64)	ADDQ	DI, CX
+	0x012a 00298 (kernels.go:614)	TESTB	SIB, SIB
+	0x012d 00301 (kernels.go:615)	JEQ	29
+	0x0133 00307 (kernels.go:615)	JMP	318
+	0x0135 00309 (kernels.go:215)	MOVQ	CX, AX
+	0x0138 00312 (kernels.go:215)	ADDQ	$16, SP
+	0x013c 00316 (kernels.go:215)	POPQ	BP
+	0x013d 00317 (kernels.go:215)	RET
+	0x013e 00318 (kernels.go:616)	LEAQ	type:string(SB), AX
+	0x0145 00325 (kernels.go:616)	LEAQ	ob..stmp_2(SB), BX
+	0x014c 00332 (kernels.go:616)	CALL	runtime.gopanic(SB)
+	0x0151 00337 (kernels.go:624)	LEAQ	type:string(SB), AX
+	0x0158 00344 (kernels.go:624)	LEAQ	ob..stmp_1(SB), BX
+	0x015f 00351 (kernels.go:624)	NOP
+	0x0160 00352 (kernels.go:624)	CALL	runtime.gopanic(SB)
+	0x0165 00357 (kernels.go:632)	LEAQ	type:string(SB), AX
+	0x016c 00364 (kernels.go:632)	LEAQ	ob..stmp_0(SB), BX
+	0x0173 00371 (kernels.go:632)	CALL	runtime.gopanic(SB)
+	0x0178 00376 (kernels.go:632)	XCHGL	AX, AX
+	0x0179 00377 (kernels.go:632)	NOP
+	0x0179 00377 (kernels.go:207)	MOVQ	AX, 8(SP)
+	0x017e 00382 (kernels.go:207)	MOVQ	BX, 16(SP)
+	0x0183 00387 (kernels.go:207)	MOVQ	CX, 24(SP)
+	0x0188 00392 (kernels.go:207)	CALL	runtime.morestack_noctxt(SB)
+	0x018d 00397 (kernels.go:207)	MOVQ	8(SP), AX
+	0x0192 00402 (kernels.go:207)	MOVQ	16(SP), BX
+	0x0197 00407 (kernels.go:207)	MOVQ	24(SP), CX
+	0x019c 00412 (kernels.go:207)	NOP
+	0x01a0 00416 (kernels.go:207)	JMP	0
+ob.SumDefectPost STEXT size=281 align=0x0 args=0x18 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:219)	TEXT	ob.SumDefectPost(SB), ABIInternal, $24-24
+	0x0000 00000 (kernels.go:219)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:219)	JLS	238
+	0x000a 00010 (kernels.go:219)	PUSHQ	BP
+	0x000b 00011 (kernels.go:219)	MOVQ	SP, BP
+	0x000e 00014 (kernels.go:219)	SUBQ	$16, SP
+	0x0012 00018 (kernels.go:219)	MOVQ	AX, ob.items+32(FP)
+	0x0017 00023 (kernels.go:221)	XORL	CX, CX
+	0x0019 00025 (kernels.go:221)	XORL	DX, DX
+	0x001b 00027 (kernels.go:221)	JMP	42
+	0x001d 00029 (kernels.go:221)	LEAQ	1(R10), SI
+	0x0021 00033 (kernels.go:223)	MOVQ	R9, AX
+	0x0024 00036 (kernels.go:221)	MOVQ	DX, CX
+	0x0027 00039 (kernels.go:221)	MOVQ	SI, DX
+	0x002a 00042 (kernels.go:221)	CMPQ	BX, DX
+	0x002d 00045 (kernels.go:221)	JLE	171
+	0x002f 00047 (kernels.go:222)	LEAQ	(DX)(DX*2), SI
+	0x0033 00051 (kernels.go:223)	MOVQ	(AX)(SI*8), DI
+	0x0037 00055 (kernels.go:223)	MOVQ	8(AX)(SI*8), R8
+	0x003c 00060 (kernels.go:221)	MOVQ	AX, R9
+	0x003f 00063 (kernels.go:124)	MOVQ	DI, AX
+	0x0042 00066 (kernels.go:221)	MOVQ	DX, R10
+	0x0045 00069 (kernels.go:124)	MULQ	R8
+	0x0048 00072 (kernels.go:125)	MOVQ	DI, R11
+	0x004b 00075 (kernels.go:125)	SARQ	$63, DI
+	0x004f 00079 (kernels.go:125)	ANDQ	R8, DI
+	0x0052 00082 (kernels.go:125)	SUBQ	DI, DX
+	0x0055 00085 (kernels.go:125)	SARQ	$63, R8
+	0x0059 00089 (kernels.go:125)	ANDQ	R11, R8
+	0x005c 00092 (kernels.go:125)	SUBQ	R8, DX
+	0x005f 00095 (kernels.go:126)	MOVQ	AX, DI
+	0x0062 00098 (kernels.go:126)	SARQ	$63, AX
+	0x0066 00102 (<unknown line number>)	NOP
+	0x0066 00102 (kernels.go:686)	XCHGL	AX, AX
+	0x0067 00103 (kernels.go:126)	CMPQ	AX, DX
+	0x006a 00106 (kernels.go:687)	JNE	218
+	0x006c 00108 (kernels.go:224)	MOVQ	16(R9)(SI*8), DX
+	0x0071 00113 (kernels.go:92)	MOVQ	DI, SI
+	0x0074 00116 (kernels.go:92)	SUBQ	DX, DI
+	0x0077 00119 (<unknown line number>)	NOP
+	0x0077 00119 (kernels.go:646)	XCHGL	AX, AX
+	0x0078 00120 (kernels.go:93)	CMPQ	SI, DI
+	0x007b 00123 (kernels.go:93)	SETLT	SIB
+	0x007f 00127 (kernels.go:93)	TESTQ	DX, DX
+	0x0082 00130 (kernels.go:93)	SETLT	DL
+	0x0085 00133 (kernels.go:93)	CMPB	DL, SIB
+	0x0088 00136 (kernels.go:647)	JNE	199
+	0x008a 00138 (kernels.go:87)	LEAQ	(CX)(DI*1), DX
+	0x008e 00142 (kernels.go:225)	XCHGL	AX, AX
+	0x008f 00143 (kernels.go:638)	XCHGL	AX, AX
+	0x0090 00144 (kernels.go:88)	CMPQ	CX, DX
+	0x0093 00147 (kernels.go:88)	SETGT	CL
+	0x0096 00150 (kernels.go:88)	TESTQ	DI, DI
+	0x0099 00153 (kernels.go:88)	SETLT	SIB
+	0x009d 00157 (kernels.go:88)	NOP
+	0x00a0 00160 (kernels.go:88)	CMPB	CL, SIB
+	0x00a3 00163 (kernels.go:639)	JEQ	29
+	0x00a9 00169 (kernels.go:639)	JMP	180
+	0x00ab 00171 (kernels.go:227)	MOVQ	CX, AX
+	0x00ae 00174 (kernels.go:227)	ADDQ	$16, SP
+	0x00b2 00178 (kernels.go:227)	POPQ	BP
+	0x00b3 00179 (kernels.go:227)	RET
+	0x00b4 00180 (kernels.go:640)	LEAQ	type:string(SB), AX
+	0x00bb 00187 (kernels.go:640)	LEAQ	ob..stmp_5(SB), BX
+	0x00c2 00194 (kernels.go:640)	CALL	runtime.gopanic(SB)
+	0x00c7 00199 (kernels.go:648)	LEAQ	type:string(SB), AX
+	0x00ce 00206 (kernels.go:648)	LEAQ	ob..stmp_4(SB), BX
+	0x00d5 00213 (kernels.go:648)	CALL	runtime.gopanic(SB)
+	0x00da 00218 (kernels.go:688)	LEAQ	type:string(SB), AX
+	0x00e1 00225 (kernels.go:688)	LEAQ	ob..stmp_3(SB), BX
+	0x00e8 00232 (kernels.go:688)	CALL	runtime.gopanic(SB)
+	0x00ed 00237 (kernels.go:688)	XCHGL	AX, AX
+	0x00ee 00238 (kernels.go:688)	NOP
+	0x00ee 00238 (kernels.go:219)	MOVQ	AX, 8(SP)
+	0x00f3 00243 (kernels.go:219)	MOVQ	BX, 16(SP)
+	0x00f8 00248 (kernels.go:219)	MOVQ	CX, 24(SP)
+	0x00fd 00253 (kernels.go:219)	NOP
+	0x0100 00256 (kernels.go:219)	CALL	runtime.morestack_noctxt(SB)
+	0x0105 00261 (kernels.go:219)	MOVQ	8(SP), AX
+	0x010a 00266 (kernels.go:219)	MOVQ	16(SP), BX
+	0x010f 00271 (kernels.go:219)	MOVQ	24(SP), CX
+	0x0114 00276 (kernels.go:219)	JMP	0
+ob.SumDefectXor STEXT size=261 align=0x0 args=0x18 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:231)	TEXT	ob.SumDefectXor(SB), ABIInternal, $24-24
+	0x0000 00000 (kernels.go:231)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:231)	JLS	219
+	0x000a 00010 (kernels.go:231)	PUSHQ	BP
+	0x000b 00011 (kernels.go:231)	MOVQ	SP, BP
+	0x000e 00014 (kernels.go:231)	SUBQ	$16, SP
+	0x0012 00018 (kernels.go:231)	MOVQ	AX, ob.items+32(FP)
+	0x0017 00023 (kernels.go:233)	XORL	CX, CX
+	0x0019 00025 (kernels.go:233)	XORL	DX, DX
+	0x001b 00027 (kernels.go:233)	JMP	42
+	0x001d 00029 (kernels.go:233)	LEAQ	1(R10), SI
+	0x0021 00033 (kernels.go:235)	MOVQ	R9, AX
+	0x0024 00036 (kernels.go:233)	MOVQ	DX, CX
+	0x0027 00039 (kernels.go:233)	MOVQ	SI, DX
+	0x002a 00042 (kernels.go:233)	CMPQ	BX, DX
+	0x002d 00045 (kernels.go:233)	JLE	152
+	0x002f 00047 (kernels.go:234)	LEAQ	(DX)(DX*2), SI
+	0x0033 00051 (kernels.go:235)	MOVQ	(AX)(SI*8), DI
+	0x0037 00055 (kernels.go:235)	MOVQ	8(AX)(SI*8), R8
+	0x003c 00060 (kernels.go:233)	MOVQ	AX, R9
+	0x003f 00063 (kernels.go:124)	MOVQ	DI, AX
+	0x0042 00066 (kernels.go:233)	MOVQ	DX, R10
+	0x0045 00069 (kernels.go:124)	MULQ	R8
+	0x0048 00072 (kernels.go:125)	MOVQ	DI, R11
+	0x004b 00075 (kernels.go:125)	SARQ	$63, DI
+	0x004f 00079 (kernels.go:125)	ANDQ	R8, DI
+	0x0052 00082 (kernels.go:125)	SUBQ	DI, DX
+	0x0055 00085 (kernels.go:125)	SARQ	$63, R8
+	0x0059 00089 (kernels.go:125)	ANDQ	R11, R8
+	0x005c 00092 (kernels.go:125)	SUBQ	R8, DX
+	0x005f 00095 (kernels.go:126)	MOVQ	AX, DI
+	0x0062 00098 (kernels.go:126)	SARQ	$63, AX
+	0x0066 00102 (<unknown line number>)	NOP
+	0x0066 00102 (kernels.go:686)	XCHGL	AX, AX
+	0x0067 00103 (kernels.go:126)	CMPQ	AX, DX
+	0x006a 00106 (kernels.go:687)	JNE	199
+	0x006c 00108 (kernels.go:236)	MOVQ	16(R9)(SI*8), DX
+	0x0071 00113 (kernels.go:104)	MOVQ	DI, SI
+	0x0074 00116 (kernels.go:104)	SUBQ	DX, DI
+	0x0077 00119 (kernels.go:105)	XORQ	SI, DX
+	0x007a 00122 (kernels.go:105)	XORQ	DI, SI
+	0x007d 00125 (<unknown line number>)	NOP
+	0x007d 00125 (kernels.go:662)	XCHGL	AX, AX
+	0x007e 00126 (kernels.go:662)	NOP
+	0x0080 00128 (kernels.go:105)	TESTQ	SI, DX
+	0x0083 00131 (kernels.go:663)	JLT	180
+	0x0085 00133 (kernels.go:99)	LEAQ	(CX)(DI*1), DX
+	0x0089 00137 (kernels.go:100)	XORQ	DX, CX
+	0x008c 00140 (kernels.go:100)	XORQ	DX, DI
+	0x008f 00143 (kernels.go:237)	XCHGL	AX, AX
+	0x0090 00144 (kernels.go:654)	XCHGL	AX, AX
+	0x0091 00145 (kernels.go:100)	TESTQ	DI, CX
+	0x0094 00148 (kernels.go:655)	JGE	29
+	0x0096 00150 (kernels.go:655)	JMP	161
+	0x0098 00152 (kernels.go:239)	MOVQ	CX, AX
+	0x009b 00155 (kernels.go:239)	ADDQ	$16, SP
+	0x009f 00159 (kernels.go:239)	POPQ	BP
+	0x00a0 00160 (kernels.go:239)	RET
+	0x00a1 00161 (kernels.go:656)	LEAQ	type:string(SB), AX
+	0x00a8 00168 (kernels.go:656)	LEAQ	ob..stmp_8(SB), BX
+	0x00af 00175 (kernels.go:656)	CALL	runtime.gopanic(SB)
+	0x00b4 00180 (kernels.go:664)	LEAQ	type:string(SB), AX
+	0x00bb 00187 (kernels.go:664)	LEAQ	ob..stmp_7(SB), BX
+	0x00c2 00194 (kernels.go:664)	CALL	runtime.gopanic(SB)
+	0x00c7 00199 (kernels.go:688)	LEAQ	type:string(SB), AX
+	0x00ce 00206 (kernels.go:688)	LEAQ	ob..stmp_6(SB), BX
+	0x00d5 00213 (kernels.go:688)	CALL	runtime.gopanic(SB)
+	0x00da 00218 (kernels.go:688)	XCHGL	AX, AX
+	0x00db 00219 (kernels.go:688)	NOP
+	0x00db 00219 (kernels.go:231)	MOVQ	AX, 8(SP)
+	0x00e0 00224 (kernels.go:231)	MOVQ	BX, 16(SP)
+	0x00e5 00229 (kernels.go:231)	MOVQ	CX, 24(SP)
+	0x00ea 00234 (kernels.go:231)	CALL	runtime.morestack_noctxt(SB)
+	0x00ef 00239 (kernels.go:231)	MOVQ	8(SP), AX
+	0x00f4 00244 (kernels.go:231)	MOVQ	16(SP), BX
+	0x00f9 00249 (kernels.go:231)	MOVQ	24(SP), CX
+	0x00fe 00254 (kernels.go:231)	NOP
+	0x0100 00256 (kernels.go:231)	JMP	0
+ob.SumDefectBits STEXT size=302 align=0x0 args=0x18 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:243)	TEXT	ob.SumDefectBits(SB), ABIInternal, $24-24
+	0x0000 00000 (kernels.go:243)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:243)	JLS	262
+	0x000a 00010 (kernels.go:243)	PUSHQ	BP
+	0x000b 00011 (kernels.go:243)	MOVQ	SP, BP
+	0x000e 00014 (kernels.go:243)	SUBQ	$16, SP
+	0x0012 00018 (kernels.go:243)	MOVQ	AX, ob.items+32(FP)
+	0x0017 00023 (kernels.go:245)	XORL	CX, CX
+	0x0019 00025 (kernels.go:245)	XORL	DX, DX
+	0x001b 00027 (kernels.go:245)	JMP	36
+	0x001d 00029 (kernels.go:245)	LEAQ	1(R10), DX
+	0x0021 00033 (kernels.go:247)	MOVQ	R9, AX
+	0x0024 00036 (kernels.go:245)	CMPQ	BX, DX
+	0x0027 00039 (kernels.go:245)	JLE	191
+	0x002d 00045 (kernels.go:246)	LEAQ	(DX)(DX*2), SI
+	0x0031 00049 (kernels.go:247)	MOVQ	(AX)(SI*8), DI
+	0x0035 00053 (kernels.go:247)	MOVQ	8(AX)(SI*8), R8
+	0x003a 00058 (kernels.go:245)	MOVQ	AX, R9
+	0x003d 00061 (kernels.go:124)	MOVQ	DI, AX
+	0x0040 00064 (kernels.go:245)	MOVQ	DX, R10
+	0x0043 00067 (kernels.go:124)	MULQ	R8
+	0x0046 00070 (kernels.go:125)	MOVQ	DI, R11
+	0x0049 00073 (kernels.go:125)	SARQ	$63, DI
+	0x004d 00077 (kernels.go:125)	ANDQ	R8, DI
+	0x0050 00080 (kernels.go:125)	SUBQ	DI, DX
+	0x0053 00083 (kernels.go:125)	SARQ	$63, R8
+	0x0057 00087 (kernels.go:125)	ANDQ	R8, R11
+	0x005a 00090 (kernels.go:125)	SUBQ	R11, DX
+	0x005d 00093 (kernels.go:126)	MOVQ	AX, DI
+	0x0060 00096 (kernels.go:126)	SARQ	$63, AX
+	0x0064 00100 (<unknown line number>)	NOP
+	0x0064 00100 (kernels.go:686)	XCHGL	AX, AX
+	0x0065 00101 (kernels.go:126)	CMPQ	AX, DX
+	0x0068 00104 (kernels.go:687)	JNE	238
+	0x006e 00110 (kernels.go:248)	MOVQ	16(R9)(SI*8), DX
+	0x0073 00115 (<unknown line number>)	NOP
+	0x0073 00115 (kernels.go:678)	XCHGL	AX, AX
+	0x0074 00116 (kernels.go:116)	MOVQ	DI, SI
+	0x0077 00119 (kernels.go:116)	SUBQ	DX, DI
+	0x007a 00122 (kernels.go:116)	SETCS	R8B
+	0x007e 00126 (kernels.go:116)	MOVBLZX	R8B, R8
+	0x0082 00130 (kernels.go:117)	XORQ	DI, SI
+	0x0085 00133 (kernels.go:117)	XORQ	SI, DX
+	0x0088 00136 (kernels.go:117)	SHRQ	$63, DX
+	0x008c 00140 (kernels.go:117)	XORQ	DX, R8
+	0x008f 00143 (kernels.go:117)	BTL	$0, R8
+	0x0094 00148 (kernels.go:679)	JCS	219
+	0x0096 00150 (kernels.go:249)	XCHGL	AX, AX
+	0x0097 00151 (kernels.go:670)	XCHGL	AX, AX
+	0x0098 00152 (kernels.go:111)	MOVQ	CX, DX
+	0x009b 00155 (kernels.go:111)	ADDQ	DI, CX
+	0x009e 00158 (kernels.go:111)	SETCS	SIB
+	0x00a2 00162 (kernels.go:111)	MOVBLZX	SIB, SI
+	0x00a6 00166 (kernels.go:112)	XORQ	CX, DX
+	0x00a9 00169 (kernels.go:112)	XORQ	DX, DI
+	0x00ac 00172 (kernels.go:112)	SHRQ	$63, DI
+	0x00b0 00176 (kernels.go:112)	XORQ	DI, SI
+	0x00b3 00179 (kernels.go:112)	BTL	$0, SI
+	0x00b7 00183 (kernels.go:671)	JCC	29
+	0x00bd 00189 (kernels.go:671)	JMP	200
+	0x00bf 00191 (kernels.go:251)	MOVQ	CX, AX
+	0x00c2 00194 (kernels.go:251)	ADDQ	$16, SP
+	0x00c6 00198 (kernels.go:251)	POPQ	BP
+	0x00c7 00199 (kernels.go:251)	RET
+	0x00c8 00200 (kernels.go:672)	LEAQ	type:string(SB), AX
+	0x00cf 00207 (kernels.go:672)	LEAQ	ob..stmp_11(SB), BX
+	0x00d6 00214 (kernels.go:672)	CALL	runtime.gopanic(SB)
+	0x00db 00219 (kernels.go:680)	LEAQ	type:string(SB), AX
+	0x00e2 00226 (kernels.go:680)	LEAQ	ob..stmp_10(SB), BX
+	0x00e9 00233 (kernels.go:680)	CALL	runtime.gopanic(SB)
+	0x00ee 00238 (kernels.go:688)	LEAQ	type:string(SB), AX
+	0x00f5 00245 (kernels.go:688)	LEAQ	ob..stmp_9(SB), BX
+	0x00fc 00252 (kernels.go:688)	NOP
+	0x0100 00256 (kernels.go:688)	CALL	runtime.gopanic(SB)
+	0x0105 00261 (kernels.go:688)	XCHGL	AX, AX
+	0x0106 00262 (kernels.go:688)	NOP
+	0x0106 00262 (kernels.go:243)	MOVQ	AX, 8(SP)
+	0x010b 00267 (kernels.go:243)	MOVQ	BX, 16(SP)
+	0x0110 00272 (kernels.go:243)	MOVQ	CX, 24(SP)
+	0x0115 00277 (kernels.go:243)	CALL	runtime.morestack_noctxt(SB)
+	0x011a 00282 (kernels.go:243)	MOVQ	8(SP), AX
+	0x011f 00287 (kernels.go:243)	MOVQ	16(SP), BX
+	0x0124 00292 (kernels.go:243)	MOVQ	24(SP), CX
+	0x0129 00297 (kernels.go:243)	JMP	0
+ob.SumDefectRange STEXT size=325 align=0x0 args=0x18 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:258)	TEXT	ob.SumDefectRange(SB), ABIInternal, $24-24
+	0x0000 00000 (kernels.go:258)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:258)	JLS	281
+	0x000a 00010 (kernels.go:258)	PUSHQ	BP
+	0x000b 00011 (kernels.go:258)	MOVQ	SP, BP
+	0x000e 00014 (kernels.go:258)	SUBQ	$16, SP
+	0x0012 00018 (kernels.go:258)	MOVQ	AX, ob.items+32(FP)
+	0x0017 00023 (kernels.go:260)	XORL	CX, CX
+	0x0019 00025 (kernels.go:260)	XORL	DX, DX
+	0x001b 00027 (kernels.go:260)	JMP	43
+	0x001d 00029 (kernels.go:260)	LEAQ	1(R12), SI
+	0x0022 00034 (kernels.go:263)	MOVQ	R10, AX
+	0x0025 00037 (kernels.go:260)	MOVQ	DX, CX
+	0x0028 00040 (kernels.go:260)	MOVQ	SI, DX
+	0x002b 00043 (kernels.go:260)	CMPQ	BX, DX
+	0x002e 00046 (kernels.go:260)	JLE	211
+	0x0034 00052 (kernels.go:261)	LEAQ	(DX)(DX*2), SI
+	0x0038 00056 (kernels.go:263)	MOVQ	(AX)(SI*8), DI
+	0x003c 00060 (kernels.go:263)	MOVQ	8(AX)(SI*8), R8
+	0x0041 00065 (kernels.go:149)	MOVL	$2147483648, R9
+	0x0047 00071 (kernels.go:149)	LEAQ	(R9)(DI*1), R10
+	0x004b 00075 (kernels.go:149)	LEAQ	(R9)(R8*1), R11
+	0x004f 00079 (kernels.go:149)	ORQ	R11, R10
+	0x0052 00082 (<unknown line number>)	NOP
+	0x0052 00082 (kernels.go:149)	MOVQ	$4294967296, R11
+	0x005c 00092 (kernels.go:149)	NOP
+	0x0060 00096 (kernels.go:149)	CMPQ	R11, R10
+	0x0063 00099 (kernels.go:263)	JLS	113
+	0x0065 00101 (kernels.go:264)	IMULQ	R8, DI
+	0x0069 00105 (kernels.go:268)	MOVQ	AX, R10
+	0x006c 00108 (kernels.go:260)	MOVQ	DX, R12
+	0x006f 00111 (kernels.go:264)	JMP	165
+	0x0071 00113 (kernels.go:260)	MOVQ	AX, R10
+	0x0074 00116 (kernels.go:124)	MOVQ	DI, AX
+	0x0077 00119 (kernels.go:260)	MOVQ	DX, R12
+	0x007a 00122 (kernels.go:124)	MULQ	R8
+	0x007d 00125 (kernels.go:125)	MOVQ	DI, R13
+	0x0080 00128 (kernels.go:125)	SARQ	$63, DI
+	0x0084 00132 (kernels.go:125)	ANDQ	R8, DI
+	0x0087 00135 (kernels.go:125)	SUBQ	DI, DX
+	0x008a 00138 (kernels.go:125)	SARQ	$63, R8
+	0x008e 00142 (kernels.go:125)	ANDQ	R13, R8
+	0x0091 00145 (kernels.go:125)	SUBQ	R8, DX
+	0x0094 00148 (kernels.go:126)	MOVQ	AX, DI
+	0x0097 00151 (kernels.go:126)	SARQ	$63, AX
+	0x009b 00155 (kernels.go:266)	XCHGL	AX, AX
+	0x009c 00156 (kernels.go:686)	XCHGL	AX, AX
+	0x009d 00157 (kernels.go:686)	NOP
+	0x00a0 00160 (kernels.go:126)	CMPQ	AX, DX
+	0x00a3 00163 (kernels.go:687)	JNE	261
+	0x00a5 00165 (kernels.go:268)	MOVQ	16(R10)(SI*8), DX
+	0x00aa 00170 (kernels.go:104)	MOVQ	DI, SI
+	0x00ad 00173 (kernels.go:104)	SUBQ	DX, DI
+	0x00b0 00176 (kernels.go:105)	XORQ	SI, DX
+	0x00b3 00179 (kernels.go:105)	XORQ	DI, SI
+	0x00b6 00182 (<unknown line number>)	NOP
+	0x00b6 00182 (kernels.go:662)	XCHGL	AX, AX
+	0x00b7 00183 (kernels.go:105)	TESTQ	SI, DX
+	0x00ba 00186 (kernels.go:663)	JLT	239
+	0x00bc 00188 (kernels.go:99)	LEAQ	(CX)(DI*1), DX
+	0x00c0 00192 (kernels.go:100)	XORQ	DX, CX
+	0x00c3 00195 (kernels.go:100)	XORQ	DX, DI
+	0x00c6 00198 (kernels.go:269)	XCHGL	AX, AX
+	0x00c7 00199 (kernels.go:654)	XCHGL	AX, AX
+	0x00c8 00200 (kernels.go:100)	TESTQ	DI, CX
+	0x00cb 00203 (kernels.go:655)	JGE	29
+	0x00d1 00209 (kernels.go:655)	JMP	220
+	0x00d3 00211 (kernels.go:271)	MOVQ	CX, AX
+	0x00d6 00214 (kernels.go:271)	ADDQ	$16, SP
+	0x00da 00218 (kernels.go:271)	POPQ	BP
+	0x00db 00219 (kernels.go:271)	RET
+	0x00dc 00220 (kernels.go:656)	LEAQ	type:string(SB), AX
+	0x00e3 00227 (kernels.go:656)	LEAQ	ob..stmp_14(SB), BX
+	0x00ea 00234 (kernels.go:656)	CALL	runtime.gopanic(SB)
+	0x00ef 00239 (kernels.go:664)	LEAQ	type:string(SB), AX
+	0x00f6 00246 (kernels.go:664)	LEAQ	ob..stmp_13(SB), BX
+	0x00fd 00253 (kernels.go:664)	NOP
+	0x0100 00256 (kernels.go:664)	CALL	runtime.gopanic(SB)
+	0x0105 00261 (kernels.go:688)	LEAQ	type:string(SB), AX
+	0x010c 00268 (kernels.go:688)	LEAQ	ob..stmp_12(SB), BX
+	0x0113 00275 (kernels.go:688)	CALL	runtime.gopanic(SB)
+	0x0118 00280 (kernels.go:688)	XCHGL	AX, AX
+	0x0119 00281 (kernels.go:688)	NOP
+	0x0119 00281 (kernels.go:258)	MOVQ	AX, 8(SP)
+	0x011e 00286 (kernels.go:258)	MOVQ	BX, 16(SP)
+	0x0123 00291 (kernels.go:258)	MOVQ	CX, 24(SP)
+	0x0128 00296 (kernels.go:258)	CALL	runtime.morestack_noctxt(SB)
+	0x012d 00301 (kernels.go:258)	MOVQ	8(SP), AX
+	0x0132 00306 (kernels.go:258)	MOVQ	16(SP), BX
+	0x0137 00311 (kernels.go:258)	MOVQ	24(SP), CX
+	0x013c 00316 (kernels.go:258)	NOP
+	0x0140 00320 (kernels.go:258)	JMP	0
+ob.SumFailCmp STEXT nosplit size=396 align=0x0 args=0x18 locals=0x0 funcid=0x0
+	0x0000 00000 (kernels.go:275)	TEXT	ob.SumFailCmp(SB), NOSPLIT|NOFRAME|ABIInternal, $0-24
+	0x0000 00000 (kernels.go:275)	MOVQ	AX, ob.items+8(FP)
+	0x0005 00005 (kernels.go:277)	XORL	DX, DX
+	0x0007 00007 (kernels.go:277)	XORL	SI, SI
+	0x0009 00009 (kernels.go:277)	JMP	14
+	0x000b 00011 (kernels.go:277)	INCQ	SI
+	0x000e 00014 (kernels.go:277)	CMPQ	BX, SI
+	0x0011 00017 (kernels.go:277)	JLE	388
+	0x0017 00023 (kernels.go:278)	LEAQ	(SI)(SI*2), DI
+	0x001b 00027 (kernels.go:279)	MOVQ	(AX)(DI*8), R8
+	0x001f 00031 (kernels.go:279)	MOVQ	8(AX)(DI*8), R9
+	0x0024 00036 (<unknown line number>)	NOP
+	0x0024 00036 (kernels.go:712)	XCHGL	AX, AX
+	0x0025 00037 (kernels.go:74)	MOVQ	R8, R10
+	0x0028 00040 (kernels.go:74)	IMULQ	R9, R8
+	0x002c 00044 (kernels.go:75)	TESTQ	R10, R10
+	0x002f 00047 (kernels.go:75)	JEQ	150
+	0x0031 00049 (kernels.go:78)	CMPQ	R10, $-1
+	0x0035 00053 (kernels.go:78)	JNE	72
+	0x0037 00055 (kernels.go:78)	MOVQ	$-9223372036854775808, R11
+	0x0041 00065 (kernels.go:78)	CMPQ	R9, R11
+	0x0044 00068 (kernels.go:78)	JEQ	125
+	0x0046 00070 (kernels.go:78)	JMP	82
+	0x0048 00072 (kernels.go:78)	MOVQ	$-9223372036854775808, R11
+	0x0052 00082 (kernels.go:277)	MOVQ	AX, CX
+	0x0055 00085 (kernels.go:81)	MOVQ	R8, AX
+	0x0058 00088 (kernels.go:277)	MOVQ	DX, R12
+	0x005b 00091 (kernels.go:277)	NOP
+	0x0060 00096 (kernels.go:81)	CMPQ	R10, $-1
+	0x0064 00100 (kernels.go:81)	JNE	109
+	0x0066 00102 (kernels.go:81)	NEGQ	AX
+	0x0069 00105 (kernels.go:81)	XORL	DX, DX
+	0x006b 00107 (kernels.go:81)	JMP	114
+	0x006d 00109 (kernels.go:81)	CQO
+	0x006f 00111 (kernels.go:81)	IDIVQ	R10
+	0x0072 00114 (kernels.go:81)	CMPQ	AX, R9
+	0x0075 00117 (kernels.go:713)	JEQ	144
+	0x0077 00119 (kernels.go:283)	MOVQ	CX, AX
+	0x007a 00122 (kernels.go:64)	MOVQ	R12, DX
+	0x007d 00125 (kernels.go:713)	LEAQ	go:itab.ob.Overflow,error(SB), CX
+	0x0084 00132 (kernels.go:713)	XORL	R8, R8
+	0x0087 00135 (kernels.go:713)	LEAQ	runtime.zerobase(SB), R9
+	0x008e 00142 (kernels.go:279)	JMP	165
+	0x0090 00144 (kernels.go:283)	MOVQ	CX, AX
+	0x0093 00147 (kernels.go:64)	MOVQ	R12, DX
+	0x0096 00150 (kernels.go:713)	MOVQ	$-9223372036854775808, R11
+	0x00a0 00160 (kernels.go:713)	XORL	CX, CX
+	0x00a2 00162 (kernels.go:713)	XORL	R9, R9
+	0x00a5 00165 (kernels.go:280)	TESTQ	CX, CX
+	0x00a8 00168 (kernels.go:280)	JNE	379
+	0x00ae 00174 (kernels.go:283)	MOVQ	16(AX)(DI*8), DI
+	0x00b3 00179 (<unknown line number>)	NOP
+	0x00b3 00179 (<unknown line number>)	NOP
+	0x00b3 00179 (kernels.go:68)	TESTQ	DI, DI
+	0x00b6 00182 (kernels.go:68)	JGE	216
+	0x00b8 00184 (kernels.go:68)	MOVQ	$9223372036854775807, R9
+	0x00c2 00194 (kernels.go:68)	LEAQ	(R9)(DI*1), R10
+	0x00c6 00198 (kernels.go:68)	CMPQ	R8, R10
+	0x00c9 00201 (kernels.go:68)	JLE	211
+	0x00cb 00203 (kernels.go:68)	MOVL	$1, R10
+	0x00d1 00209 (kernels.go:68)	JMP	244
+	0x00d3 00211 (kernels.go:68)	TESTQ	DI, DI
+	0x00d6 00214 (kernels.go:68)	JMP	226
+	0x00d8 00216 (kernels.go:68)	MOVQ	$9223372036854775807, R9
+	0x00e2 00226 (kernels.go:68)	JLE	241
+	0x00e4 00228 (kernels.go:68)	LEAQ	(DI)(R11*1), R10
+	0x00e8 00232 (kernels.go:68)	CMPQ	R8, R10
+	0x00eb 00235 (kernels.go:68)	SETLT	R10B
+	0x00ef 00239 (kernels.go:68)	JMP	244
+	0x00f1 00241 (kernels.go:68)	XORL	R10, R10
+	0x00f4 00244 (kernels.go:68)	SUBQ	DI, R8
+	0x00f7 00247 (kernels.go:704)	TESTB	R10B, R10B
+	0x00fa 00250 (kernels.go:705)	JEQ	271
+	0x00fc 00252 (kernels.go:705)	LEAQ	go:itab.ob.Overflow,error(SB), CX
+	0x0103 00259 (kernels.go:705)	XORL	R8, R8
+	0x0106 00262 (kernels.go:705)	LEAQ	runtime.zerobase(SB), DI
+	0x010d 00269 (kernels.go:283)	JMP	275
+	0x010f 00271 (kernels.go:283)	XORL	CX, CX
+	0x0111 00273 (kernels.go:283)	XORL	DI, DI
+	0x0113 00275 (kernels.go:284)	TESTQ	CX, CX
+	0x0116 00278 (kernels.go:284)	JNE	370
+	0x0118 00280 (<unknown line number>)	NOP
+	0x0118 00280 (<unknown line number>)	NOP
+	0x0118 00280 (kernels.go:64)	TESTQ	R8, R8
+	0x011b 00283 (kernels.go:64)	JLE	303
+	0x011d 00285 (kernels.go:64)	SUBQ	R8, R9
+	0x0120 00288 (kernels.go:64)	CMPQ	DX, R9
+	0x0123 00291 (kernels.go:64)	JLE	300
+	0x0125 00293 (kernels.go:64)	MOVL	$1, DI
+	0x012a 00298 (kernels.go:64)	JMP	319
+	0x012c 00300 (kernels.go:64)	TESTQ	R8, R8
+	0x012f 00303 (kernels.go:64)	JGE	317
+	0x0131 00305 (kernels.go:64)	SUBQ	R8, R11
+	0x0134 00308 (kernels.go:64)	CMPQ	DX, R11
+	0x0137 00311 (kernels.go:64)	SETLT	DIB
+	0x013b 00315 (kernels.go:64)	JMP	319
+	0x013d 00317 (kernels.go:64)	XORL	DI, DI
+	0x013f 00319 (kernels.go:64)	ADDQ	R8, DX
+	0x0142 00322 (kernels.go:696)	TESTB	DIB, DIB
+	0x0145 00325 (kernels.go:697)	JEQ	345
+	0x0147 00327 (kernels.go:697)	LEAQ	go:itab.ob.Overflow,error(SB), CX
+	0x014e 00334 (kernels.go:697)	XORL	DX, DX
+	0x0150 00336 (kernels.go:697)	LEAQ	runtime.zerobase(SB), DI
+	0x0157 00343 (kernels.go:287)	JMP	352
+	0x0159 00345 (kernels.go:287)	XORL	CX, CX
+	0x015b 00347 (kernels.go:287)	XORL	DI, DI
+	0x015d 00349 (kernels.go:287)	NOP
+	0x0160 00352 (kernels.go:288)	TESTQ	CX, CX
+	0x0163 00355 (kernels.go:288)	JEQ	11
+	0x0169 00361 (kernels.go:289)	XORL	AX, AX
+	0x016b 00363 (kernels.go:289)	MOVQ	CX, BX
+	0x016e 00366 (kernels.go:289)	MOVQ	DI, CX
+	0x0171 00369 (kernels.go:289)	RET
+	0x0172 00370 (kernels.go:285)	XORL	AX, AX
+	0x0174 00372 (kernels.go:285)	MOVQ	CX, BX
+	0x0177 00375 (kernels.go:285)	MOVQ	DI, CX
+	0x017a 00378 (kernels.go:285)	RET
+	0x017b 00379 (kernels.go:281)	XORL	AX, AX
+	0x017d 00381 (kernels.go:281)	MOVQ	CX, BX
+	0x0180 00384 (kernels.go:281)	MOVQ	R9, CX
+	0x0183 00387 (kernels.go:281)	RET
+	0x0184 00388 (kernels.go:292)	MOVQ	DX, AX
+	0x0187 00391 (kernels.go:292)	XORL	BX, BX
+	0x0189 00393 (kernels.go:292)	XORL	CX, CX
+	0x018b 00395 (kernels.go:292)	RET
+ob.SumFailPost STEXT nosplit size=268 align=0x0 args=0x18 locals=0x0 funcid=0x0
+	0x0000 00000 (kernels.go:296)	TEXT	ob.SumFailPost(SB), NOSPLIT|NOFRAME|ABIInternal, $0-24
+	0x0000 00000 (kernels.go:296)	MOVQ	AX, ob.items+8(FP)
+	0x0005 00005 (kernels.go:298)	XORL	DX, DX
+	0x0007 00007 (kernels.go:298)	XORL	SI, SI
+	0x0009 00009 (kernels.go:298)	JMP	17
+	0x000b 00011 (kernels.go:298)	INCQ	SI
+	0x000e 00014 (kernels.go:300)	MOVQ	CX, AX
+	0x0011 00017 (kernels.go:298)	CMPQ	BX, SI
+	0x0014 00020 (kernels.go:298)	JLE	260
+	0x001a 00026 (kernels.go:299)	LEAQ	(SI)(SI*2), DI
+	0x001e 00030 (kernels.go:300)	MOVQ	(AX)(DI*8), R8
+	0x0022 00034 (kernels.go:300)	MOVQ	8(AX)(DI*8), R9
+	0x0027 00039 (kernels.go:298)	MOVQ	AX, CX
+	0x002a 00042 (kernels.go:124)	MOVQ	R8, AX
+	0x002d 00045 (kernels.go:298)	MOVQ	DX, R10
+	0x0030 00048 (kernels.go:124)	MULQ	R9
+	0x0033 00051 (kernels.go:125)	MOVQ	R8, R11
+	0x0036 00054 (kernels.go:125)	SARQ	$63, R8
+	0x003a 00058 (kernels.go:125)	ANDQ	R9, R8
+	0x003d 00061 (kernels.go:125)	SUBQ	R8, DX
+	0x0040 00064 (kernels.go:125)	SARQ	$63, R9
+	0x0044 00068 (kernels.go:125)	ANDQ	R11, R9
+	0x0047 00071 (kernels.go:125)	SUBQ	R9, DX
+	0x004a 00074 (kernels.go:126)	MOVQ	AX, R8
+	0x004d 00077 (kernels.go:126)	SARQ	$63, AX
+	0x0051 00081 (<unknown line number>)	NOP
+	0x0051 00081 (kernels.go:768)	XCHGL	AX, AX
+	0x0052 00082 (kernels.go:126)	CMPQ	AX, DX
+	0x0055 00085 (kernels.go:769)	JEQ	106
+	0x0057 00087 (kernels.go:769)	LEAQ	go:itab.ob.Overflow,error(SB), AX
+	0x005e 00094 (kernels.go:769)	XORL	R8, R8
+	0x0061 00097 (kernels.go:769)	LEAQ	runtime.zerobase(SB), DX
+	0x0068 00104 (kernels.go:300)	JMP	110
+	0x006a 00106 (kernels.go:300)	XORL	AX, AX
+	0x006c 00108 (kernels.go:300)	XORL	DX, DX
+	0x006e 00110 (kernels.go:301)	TESTQ	AX, AX
+	0x0071 00113 (kernels.go:301)	JNE	251
+	0x0077 00119 (kernels.go:304)	MOVQ	16(CX)(DI*8), DX
+	0x007c 00124 (kernels.go:92)	MOVQ	R8, DI
+	0x007f 00127 (kernels.go:92)	SUBQ	DX, R8
+	0x0082 00130 (<unknown line number>)	NOP
+	0x0082 00130 (kernels.go:728)	XCHGL	AX, AX
+	0x0083 00131 (kernels.go:93)	CMPQ	DI, R8
+	0x0086 00134 (kernels.go:93)	SETLT	DIB
+	0x008a 00138 (kernels.go:93)	TESTQ	DX, DX
+	0x008d 00141 (kernels.go:93)	SETLT	DL
+	0x0090 00144 (kernels.go:93)	CMPB	DL, DIB
+	0x0093 00147 (kernels.go:729)	JEQ	168
+	0x0095 00149 (kernels.go:729)	LEAQ	go:itab.ob.Overflow,error(SB), AX
+	0x009c 00156 (kernels.go:729)	XORL	R8, R8
+	0x009f 00159 (kernels.go:729)	LEAQ	runtime.zerobase(SB), DX
+	0x00a6 00166 (kernels.go:304)	JMP	172
+	0x00a8 00168 (kernels.go:304)	XORL	AX, AX
+	0x00aa 00170 (kernels.go:304)	XORL	DX, DX
+	0x00ac 00172 (kernels.go:305)	TESTQ	AX, AX
+	0x00af 00175 (kernels.go:305)	JNE	242
+	0x00b1 00177 (kernels.go:87)	LEAQ	(R10)(R8*1), DX
+	0x00b5 00181 (<unknown line number>)	NOP
+	0x00b5 00181 (kernels.go:720)	XCHGL	AX, AX
+	0x00b6 00182 (kernels.go:88)	CMPQ	R10, DX
+	0x00b9 00185 (kernels.go:88)	SETGT	DIB
+	0x00bd 00189 (kernels.go:88)	TESTQ	R8, R8
+	0x00c0 00192 (kernels.go:88)	SETLT	R8B
+	0x00c4 00196 (kernels.go:88)	CMPB	DIB, R8B
+	0x00c7 00199 (kernels.go:721)	JEQ	219
+	0x00c9 00201 (kernels.go:721)	LEAQ	go:itab.ob.Overflow,error(SB), AX
+	0x00d0 00208 (kernels.go:721)	XORL	DX, DX
+	0x00d2 00210 (kernels.go:721)	LEAQ	runtime.zerobase(SB), DI
+	0x00d9 00217 (kernels.go:308)	JMP	224
+	0x00db 00219 (kernels.go:308)	XORL	AX, AX
+	0x00dd 00221 (kernels.go:308)	XORL	DI, DI
+	0x00df 00223 (kernels.go:308)	NOP
+	0x00e0 00224 (kernels.go:309)	TESTQ	AX, AX
+	0x00e3 00227 (kernels.go:309)	JEQ	11
+	0x00e9 00233 (kernels.go:310)	MOVQ	AX, BX
+	0x00ec 00236 (kernels.go:310)	MOVQ	DI, CX
+	0x00ef 00239 (kernels.go:310)	XORL	AX, AX
+	0x00f1 00241 (kernels.go:310)	RET
+	0x00f2 00242 (kernels.go:306)	MOVQ	AX, BX
+	0x00f5 00245 (kernels.go:306)	MOVQ	DX, CX
+	0x00f8 00248 (kernels.go:306)	XORL	AX, AX
+	0x00fa 00250 (kernels.go:306)	RET
+	0x00fb 00251 (kernels.go:302)	MOVQ	AX, BX
+	0x00fe 00254 (kernels.go:302)	MOVQ	DX, CX
+	0x0101 00257 (kernels.go:302)	XORL	AX, AX
+	0x0103 00259 (kernels.go:302)	RET
+	0x0104 00260 (kernels.go:313)	MOVQ	DX, AX
+	0x0107 00263 (kernels.go:313)	XORL	BX, BX
+	0x0109 00265 (kernels.go:313)	XORL	CX, CX
+	0x010b 00267 (kernels.go:313)	RET
+ob.SumFailXor STEXT nosplit size=248 align=0x0 args=0x18 locals=0x0 funcid=0x0
+	0x0000 00000 (kernels.go:317)	TEXT	ob.SumFailXor(SB), NOSPLIT|NOFRAME|ABIInternal, $0-24
+	0x0000 00000 (kernels.go:317)	MOVQ	AX, ob.items+8(FP)
+	0x0005 00005 (kernels.go:319)	XORL	DX, DX
+	0x0007 00007 (kernels.go:319)	XORL	SI, SI
+	0x0009 00009 (kernels.go:319)	JMP	17
+	0x000b 00011 (kernels.go:319)	INCQ	SI
+	0x000e 00014 (kernels.go:321)	MOVQ	CX, AX
+	0x0011 00017 (kernels.go:319)	CMPQ	BX, SI
+	0x0014 00020 (kernels.go:319)	JLE	240
+	0x001a 00026 (kernels.go:320)	LEAQ	(SI)(SI*2), DI
+	0x001e 00030 (kernels.go:321)	MOVQ	(AX)(DI*8), R8
+	0x0022 00034 (kernels.go:321)	MOVQ	8(AX)(DI*8), R9
+	0x0027 00039 (kernels.go:319)	MOVQ	AX, CX
+	0x002a 00042 (kernels.go:124)	MOVQ	R8, AX
+	0x002d 00045 (kernels.go:319)	MOVQ	DX, R10
+	0x0030 00048 (kernels.go:124)	MULQ	R9
+	0x0033 00051 (kernels.go:125)	MOVQ	R8, R11
+	0x0036 00054 (kernels.go:125)	SARQ	$63, R8
+	0x003a 00058 (kernels.go:125)	ANDQ	R9, R8
+	0x003d 00061 (kernels.go:125)	SUBQ	R8, DX
+	0x0040 00064 (kernels.go:125)	SARQ	$63, R9
+	0x0044 00068 (kernels.go:125)	ANDQ	R11, R9
+	0x0047 00071 (kernels.go:125)	SUBQ	R9, DX
+	0x004a 00074 (kernels.go:126)	MOVQ	AX, R8
+	0x004d 00077 (kernels.go:126)	SARQ	$63, AX
+	0x0051 00081 (<unknown line number>)	NOP
+	0x0051 00081 (kernels.go:768)	XCHGL	AX, AX
+	0x0052 00082 (kernels.go:126)	CMPQ	AX, DX
+	0x0055 00085 (kernels.go:769)	JEQ	106
+	0x0057 00087 (kernels.go:769)	LEAQ	go:itab.ob.Overflow,error(SB), AX
+	0x005e 00094 (kernels.go:769)	XORL	R8, R8
+	0x0061 00097 (kernels.go:769)	LEAQ	runtime.zerobase(SB), DX
+	0x0068 00104 (kernels.go:321)	JMP	110
+	0x006a 00106 (kernels.go:321)	XORL	AX, AX
+	0x006c 00108 (kernels.go:321)	XORL	DX, DX
+	0x006e 00110 (kernels.go:322)	TESTQ	AX, AX
+	0x0071 00113 (kernels.go:322)	JNE	231
+	0x0073 00115 (kernels.go:325)	MOVQ	16(CX)(DI*8), DX
+	0x0078 00120 (kernels.go:104)	MOVQ	R8, DI
+	0x007b 00123 (kernels.go:104)	SUBQ	DX, R8
+	0x007e 00126 (kernels.go:105)	XORQ	DI, DX
+	0x0081 00129 (kernels.go:105)	XORQ	R8, DI
+	0x0084 00132 (<unknown line number>)	NOP
+	0x0084 00132 (kernels.go:744)	XCHGL	AX, AX
+	0x0085 00133 (kernels.go:105)	TESTQ	DI, DX
+	0x0088 00136 (kernels.go:745)	JGE	157
+	0x008a 00138 (kernels.go:745)	LEAQ	go:itab.ob.Overflow,error(SB), AX
+	0x0091 00145 (kernels.go:745)	XORL	R8, R8
+	0x0094 00148 (kernels.go:745)	LEAQ	runtime.zerobase(SB), DX
+	0x009b 00155 (kernels.go:325)	JMP	161
+	0x009d 00157 (kernels.go:325)	XORL	AX, AX
+	0x009f 00159 (kernels.go:325)	XORL	DX, DX
+	0x00a1 00161 (kernels.go:326)	TESTQ	AX, AX
+	0x00a4 00164 (kernels.go:326)	JNE	222
+	0x00a6 00166 (kernels.go:99)	LEAQ	(R10)(R8*1), DX
+	0x00aa 00170 (kernels.go:100)	XORQ	DX, R10
+	0x00ad 00173 (kernels.go:100)	XORQ	DX, R8
+	0x00b0 00176 (<unknown line number>)	NOP
+	0x00b0 00176 (kernels.go:736)	XCHGL	AX, AX
+	0x00b1 00177 (kernels.go:100)	TESTQ	R8, R10
+	0x00b4 00180 (kernels.go:737)	JGE	200
+	0x00b6 00182 (kernels.go:737)	LEAQ	go:itab.ob.Overflow,error(SB), AX
+	0x00bd 00189 (kernels.go:737)	XORL	DX, DX
+	0x00bf 00191 (kernels.go:737)	LEAQ	runtime.zerobase(SB), DI
+	0x00c6 00198 (kernels.go:329)	JMP	204
+	0x00c8 00200 (kernels.go:329)	XORL	AX, AX
+	0x00ca 00202 (kernels.go:329)	XORL	DI, DI
+	0x00cc 00204 (kernels.go:330)	TESTQ	AX, AX
+	0x00cf 00207 (kernels.go:330)	JEQ	11
+	0x00d5 00213 (kernels.go:331)	MOVQ	AX, BX
+	0x00d8 00216 (kernels.go:331)	MOVQ	DI, CX
+	0x00db 00219 (kernels.go:331)	XORL	AX, AX
+	0x00dd 00221 (kernels.go:331)	RET
+	0x00de 00222 (kernels.go:327)	MOVQ	AX, BX
+	0x00e1 00225 (kernels.go:327)	MOVQ	DX, CX
+	0x00e4 00228 (kernels.go:327)	XORL	AX, AX
+	0x00e6 00230 (kernels.go:327)	RET
+	0x00e7 00231 (kernels.go:323)	MOVQ	AX, BX
+	0x00ea 00234 (kernels.go:323)	MOVQ	DX, CX
+	0x00ed 00237 (kernels.go:323)	XORL	AX, AX
+	0x00ef 00239 (kernels.go:323)	RET
+	0x00f0 00240 (kernels.go:334)	MOVQ	DX, AX
+	0x00f3 00243 (kernels.go:334)	XORL	BX, BX
+	0x00f5 00245 (kernels.go:334)	XORL	CX, CX
+	0x00f7 00247 (kernels.go:334)	RET
+ob.SumFailBits STEXT nosplit size=300 align=0x0 args=0x18 locals=0x0 funcid=0x0
+	0x0000 00000 (kernels.go:338)	TEXT	ob.SumFailBits(SB), NOSPLIT|NOFRAME|ABIInternal, $0-24
+	0x0000 00000 (kernels.go:338)	MOVQ	AX, ob.items+8(FP)
+	0x0005 00005 (kernels.go:340)	XORL	DX, DX
+	0x0007 00007 (kernels.go:340)	XORL	SI, SI
+	0x0009 00009 (kernels.go:340)	JMP	20
+	0x000b 00011 (kernels.go:340)	INCQ	SI
+	0x000e 00014 (kernels.go:342)	MOVQ	CX, AX
+	0x0011 00017 (kernels.go:340)	MOVQ	R10, DX
+	0x0014 00020 (kernels.go:340)	CMPQ	BX, SI
+	0x0017 00023 (kernels.go:340)	JLE	292
+	0x001d 00029 (kernels.go:341)	LEAQ	(SI)(SI*2), DI
+	0x0021 00033 (kernels.go:342)	MOVQ	(AX)(DI*8), R8
+	0x0025 00037 (kernels.go:342)	MOVQ	8(AX)(DI*8), R9
+	0x002a 00042 (kernels.go:340)	MOVQ	AX, CX
+	0x002d 00045 (kernels.go:124)	MOVQ	R8, AX
+	0x0030 00048 (kernels.go:340)	MOVQ	DX, R10
+	0x0033 00051 (kernels.go:124)	MULQ	R9
+	0x0036 00054 (kernels.go:125)	MOVQ	R8, R11
+	0x0039 00057 (kernels.go:125)	SARQ	$63, R8
+	0x003d 00061 (kernels.go:125)	ANDQ	R9, R8
+	0x0040 00064 (kernels.go:125)	SUBQ	R8, DX
+	0x0043 00067 (kernels.go:125)	SARQ	$63, R9
+	0x0047 00071 (kernels.go:125)	ANDQ	R9, R11
+	0x004a 00074 (kernels.go:125)	SUBQ	R11, DX
+	0x004d 00077 (kernels.go:126)	MOVQ	AX, R8
+	0x0050 00080 (kernels.go:126)	SARQ	$63, AX
+	0x0054 00084 (<unknown line number>)	NOP
+	0x0054 00084 (kernels.go:768)	XCHGL	AX, AX
+	0x0055 00085 (kernels.go:126)	CMPQ	AX, DX
+	0x0058 00088 (kernels.go:769)	JEQ	109
+	0x005a 00090 (kernels.go:769)	LEAQ	go:itab.ob.Overflow,error(SB), AX
+	0x0061 00097 (kernels.go:769)	XORL	R8, R8
+	0x0064 00100 (kernels.go:769)	LEAQ	runtime.zerobase(SB), DX
+	0x006b 00107 (kernels.go:342)	JMP	113
+	0x006d 00109 (kernels.go:342)	XORL	AX, AX
+	0x006f 00111 (kernels.go:342)	XORL	DX, DX
+	0x0071 00113 (kernels.go:343)	TESTQ	AX, AX
+	0x0074 00116 (kernels.go:343)	JNE	283
+	0x007a 00122 (kernels.go:346)	MOVQ	16(CX)(DI*8), DX
+	0x007f 00127 (<unknown line number>)	NOP
+	0x007f 00127 (kernels.go:760)	XCHGL	AX, AX
+	0x0080 00128 (kernels.go:116)	MOVQ	R8, DI
+	0x0083 00131 (kernels.go:116)	SUBQ	DX, R8
+	0x0086 00134 (kernels.go:116)	SETCS	R9B
+	0x008a 00138 (kernels.go:116)	MOVBLZX	R9B, R9
+	0x008e 00142 (kernels.go:117)	XORQ	R8, DI
+	0x0091 00145 (kernels.go:117)	XORQ	DI, DX
+	0x0094 00148 (kernels.go:117)	SHRQ	$63, DX
+	0x0098 00152 (kernels.go:117)	XORQ	R9, DX
+	0x009b 00155 (kernels.go:117)	BTL	$0, DX
+	0x009f 00159 (kernels.go:117)	NOP
+	0x00a0 00160 (kernels.go:761)	JCC	181
+	0x00a2 00162 (kernels.go:761)	LEAQ	go:itab.ob.Overflow,error(SB), AX
+	0x00a9 00169 (kernels.go:761)	XORL	R8, R8
+	0x00ac 00172 (kernels.go:761)	LEAQ	runtime.zerobase(SB), DX
+	0x00b3 00179 (kernels.go:346)	JMP	185
+	0x00b5 00181 (kernels.go:346)	XORL	AX, AX
+	0x00b7 00183 (kernels.go:346)	XORL	DX, DX
+	0x00b9 00185 (kernels.go:347)	TESTQ	AX, AX
+	0x00bc 00188 (kernels.go:347)	JNE	274
+	0x00be 00190 (<unknown line number>)	NOP
+	0x00be 00190 (kernels.go:752)	XCHGL	AX, AX
+	0x00bf 00191 (kernels.go:111)	MOVQ	R10, DX
+	0x00c2 00194 (kernels.go:111)	ADDQ	R8, R10
+	0x00c5 00197 (kernels.go:111)	SETCS	DIB
+	0x00c9 00201 (kernels.go:111)	MOVBLZX	DIB, DI
+	0x00cd 00205 (kernels.go:112)	XORQ	R10, DX
+	0x00d0 00208 (kernels.go:112)	XORQ	DX, R8
+	0x00d3 00211 (kernels.go:112)	SHRQ	$63, R8
+	0x00d7 00215 (kernels.go:112)	XORQ	DI, R8
+	0x00da 00218 (kernels.go:112)	BTL	$0, R8
+	0x00df 00223 (kernels.go:112)	NOP
+	0x00e0 00224 (kernels.go:753)	JCC	245
+	0x00e2 00226 (kernels.go:753)	LEAQ	go:itab.ob.Overflow,error(SB), AX
+	0x00e9 00233 (kernels.go:753)	XORL	R10, R10
+	0x00ec 00236 (kernels.go:753)	LEAQ	runtime.zerobase(SB), DX
+	0x00f3 00243 (kernels.go:350)	JMP	256
+	0x00f5 00245 (kernels.go:350)	XORL	AX, AX
+	0x00f7 00247 (kernels.go:350)	XORL	DX, DX
+	0x00f9 00249 (kernels.go:350)	NOP
+	0x0100 00256 (kernels.go:351)	TESTQ	AX, AX
+	0x0103 00259 (kernels.go:351)	JEQ	11
+	0x0109 00265 (kernels.go:352)	MOVQ	AX, BX
+	0x010c 00268 (kernels.go:352)	MOVQ	DX, CX
+	0x010f 00271 (kernels.go:352)	XORL	AX, AX
+	0x0111 00273 (kernels.go:352)	RET
+	0x0112 00274 (kernels.go:348)	MOVQ	AX, BX
+	0x0115 00277 (kernels.go:348)	MOVQ	DX, CX
+	0x0118 00280 (kernels.go:348)	XORL	AX, AX
+	0x011a 00282 (kernels.go:348)	RET
+	0x011b 00283 (kernels.go:344)	MOVQ	AX, BX
+	0x011e 00286 (kernels.go:344)	MOVQ	DX, CX
+	0x0121 00289 (kernels.go:344)	XORL	AX, AX
+	0x0123 00291 (kernels.go:344)	RET
+	0x0124 00292 (kernels.go:355)	MOVQ	DX, AX
+	0x0127 00295 (kernels.go:355)	XORL	BX, BX
+	0x0129 00297 (kernels.go:355)	XORL	CX, CX
+	0x012b 00299 (kernels.go:355)	RET
+ob.SumFailRange STEXT nosplit size=300 align=0x0 args=0x18 locals=0x0 funcid=0x0
+	0x0000 00000 (kernels.go:359)	TEXT	ob.SumFailRange(SB), NOSPLIT|NOFRAME|ABIInternal, $0-24
+	0x0000 00000 (kernels.go:359)	MOVQ	AX, ob.items+8(FP)
+	0x0005 00005 (kernels.go:361)	XORL	DX, DX
+	0x0007 00007 (kernels.go:361)	XORL	SI, SI
+	0x0009 00009 (kernels.go:361)	JMP	17
+	0x000b 00011 (kernels.go:361)	INCQ	SI
+	0x000e 00014 (kernels.go:364)	MOVQ	CX, AX
+	0x0011 00017 (kernels.go:361)	CMPQ	BX, SI
+	0x0014 00020 (kernels.go:361)	JLE	292
+	0x001a 00026 (kernels.go:362)	LEAQ	(SI)(SI*2), DI
+	0x001e 00030 (kernels.go:364)	MOVQ	(AX)(DI*8), R8
+	0x0022 00034 (kernels.go:364)	MOVQ	8(AX)(DI*8), R9
+	0x0027 00039 (kernels.go:149)	MOVL	$2147483648, R10
+	0x002d 00045 (kernels.go:149)	LEAQ	(R10)(R8*1), R11
+	0x0031 00049 (kernels.go:149)	LEAQ	(R10)(R9*1), R12
+	0x0035 00053 (kernels.go:149)	ORQ	R12, R11
+	0x0038 00056 (<unknown line number>)	NOP
+	0x0038 00056 (kernels.go:149)	MOVQ	$4294967296, R12
+	0x0042 00066 (kernels.go:149)	CMPQ	R12, R11
+	0x0045 00069 (kernels.go:364)	JLS	83
+	0x0047 00071 (kernels.go:365)	IMULQ	R9, R8
+	0x004b 00075 (kernels.go:373)	MOVQ	AX, CX
+	0x004e 00078 (kernels.go:99)	MOVQ	DX, R11
+	0x0051 00081 (kernels.go:365)	JMP	165
+	0x0053 00083 (kernels.go:361)	MOVQ	AX, CX
+	0x0056 00086 (kernels.go:124)	MOVQ	R8, AX
+	0x0059 00089 (kernels.go:361)	MOVQ	DX, R11
+	0x005c 00092 (kernels.go:124)	MULQ	R9
+	0x005f 00095 (kernels.go:125)	MOVQ	R8, R13
+	0x0062 00098 (kernels.go:125)	SARQ	$63, R8
+	0x0066 00102 (kernels.go:125)	ANDQ	R9, R8
+	0x0069 00105 (kernels.go:125)	SUBQ	R8, DX
+	0x006c 00108 (kernels.go:125)	SARQ	$63, R9
+	0x0070 00112 (kernels.go:125)	ANDQ	R13, R9
+	0x0073 00115 (kernels.go:125)	SUBQ	R9, DX
+	0x0076 00118 (kernels.go:126)	MOVQ	AX, R8
+	0x0079 00121 (kernels.go:126)	SARQ	$63, AX
+	0x007d 00125 (<unknown line number>)	NOP
+	0x007d 00125 (kernels.go:768)	XCHGL	AX, AX
+	0x007e 00126 (kernels.go:768)	NOP
+	0x0080 00128 (kernels.go:126)	CMPQ	AX, DX
+	0x0083 00131 (kernels.go:769)	JEQ	152
+	0x0085 00133 (kernels.go:769)	LEAQ	go:itab.ob.Overflow,error(SB), AX
+	0x008c 00140 (kernels.go:769)	XORL	R8, R8
+	0x008f 00143 (kernels.go:769)	LEAQ	runtime.zerobase(SB), DX
+	0x0096 00150 (kernels.go:368)	JMP	160
+	0x0098 00152 (kernels.go:368)	XORL	AX, AX
+	0x009a 00154 (kernels.go:368)	XORL	DX, DX
+	0x009c 00156 (kernels.go:368)	NOP
+	0x00a0 00160 (kernels.go:369)	TESTQ	AX, AX
+	0x00a3 00163 (kernels.go:369)	JNE	283
+	0x00a5 00165 (kernels.go:373)	MOVQ	16(CX)(DI*8), DX
+	0x00aa 00170 (kernels.go:104)	MOVQ	R8, DI
+	0x00ad 00173 (kernels.go:104)	SUBQ	DX, R8
+	0x00b0 00176 (kernels.go:105)	XORQ	DI, DX
+	0x00b3 00179 (kernels.go:105)	XORQ	R8, DI
+	0x00b6 00182 (<unknown line number>)	NOP
+	0x00b6 00182 (kernels.go:744)	XCHGL	AX, AX
+	0x00b7 00183 (kernels.go:105)	TESTQ	DI, DX
+	0x00ba 00186 (kernels.go:745)	JGE	207
+	0x00bc 00188 (kernels.go:745)	LEAQ	go:itab.ob.Overflow,error(SB), AX
+	0x00c3 00195 (kernels.go:745)	XORL	R8, R8
+	0x00c6 00198 (kernels.go:745)	LEAQ	runtime.zerobase(SB), DX
+	0x00cd 00205 (kernels.go:373)	JMP	211
+	0x00cf 00207 (kernels.go:373)	XORL	AX, AX
+	0x00d1 00209 (kernels.go:373)	XORL	DX, DX
+	0x00d3 00211 (kernels.go:374)	TESTQ	AX, AX
+	0x00d6 00214 (kernels.go:374)	JNE	274
+	0x00d8 00216 (kernels.go:99)	LEAQ	(R11)(R8*1), DX
+	0x00dc 00220 (kernels.go:100)	XORQ	DX, R11
+	0x00df 00223 (kernels.go:100)	XORQ	DX, R8
+	0x00e2 00226 (<unknown line number>)	NOP
+	0x00e2 00226 (kernels.go:736)	XCHGL	AX, AX
+	0x00e3 00227 (kernels.go:100)	TESTQ	R8, R11
+	0x00e6 00230 (kernels.go:737)	JGE	250
+	0x00e8 00232 (kernels.go:737)	LEAQ	go:itab.ob.Overflow,error(SB), AX
+	0x00ef 00239 (kernels.go:737)	XORL	DX, DX
+	0x00f1 00241 (kernels.go:737)	LEAQ	runtime.zerobase(SB), DI
+	0x00f8 00248 (kernels.go:377)	JMP	256
+	0x00fa 00250 (kernels.go:377)	XORL	AX, AX
+	0x00fc 00252 (kernels.go:377)	XORL	DI, DI
+	0x00fe 00254 (kernels.go:377)	NOP
+	0x0100 00256 (kernels.go:378)	TESTQ	AX, AX
+	0x0103 00259 (kernels.go:378)	JEQ	11
+	0x0109 00265 (kernels.go:379)	MOVQ	AX, BX
+	0x010c 00268 (kernels.go:379)	MOVQ	DI, CX
+	0x010f 00271 (kernels.go:379)	XORL	AX, AX
+	0x0111 00273 (kernels.go:379)	RET
+	0x0112 00274 (kernels.go:375)	MOVQ	AX, BX
+	0x0115 00277 (kernels.go:375)	MOVQ	DX, CX
+	0x0118 00280 (kernels.go:375)	XORL	AX, AX
+	0x011a 00282 (kernels.go:375)	RET
+	0x011b 00283 (kernels.go:370)	MOVQ	AX, BX
+	0x011e 00286 (kernels.go:370)	MOVQ	DX, CX
+	0x0121 00289 (kernels.go:370)	XORL	AX, AX
+	0x0123 00291 (kernels.go:370)	RET
+	0x0124 00292 (kernels.go:382)	MOVQ	DX, AX
+	0x0127 00295 (kernels.go:382)	XORL	BX, BX
+	0x0129 00297 (kernels.go:382)	XORL	CX, CX
+	0x012b 00299 (kernels.go:382)	RET
+ob.HashWrap STEXT nosplit size=41 align=0x0 args=0x18 locals=0x0 funcid=0x0
+	0x0000 00000 (kernels.go:393)	TEXT	ob.HashWrap(SB), NOSPLIT|NOFRAME|ABIInternal, $0-24
+	0x0000 00000 (kernels.go:393)	MOVQ	AX, ob.key+8(FP)
+	0x0005 00005 (kernels.go:395)	XORL	CX, CX
+	0x0007 00007 (kernels.go:395)	XORL	DX, DX
+	0x0009 00009 (kernels.go:395)	JMP	32
+	0x000b 00011 (kernels.go:395)	MOVBLZX	(AX)(DX*1), SI
+	0x000f 00015 (kernels.go:396)	MOVQ	CX, DI
+	0x0012 00018 (kernels.go:396)	SHLQ	$5, CX
+	0x0016 00022 (kernels.go:396)	SUBQ	DI, CX
+	0x0019 00025 (kernels.go:396)	ADDQ	SI, CX
+	0x001c 00028 (kernels.go:395)	INCQ	DX
+	0x001f 00031 (kernels.go:395)	NOP
+	0x0020 00032 (kernels.go:395)	CMPQ	BX, DX
+	0x0023 00035 (kernels.go:395)	JGT	11
+	0x0025 00037 (kernels.go:398)	MOVQ	CX, AX
+	0x0028 00040 (kernels.go:398)	RET
+ob.HashExplicitWrap STEXT nosplit size=42 align=0x0 args=0x18 locals=0x0 funcid=0x0
+	0x0000 00000 (kernels.go:406)	TEXT	ob.HashExplicitWrap(SB), NOSPLIT|NOFRAME|ABIInternal, $0-24
+	0x0000 00000 (kernels.go:406)	MOVQ	AX, ob.key+8(FP)
+	0x0005 00005 (kernels.go:408)	XORL	CX, CX
+	0x0007 00007 (kernels.go:408)	XORL	DX, DX
+	0x0009 00009 (kernels.go:408)	JMP	33
+	0x000b 00011 (kernels.go:408)	MOVBLZX	(AX)(DX*1), SI
+	0x000f 00015 (kernels.go:415)	MOVQ	CX, DI
+	0x0012 00018 (kernels.go:415)	SHLQ	$5, CX
+	0x0016 00022 (kernels.go:415)	SUBQ	DI, CX
+	0x0019 00025 (kernels.go:409)	XCHGL	AX, AX
+	0x001a 00026 (kernels.go:409)	XCHGL	AX, AX
+	0x001b 00027 (kernels.go:414)	ADDQ	SI, CX
+	0x001e 00030 (kernels.go:408)	INCQ	DX
+	0x0021 00033 (kernels.go:408)	CMPQ	BX, DX
+	0x0024 00036 (kernels.go:408)	JGT	11
+	0x0026 00038 (kernels.go:411)	MOVQ	CX, AX
+	0x0029 00041 (kernels.go:411)	RET
+ob.HashDefectCmp STEXT size=211 align=0x0 args=0x18 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:422)	TEXT	ob.HashDefectCmp(SB), ABIInternal, $24-24
+	0x0000 00000 (kernels.go:422)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:422)	JLS	171
+	0x000a 00010 (kernels.go:422)	PUSHQ	BP
+	0x000b 00011 (kernels.go:422)	MOVQ	SP, BP
+	0x000e 00014 (kernels.go:422)	SUBQ	$16, SP
+	0x0012 00018 (kernels.go:422)	MOVQ	AX, ob.key+32(FP)
+	0x0017 00023 (kernels.go:424)	XORL	CX, CX
+	0x0019 00025 (kernels.go:424)	XORL	DX, DX
+	0x001b 00027 (kernels.go:424)	JMP	32
+	0x001d 00029 (kernels.go:424)	INCQ	DX
+	0x0020 00032 (kernels.go:424)	CMPQ	BX, DX
+	0x0023 00035 (kernels.go:424)	JLE	123
+	0x0025 00037 (kernels.go:425)	MOVQ	$297528130221121800, SI
+	0x002f 00047 (kernels.go:425)	LEAQ	(CX)(SI*1), DI
+	0x0033 00051 (kernels.go:424)	MOVBLZX	(AX)(DX*1), R8
+	0x0038 00056 (kernels.go:425)	MOVQ	$595056260442243600, R9
+	0x0042 00066 (kernels.go:425)	CMPQ	R9, DI
+	0x0045 00069 (kernels.go:425)	JCS	151
+	0x0047 00071 (kernels.go:428)	MOVQ	CX, DI
+	0x004a 00074 (kernels.go:428)	SHLQ	$5, CX
+	0x004e 00078 (<unknown line number>)	NOP
+	0x004e 00078 (kernels.go:428)	SUBQ	DI, CX
+	0x0051 00081 (<unknown line number>)	NOP
+	0x0051 00081 (kernels.go:64)	TESTQ	R8, R8
+	0x0054 00084 (kernels.go:64)	JEQ	111
+	0x0056 00086 (kernels.go:64)	MOVQ	$9223372036854775807, DI
+	0x0060 00096 (kernels.go:64)	SUBQ	R8, DI
+	0x0063 00099 (kernels.go:64)	CMPQ	DI, CX
+	0x0066 00102 (kernels.go:64)	JGE	111
+	0x0068 00104 (kernels.go:64)	MOVL	$1, DI
+	0x006d 00109 (kernels.go:64)	JMP	113
+	0x006f 00111 (kernels.go:64)	XORL	DI, DI
+	0x0071 00113 (kernels.go:64)	ADDQ	R8, CX
+	0x0074 00116 (kernels.go:614)	TESTB	DIB, DIB
+	0x0077 00119 (kernels.go:615)	JEQ	29
+	0x0079 00121 (kernels.go:615)	JMP	132
+	0x007b 00123 (kernels.go:430)	MOVQ	CX, AX
+	0x007e 00126 (kernels.go:430)	ADDQ	$16, SP
+	0x0082 00130 (kernels.go:430)	POPQ	BP
+	0x0083 00131 (kernels.go:430)	RET
+	0x0084 00132 (kernels.go:616)	LEAQ	type:string(SB), AX
+	0x008b 00139 (kernels.go:616)	LEAQ	ob..stmp_31(SB), BX
+	0x0092 00146 (kernels.go:616)	CALL	runtime.gopanic(SB)
+	0x0097 00151 (kernels.go:426)	LEAQ	type:string(SB), AX
+	0x009e 00158 (kernels.go:426)	LEAQ	ob..stmp_30(SB), BX
+	0x00a5 00165 (kernels.go:426)	CALL	runtime.gopanic(SB)
+	0x00aa 00170 (kernels.go:426)	XCHGL	AX, AX
+	0x00ab 00171 (kernels.go:426)	NOP
+	0x00ab 00171 (kernels.go:422)	MOVQ	AX, 8(SP)
+	0x00b0 00176 (kernels.go:422)	MOVQ	BX, 16(SP)
+	0x00b5 00181 (kernels.go:422)	MOVQ	CX, 24(SP)
+	0x00ba 00186 (kernels.go:422)	CALL	runtime.morestack_noctxt(SB)
+	0x00bf 00191 (kernels.go:422)	MOVQ	8(SP), AX
+	0x00c4 00196 (kernels.go:422)	MOVQ	16(SP), BX
+	0x00c9 00201 (kernels.go:422)	MOVQ	24(SP), CX
+	0x00ce 00206 (kernels.go:422)	JMP	0
+ob.HashDefectBits STEXT size=199 align=0x0 args=0x18 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:434)	TEXT	ob.HashDefectBits(SB), ABIInternal, $24-24
+	0x0000 00000 (kernels.go:434)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:434)	JLS	159
+	0x000a 00010 (kernels.go:434)	PUSHQ	BP
+	0x000b 00011 (kernels.go:434)	MOVQ	SP, BP
+	0x000e 00014 (kernels.go:434)	SUBQ	$16, SP
+	0x0012 00018 (kernels.go:434)	MOVQ	AX, ob.key+32(FP)
+	0x0017 00023 (kernels.go:436)	XORL	CX, CX
+	0x0019 00025 (kernels.go:436)	XORL	DX, DX
+	0x001b 00027 (kernels.go:436)	JMP	41
+	0x001d 00029 (kernels.go:436)	INCQ	R8
+	0x0020 00032 (kernels.go:436)	MOVQ	SI, AX
+	0x0023 00035 (kernels.go:436)	MOVQ	DX, CX
+	0x0026 00038 (kernels.go:436)	MOVQ	R8, DX
+	0x0029 00041 (kernels.go:436)	CMPQ	BX, DX
+	0x002c 00044 (kernels.go:436)	JLE	111
+	0x002e 00046 (kernels.go:436)	MOVQ	AX, SI
+	0x0031 00049 (kernels.go:124)	MOVQ	CX, AX
+	0x0034 00052 (kernels.go:124)	MOVL	$31, DI
+	0x0039 00057 (kernels.go:436)	MOVQ	DX, R8
+	0x003c 00060 (kernels.go:124)	MULQ	DI
+	0x003f 00063 (kernels.go:125)	SARQ	$63, CX
+	0x0043 00067 (kernels.go:125)	ANDL	$31, CX
+	0x0046 00070 (kernels.go:125)	SUBQ	CX, DX
+	0x0049 00073 (kernels.go:126)	MOVQ	AX, CX
+	0x004c 00076 (kernels.go:126)	SARQ	$63, AX
+	0x0050 00080 (kernels.go:436)	MOVBLZX	(SI)(R8*1), R9
+	0x0055 00085 (kernels.go:437)	XCHGL	AX, AX
+	0x0056 00086 (kernels.go:686)	XCHGL	AX, AX
+	0x0057 00087 (kernels.go:126)	CMPQ	AX, DX
+	0x005a 00090 (kernels.go:687)	JNE	139
+	0x005c 00092 (kernels.go:99)	LEAQ	(CX)(R9*1), DX
+	0x0060 00096 (kernels.go:100)	XORQ	DX, CX
+	0x0063 00099 (kernels.go:100)	XORQ	DX, R9
+	0x0066 00102 (kernels.go:437)	XCHGL	AX, AX
+	0x0067 00103 (kernels.go:654)	XCHGL	AX, AX
+	0x0068 00104 (kernels.go:100)	TESTQ	CX, R9
+	0x006b 00107 (kernels.go:655)	JGE	29
+	0x006d 00109 (kernels.go:655)	JMP	120
+	0x006f 00111 (kernels.go:439)	MOVQ	CX, AX
+	0x0072 00114 (kernels.go:439)	ADDQ	$16, SP
+	0x0076 00118 (kernels.go:439)	POPQ	BP
+	0x0077 00119 (kernels.go:439)	RET
+	0x0078 00120 (kernels.go:656)	LEAQ	type:string(SB), AX
+	0x007f 00127 (kernels.go:656)	LEAQ	ob..stmp_33(SB), BX
+	0x0086 00134 (kernels.go:656)	CALL	runtime.gopanic(SB)
+	0x008b 00139 (kernels.go:688)	LEAQ	type:string(SB), AX
+	0x0092 00146 (kernels.go:688)	LEAQ	ob..stmp_32(SB), BX
+	0x0099 00153 (kernels.go:688)	CALL	runtime.gopanic(SB)
+	0x009e 00158 (kernels.go:688)	XCHGL	AX, AX
+	0x009f 00159 (kernels.go:688)	NOP
+	0x009f 00159 (kernels.go:434)	MOVQ	AX, 8(SP)
+	0x00a4 00164 (kernels.go:434)	MOVQ	BX, 16(SP)
+	0x00a9 00169 (kernels.go:434)	MOVQ	CX, 24(SP)
+	0x00ae 00174 (kernels.go:434)	CALL	runtime.morestack_noctxt(SB)
+	0x00b3 00179 (kernels.go:434)	MOVQ	8(SP), AX
+	0x00b8 00184 (kernels.go:434)	MOVQ	16(SP), BX
+	0x00bd 00189 (kernels.go:434)	MOVQ	24(SP), CX
+	0x00c2 00194 (kernels.go:434)	JMP	0
+ob.HashFailCmp STEXT nosplit size=169 align=0x0 args=0x18 locals=0x0 funcid=0x0
+	0x0000 00000 (kernels.go:443)	TEXT	ob.HashFailCmp(SB), NOSPLIT|NOFRAME|ABIInternal, $0-24
+	0x0000 00000 (kernels.go:443)	MOVQ	AX, ob.key+8(FP)
+	0x0005 00005 (kernels.go:445)	XORL	DX, DX
+	0x0007 00007 (kernels.go:445)	XORL	SI, SI
+	0x0009 00009 (kernels.go:445)	JMP	14
+	0x000b 00011 (kernels.go:445)	INCQ	SI
+	0x000e 00014 (kernels.go:445)	CMPQ	BX, SI
+	0x0011 00017 (kernels.go:445)	JLE	161
+	0x0017 00023 (kernels.go:446)	MOVQ	$297528130221121800, DI
+	0x0021 00033 (kernels.go:446)	LEAQ	(DX)(DI*1), R8
+	0x0025 00037 (kernels.go:445)	MOVBLZX	(AX)(SI*1), R9
+	0x002a 00042 (kernels.go:446)	MOVQ	$595056260442243600, R10
+	0x0034 00052 (kernels.go:446)	CMPQ	R10, R8
+	0x0037 00055 (kernels.go:446)	JCS	144
+	0x0039 00057 (kernels.go:450)	MOVQ	DX, R8
+	0x003c 00060 (kernels.go:450)	SHLQ	$5, DX
+	0x0040 00064 (<unknown line number>)	NOP
+	0x0040 00064 (kernels.go:450)	SUBQ	R8, DX
+	0x0043 00067 (<unknown line number>)	NOP
+	0x0043 00067 (kernels.go:64)	TESTQ	R9, R9
+	0x0046 00070 (kernels.go:64)	JEQ	98
+	0x0048 00072 (kernels.go:64)	MOVQ	$9223372036854775807, R8
+	0x0052 00082 (kernels.go:64)	SUBQ	R9, R8
+	0x0055 00085 (kernels.go:64)	CMPQ	R8, DX
+	0x0058 00088 (kernels.go:64)	JGE	98
+	0x005a 00090 (kernels.go:64)	MOVL	$1, CX
+	0x005f 00095 (kernels.go:64)	NOP
+	0x0060 00096 (kernels.go:64)	JMP	100
+	0x0062 00098 (kernels.go:64)	XORL	CX, CX
+	0x0064 00100 (kernels.go:64)	ADDQ	R9, DX
+	0x0067 00103 (kernels.go:696)	TESTB	CL, CL
+	0x0069 00105 (kernels.go:697)	JEQ	125
+	0x006b 00107 (kernels.go:697)	LEAQ	go:itab.ob.Overflow,error(SB), CX
+	0x0072 00114 (kernels.go:697)	XORL	DX, DX
+	0x0074 00116 (kernels.go:697)	LEAQ	runtime.zerobase(SB), R8
+	0x007b 00123 (kernels.go:450)	JMP	130
+	0x007d 00125 (kernels.go:450)	XORL	CX, CX
+	0x007f 00127 (kernels.go:450)	XORL	R8, R8
+	0x0082 00130 (kernels.go:451)	TESTQ	CX, CX
+	0x0085 00133 (kernels.go:451)	JEQ	11
+	0x0087 00135 (kernels.go:452)	XORL	AX, AX
+	0x0089 00137 (kernels.go:452)	MOVQ	CX, BX
+	0x008c 00140 (kernels.go:452)	MOVQ	R8, CX
+	0x008f 00143 (kernels.go:452)	RET
+	0x0090 00144 (kernels.go:447)	XORL	AX, AX
+	0x0092 00146 (kernels.go:447)	LEAQ	go:itab.ob.Overflow,error(SB), BX
+	0x0099 00153 (kernels.go:447)	LEAQ	runtime.zerobase(SB), CX
+	0x00a0 00160 (kernels.go:447)	RET
+	0x00a1 00161 (kernels.go:455)	MOVQ	DX, AX
+	0x00a4 00164 (kernels.go:455)	XORL	BX, BX
+	0x00a6 00166 (kernels.go:455)	XORL	CX, CX
+	0x00a8 00168 (kernels.go:455)	RET
+ob.HashFailBits STEXT nosplit size=175 align=0x0 args=0x18 locals=0x0 funcid=0x0
+	0x0000 00000 (kernels.go:459)	TEXT	ob.HashFailBits(SB), NOSPLIT|NOFRAME|ABIInternal, $0-24
+	0x0000 00000 (kernels.go:459)	MOVQ	AX, ob.key+8(FP)
+	0x0005 00005 (kernels.go:461)	XORL	DX, DX
+	0x0007 00007 (kernels.go:461)	XORL	SI, SI
+	0x0009 00009 (kernels.go:461)	JMP	17
+	0x000b 00011 (kernels.go:461)	INCQ	SI
+	0x000e 00014 (kernels.go:461)	MOVQ	CX, AX
+	0x0011 00017 (kernels.go:461)	CMPQ	BX, SI
+	0x0014 00020 (kernels.go:461)	JLE	167
+	0x001a 00026 (kernels.go:461)	MOVQ	AX, CX
+	0x001d 00029 (kernels.go:124)	MOVQ	DX, AX
+	0x0020 00032 (kernels.go:124)	MOVL	$31, DI
+	0x0025 00037 (kernels.go:461)	MOVQ	AX, R8
+	0x0028 00040 (kernels.go:124)	MULQ	DI
+	0x002b 00043 (kernels.go:125)	SARQ	$63, R8
+	0x002f 00047 (kernels.go:125)	ANDL	$31, R8
+	0x0033 00051 (kernels.go:125)	SUBQ	R8, DX
+	0x0036 00054 (kernels.go:126)	MOVQ	AX, R8
+	0x0039 00057 (kernels.go:126)	SARQ	$63, AX
+	0x003d 00061 (kernels.go:461)	MOVBLZX	(CX)(SI*1), R9
+	0x0042 00066 (<unknown line number>)	NOP
+	0x0042 00066 (kernels.go:768)	XCHGL	AX, AX
+	0x0043 00067 (kernels.go:126)	CMPQ	AX, DX
+	0x0046 00070 (kernels.go:769)	JEQ	91
+	0x0048 00072 (kernels.go:769)	LEAQ	go:itab.ob.Overflow,error(SB), AX
+	0x004f 00079 (kernels.go:769)	XORL	R8, R8
+	0x0052 00082 (kernels.go:769)	LEAQ	runtime.zerobase(SB), DX
+	0x0059 00089 (kernels.go:462)	JMP	96
+	0x005b 00091 (kernels.go:462)	XORL	AX, AX
+	0x005d 00093 (kernels.go:462)	XORL	DX, DX
+	0x005f 00095 (kernels.go:462)	NOP
+	0x0060 00096 (kernels.go:463)	TESTQ	AX, AX
+	0x0063 00099 (kernels.go:463)	JNE	158
+	0x0065 00101 (kernels.go:99)	LEAQ	(R8)(R9*1), DX
+	0x0069 00105 (kernels.go:100)	XORQ	DX, R8
+	0x006c 00108 (kernels.go:100)	XORQ	DX, R9
+	0x006f 00111 (<unknown line number>)	NOP
+	0x006f 00111 (kernels.go:736)	XCHGL	AX, AX
+	0x0070 00112 (kernels.go:100)	TESTQ	R9, R8
+	0x0073 00115 (kernels.go:737)	JGE	135
+	0x0075 00117 (kernels.go:737)	LEAQ	go:itab.ob.Overflow,error(SB), AX
+	0x007c 00124 (kernels.go:737)	XORL	DX, DX
+	0x007e 00126 (kernels.go:737)	LEAQ	runtime.zerobase(SB), R8
+	0x0085 00133 (kernels.go:466)	JMP	140
+	0x0087 00135 (kernels.go:466)	XORL	AX, AX
+	0x0089 00137 (kernels.go:466)	XORL	R8, R8
+	0x008c 00140 (kernels.go:467)	TESTQ	AX, AX
+	0x008f 00143 (kernels.go:467)	JEQ	11
+	0x0095 00149 (kernels.go:468)	MOVQ	AX, BX
+	0x0098 00152 (kernels.go:468)	MOVQ	R8, CX
+	0x009b 00155 (kernels.go:468)	XORL	AX, AX
+	0x009d 00157 (kernels.go:468)	RET
+	0x009e 00158 (kernels.go:464)	MOVQ	AX, BX
+	0x00a1 00161 (kernels.go:464)	MOVQ	DX, CX
+	0x00a4 00164 (kernels.go:464)	XORL	AX, AX
+	0x00a6 00166 (kernels.go:464)	RET
+	0x00a7 00167 (kernels.go:471)	MOVQ	DX, AX
+	0x00aa 00170 (kernels.go:471)	XORL	BX, BX
+	0x00ac 00172 (kernels.go:471)	XORL	CX, CX
+	0x00ae 00174 (kernels.go:471)	RET
+ob.OpAddWrap STEXT nosplit size=27 align=0x0 args=0x18 locals=0x0 funcid=0x0
+	0x0000 00000 (kernels.go:481)	TEXT	ob.OpAddWrap(SB), NOSPLIT|NOFRAME|ABIInternal, $0-24
+	0x0000 00000 (kernels.go:481)	MOVQ	AX, ob.xs+8(FP)
+	0x0005 00005 (kernels.go:483)	XORL	CX, CX
+	0x0007 00007 (kernels.go:483)	XORL	DX, DX
+	0x0009 00009 (kernels.go:483)	JMP	18
+	0x000b 00011 (kernels.go:484)	ADDQ	(AX)(DX*8), CX
+	0x000f 00015 (kernels.go:483)	INCQ	DX
+	0x0012 00018 (kernels.go:483)	CMPQ	BX, DX
+	0x0015 00021 (kernels.go:483)	JGT	11
+	0x0017 00023 (kernels.go:486)	MOVQ	CX, AX
+	0x001a 00026 (kernels.go:486)	RET
+ob.OpAddCmp STEXT size=185 align=0x0 args=0x18 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:490)	TEXT	ob.OpAddCmp(SB), ABIInternal, $24-24
+	0x0000 00000 (kernels.go:490)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:490)	JLS	144
+	0x000a 00010 (kernels.go:490)	PUSHQ	BP
+	0x000b 00011 (kernels.go:490)	MOVQ	SP, BP
+	0x000e 00014 (kernels.go:490)	SUBQ	$16, SP
+	0x0012 00018 (kernels.go:490)	MOVQ	AX, ob.xs+32(FP)
+	0x0017 00023 (kernels.go:492)	XORL	CX, CX
+	0x0019 00025 (kernels.go:492)	XORL	DX, DX
+	0x001b 00027 (kernels.go:492)	JMP	32
+	0x001d 00029 (kernels.go:492)	INCQ	DX
+	0x0020 00032 (kernels.go:492)	CMPQ	BX, DX
+	0x0023 00035 (kernels.go:492)	JLE	115
+	0x0025 00037 (kernels.go:492)	MOVQ	(AX)(DX*8), SI
+	0x0029 00041 (kernels.go:493)	XCHGL	AX, AX
+	0x002a 00042 (<unknown line number>)	NOP
+	0x002a 00042 (kernels.go:64)	TESTQ	SI, SI
+	0x002d 00045 (kernels.go:64)	JLE	79
+	0x002f 00047 (kernels.go:64)	MOVQ	$9223372036854775807, DI
+	0x0039 00057 (kernels.go:64)	SUBQ	SI, DI
+	0x003c 00060 (kernels.go:64)	NOP
+	0x0040 00064 (kernels.go:64)	CMPQ	CX, DI
+	0x0043 00067 (kernels.go:64)	JLE	76
+	0x0045 00069 (kernels.go:64)	MOVL	$1, DI
+	0x004a 00074 (kernels.go:64)	JMP	105
+	0x004c 00076 (kernels.go:64)	TESTQ	SI, SI
+	0x004f 00079 (kernels.go:64)	JGE	103
+	0x0051 00081 (kernels.go:64)	MOVQ	$-9223372036854775808, DI
+	0x005b 00091 (kernels.go:64)	SUBQ	SI, DI
+	0x005e 00094 (kernels.go:64)	CMPQ	CX, DI
+	0x0061 00097 (kernels.go:64)	SETLT	DIB
+	0x0065 00101 (kernels.go:64)	JMP	105
+	0x0067 00103 (kernels.go:64)	XORL	DI, DI
+	0x0069 00105 (kernels.go:64)	ADDQ	SI, CX
+	0x006c 00108 (kernels.go:614)	TESTB	DIB, DIB
+	0x006f 00111 (kernels.go:615)	JEQ	29
+	0x0071 00113 (kernels.go:615)	JMP	124
+	0x0073 00115 (kernels.go:495)	MOVQ	CX, AX
+	0x0076 00118 (kernels.go:495)	ADDQ	$16, SP
+	0x007a 00122 (kernels.go:495)	POPQ	BP
+	0x007b 00123 (kernels.go:495)	RET
+	0x007c 00124 (kernels.go:616)	LEAQ	type:string(SB), AX
+	0x0083 00131 (kernels.go:616)	LEAQ	ob..stmp_38(SB), BX
+	0x008a 00138 (kernels.go:616)	CALL	runtime.gopanic(SB)
+	0x008f 00143 (kernels.go:616)	XCHGL	AX, AX
+	0x0090 00144 (kernels.go:616)	NOP
+	0x0090 00144 (kernels.go:490)	MOVQ	AX, 8(SP)
+	0x0095 00149 (kernels.go:490)	MOVQ	BX, 16(SP)
+	0x009a 00154 (kernels.go:490)	MOVQ	CX, 24(SP)
+	0x009f 00159 (kernels.go:490)	NOP
+	0x00a0 00160 (kernels.go:490)	CALL	runtime.morestack_noctxt(SB)
+	0x00a5 00165 (kernels.go:490)	MOVQ	8(SP), AX
+	0x00aa 00170 (kernels.go:490)	MOVQ	16(SP), BX
+	0x00af 00175 (kernels.go:490)	MOVQ	24(SP), CX
+	0x00b4 00180 (kernels.go:490)	JMP	0
+ob.OpAddPost STEXT size=142 align=0x0 args=0x18 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:499)	TEXT	ob.OpAddPost(SB), ABIInternal, $24-24
+	0x0000 00000 (kernels.go:499)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:499)	JLS	102
+	0x0006 00006 (kernels.go:499)	PUSHQ	BP
+	0x0007 00007 (kernels.go:499)	MOVQ	SP, BP
+	0x000a 00010 (kernels.go:499)	SUBQ	$16, SP
+	0x000e 00014 (kernels.go:499)	MOVQ	AX, ob.xs+32(FP)
+	0x0013 00019 (kernels.go:501)	XORL	CX, CX
+	0x0015 00021 (kernels.go:501)	XORL	DX, DX
+	0x0017 00023 (kernels.go:501)	JMP	32
+	0x0019 00025 (kernels.go:501)	INCQ	DX
+	0x001c 00028 (kernels.go:501)	MOVQ	DI, CX
+	0x001f 00031 (kernels.go:501)	NOP
+	0x0020 00032 (kernels.go:501)	CMPQ	BX, DX
+	0x0023 00035 (kernels.go:501)	JLE	71
+	0x0025 00037 (kernels.go:501)	MOVQ	(AX)(DX*8), SI
+	0x0029 00041 (kernels.go:87)	LEAQ	(CX)(SI*1), DI
+	0x002d 00045 (kernels.go:502)	XCHGL	AX, AX
+	0x002e 00046 (kernels.go:638)	XCHGL	AX, AX
+	0x002f 00047 (kernels.go:88)	CMPQ	CX, DI
+	0x0032 00050 (kernels.go:88)	SETGT	CL
+	0x0035 00053 (kernels.go:88)	TESTQ	SI, SI
+	0x0038 00056 (kernels.go:88)	SETLT	SIB
+	0x003c 00060 (kernels.go:88)	NOP
+	0x0040 00064 (kernels.go:88)	CMPB	CL, SIB
+	0x0043 00067 (kernels.go:639)	JEQ	25
+	0x0045 00069 (kernels.go:639)	JMP	80
+	0x0047 00071 (kernels.go:504)	MOVQ	CX, AX
+	0x004a 00074 (kernels.go:504)	ADDQ	$16, SP
+	0x004e 00078 (kernels.go:504)	POPQ	BP
+	0x004f 00079 (kernels.go:504)	RET
+	0x0050 00080 (kernels.go:640)	LEAQ	type:string(SB), AX
+	0x0057 00087 (kernels.go:640)	LEAQ	ob..stmp_39(SB), BX
+	0x005e 00094 (kernels.go:640)	NOP
+	0x0060 00096 (kernels.go:640)	CALL	runtime.gopanic(SB)
+	0x0065 00101 (kernels.go:640)	XCHGL	AX, AX
+	0x0066 00102 (kernels.go:640)	NOP
+	0x0066 00102 (kernels.go:499)	MOVQ	AX, 8(SP)
+	0x006b 00107 (kernels.go:499)	MOVQ	BX, 16(SP)
+	0x0070 00112 (kernels.go:499)	MOVQ	CX, 24(SP)
+	0x0075 00117 (kernels.go:499)	CALL	runtime.morestack_noctxt(SB)
+	0x007a 00122 (kernels.go:499)	MOVQ	8(SP), AX
+	0x007f 00127 (kernels.go:499)	MOVQ	16(SP), BX
+	0x0084 00132 (kernels.go:499)	MOVQ	24(SP), CX
+	0x0089 00137 (kernels.go:499)	JMP	0
+ob.OpAddXor STEXT size=126 align=0x0 args=0x18 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:508)	TEXT	ob.OpAddXor(SB), ABIInternal, $24-24
+	0x0000 00000 (kernels.go:508)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:508)	JLS	89
+	0x0006 00006 (kernels.go:508)	PUSHQ	BP
+	0x0007 00007 (kernels.go:508)	MOVQ	SP, BP
+	0x000a 00010 (kernels.go:508)	SUBQ	$16, SP
+	0x000e 00014 (kernels.go:508)	MOVQ	AX, ob.xs+32(FP)
+	0x0013 00019 (kernels.go:510)	XORL	CX, CX
+	0x0015 00021 (kernels.go:510)	XORL	DX, DX
+	0x0017 00023 (kernels.go:510)	JMP	32
+	0x0019 00025 (kernels.go:510)	INCQ	DX
+	0x001c 00028 (kernels.go:510)	MOVQ	DI, CX
+	0x001f 00031 (kernels.go:510)	NOP
+	0x0020 00032 (kernels.go:510)	CMPQ	BX, DX
+	0x0023 00035 (kernels.go:510)	JLE	60
+	0x0025 00037 (kernels.go:510)	MOVQ	(AX)(DX*8), SI
+	0x0029 00041 (kernels.go:99)	LEAQ	(CX)(SI*1), DI
+	0x002d 00045 (kernels.go:100)	XORQ	DI, CX
+	0x0030 00048 (kernels.go:100)	XORQ	DI, SI
+	0x0033 00051 (kernels.go:511)	XCHGL	AX, AX
+	0x0034 00052 (kernels.go:654)	XCHGL	AX, AX
+	0x0035 00053 (kernels.go:100)	TESTQ	CX, SI
+	0x0038 00056 (kernels.go:655)	JGE	25
+	0x003a 00058 (kernels.go:655)	JMP	69
+	0x003c 00060 (kernels.go:513)	MOVQ	CX, AX
+	0x003f 00063 (kernels.go:513)	ADDQ	$16, SP
+	0x0043 00067 (kernels.go:513)	POPQ	BP
+	0x0044 00068 (kernels.go:513)	RET
+	0x0045 00069 (kernels.go:656)	LEAQ	type:string(SB), AX
+	0x004c 00076 (kernels.go:656)	LEAQ	ob..stmp_40(SB), BX
+	0x0053 00083 (kernels.go:656)	CALL	runtime.gopanic(SB)
+	0x0058 00088 (kernels.go:656)	XCHGL	AX, AX
+	0x0059 00089 (kernels.go:656)	NOP
+	0x0059 00089 (kernels.go:508)	MOVQ	AX, 8(SP)
+	0x005e 00094 (kernels.go:508)	MOVQ	BX, 16(SP)
+	0x0063 00099 (kernels.go:508)	MOVQ	CX, 24(SP)
+	0x0068 00104 (kernels.go:508)	CALL	runtime.morestack_noctxt(SB)
+	0x006d 00109 (kernels.go:508)	MOVQ	8(SP), AX
+	0x0072 00114 (kernels.go:508)	MOVQ	16(SP), BX
+	0x0077 00119 (kernels.go:508)	MOVQ	24(SP), CX
+	0x007c 00124 (kernels.go:508)	JMP	0
+ob.OpAddBits STEXT size=147 align=0x0 args=0x18 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:517)	TEXT	ob.OpAddBits(SB), ABIInternal, $24-24
+	0x0000 00000 (kernels.go:517)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:517)	JLS	107
+	0x0006 00006 (kernels.go:517)	PUSHQ	BP
+	0x0007 00007 (kernels.go:517)	MOVQ	SP, BP
+	0x000a 00010 (kernels.go:517)	SUBQ	$16, SP
+	0x000e 00014 (kernels.go:517)	MOVQ	AX, ob.xs+32(FP)
+	0x0013 00019 (kernels.go:519)	XORL	CX, CX
+	0x0015 00021 (kernels.go:519)	XORL	DX, DX
+	0x0017 00023 (kernels.go:519)	JMP	32
+	0x0019 00025 (kernels.go:519)	INCQ	DX
+	0x001c 00028 (kernels.go:519)	NOP
+	0x0020 00032 (kernels.go:519)	CMPQ	BX, DX
+	0x0023 00035 (kernels.go:519)	JLE	78
+	0x0025 00037 (kernels.go:519)	MOVQ	(AX)(DX*8), SI
+	0x0029 00041 (kernels.go:520)	XCHGL	AX, AX
+	0x002a 00042 (kernels.go:670)	XCHGL	AX, AX
+	0x002b 00043 (kernels.go:111)	MOVQ	CX, DI
+	0x002e 00046 (kernels.go:111)	ADDQ	SI, CX
+	0x0031 00049 (kernels.go:111)	SETCS	R8B
+	0x0035 00053 (kernels.go:111)	MOVBLZX	R8B, R8
+	0x0039 00057 (kernels.go:112)	XORQ	CX, DI
+	0x003c 00060 (kernels.go:112)	XORQ	DI, SI
+	0x003f 00063 (kernels.go:112)	SHRQ	$63, SI
+	0x0043 00067 (kernels.go:112)	XORQ	R8, SI
+	0x0046 00070 (kernels.go:112)	BTL	$0, SI
+	0x004a 00074 (kernels.go:671)	JCC	25
+	0x004c 00076 (kernels.go:671)	JMP	87
+	0x004e 00078 (kernels.go:522)	MOVQ	CX, AX
+	0x0051 00081 (kernels.go:522)	ADDQ	$16, SP
+	0x0055 00085 (kernels.go:522)	POPQ	BP
+	0x0056 00086 (kernels.go:522)	RET
+	0x0057 00087 (kernels.go:672)	LEAQ	type:string(SB), AX
+	0x005e 00094 (kernels.go:672)	LEAQ	ob..stmp_41(SB), BX
+	0x0065 00101 (kernels.go:672)	CALL	runtime.gopanic(SB)
+	0x006a 00106 (kernels.go:672)	XCHGL	AX, AX
+	0x006b 00107 (kernels.go:672)	NOP
+	0x006b 00107 (kernels.go:517)	MOVQ	AX, 8(SP)
+	0x0070 00112 (kernels.go:517)	MOVQ	BX, 16(SP)
+	0x0075 00117 (kernels.go:517)	MOVQ	CX, 24(SP)
+	0x007a 00122 (kernels.go:517)	CALL	runtime.morestack_noctxt(SB)
+	0x007f 00127 (kernels.go:517)	MOVQ	8(SP), AX
+	0x0084 00132 (kernels.go:517)	MOVQ	16(SP), BX
+	0x0089 00137 (kernels.go:517)	MOVQ	24(SP), CX
+	0x008e 00142 (kernels.go:517)	JMP	0
+ob.OpSubWrap STEXT nosplit size=27 align=0x0 args=0x18 locals=0x0 funcid=0x0
+	0x0000 00000 (kernels.go:526)	TEXT	ob.OpSubWrap(SB), NOSPLIT|NOFRAME|ABIInternal, $0-24
+	0x0000 00000 (kernels.go:526)	MOVQ	AX, ob.xs+8(FP)
+	0x0005 00005 (kernels.go:528)	XORL	CX, CX
+	0x0007 00007 (kernels.go:528)	XORL	DX, DX
+	0x0009 00009 (kernels.go:528)	JMP	18
+	0x000b 00011 (kernels.go:529)	SUBQ	(AX)(DX*8), CX
+	0x000f 00015 (kernels.go:528)	INCQ	DX
+	0x0012 00018 (kernels.go:528)	CMPQ	BX, DX
+	0x0015 00021 (kernels.go:528)	JGT	11
+	0x0017 00023 (kernels.go:531)	MOVQ	CX, AX
+	0x001a 00026 (kernels.go:531)	RET
+ob.OpSubCmp STEXT size=219 align=0x0 args=0x18 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:535)	TEXT	ob.OpSubCmp(SB), ABIInternal, $24-24
+	0x0000 00000 (kernels.go:535)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:535)	JLS	179
+	0x000a 00010 (kernels.go:535)	PUSHQ	BP
+	0x000b 00011 (kernels.go:535)	MOVQ	SP, BP
+	0x000e 00014 (kernels.go:535)	SUBQ	$16, SP
+	0x0012 00018 (kernels.go:535)	MOVQ	AX, ob.xs+32(FP)
+	0x0017 00023 (kernels.go:537)	XORL	CX, CX
+	0x0019 00025 (kernels.go:537)	XORL	DX, DX
+	0x001b 00027 (kernels.go:537)	JMP	32
+	0x001d 00029 (kernels.go:537)	INCQ	DX
+	0x0020 00032 (kernels.go:537)	CMPQ	BX, DX
+	0x0023 00035 (kernels.go:537)	JLE	150
+	0x0025 00037 (kernels.go:537)	MOVQ	(AX)(DX*8), SI
+	0x0029 00041 (kernels.go:538)	XCHGL	AX, AX
+	0x002a 00042 (<unknown line number>)	NOP
+	0x002a 00042 (kernels.go:68)	TESTQ	SI, SI
+	0x002d 00045 (kernels.go:68)	JGE	92
+	0x002f 00047 (kernels.go:68)	MOVQ	$9223372036854775807, DI
+	0x0039 00057 (kernels.go:68)	LEAQ	(DI)(SI*1), R8
+	0x003d 00061 (kernels.go:68)	NOP
+	0x0040 00064 (kernels.go:68)	CMPQ	CX, R8
+	0x0043 00067 (kernels.go:68)	JLE	87
+	0x0045 00069 (kernels.go:68)	MOVQ	$-9223372036854775808, R8
+	0x004f 00079 (kernels.go:68)	MOVL	$1, R9
+	0x0055 00085 (kernels.go:68)	JMP	140
+	0x0057 00087 (kernels.go:68)	TESTQ	SI, SI
+	0x005a 00090 (kernels.go:68)	JMP	102
+	0x005c 00092 (kernels.go:68)	MOVQ	$9223372036854775807, DI
+	0x0066 00102 (kernels.go:68)	JLE	127
+	0x0068 00104 (kernels.go:68)	MOVQ	$-9223372036854775808, R8
+	0x0072 00114 (kernels.go:68)	LEAQ	(R8)(SI*1), R9
+	0x0076 00118 (kernels.go:68)	CMPQ	CX, R9
+	0x0079 00121 (kernels.go:68)	SETLT	R9B
+	0x007d 00125 (kernels.go:68)	JMP	140
+	0x007f 00127 (kernels.go:68)	MOVQ	$-9223372036854775808, R8
+	0x0089 00137 (kernels.go:68)	XORL	R9, R9
+	0x008c 00140 (kernels.go:68)	SUBQ	SI, CX
+	0x008f 00143 (kernels.go:622)	TESTB	R9B, R9B
+	0x0092 00146 (kernels.go:623)	JEQ	29
+	0x0094 00148 (kernels.go:623)	JMP	159
+	0x0096 00150 (kernels.go:540)	MOVQ	CX, AX
+	0x0099 00153 (kernels.go:540)	ADDQ	$16, SP
+	0x009d 00157 (kernels.go:540)	POPQ	BP
+	0x009e 00158 (kernels.go:540)	RET
+	0x009f 00159 (kernels.go:624)	LEAQ	type:string(SB), AX
+	0x00a6 00166 (kernels.go:624)	LEAQ	ob..stmp_42(SB), BX
+	0x00ad 00173 (kernels.go:624)	CALL	runtime.gopanic(SB)
+	0x00b2 00178 (kernels.go:624)	XCHGL	AX, AX
+	0x00b3 00179 (kernels.go:624)	NOP
+	0x00b3 00179 (kernels.go:535)	MOVQ	AX, 8(SP)
+	0x00b8 00184 (kernels.go:535)	MOVQ	BX, 16(SP)
+	0x00bd 00189 (kernels.go:535)	MOVQ	CX, 24(SP)
+	0x00c2 00194 (kernels.go:535)	CALL	runtime.morestack_noctxt(SB)
+	0x00c7 00199 (kernels.go:535)	MOVQ	8(SP), AX
+	0x00cc 00204 (kernels.go:535)	MOVQ	16(SP), BX
+	0x00d1 00209 (kernels.go:535)	MOVQ	24(SP), CX
+	0x00d6 00214 (kernels.go:535)	JMP	0
+ob.OpSubPost STEXT size=142 align=0x0 args=0x18 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:544)	TEXT	ob.OpSubPost(SB), ABIInternal, $24-24
+	0x0000 00000 (kernels.go:544)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:544)	JLS	102
+	0x0006 00006 (kernels.go:544)	PUSHQ	BP
+	0x0007 00007 (kernels.go:544)	MOVQ	SP, BP
+	0x000a 00010 (kernels.go:544)	SUBQ	$16, SP
+	0x000e 00014 (kernels.go:544)	MOVQ	AX, ob.xs+32(FP)
+	0x0013 00019 (kernels.go:546)	XORL	CX, CX
+	0x0015 00021 (kernels.go:546)	XORL	DX, DX
+	0x0017 00023 (kernels.go:546)	JMP	32
+	0x0019 00025 (kernels.go:546)	INCQ	DX
+	0x001c 00028 (kernels.go:546)	NOP
+	0x0020 00032 (kernels.go:546)	CMPQ	BX, DX
+	0x0023 00035 (kernels.go:546)	JLE	71
+	0x0025 00037 (kernels.go:546)	MOVQ	(AX)(DX*8), SI
+	0x0029 00041 (kernels.go:92)	MOVQ	CX, DI
+	0x002c 00044 (kernels.go:92)	SUBQ	SI, CX
+	0x002f 00047 (kernels.go:547)	XCHGL	AX, AX
+	0x0030 00048 (kernels.go:646)	XCHGL	AX, AX
+	0x0031 00049 (kernels.go:93)	CMPQ	DI, CX
+	0x0034 00052 (kernels.go:93)	SETLT	DIB
+	0x0038 00056 (kernels.go:93)	TESTQ	SI, SI
+	0x003b 00059 (kernels.go:93)	SETLT	SIB
+	0x003f 00063 (kernels.go:93)	NOP
+	0x0040 00064 (kernels.go:93)	CMPB	SIB, DIB
+	0x0043 00067 (kernels.go:647)	JEQ	25
+	0x0045 00069 (kernels.go:647)	JMP	80
+	0x0047 00071 (kernels.go:549)	MOVQ	CX, AX
+	0x004a 00074 (kernels.go:549)	ADDQ	$16, SP
+	0x004e 00078 (kernels.go:549)	POPQ	BP
+	0x004f 00079 (kernels.go:549)	RET
+	0x0050 00080 (kernels.go:648)	LEAQ	type:string(SB), AX
+	0x0057 00087 (kernels.go:648)	LEAQ	ob..stmp_43(SB), BX
+	0x005e 00094 (kernels.go:648)	NOP
+	0x0060 00096 (kernels.go:648)	CALL	runtime.gopanic(SB)
+	0x0065 00101 (kernels.go:648)	XCHGL	AX, AX
+	0x0066 00102 (kernels.go:648)	NOP
+	0x0066 00102 (kernels.go:544)	MOVQ	AX, 8(SP)
+	0x006b 00107 (kernels.go:544)	MOVQ	BX, 16(SP)
+	0x0070 00112 (kernels.go:544)	MOVQ	CX, 24(SP)
+	0x0075 00117 (kernels.go:544)	CALL	runtime.morestack_noctxt(SB)
+	0x007a 00122 (kernels.go:544)	MOVQ	8(SP), AX
+	0x007f 00127 (kernels.go:544)	MOVQ	16(SP), BX
+	0x0084 00132 (kernels.go:544)	MOVQ	24(SP), CX
+	0x0089 00137 (kernels.go:544)	JMP	0
+ob.OpSubXor STEXT size=133 align=0x0 args=0x18 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:553)	TEXT	ob.OpSubXor(SB), ABIInternal, $24-24
+	0x0000 00000 (kernels.go:553)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:553)	JLS	91
+	0x0006 00006 (kernels.go:553)	PUSHQ	BP
+	0x0007 00007 (kernels.go:553)	MOVQ	SP, BP
+	0x000a 00010 (kernels.go:553)	SUBQ	$16, SP
+	0x000e 00014 (kernels.go:553)	MOVQ	AX, ob.xs+32(FP)
+	0x0013 00019 (kernels.go:555)	XORL	CX, CX
+	0x0015 00021 (kernels.go:555)	XORL	DX, DX
+	0x0017 00023 (kernels.go:555)	JMP	32
+	0x0019 00025 (kernels.go:555)	INCQ	DX
+	0x001c 00028 (kernels.go:555)	NOP
+	0x0020 00032 (kernels.go:555)	CMPQ	BX, DX
+	0x0023 00035 (kernels.go:555)	JLE	62
+	0x0025 00037 (kernels.go:555)	MOVQ	(AX)(DX*8), SI
+	0x0029 00041 (kernels.go:104)	MOVQ	CX, DI
+	0x002c 00044 (kernels.go:104)	SUBQ	SI, CX
+	0x002f 00047 (kernels.go:105)	XORQ	DI, SI
+	0x0032 00050 (kernels.go:105)	XORQ	CX, DI
+	0x0035 00053 (kernels.go:556)	XCHGL	AX, AX
+	0x0036 00054 (kernels.go:662)	XCHGL	AX, AX
+	0x0037 00055 (kernels.go:105)	TESTQ	SI, DI
+	0x003a 00058 (kernels.go:663)	JGE	25
+	0x003c 00060 (kernels.go:663)	JMP	71
+	0x003e 00062 (kernels.go:558)	MOVQ	CX, AX
+	0x0041 00065 (kernels.go:558)	ADDQ	$16, SP
+	0x0045 00069 (kernels.go:558)	POPQ	BP
+	0x0046 00070 (kernels.go:558)	RET
+	0x0047 00071 (kernels.go:664)	LEAQ	type:string(SB), AX
+	0x004e 00078 (kernels.go:664)	LEAQ	ob..stmp_44(SB), BX
+	0x0055 00085 (kernels.go:664)	CALL	runtime.gopanic(SB)
+	0x005a 00090 (kernels.go:664)	XCHGL	AX, AX
+	0x005b 00091 (kernels.go:664)	NOP
+	0x005b 00091 (kernels.go:553)	MOVQ	AX, 8(SP)
+	0x0060 00096 (kernels.go:553)	MOVQ	BX, 16(SP)
+	0x0065 00101 (kernels.go:553)	MOVQ	CX, 24(SP)
+	0x006a 00106 (kernels.go:553)	CALL	runtime.morestack_noctxt(SB)
+	0x006f 00111 (kernels.go:553)	MOVQ	8(SP), AX
+	0x0074 00116 (kernels.go:553)	MOVQ	16(SP), BX
+	0x0079 00121 (kernels.go:553)	MOVQ	24(SP), CX
+	0x007e 00126 (kernels.go:553)	NOP
+	0x0080 00128 (kernels.go:553)	JMP	0
+ob.OpSubBits STEXT size=147 align=0x0 args=0x18 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:562)	TEXT	ob.OpSubBits(SB), ABIInternal, $24-24
+	0x0000 00000 (kernels.go:562)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:562)	JLS	107
+	0x0006 00006 (kernels.go:562)	PUSHQ	BP
+	0x0007 00007 (kernels.go:562)	MOVQ	SP, BP
+	0x000a 00010 (kernels.go:562)	SUBQ	$16, SP
+	0x000e 00014 (kernels.go:562)	MOVQ	AX, ob.xs+32(FP)
+	0x0013 00019 (kernels.go:564)	XORL	CX, CX
+	0x0015 00021 (kernels.go:564)	XORL	DX, DX
+	0x0017 00023 (kernels.go:564)	JMP	32
+	0x0019 00025 (kernels.go:564)	INCQ	DX
+	0x001c 00028 (kernels.go:564)	NOP
+	0x0020 00032 (kernels.go:564)	CMPQ	BX, DX
+	0x0023 00035 (kernels.go:564)	JLE	78
+	0x0025 00037 (kernels.go:564)	MOVQ	(AX)(DX*8), SI
+	0x0029 00041 (kernels.go:565)	XCHGL	AX, AX
+	0x002a 00042 (kernels.go:678)	XCHGL	AX, AX
+	0x002b 00043 (kernels.go:116)	MOVQ	CX, DI
+	0x002e 00046 (kernels.go:116)	SUBQ	SI, CX
+	0x0031 00049 (kernels.go:116)	SETCS	R8B
+	0x0035 00053 (kernels.go:116)	MOVBLZX	R8B, R8
+	0x0039 00057 (kernels.go:117)	XORQ	CX, DI
+	0x003c 00060 (kernels.go:117)	XORQ	DI, SI
+	0x003f 00063 (kernels.go:117)	SHRQ	$63, SI
+	0x0043 00067 (kernels.go:117)	XORQ	R8, SI
+	0x0046 00070 (kernels.go:117)	BTL	$0, SI
+	0x004a 00074 (kernels.go:679)	JCC	25
+	0x004c 00076 (kernels.go:679)	JMP	87
+	0x004e 00078 (kernels.go:567)	MOVQ	CX, AX
+	0x0051 00081 (kernels.go:567)	ADDQ	$16, SP
+	0x0055 00085 (kernels.go:567)	POPQ	BP
+	0x0056 00086 (kernels.go:567)	RET
+	0x0057 00087 (kernels.go:680)	LEAQ	type:string(SB), AX
+	0x005e 00094 (kernels.go:680)	LEAQ	ob..stmp_45(SB), BX
+	0x0065 00101 (kernels.go:680)	CALL	runtime.gopanic(SB)
+	0x006a 00106 (kernels.go:680)	XCHGL	AX, AX
+	0x006b 00107 (kernels.go:680)	NOP
+	0x006b 00107 (kernels.go:562)	MOVQ	AX, 8(SP)
+	0x0070 00112 (kernels.go:562)	MOVQ	BX, 16(SP)
+	0x0075 00117 (kernels.go:562)	MOVQ	CX, 24(SP)
+	0x007a 00122 (kernels.go:562)	CALL	runtime.morestack_noctxt(SB)
+	0x007f 00127 (kernels.go:562)	MOVQ	8(SP), AX
+	0x0084 00132 (kernels.go:562)	MOVQ	16(SP), BX
+	0x0089 00137 (kernels.go:562)	MOVQ	24(SP), CX
+	0x008e 00142 (kernels.go:562)	JMP	0
+ob.OpMulWrap STEXT nosplit size=61 align=0x0 args=0x30 locals=0x8 funcid=0x0
+	0x0000 00000 (kernels.go:571)	TEXT	ob.OpMulWrap(SB), NOSPLIT|ABIInternal, $8-48
+	0x0000 00000 (kernels.go:571)	PUSHQ	BP
+	0x0001 00001 (kernels.go:571)	MOVQ	SP, BP
+	0x0004 00004 (kernels.go:571)	MOVQ	AX, ob.xs+16(FP)
+	0x0009 00009 (kernels.go:571)	MOVQ	DI, ob.ys+40(FP)
+	0x000e 00014 (kernels.go:573)	XORL	CX, CX
+	0x0010 00016 (kernels.go:573)	XORL	DX, DX
+	0x0012 00018 (kernels.go:573)	JMP	34
+	0x0014 00020 (kernels.go:574)	MOVQ	(DI)(DX*8), R9
+	0x0018 00024 (kernels.go:574)	IMULQ	R9, R8
+	0x001c 00028 (kernels.go:574)	ADDQ	R8, CX
+	0x001f 00031 (kernels.go:573)	INCQ	DX
+	0x0022 00034 (kernels.go:573)	CMPQ	BX, DX
+	0x0025 00037 (kernels.go:573)	JLE	50
+	0x0027 00039 (kernels.go:573)	MOVQ	(AX)(DX*8), R8
+	0x002b 00043 (kernels.go:574)	CMPQ	SI, DX
+	0x002e 00046 (kernels.go:574)	JHI	20
+	0x0030 00048 (kernels.go:574)	JMP	55
+	0x0032 00050 (kernels.go:576)	MOVQ	CX, AX
+	0x0035 00053 (kernels.go:576)	POPQ	BP
+	0x0036 00054 (kernels.go:576)	RET
+	0x0037 00055 (kernels.go:574)	CALL	runtime.panicBounds(SB)
+	0x003c 00060 (kernels.go:574)	XCHGL	AX, AX
+ob.OpMulCmp STEXT size=248 align=0x0 args=0x30 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:580)	TEXT	ob.OpMulCmp(SB), ABIInternal, $24-48
+	0x0000 00000 (kernels.go:580)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:580)	JLS	178
+	0x000a 00010 (kernels.go:580)	PUSHQ	BP
+	0x000b 00011 (kernels.go:580)	MOVQ	SP, BP
+	0x000e 00014 (kernels.go:580)	SUBQ	$16, SP
+	0x0012 00018 (kernels.go:580)	MOVQ	AX, ob.xs+32(FP)
+	0x0017 00023 (kernels.go:580)	MOVQ	DI, ob.ys+56(FP)
+	0x001c 00028 (kernels.go:582)	XORL	CX, CX
+	0x001e 00030 (kernels.go:582)	XORL	DX, DX
+	0x0020 00032 (kernels.go:582)	JMP	40
+	0x0022 00034 (kernels.go:583)	ADDQ	R8, CX
+	0x0025 00037 (kernels.go:582)	INCQ	DX
+	0x0028 00040 (kernels.go:582)	CMPQ	BX, DX
+	0x002b 00043 (kernels.go:582)	JLE	144
+	0x002d 00045 (kernels.go:582)	MOVQ	(AX)(DX*8), R8
+	0x0031 00049 (kernels.go:583)	CMPQ	SI, DX
+	0x0034 00052 (kernels.go:583)	JLS	172
+	0x0036 00054 (kernels.go:583)	MOVQ	(DI)(DX*8), R9
+	0x003a 00058 (<unknown line number>)	NOP
+	0x003a 00058 (kernels.go:630)	XCHGL	AX, AX
+	0x003b 00059 (kernels.go:74)	MOVQ	R8, R10
+	0x003e 00062 (kernels.go:74)	IMULQ	R9, R8
+	0x0042 00066 (kernels.go:75)	TESTQ	R10, R10
+	0x0045 00069 (kernels.go:75)	JEQ	34
+	0x0047 00071 (kernels.go:78)	CMPQ	R10, $-1
+	0x004b 00075 (kernels.go:78)	JNE	94
+	0x004d 00077 (kernels.go:78)	MOVQ	$-9223372036854775808, R11
+	0x0057 00087 (kernels.go:78)	CMPQ	R9, R11
+	0x005a 00090 (kernels.go:78)	JNE	104
+	0x005c 00092 (kernels.go:78)	JMP	153
+	0x005e 00094 (kernels.go:78)	MOVQ	$-9223372036854775808, R11
+	0x0068 00104 (kernels.go:582)	MOVQ	AX, R12
+	0x006b 00107 (kernels.go:81)	MOVQ	R8, AX
+	0x006e 00110 (kernels.go:582)	MOVQ	DX, R13
+	0x0071 00113 (kernels.go:81)	CMPQ	R10, $-1
+	0x0075 00117 (kernels.go:81)	JNE	126
+	0x0077 00119 (kernels.go:81)	NEGQ	AX
+	0x007a 00122 (kernels.go:81)	XORL	DX, DX
+	0x007c 00124 (kernels.go:81)	JMP	131
+	0x007e 00126 (kernels.go:81)	CQO
+	0x0080 00128 (kernels.go:81)	IDIVQ	R10
+	0x0083 00131 (kernels.go:81)	CMPQ	AX, R9
+	0x0086 00134 (kernels.go:631)	JNE	153
+	0x0088 00136 (kernels.go:582)	MOVQ	R12, AX
+	0x008b 00139 (kernels.go:582)	MOVQ	R13, DX
+	0x008e 00142 (kernels.go:631)	JMP	34
+	0x0090 00144 (kernels.go:585)	MOVQ	CX, AX
+	0x0093 00147 (kernels.go:585)	ADDQ	$16, SP
+	0x0097 00151 (kernels.go:585)	POPQ	BP
+	0x0098 00152 (kernels.go:585)	RET
+	0x0099 00153 (kernels.go:632)	LEAQ	type:string(SB), AX
+	0x00a0 00160 (kernels.go:632)	LEAQ	ob..stmp_46(SB), BX
+	0x00a7 00167 (kernels.go:632)	CALL	runtime.gopanic(SB)
+	0x00ac 00172 (kernels.go:583)	CALL	runtime.panicBounds(SB)
+	0x00b1 00177 (kernels.go:583)	XCHGL	AX, AX
+	0x00b2 00178 (kernels.go:583)	NOP
+	0x00b2 00178 (kernels.go:580)	MOVQ	AX, 8(SP)
+	0x00b7 00183 (kernels.go:580)	MOVQ	BX, 16(SP)
+	0x00bc 00188 (kernels.go:580)	MOVQ	CX, 24(SP)
+	0x00c1 00193 (kernels.go:580)	MOVQ	DI, 32(SP)
+	0x00c6 00198 (kernels.go:580)	MOVQ	SI, 40(SP)
+	0x00cb 00203 (kernels.go:580)	MOVQ	R8, 48(SP)
+	0x00d0 00208 (kernels.go:580)	CALL	runtime.morestack_noctxt(SB)
+	0x00d5 00213 (kernels.go:580)	MOVQ	8(SP), AX
+	0x00da 00218 (kernels.go:580)	MOVQ	16(SP), BX
+	0x00df 00223 (kernels.go:580)	MOVQ	24(SP), CX
+	0x00e4 00228 (kernels.go:580)	MOVQ	32(SP), DI
+	0x00e9 00233 (kernels.go:580)	MOVQ	40(SP), SI
+	0x00ee 00238 (kernels.go:580)	MOVQ	48(SP), R8
+	0x00f3 00243 (kernels.go:580)	JMP	0
+ob.OpMulBits STEXT size=216 align=0x0 args=0x30 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:589)	TEXT	ob.OpMulBits(SB), ABIInternal, $24-48
+	0x0000 00000 (kernels.go:589)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:589)	JLS	146
+	0x000a 00010 (kernels.go:589)	PUSHQ	BP
+	0x000b 00011 (kernels.go:589)	MOVQ	SP, BP
+	0x000e 00014 (kernels.go:589)	SUBQ	$16, SP
+	0x0012 00018 (kernels.go:589)	MOVQ	AX, ob.xs+32(FP)
+	0x0017 00023 (kernels.go:589)	MOVQ	DI, ob.ys+56(FP)
+	0x001c 00028 (kernels.go:591)	XORL	CX, CX
+	0x001e 00030 (kernels.go:591)	XORL	DX, DX
+	0x0020 00032 (kernels.go:591)	JMP	44
+	0x0022 00034 (kernels.go:592)	ADDQ	R8, CX
+	0x0025 00037 (kernels.go:591)	LEAQ	1(R11), DX
+	0x0029 00041 (kernels.go:591)	MOVQ	R10, AX
+	0x002c 00044 (kernels.go:591)	CMPQ	BX, DX
+	0x002f 00047 (kernels.go:591)	JLE	112
+	0x0031 00049 (kernels.go:591)	MOVQ	(AX)(DX*8), R8
+	0x0035 00053 (kernels.go:592)	CMPQ	SI, DX
+	0x0038 00056 (kernels.go:592)	JLS	140
+	0x003a 00058 (kernels.go:592)	MOVQ	(DI)(DX*8), R9
+	0x003e 00062 (kernels.go:591)	MOVQ	AX, R10
+	0x0041 00065 (kernels.go:124)	MOVQ	R8, AX
+	0x0044 00068 (kernels.go:591)	MOVQ	DX, R11
+	0x0047 00071 (kernels.go:124)	MULQ	R9
+	0x004a 00074 (kernels.go:125)	MOVQ	R8, R12
+	0x004d 00077 (kernels.go:125)	SARQ	$63, R8
+	0x0051 00081 (kernels.go:125)	ANDQ	R9, R8
+	0x0054 00084 (kernels.go:125)	SUBQ	R8, DX
+	0x0057 00087 (kernels.go:125)	SARQ	$63, R9
+	0x005b 00091 (kernels.go:125)	ANDQ	R12, R9
+	0x005e 00094 (kernels.go:125)	SUBQ	R9, DX
+	0x0061 00097 (kernels.go:126)	MOVQ	AX, R8
+	0x0064 00100 (kernels.go:126)	SARQ	$63, AX
+	0x0068 00104 (<unknown line number>)	NOP
+	0x0068 00104 (kernels.go:686)	XCHGL	AX, AX
+	0x0069 00105 (kernels.go:126)	CMPQ	AX, DX
+	0x006c 00108 (kernels.go:687)	JEQ	34
+	0x006e 00110 (kernels.go:687)	JMP	121
+	0x0070 00112 (kernels.go:594)	MOVQ	CX, AX
+	0x0073 00115 (kernels.go:594)	ADDQ	$16, SP
+	0x0077 00119 (kernels.go:594)	POPQ	BP
+	0x0078 00120 (kernels.go:594)	RET
+	0x0079 00121 (kernels.go:688)	LEAQ	type:string(SB), AX
+	0x0080 00128 (kernels.go:688)	LEAQ	ob..stmp_47(SB), BX
+	0x0087 00135 (kernels.go:688)	CALL	runtime.gopanic(SB)
+	0x008c 00140 (kernels.go:592)	CALL	runtime.panicBounds(SB)
+	0x0091 00145 (kernels.go:592)	XCHGL	AX, AX
+	0x0092 00146 (kernels.go:592)	NOP
+	0x0092 00146 (kernels.go:589)	MOVQ	AX, 8(SP)
+	0x0097 00151 (kernels.go:589)	MOVQ	BX, 16(SP)
+	0x009c 00156 (kernels.go:589)	MOVQ	CX, 24(SP)
+	0x00a1 00161 (kernels.go:589)	MOVQ	DI, 32(SP)
+	0x00a6 00166 (kernels.go:589)	MOVQ	SI, 40(SP)
+	0x00ab 00171 (kernels.go:589)	MOVQ	R8, 48(SP)
+	0x00b0 00176 (kernels.go:589)	CALL	runtime.morestack_noctxt(SB)
+	0x00b5 00181 (kernels.go:589)	MOVQ	8(SP), AX
+	0x00ba 00186 (kernels.go:589)	MOVQ	16(SP), BX
+	0x00bf 00191 (kernels.go:589)	MOVQ	24(SP), CX
+	0x00c4 00196 (kernels.go:589)	MOVQ	32(SP), DI
+	0x00c9 00201 (kernels.go:589)	MOVQ	40(SP), SI
+	0x00ce 00206 (kernels.go:589)	MOVQ	48(SP), R8
+	0x00d3 00211 (kernels.go:589)	JMP	0
+ob.OpMulRange STEXT size=273 align=0x0 args=0x30 locals=0x18 funcid=0x0
+	0x0000 00000 (kernels.go:598)	TEXT	ob.OpMulRange(SB), ABIInternal, $24-48
+	0x0000 00000 (kernels.go:598)	CMPQ	SP, 16(R14)
+	0x0004 00004 (kernels.go:598)	JLS	203
+	0x000a 00010 (kernels.go:598)	PUSHQ	BP
+	0x000b 00011 (kernels.go:598)	MOVQ	SP, BP
+	0x000e 00014 (kernels.go:598)	SUBQ	$16, SP
+	0x0012 00018 (kernels.go:598)	MOVQ	AX, ob.xs+32(FP)
+	0x0017 00023 (kernels.go:598)	MOVQ	DI, ob.ys+56(FP)
+	0x001c 00028 (kernels.go:600)	XORL	CX, CX
+	0x001e 00030 (kernels.go:600)	XORL	DX, DX
+	0x0020 00032 (kernels.go:600)	JMP	41
+	0x0022 00034 (kernels.go:600)	LEAQ	1(R13), DX
+	0x0026 00038 (kernels.go:600)	MOVQ	R11, AX
+	0x0029 00041 (kernels.go:600)	CMPQ	BX, DX
+	0x002c 00044 (kernels.go:600)	JLE	166
+	0x002e 00046 (kernels.go:600)	MOVQ	(AX)(DX*8), R8
+	0x0032 00050 (kernels.go:601)	CMPQ	SI, DX
+	0x0035 00053 (kernels.go:601)	JLS	197
+	0x003b 00059 (kernels.go:601)	MOVQ	(DI)(DX*8), R9
+	0x003f 00063 (kernels.go:149)	MOVL	$2147483648, R10
+	0x0045 00069 (kernels.go:149)	LEAQ	(R10)(R8*1), R11
+	0x0049 00073 (kernels.go:149)	LEAQ	(R10)(R9*1), R12
+	0x004d 00077 (kernels.go:149)	ORQ	R12, R11
+	0x0050 00080 (<unknown line number>)	NOP
+	0x0050 00080 (kernels.go:149)	MOVQ	$4294967296, R12
+	0x005a 00090 (kernels.go:149)	CMPQ	R12, R11
+	0x005d 00093 (kernels.go:602)	JLS	110
+	0x005f 00095 (kernels.go:603)	IMULQ	R9, R8
+	0x0063 00099 (kernels.go:603)	ADDQ	R8, CX
+	0x0066 00102 (kernels.go:600)	MOVQ	AX, R11
+	0x0069 00105 (kernels.go:600)	MOVQ	DX, R13
+	0x006c 00108 (kernels.go:603)	JMP	34
+	0x006e 00110 (kernels.go:600)	MOVQ	AX, R11
+	0x0071 00113 (kernels.go:124)	MOVQ	R8, AX
+	0x0074 00116 (kernels.go:600)	MOVQ	DX, R13
+	0x0077 00119 (kernels.go:124)	MULQ	R9
+	0x007a 00122 (kernels.go:125)	MOVQ	R8, R15
+	0x007d 00125 (kernels.go:125)	SARQ	$63, R8
+	0x0081 00129 (kernels.go:125)	ANDQ	R9, R8
+	0x0084 00132 (kernels.go:125)	SUBQ	R8, DX
+	0x0087 00135 (kernels.go:125)	SARQ	$63, R9
+	0x008b 00139 (kernels.go:125)	ANDQ	R15, R9
+	0x008e 00142 (kernels.go:125)	SUBQ	R9, DX
+	0x0091 00145 (kernels.go:126)	MOVQ	AX, R8
+	0x0094 00148 (kernels.go:126)	SARQ	$63, AX
+	0x0098 00152 (<unknown line number>)	NOP
+	0x0098 00152 (kernels.go:686)	XCHGL	AX, AX
+	0x0099 00153 (kernels.go:126)	CMPQ	AX, DX
+	0x009c 00156 (kernels.go:687)	JNE	175
+	0x009e 00158 (kernels.go:605)	ADDQ	R8, CX
+	0x00a1 00161 (kernels.go:605)	JMP	34
+	0x00a6 00166 (kernels.go:608)	MOVQ	CX, AX
+	0x00a9 00169 (kernels.go:608)	ADDQ	$16, SP
+	0x00ad 00173 (kernels.go:608)	POPQ	BP
+	0x00ae 00174 (kernels.go:608)	RET
+	0x00af 00175 (kernels.go:688)	LEAQ	type:string(SB), AX
+	0x00b6 00182 (kernels.go:688)	LEAQ	ob..stmp_48(SB), BX
+	0x00bd 00189 (kernels.go:688)	NOP
+	0x00c0 00192 (kernels.go:688)	CALL	runtime.gopanic(SB)
+	0x00c5 00197 (kernels.go:601)	CALL	runtime.panicBounds(SB)
+	0x00ca 00202 (kernels.go:601)	XCHGL	AX, AX
+	0x00cb 00203 (kernels.go:601)	NOP
+	0x00cb 00203 (kernels.go:598)	MOVQ	AX, 8(SP)
+	0x00d0 00208 (kernels.go:598)	MOVQ	BX, 16(SP)
+	0x00d5 00213 (kernels.go:598)	MOVQ	CX, 24(SP)
+	0x00da 00218 (kernels.go:598)	MOVQ	DI, 32(SP)
+	0x00df 00223 (kernels.go:598)	MOVQ	SI, 40(SP)
+	0x00e4 00228 (kernels.go:598)	MOVQ	R8, 48(SP)
+	0x00e9 00233 (kernels.go:598)	CALL	runtime.morestack_noctxt(SB)
+	0x00ee 00238 (kernels.go:598)	MOVQ	8(SP), AX
+	0x00f3 00243 (kernels.go:598)	MOVQ	16(SP), BX
+	0x00f8 00248 (kernels.go:598)	MOVQ	24(SP), CX
+	0x00fd 00253 (kernels.go:598)	MOVQ	32(SP), DI
+	0x0102 00258 (kernels.go:598)	MOVQ	40(SP), SI
+	0x0107 00263 (kernels.go:598)	MOVQ	48(SP), R8
+	0x010c 00268 (kernels.go:598)	JMP	0

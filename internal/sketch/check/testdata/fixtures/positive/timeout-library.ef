@@ -2,17 +2,17 @@ package demo
 
 import "timeout"
 
-func pause() string uses Scheduler {
+func pause() string needs Scheduler {
 	Scheduler.Sleep(1ms)
 	return "slept"
 }
 
-func nap() (string, error[timeout.Expired]) uses Scheduler {
+func nap() (string, error[timeout.Expired]) needs Scheduler {
 	v := try timeout.After(1s) { pause() }
 	return v
 }
 
-func main() uses Console {
+func main() needs Console {
 	v := with(wire{ Scheduler = LiveScheduler{} }) { nap() } catch {
 	case timeout.Expired:
 		"timed out"

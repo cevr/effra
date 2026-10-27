@@ -1,4 +1,4 @@
-import Json "effra/json"
+import Json "ergo/json"
 
 record Customer {
     id: i64

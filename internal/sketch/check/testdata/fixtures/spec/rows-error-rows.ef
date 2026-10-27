@@ -28,7 +28,7 @@ func (g FakeGateway) Charge(order Order) (string, error[GatewayDown]) {
 	return g.AuthID
 }
 
-func pay(id string) (string, error[OrderNotFound | GatewayDown]) uses Orders, Gateway {
+func pay(id string) (string, error[OrderNotFound | GatewayDown]) needs Orders, Gateway {
 	order := try Orders.Find(id)
 	return Gateway.Charge(order)
 }

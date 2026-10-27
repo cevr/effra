@@ -9,7 +9,7 @@ type Failure struct{ Endpoint string }
 type Retry struct{}
 type Signal interface{ Failure | Retry }
 
-func step(s State, sig Signal) (Decision[State, string], error[ProbeDown]) uses Probe {
+func step(s State, sig Signal) (Decision[State, string], error[ProbeDown]) needs Probe {
 	switch st, e := s.(type), sig.(type) {
 	case (Closed, Failure):
 		if st.Failures >= 2 {

@@ -1,6 +1,6 @@
 package check
 
-import "effra.local/prototype/internal/sketch/syntax"
+import "ergo.local/prototype/internal/sketch/syntax"
 
 // The instantiation-cycle check (round-2 M1; go/types mono.go). Each
 // instantiation G[targs] written or inferred inside a generic declaration D

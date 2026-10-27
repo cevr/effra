@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/sketch/check"
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/check"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // TestPreludeAndStdAreClean: the embedded prelude and the standard library
-// are ordinary Effra source checked by this checker, with no diagnostic.
+// are ordinary Ergo source checked by this checker, with no diagnostic.
 func TestPreludeAndStdAreClean(t *testing.T) {
 	if diags := check.PreludeDiagnostics(); len(diags) > 0 {
 		t.Fatalf("prelude diagnostics: %v", diags)
@@ -48,8 +48,8 @@ var negativeSpans = map[string][2]string{
 	"fallible-function-value":            {"S108", "boom"},
 	"generic-row-parameter-instantiated": {"S105", "apply(fail)"},
 	"inferred-error-reaches-exported":    {"S105", "helper()"},
-	"inferred-uses-reaches-exported":     {"S102", "read()"},
-	"interface-method-uses":              {"S108", "uses Other"},
+	"inferred-needs-reaches-exported":    {"S102", "read()"},
+	"interface-method-needs":             {"S108", "needs Other"},
 	"interface-missing-method":           {"S108", "Mem{}"},
 	"interface-wider-row":                {"S108", "Mem{}"},
 	"keyed-literal-nondefaultable":       {"S108", "Box{Name: \"x\"}"},
@@ -66,7 +66,7 @@ var negativeSpans = map[string][2]string{
 	"plus-on-bool":                       {"S108", "true + false"},
 	"positional-literal-short":           {"S108", "P{1}"},
 	"product-not-total":                  {"S103", "switch"},
-	"provider-method-uses":               {"S106", "Mem{}"},
+	"provider-method-needs":              {"S106", "Mem{}"},
 	"provider-missing-method":            {"S106", "Mem{}"},
 	"provider-wider-row":                 {"S106", "Mem{}"},
 	"receiver-not-local":                 {"S108", "int64"},
@@ -93,13 +93,13 @@ var negativeSpans = map[string][2]string{
 	"unused-expression":                  {"S110", "x"},
 	"unused-local":                       {"S110", "x"},
 	"unused-type-switch-binding":         {"S110", "v"},
-	"uses-non-capability":                {"S104", "Order"},
+	"needs-non-capability":               {"S104", "Order"},
 	"var-mismatch":                       {"S108", "\"seven\""},
 	"var-nondefaultable":                 {"S108", "c"},
 	"wire-constructor-is-37":             {"S109", "open"},
 	"wire-cycle":                         {"S108", "W"},
 	"wire-entry-non-capability":          {"S104", "Order"},
-	"wire-exposure-hides-entry":          {"S109", "uses Account"},
+	"wire-exposure-hides-entry":          {"S109", "provides Account"},
 	"wire-literal-outside-with":          {"S108", "wire{ Store = Mem{} }"},
 }
 

@@ -1,5 +1,5 @@
 // Codec-only consumer: one derived JSON codec plan, no transport.
-import Json "effra/json"
+import Json "ergo/json"
 
 record Customer {
     id: i64

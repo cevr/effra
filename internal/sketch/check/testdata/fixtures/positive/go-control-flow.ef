@@ -41,7 +41,7 @@ func keys(m map[string]int64) []string {
 	return out
 }
 
-func main() uses Console {
+func main() needs Console {
 	var label string = classify(3)
 	m := map[string]int64{"a": 1}
 	m["b"] = 2

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/gosyntax"
+	"ergo.local/prototype/internal/gosyntax"
 )
 
 // lineDirectiveProbe reaches two stack traces the Go runtime prints itself:
@@ -70,7 +70,7 @@ func tracebackFrames(output string) []stackFrame {
 
 // The Go toolchain reports user frames at .ef lines. Origins in different
 // checkouts name the same module-relative file, so the traceback reads
-// effra.generated/probe.ef under ef build's -trimpath.
+// ergo.generated/probe.ef under ergo build's -trimpath.
 func TestGoLineDirectivesAttributeStackTracesToSource(t *testing.T) {
 	r := CompileAt(lineDirectiveProbe, "go", "../..")
 	if !r.Checked {
@@ -91,9 +91,9 @@ func TestGoLineDirectivesAttributeStackTracesToSource(t *testing.T) {
 	// places at the declaration (line 3); every caller is at the recursive
 	// call (line 4).
 	want := map[string][]string{
-		"main.efFunction_trace.": {"effra.generated/probe.ef:8"},
-		"main.efFunction_main.":  {"effra.generated/probe.ef:17", "effra.generated/probe.ef:18"},
-		"main.efFunction_depth(": {"effra.generated/probe.ef:3", "effra.generated/probe.ef:4"},
+		"main.efFunction_trace.": {"ergo.generated/probe.ef:8"},
+		"main.efFunction_main.":  {"ergo.generated/probe.ef:17", "ergo.generated/probe.ef:18"},
+		"main.efFunction_depth(": {"ergo.generated/probe.ef:3", "ergo.generated/probe.ef:4"},
 	}
 	for prefix, positions := range want {
 		seen := map[string]bool{}
@@ -118,13 +118,13 @@ func TestGoLineDirectivesAttributeStackTracesToSource(t *testing.T) {
 	glue := false
 	for _, frame := range frames {
 		switch {
-		case strings.HasPrefix(frame.function, "effra.generated/runtime."):
-			if !strings.HasPrefix(frame.position, "effra.generated/runtime/") || !strings.Contains(frame.position, ".go:") {
+		case strings.HasPrefix(frame.function, "ergo.generated/runtime."):
+			if !strings.HasPrefix(frame.position, "ergo.generated/runtime/") || !strings.Contains(frame.position, ".go:") {
 				t.Errorf("runtime frame %s lost its Go position: %s", frame.function, frame.position)
 			}
 		case frame.function == "main.main()":
 			glue = true
-			if !strings.HasPrefix(frame.position, "effra.generated/main.go:") {
+			if !strings.HasPrefix(frame.position, "ergo.generated/main.go:") {
 				t.Errorf("generated entry frame at %s, want generated main.go", frame.position)
 			}
 		case strings.HasPrefix(frame.function, "runtime/debug."):

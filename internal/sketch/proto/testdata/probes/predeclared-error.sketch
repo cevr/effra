@@ -1,7 +1,7 @@
 // want S109
 package demo
 import "timeout"
-func main() uses Console {
+func main() needs Console {
   error := "shadow"
   x := with(wire{ Scheduler = LiveScheduler{} }) {
     timeout.After(1s) { "ok" }

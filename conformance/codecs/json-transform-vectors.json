@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "profile": "effra/json-structural-1",
+  "profile": "ergo/json-structural-1",
   "comparator": {"output": "conformance/codecs/effect-transform-comparator.out.jsonl"},
   "behaviors": {
     "email": "decode: a non-empty string, lower-cased, else fails \"empty\"; encode: the string, except \"blocked\" fails \"blocked\"",
@@ -34,7 +34,7 @@
     {"id": "decode.normalizes", "plan": "profile", "direction": "decode", "body": "{\"active\":true,\"contact\":{\"email\":\"B@X\"},\"email\":\"A@X\",\"id\":\"7\"}", "expect": {"ok": true, "encoded": "{\"id\":\"7\",\"email\":\"a@x\",\"contact\":{\"email\":\"b@x\"},\"active\":true}"}, "comparison": "matched"},
     {"id": "decode.step-failure", "plan": "profile", "direction": "decode", "body": "{\"id\":\"7\",\"email\":\"\",\"contact\":{\"email\":\"b\"},\"active\":true}", "expect": {"ok": false, "step": "email", "message": "empty"}, "comparison": "matched"},
     {"id": "decode.first-step-failure-in-declared-order", "plan": "profile", "direction": "decode", "body": "{\"id\":\"7\",\"email\":\"a\",\"contact\":{\"email\":\"\"},\"active\":true}", "expect": {"ok": false, "step": "email", "message": "empty"}, "comparison": "matched"},
-    {"id": "decode.structure-before-transformation", "plan": "profile", "direction": "decode", "body": "{\"id\":\"7\",\"email\":\"\",\"contact\":{\"email\":\"b\"},\"active\":\"yes\"}", "expect": {"ok": false, "reason": "type", "path": ["active"], "offset": -1}, "comparison": "difference", "note": "Effra decodes the whole structure before any transformation, so malformed input never reaches one; pinned Schema decodes field by field and reports the earlier transformation failure."},
+    {"id": "decode.structure-before-transformation", "plan": "profile", "direction": "decode", "body": "{\"id\":\"7\",\"email\":\"\",\"contact\":{\"email\":\"b\"},\"active\":\"yes\"}", "expect": {"ok": false, "reason": "type", "path": ["active"], "offset": -1}, "comparison": "difference", "note": "Ergo decodes the whole structure before any transformation, so malformed input never reaches one; pinned Schema decodes field by field and reports the earlier transformation failure."},
     {"id": "decode.missing-before-transformation", "plan": "profile", "direction": "decode", "body": "{\"id\":\"7\",\"email\":\"\",\"active\":true}", "expect": {"ok": false, "reason": "missing", "path": ["contact"], "offset": -1}, "comparison": "difference", "note": "Structure first: the missing key is reported although the earlier email transformation would fail."},
     {"id": "decode.root-transformation", "plan": "email", "direction": "decode", "body": "\"ADA@X\"", "expect": {"ok": true, "encoded": "\"ada@x\""}, "comparison": "matched"},
     {"id": "decode.root-step-failure", "plan": "email", "direction": "decode", "body": "\"\"", "expect": {"ok": false, "step": "email", "message": "empty"}, "comparison": "matched"},

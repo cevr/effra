@@ -6,7 +6,7 @@ type Mem struct{}
 
 func (Mem) Get() (string, error[Fault]) { return Fault{} }
 
-func main() uses Console {
+func main() needs Console {
 	v := with(wire{ Store = Mem{} }) { Store.Get() } // want S106
 	Console.Println(v)
 }

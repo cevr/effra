@@ -1,0 +1,41 @@
+// Label: Proposed. Size scope "inline caller with #214" for Q5: as
+// agent-inline.go.sketch, with function-literal parameter types inferred
+// from Call's expected type (#214, not yet designed in docs/spec).
+package roster
+
+import (
+	"actor"
+	"slices"
+)
+
+type RoomFull struct{ Limit int64 }
+
+type Room struct {
+	limit int64
+	names []string
+}
+
+func (r *Room) Join(name string) (int64, error[RoomFull]) {
+	if len(r.names) >= r.limit {
+		return RoomFull{r.limit}
+	}
+	r.names = append(r.names, name)
+	return len(r.names)
+}
+
+func (r *Room) Leave(name string) int64 {
+	r.names = slices.DeleteFunc(r.names, func(n string) bool { return n == name })
+	return len(r.names)
+}
+
+func (r *Room) Members() []string { return r.names }
+
+func StartRoom(limit int64) actor.Agent[Room] {
+	return actor.StartAgent(Room{limit: limit}, 64)
+}
+
+func Use(room actor.AgentAddress[Room], name string) ([]string, error[RoomFull | actor.Stopped | actor.NoReply]) {
+	try actor.Call(room, func(r) { r.Join(name) })
+	try actor.Call(room, func(r) { r.Leave(name) })
+	return actor.Call(room, func(r) { r.Members() })
+}

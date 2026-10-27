@@ -3,8 +3,8 @@ package format
 import (
 	"testing"
 
-	"effra.local/prototype/internal/sketch/sketchtest"
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/sketchtest"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // FuzzFormat: for every input that parses, the output parses, formatting is

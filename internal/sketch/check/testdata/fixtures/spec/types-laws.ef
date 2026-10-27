@@ -15,7 +15,7 @@ func LawRoundTrip(q Quantity) bool {
 	return ParseQuantity(q.Wire()) == q
 }
 
-func LawFindAfterPut(id string, v Order) bool uses Store {
+func LawFindAfterPut(id string, v Order) bool needs Store {
 	Store.Put(id, v)
 	return Store.Find(id) == v
 }

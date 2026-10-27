@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-const codecOriginInvoiceSource = `import Json "effra/json"
+const codecOriginInvoiceSource = `import Json "ergo/json"
 
 error Rejected
 service Policy {
@@ -39,7 +39,7 @@ effect fn main() -> string raises { JsonDecodeFailure, Rejected, JsonEncodeFailu
 }
 `
 
-const codecOriginSettingsSource = `import Json "effra/json"
+const codecOriginSettingsSource = `import Json "ergo/json"
 record Window { title: string, visible: bool }
 enum Mode { Idle, Ready { window: Window, marker: void } }
 record State { mode: Mode, revision: i64 }

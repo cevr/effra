@@ -13,7 +13,7 @@ import (
 // row-polymorphic effect function whose failure row is substituted. The
 // callers are substituted so that one program can omit what the other spells.
 func defaultCallsSource(suffix string, callers [8]string) string {
-	return fmt.Sprintf(`import Fns "effra/functions"
+	return fmt.Sprintf(`import Fns "ergo/functions"
 fn render(value: string, suffix: string = %q, count: i64 = 7, loud: bool = false) -> string {
     if loud { value + suffix } else { value }
 }
@@ -103,7 +103,7 @@ func TestOmittedArgumentsCompileToTheExplicitConstantCall(t *testing.T) {
 	found := false
 	for _, expression := range expressionsOf(checked.Program) {
 		f := expression.ResolvedFunction
-		if expression.Kind != "call" || f == nil || f.Module != "effra/functions" {
+		if expression.Kind != "call" || f == nil || f.Module != "ergo/functions" {
 			continue
 		}
 		application := expression.checked.application

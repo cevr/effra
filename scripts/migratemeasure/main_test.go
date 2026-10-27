@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/testinputs"
+	"ergo.local/prototype/internal/testinputs"
 )
 
 // TestMain runs the tests under observation, so the files and variables

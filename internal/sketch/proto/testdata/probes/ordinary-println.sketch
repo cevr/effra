@@ -3,4 +3,4 @@ package demo
 type Logger interface{ Println(value string) string }
 type Plain struct{}
 func (Plain) Println(value string) string { return "ordinary " + value }
-func main() uses Console { with(wire{ Logger = Plain{} }) { Console.Println(Logger.Println("ok")) } }
+func main() needs Console { with(wire{ Logger = Plain{} }) { Console.Println(Logger.Println("ok")) } }

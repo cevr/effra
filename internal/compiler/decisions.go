@@ -16,7 +16,7 @@ const decisionCode = "EF143"
 
 const (
 	decisionTypeName     = "decision"
-	decisionModule       = "effra/language"
+	decisionModule       = "ergo/language"
 	decisionIdentity     = "template:" + decisionModule + ":predeclared:" + decisionTypeName
 	decisionSourceID     = "language:decision"
 	decisionEmissionName = "predeclared_decision"
@@ -371,7 +371,7 @@ func constructVariant(e *Expr) string {
 }
 
 // removedMachinesModule held the bundled Step template before decision syntax.
-const removedMachinesModule = "effra/machines"
+const removedMachinesModule = "ergo/machines"
 
 // stepTemplateMigration is the help for the removed bundled Step template.
-const stepTemplateMigration = "the bundled effra/machines module and its Step template are removed; declare the result as decision<S, O> and write " + decisionForms + " (Go -> enter, Stay -> stay, Ignore -> ignore, Reject -> reject, Done -> done)"
+const stepTemplateMigration = "the bundled ergo/machines module and its Step template are removed; declare the result as decision<S, O> and write " + decisionForms + " (Go -> enter, Stay -> stay, Ignore -> ignore, Reject -> reject, Done -> done)"

@@ -7,12 +7,12 @@ import (
 )
 
 // absentSyntaxCode is the one stable code for source written in a construct
-// Effra does not have. Each catalog entry contributes the construct-specific
-// message and help, so tools key on one code while authors read what Effra
+// Ergo does not have. Each catalog entry contributes the construct-specific
+// message and help, so tools key on one code while authors read what Ergo
 // uses instead.
 const absentSyntaxCode = "EF003"
 
-// A construct is absent when Effra deliberately leaves it out: a library,
+// A construct is absent when Ergo deliberately leaves it out: a library,
 // another construct or a diagnostic already covers the need. A planned
 // construct is specified by the design but not implemented yet; its message
 // says "not yet supported".
@@ -56,13 +56,13 @@ func (a absentSyntax) diagnostic(span Span) Diagnostic {
 }
 
 const (
-	absentOptionHelp   = "absence is explicit: use Data.Option<T> from `import Data \"effra/data\"`, built as `Data.Option.Some { value: x }` or `Data.Option<T>.None {}`"
+	absentOptionHelp   = "absence is explicit: use Data.Option<T> from `import Data \"ergo/data\"`, built as `Data.Option.Some { value: x }` or `Data.Option<T>.None {}`"
 	absentFailHelp     = "raise a declared failure with `fail E` in an `effect fn` that lists E in `raises { E }`; callers recover with `.catch<E>(fallback)`"
 	absentRecoverHelp  = "failures are typed: recover with `.catch<E>(fallback)` on the effect that raises E; resources acquired inside `scope { ... }` are released when it closes"
-	absentAssertHelp   = "values keep their checked types: convert with an explicit function, or decode external data with a checked codec such as Convert.Codec from `import Convert \"effra/conversions\"`"
+	absentAssertHelp   = "values keep their checked types: convert with an explicit function, or decode external data with a checked codec such as Convert.Codec from `import Convert \"ergo/conversions\"`"
 	absentTopTypeHelp  = "declare a concrete type, or a closed enum of the admitted alternatives and `match` on it; decode external data into a concrete type with a checked codec"
 	absentAsyncHelp    = "declare an `effect fn` and sequence other effects inside it with `run`"
-	absentImportHelp   = "declare imports at the top of the module: `import Data \"effra/data\"`, or `import go name \"path\"` for a Go package"
+	absentImportHelp   = "declare imports at the top of the module: `import Data \"ergo/data\"`, or `import go name \"path\"` for a Go package"
 	absentLoopHelp     = "repeat work with a recursive named function"
 	absentNegationHelp = "negate with `if b { false } else { true }`"
 )
@@ -72,27 +72,27 @@ const (
 // them in docs/tooling.md; a construct the specifications never plan is
 // absent.
 var absentSyntaxCatalog = []absentSyntax{
-	{"null", absentInValue, "null", constructAbsent, "Effra has no `null` value", absentOptionHelp},
-	{"null", absentInValue, "nil", constructAbsent, "Effra has no `nil` value", absentOptionHelp},
-	{"null", absentInValue, "undefined", constructAbsent, "Effra has no `undefined` value", absentOptionHelp},
-	{"throw", absentInValue, "throw", constructAbsent, "Effra has no `throw`", absentFailHelp},
-	{"try-catch", absentInValue, "try", constructAbsent, "Effra has no `try`/`catch` blocks", absentRecoverHelp},
-	{"try-catch", absentInValue, "catch", constructAbsent, "Effra has no `try`/`catch` blocks", absentRecoverHelp},
-	{"try-catch", absentInBlock, "try", constructAbsent, "Effra has no `try`/`catch` blocks", absentRecoverHelp},
-	{"try-catch", absentInBlock, "catch", constructAbsent, "Effra has no `try`/`catch` blocks", absentRecoverHelp},
-	{"type-assertion", absentInValue, "as", constructAbsent, "Effra has no `as` type assertions", absentAssertHelp},
-	{"top-type", absentInType, "unknown", constructAbsent, "Effra has no `unknown` type", absentTopTypeHelp},
-	{"top-type", absentInType, "any", constructAbsent, "Effra has no `any` type", absentTopTypeHelp},
-	{"async", absentInDeclaration, "async", constructAbsent, "Effra has no `async` functions", absentAsyncHelp},
-	{"async", absentInValue, "async", constructAbsent, "Effra has no `async` functions", absentAsyncHelp},
-	{"async", absentInValue, "await", constructAbsent, "Effra has no `await`", absentAsyncHelp},
+	{"null", absentInValue, "null", constructAbsent, "Ergo has no `null` value", absentOptionHelp},
+	{"null", absentInValue, "nil", constructAbsent, "Ergo has no `nil` value", absentOptionHelp},
+	{"null", absentInValue, "undefined", constructAbsent, "Ergo has no `undefined` value", absentOptionHelp},
+	{"throw", absentInValue, "throw", constructAbsent, "Ergo has no `throw`", absentFailHelp},
+	{"try-catch", absentInValue, "try", constructAbsent, "Ergo has no `try`/`catch` blocks", absentRecoverHelp},
+	{"try-catch", absentInValue, "catch", constructAbsent, "Ergo has no `try`/`catch` blocks", absentRecoverHelp},
+	{"try-catch", absentInBlock, "try", constructAbsent, "Ergo has no `try`/`catch` blocks", absentRecoverHelp},
+	{"try-catch", absentInBlock, "catch", constructAbsent, "Ergo has no `try`/`catch` blocks", absentRecoverHelp},
+	{"type-assertion", absentInValue, "as", constructAbsent, "Ergo has no `as` type assertions", absentAssertHelp},
+	{"top-type", absentInType, "unknown", constructAbsent, "Ergo has no `unknown` type", absentTopTypeHelp},
+	{"top-type", absentInType, "any", constructAbsent, "Ergo has no `any` type", absentTopTypeHelp},
+	{"async", absentInDeclaration, "async", constructAbsent, "Ergo has no `async` functions", absentAsyncHelp},
+	{"async", absentInValue, "async", constructAbsent, "Ergo has no `async` functions", absentAsyncHelp},
+	{"async", absentInValue, "await", constructAbsent, "Ergo has no `await`", absentAsyncHelp},
 	{"module-binding", absentInDeclaration, "let", constructPlanned, "module-level `let` bindings are not yet supported", "for a fixed value, declare a zero-argument function such as `fn initial() -> string { \"0\" }` and call it; state shared across calls belongs to a service whose implementation a layer provides"},
-	{"dynamic-import", absentInValue, "import", constructAbsent, "Effra has no dynamic `import(...)`", absentImportHelp},
+	{"dynamic-import", absentInValue, "import", constructAbsent, "Ergo has no dynamic `import(...)`", absentImportHelp},
 	{"question-operator", absentInOperator, "?", constructPlanned, "the `?` operator is not yet supported", "write a conditional as `if c { a } else { b }`; until Result propagation with `?` lands, inspect a Data.Result with `match`"},
-	{"negation", absentInOperator, "!", constructAbsent, "Effra has no `!` operator", absentNegationHelp},
-	{"inequality", absentInOperator, "!=", constructAbsent, "Effra has no `!=` operator", "compare with `==` and swap the branches: `if a == b { false } else { true }`"},
-	{"logical-and", absentInOperator, "&&", constructAbsent, "Effra has no `&&` operator", "write `if a { b } else { false }`"},
-	{"if-without-else", absentInStatement, "if", constructAbsent, "Effra has no `if` without `else`", "`if` is an expression with two branches: add `else { void }` when both complete with no value"},
+	{"negation", absentInOperator, "!", constructAbsent, "Ergo has no `!` operator", absentNegationHelp},
+	{"inequality", absentInOperator, "!=", constructAbsent, "Ergo has no `!=` operator", "compare with `==` and swap the branches: `if a == b { false } else { true }`"},
+	{"logical-and", absentInOperator, "&&", constructAbsent, "Ergo has no `&&` operator", "write `if a { b } else { false }`"},
+	{"if-without-else", absentInStatement, "if", constructAbsent, "Ergo has no `if` without `else`", "`if` is an expression with two branches: add `else { void }` when both complete with no value"},
 	{"closure", absentInStatement, "fn", constructPlanned, "anonymous functions and closure captures are not yet supported", "declare a named module function and pass it by name"},
 	{"closure", absentInStatement, "effect", constructPlanned, "anonymous functions and closure captures are not yet supported", "declare a named module function and pass it by name"},
 	{"loop", absentInValue, "for", constructPlanned, "`for` loops are not yet supported", absentLoopHelp},
@@ -166,7 +166,7 @@ func (c absentConstruct) covers(span Span) bool {
 }
 
 // absentConstructAt recognizes, without consuming tokens, the braced construct
-// a statement head spells in the languages Effra authors arrive from:
+// a statement head spells in the languages Ergo authors arrive from:
 //
 //	try { ... }
 //	catch [( ... )] { ... }
@@ -175,7 +175,7 @@ func (c absentConstruct) covers(span Span) bool {
 //	for init; condition; post { ... }  or  for condition { ... }  or  for { ... }
 //
 // A loop header is the tokens before the first `{` outside parentheses, and a
-// condition is such a header that parses as one Effra expression; so
+// condition is such a header that parses as one Ergo expression; so
 // `while match x { ... } { ... }`, whose condition holds braces outside
 // parentheses, is no construct. Recognition reads tokens alone: a name bound
 // as `while` or `try` and followed by a braced record literal has the same
@@ -230,7 +230,7 @@ func (p *parser) absentConstructAt() (construct absentConstruct, ok bool) {
 
 // loopHeader consumes the tokens before the first brace outside parentheses,
 // which opens the body: a parenthesized C-family header, a Go for clause when
-// clauses are admitted, or a condition that parses as one Effra expression.
+// clauses are admitted, or a condition that parses as one Ergo expression.
 // As in Rust, a loop condition holds no payload braces, so a body such as
 // `{ x: y }` is never read as a constructor. The condition parses at this
 // statement's depth, so the nesting limit bounds it.

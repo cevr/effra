@@ -3,8 +3,8 @@ package rt_test
 import (
 	"testing"
 
-	"effra.local/prototype/runtime/rt"
-	"effra.local/prototype/runtime/rt/rttrace"
+	"ergo.local/prototype/runtime/rt"
+	"ergo.local/prototype/runtime/rt/rttrace"
 )
 
 // The traced benchmarks run the bodies of BenchmarkPoll, BenchmarkSpawnWait

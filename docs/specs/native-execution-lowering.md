@@ -10,7 +10,7 @@ Preserve argument evaluation count and order, lazy recipe construction, repeated
 
 Every lowering candidate uses a semantic equivalence baseline: the same
 validation, failure/service rows, ownership, cancellation and completed cleanup
-must be observable in the Effra program, an explicit Go program and an explicit
+must be observable in the Ergo program, an explicit Go program and an explicit
 TypeScript/Effect program. Record whether the candidate erases the abstraction,
 directly lowers it or retains a runtime representation, then measure emitted
 source, retained dependencies, executable bytes, allocation, dispatch and
@@ -45,18 +45,18 @@ emitted ordered `if` branches uniformly. That archived baseline remains
 separate from the current emitter carried from accepted LOW donor
 `0a1c8b4768f3d82475d39f2ab0f5ee4d22259cb0`.
 
-The removed JavaScript [`jsMatchStatements`](https://github.com/cevr/effra/blob/9e80874af13a23858fb674a0a83d66fe20fe1e79/internal/compiler/emit.go#L813)
+The removed JavaScript [`jsMatchStatements`](https://github.com/cevr/ergo/blob/9e80874af13a23858fb674a0a83d66fe20fe1e79/internal/compiler/emit.go#L813)
 path evaluates each subject once in source order and keeps branches lazy.
-[`jsCanSwitchMatch`](https://github.com/cevr/effra/blob/9e80874af13a23858fb674a0a83d66fe20fe1e79/internal/compiler/emit.go#L886) admits a tag `switch`
+[`jsCanSwitchMatch`](https://github.com/cevr/ergo/blob/9e80874af13a23858fb674a0a83d66fe20fe1e79/internal/compiler/emit.go#L886) admits a tag `switch`
 only for checked eligible single-subject plans with explicit, non-total variant
 cells. Product matches, total cells and other general plans retain the ordered
 condition chain; constrained cells compare tags and wholly total arms use a
-`true` condition. At [discarded, returned and admitted self-tail sites](https://github.com/cevr/effra/blob/9e80874af13a23858fb674a0a83d66fe20fe1e79/internal/compiler/emit.go),
+`true` condition. At [discarded, returned and admitted self-tail sites](https://github.com/cevr/ergo/blob/9e80874af13a23858fb674a0a83d66fe20fe1e79/internal/compiler/emit.go),
 `if` and `match` emit direct statements: discarded branches continue with the
 following statement, while tail branches return, fail or continue an admitted
 self-tail loop. Expression-valued subpositions retain their value-producing
-`yield* Effect.gen` or pure IIFE wrapper ([`jsExpr`](https://github.com/cevr/effra/blob/9e80874af13a23858fb674a0a83d66fe20fe1e79/internal/compiler/emit.go#L606),
-[`jsMatch`](https://github.com/cevr/effra/blob/9e80874af13a23858fb674a0a83d66fe20fe1e79/internal/compiler/emit.go#L798)). The outer automatic scope and
+`yield* Effect.gen` or pure IIFE wrapper ([`jsExpr`](https://github.com/cevr/ergo/blob/9e80874af13a23858fb674a0a83d66fe20fe1e79/internal/compiler/emit.go#L606),
+[`jsMatch`](https://github.com/cevr/ergo/blob/9e80874af13a23858fb674a0a83d66fe20fe1e79/internal/compiler/emit.go#L798)). The outer automatic scope and
 explicit scope/cleanup boundaries remain, along with the pinned default
 Effect-compatible JS ABI. These are current emitted shapes, not measured
 allocation reductions or speedups. Further dispatch and generated/specialized
@@ -73,4 +73,4 @@ Acceptance requires identical observable conformance, full gates, race checks fo
 
 ## Prior art: MoonBit
 
-MoonBit's pinned compiler runs a fixed per-package pass chain (`src/driver_util.ml:L68-L94` at `d4ada10d`). It covers single-use join inlining, async elimination, contification, alias removal, record scalarization, loop-parameter unboxing, constructor propagation, lambda lifting and dead-code removal. Contification turns a local function called only in tail position into a join point and self tail calls into loops (`src/pass_contification.ml:L24-L278`), and a layout pass unboxes `Option` (`src/pass_layout.ml:L98-L155`). The chain has no general inliner or constant-folding pass. Effra currently rewrites only pure self tail calls ([design](../design.md)); join points for tail-called local functions are a candidate under the same measurement rules, not an adopted lowering. The checkout builds only wasm-gc, so it says nothing about JS output. Pins are in [PRIOR_ART](../../PRIOR_ART.md#moonbit).
+MoonBit's pinned compiler runs a fixed per-package pass chain (`src/driver_util.ml:L68-L94` at `d4ada10d`). It covers single-use join inlining, async elimination, contification, alias removal, record scalarization, loop-parameter unboxing, constructor propagation, lambda lifting and dead-code removal. Contification turns a local function called only in tail position into a join point and self tail calls into loops (`src/pass_contification.ml:L24-L278`), and a layout pass unboxes `Option` (`src/pass_layout.ml:L98-L155`). The chain has no general inliner or constant-folding pass. Ergo currently rewrites only pure self tail calls ([design](../design.md)); join points for tail-called local functions are a candidate under the same measurement rules, not an adopted lowering. The checkout builds only wasm-gc, so it says nothing about JS output. Pins are in [PRIOR_ART](../../PRIOR_ART.md#moonbit).

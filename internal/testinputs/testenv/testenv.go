@@ -21,7 +21,7 @@ import (
 // test tools (git, sh) and the values of the variables in Names. cmd/go rechecks only files inside the
 // module root, so it stands for the programs and libraries outside the root
 // that observed processes run, and for variables they read.
-const ToolDigest = "EFFRA_TOOL_VERSIONS"
+const ToolDigest = "ERGO_TOOL_VERSIONS"
 
 // Names are the variables a cached Go test may receive.
 var Names = []string{

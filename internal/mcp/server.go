@@ -14,12 +14,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"effra.local/prototype/internal/compiler"
-	"effra.local/prototype/internal/edition"
-	"effra.local/prototype/internal/lintpacks"
-	"effra.local/prototype/internal/producer"
-	"effra.local/prototype/internal/sketchfront"
-	sourcefile "effra.local/prototype/internal/source"
+	"ergo.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/edition"
+	"ergo.local/prototype/internal/lintpacks"
+	"ergo.local/prototype/internal/producer"
+	"ergo.local/prototype/internal/sketchfront"
+	sourcefile "ergo.local/prototype/internal/source"
 )
 
 const ProtocolVersion = "2025-11-25"
@@ -580,7 +580,7 @@ func Serve(root string, packs *lintpacks.Session, input io.Reader, output io.Wri
 					res.Error = &rpcError{-32602, "Invalid initialize params"}
 				} else {
 					initialized = true
-					res.Result = map[string]any{"protocolVersion": ProtocolVersion, "capabilities": map[string]any{"tools": map[string]bool{"listChanged": false}}, "serverInfo": map[string]string{"name": "effra", "version": CompilerVersion}, "instructions": "Read-only single-file compiler prototype. Use project.describe to inspect limits; code.inspect is authoritative for admitted source contracts."}
+					res.Result = map[string]any{"protocolVersion": ProtocolVersion, "capabilities": map[string]any{"tools": map[string]bool{"listChanged": false}}, "serverInfo": map[string]string{"name": "ergo", "version": CompilerVersion}, "instructions": "Read-only single-file compiler prototype. Use project.describe to inspect limits; code.inspect is authoritative for admitted source contracts."}
 				}
 			case "ping":
 				res.Result = map[string]any{}
@@ -938,7 +938,7 @@ func call(root string, packs *lintpacks.Session, name string, args arguments) (a
 		if !projection.Complete {
 			return nil, fmt.Errorf("test catalog type projection unavailable: %s", projection.Error)
 		}
-		response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "tests": tests, "liveRequired": r.TestMode(false) != nil, "execution": "ef test; MCP does not execute tests", "types": projection.Types, "rows": projection.Rows, "declarations": r.ProjectionDeclarations(projection), "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": true}
+		response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "tests": tests, "liveRequired": r.TestMode(false) != nil, "execution": "ergo test; MCP does not execute tests", "types": projection.Types, "rows": projection.Rows, "declarations": r.ProjectionDeclarations(projection), "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": true}
 		r.AddSourceInputs(response)
 		if _, err := r.ValidateProjectionResponse(projection, response); err != nil {
 			return nil, err

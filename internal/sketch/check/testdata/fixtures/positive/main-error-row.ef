@@ -4,7 +4,7 @@ type Fault struct{}
 
 func fail() error[Fault] { return Fault{} }
 
-func main() error[Fault] uses Console {
+func main() error[Fault] needs Console {
 	try fail()
 	Console.Println("unreachable")
 }

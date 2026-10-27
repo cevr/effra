@@ -51,7 +51,7 @@ effect fn main() -> string {
 }
 `
 
-func TestSigned64ProfileRunsTwoEffraCallersOnBothTargets(t *testing.T) {
+func TestSigned64ProfileRunsTwoErgoCallersOnBothTargets(t *testing.T) {
 	r := CompileFor(signed64ProfileSource, "go")
 	if !r.Checked {
 		t.Fatalf("signed64 profile rejected: %+v", r.Diagnostics)
@@ -119,7 +119,7 @@ func TestSigned64ProfilePreservesOperatorPrecedenceAndFormatting(t *testing.T) {
 
 func TestSigned64ProfileGoConstantFailureIsNotPortableSuccess(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.constant.control\n\ngo 1.27\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module ergo.constant.control\n\ngo 1.27\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nvar _ int64 = 9223372036854775807 + 1\nfunc main() {}\n"), 0600); err != nil {
@@ -130,7 +130,7 @@ func TestSigned64ProfileGoConstantFailureIsNotPortableSuccess(t *testing.T) {
 	}
 	result := CompileFor(`effect fn main() -> i64 { 9223372036854775807 + 1 }`, "go")
 	if !result.Checked {
-		t.Fatalf("Effra literal operation was rejected: %+v", result.Diagnostics)
+		t.Fatalf("Ergo literal operation was rejected: %+v", result.Diagnostics)
 	}
 	if _, err := result.EmitGo(); err != nil {
 		t.Fatal(err)

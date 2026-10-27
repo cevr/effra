@@ -45,7 +45,7 @@ func validIdentifier(name string) bool {
 
 // ReservedNamespaces cannot be claimed by a rule pack: built-in rules use
 // unqualified names, and the compiler and runner own these prefixes.
-var ReservedNamespaces = []string{"builtin", "compiler", "ef", "effra", "lint", "runner"}
+var ReservedNamespaces = []string{"builtin", "compiler", "ergo", "ergo", "lint", "runner"}
 
 // Rule is one Go rule. Name is local to its pack; the public identity is
 // namespace/name. Check reads pass.Snapshot and pass.Options and calls

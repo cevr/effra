@@ -44,7 +44,7 @@ func (OkNet) Send(msg string) error[Down] {
 
 // both fails with two errors, so a catch can handle one and pass the other on.
 const both = `
-func both(id string) (string, error[NotFound | Down]) uses Store, Net {
+func both(id string) (string, error[NotFound | Down]) needs Store, Net {
 	v := try Store.Get(id)
 	try Net.Send(v)
 	return v
@@ -70,45 +70,45 @@ func TestCheck(t *testing.T) {
 		want       string // "" means accepted
 	}{
 		{"accepts try under a declared row", `
-func get(id string) (string, error[NotFound]) uses Store {
+func get(id string) (string, error[NotFound]) needs Store {
 	v := try Store.Get(id)
 	return v
 }
-func main() uses Console { Console.Println("x") }`, ""},
+func main() needs Console { Console.Println("x") }`, ""},
 		{"partial catch under try passes the rest on", both + `
-func partial(id string) (string, error[Down]) uses Store, Net {
+func partial(id string) (string, error[Down]) needs Store, Net {
 	v := try both(id) catch {
 	case NotFound:
 		"none"
 	}
 	return v
 }
-func main() uses Console { Console.Println("x") }`, ""},
+func main() needs Console { Console.Println("x") }`, ""},
 		{"partial catch under try still needs the rest declared", both + `
-func partial(id string) (string, error[NotFound]) uses Store, Net {
+func partial(id string) (string, error[NotFound]) needs Store, Net {
 	v := try both(id) catch {
 	case NotFound:
 		"none"
 	}
 	return v
 }
-func main() uses Console { Console.Println("x") }`, "S101"},
+func main() needs Console { Console.Println("x") }`, "S101"},
 		{"an unhandled fallible call", `
-func get(id string) string uses Store {
+func get(id string) string needs Store {
 	v := Store.Get(id)
 	return v
 }
-func main() uses Console { Console.Println("x") }`, "S105"},
+func main() needs Console { Console.Println("x") }`, "S105"},
 		{"a provider without the method", `
 type Empty struct{}
-func main() uses Console {
+func main() needs Console {
 	v := with(wire{ Store = Empty{} }) { "x" }
 	Console.Println(v)
 }`, "S106"},
 		{"a provider whose row is wider", `
 type Loose struct{}
 func (Loose) Get(id string) (string, error[NotFound | Down]) { return "x" }
-func main() uses Console {
+func main() needs Console {
 	v := with(wire{ Store = Loose{} }) { "x" }
 	Console.Println(v)
 }`, "S106"},
@@ -118,27 +118,27 @@ func pick(id string) string {
 		return "one"
 	}
 }
-func main() uses Console { Console.Println(pick("1")) }`, "S107"},
+func main() needs Console { Console.Println(pick("1")) }`, "S107"},
 		{"an unused variable", `
-func main() uses Console {
+func main() needs Console {
 	x := "unused"
 	Console.Println("y")
 }`, "S110"},
 		{"timeout requires Scheduler", `
-func slow(id string) (string, error[NotFound | timeout.Expired]) uses Store {
+func slow(id string) (string, error[NotFound | timeout.Expired]) needs Store {
 	v := try timeout.After(1s) { Store.Get(id) }
 	return v
 }
-func main() uses Console { Console.Println("x") }`, "S102"},
+func main() needs Console { Console.Println("x") }`, "S102"},
 		{"main cannot require what the host lacks", `
-func main() uses Console, Store { Console.Println("x") }`, "S102"},
+func main() needs Console, Store { Console.Println("x") }`, "S102"},
 		{"a reserved name", `
-func main() uses Console {
+func main() needs Console {
 	string := "x"
 	Console.Println(string)
 }`, "S109"},
 		{"a parse error", `
-func main() uses Console { for }`, "S001"},
+func main() needs Console { for }`, "S001"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -158,7 +158,7 @@ func TestBuildAndRun(t *testing.T) {
 		t.Skip("no go tool")
 	}
 	src := base + `
-func lookup(id string) (string, error[Down | timeout.Expired]) uses Store, Net, Scheduler {
+func lookup(id string) (string, error[Down | timeout.Expired]) needs Store, Net, Scheduler {
 	v := try timeout.After(1s) { Store.Get(id) } catch {
 	case NotFound:
 		"missing " + id
@@ -167,7 +167,7 @@ func lookup(id string) (string, error[Down | timeout.Expired]) uses Store, Net, 
 	return v
 }
 
-func show(id string) uses Console, Store, Net, Scheduler {
+func show(id string) needs Console, Store, Net, Scheduler {
 	v := lookup(id) catch {
 	case Down:
 		"down"
@@ -177,7 +177,7 @@ func show(id string) uses Console, Store, Net, Scheduler {
 	Console.Println(v)
 }
 
-func main() uses Console {
+func main() needs Console {
 	with(wire{ Store = MemStore{}; Scheduler = LiveScheduler{} }) {
 		with(wire{ Net = OkNet{} }) {
 			show("1")

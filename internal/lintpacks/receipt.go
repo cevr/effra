@@ -7,14 +7,14 @@ import (
 	"runtime"
 	"time"
 
-	"effra.local/prototype/internal/compiler"
-	"effra.local/prototype/internal/producer"
-	"effra.local/prototype/lint"
+	"ergo.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/producer"
+	"ergo.local/prototype/lint"
 )
 
 // ReceiptKind and ReceiptVersion identify the cost receipt format.
 const (
-	ReceiptKind    = "effra.lint.cost-receipt"
+	ReceiptKind    = "ergo.lint.cost-receipt"
 	ReceiptVersion = 1
 	// MaxReceiptRuns bounds one receipt.
 	MaxReceiptRuns = 100
@@ -54,7 +54,7 @@ type ReceiptSource struct {
 
 // ReceiptRun is one complete analysis, measured in nanoseconds of wall
 // time. Each run reads and compiles the source afresh and starts every
-// enabled pack as a new process; run 0 is the first in this ef process.
+// enabled pack as a new process; run 0 is the first in this ergo process.
 type ReceiptRun struct {
 	Run      int    `json:"run"`
 	Revision string `json:"revision"`
@@ -94,7 +94,7 @@ type ReceiptPackRun struct {
 }
 
 // Receipt analyses the source at path runs times through the same session,
-// pack runner and merge as ef lint, recording the raw cost of each phase.
+// pack runner and merge as ergo lint, recording the raw cost of each phase.
 // A source that does not check is still measured: its runs show the
 // frontend alone, since no pack runs over unchecked source.
 func (s *Session) Receipt(ctx context.Context, path, target string, runs int) (Receipt, error) {

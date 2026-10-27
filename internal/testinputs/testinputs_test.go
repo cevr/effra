@@ -223,7 +223,7 @@ func TestRecorderRemembersOnlySealedDirectories(t *testing.T) {
 	if sealed == "" {
 		t.Skip("no sealed directory on this host")
 	}
-	missing := filepath.Join(sealed, "effra-testinputs-missing")
+	missing := filepath.Join(sealed, "ergo-testinputs-missing")
 	r.open(missing, true)
 	if e, ok := r.fixed.Load(missing); !ok || !e.(entry).missing {
 		t.Fatalf("the lookup of %s in the sealed %s was not remembered as missing: %v", missing, sealed, e)

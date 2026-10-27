@@ -6,11 +6,11 @@ type Memory struct{ Text string }
 
 func (m Memory) Label() string { return m.Text }
 
-wire App uses Account { // want S109
+wire App provides Account { // want S109
 	Store   = Memory{Text: "hidden"}
 	Account = Memory{Text: "shown"}
 }
 
-func main() uses Console {
+func main() needs Console {
 	Console.Println(with(App) { Store.Label() })
 }

@@ -294,7 +294,7 @@ func TestSelectedImportedDeclarationDoesNotBorrowRootSourceLocation(t *testing.T
 	// The imported identity function and this unrelated root identity function
 	// have exactly the same diagnostic anchor. Ownership, not coordinates,
 	// decides whether an original node belongs to this source snapshot.
-	r := Compile("fn identity(input: string) -> string { input }\nimport Fns \"effra/functions\"\nfn call(input: string) -> string { Fns.identity(input) }")
+	r := Compile("fn identity(input: string) -> string { input }\nimport Fns \"ergo/functions\"\nfn call(input: string) -> string { Fns.identity(input) }")
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}

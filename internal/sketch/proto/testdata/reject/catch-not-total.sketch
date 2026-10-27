@@ -32,13 +32,13 @@ func (FakeGateway) Charge(order Order) (string, error[GatewayDown]) {
 	return "auth-7"
 }
 
-func pay(id string) (string, error[OrderNotFound | GatewayDown]) uses Orders, Gateway {
+func pay(id string) (string, error[OrderNotFound | GatewayDown]) needs Orders, Gateway {
 	order := try Orders.Find(id)
 	return Gateway.Charge(order)
 }
 
 // A catch with no try must cover every error; GatewayDown is missing.
-func main() uses Console {
+func main() needs Console {
 	outcome := with(wire{ Orders = MemoryOrders{}; Gateway = FakeGateway{} }) { pay("42") } catch {
 	case OrderNotFound:
 		"no such order"

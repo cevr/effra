@@ -22,7 +22,7 @@ type Directory interface {
 	Find(id string) (Member, error[UnknownMember])
 }
 
-func ParseMember(id string) (Member, error[UnknownMember]) uses Directory {
+func ParseMember(id string) (Member, error[UnknownMember]) needs Directory {
 	return Directory.Find(id)
 }
 
@@ -44,7 +44,7 @@ type Ledger interface {
 
 func ParseTotal(cents int64) Total { return Total{cents} }
 
-func (t Total) Wire() (int64, error[Unpublishable]) uses Ledger {
+func (t Total) Wire() (int64, error[Unpublishable]) needs Ledger {
 	return Ledger.Publish(t.Cents)
 }
 
@@ -57,7 +57,7 @@ type Inventory interface {
 	Reserve(item string, quantity int64) (int64, error[OutOfStock])
 }
 
-func place(order Order) (Receipt, error[OutOfStock]) uses Inventory {
+func place(order Order) (Receipt, error[OutOfStock]) needs Inventory {
 	cents := try Inventory.Reserve(order.Item, order.Quantity)
 	return Receipt{order.Item, Total{cents}}
 }
@@ -65,7 +65,7 @@ func place(order Order) (Receipt, error[OutOfStock]) uses Inventory {
 // A handler is an ordinary function from Request to Response. A catch with
 // no try must cover every error, so the checker rejects a handler that
 // leaves a decode, handler or encode failure without a status.
-func placeOrder(req http.Request) http.Response uses Directory, Inventory, Ledger {
+func placeOrder(req http.Request) http.Response needs Directory, Inventory, Ledger {
 	return created(req) catch e {
 	case http.UnsupportedMediaType:
 		http.Status(415)
@@ -80,7 +80,7 @@ func placeOrder(req http.Request) http.Response uses Directory, Inventory, Ledge
 	}
 }
 
-func created(req http.Request) (http.Response, error[http.UnsupportedMediaType | json.DecodeFailed | UnknownMember | OutOfStock | Unpublishable]) uses Directory, Inventory, Ledger {
+func created(req http.Request) (http.Response, error[http.UnsupportedMediaType | json.DecodeFailed | UnknownMember | OutOfStock | Unpublishable]) needs Directory, Inventory, Ledger {
 	order := try http.ReadJSON[Order](req, 256)
 	return http.JSON(201, try place(order))
 }
@@ -134,47 +134,47 @@ wire Shop {
 }
 
 // A stored-data caller decodes with the same wire forms outside HTTP.
-func restoreOrder(stored string) (Order, error[json.DecodeFailed | UnknownMember]) uses Directory {
+func restoreOrder(stored string) (Order, error[json.DecodeFailed | UnknownMember]) needs Directory {
 	return json.Decode[Order](stored)
 }
 
 // Calling the route table directly needs no server. Every failure is
 // mapped, so the result has no error row.
-func order(contentType string, body string) int uses Directory, Inventory, Ledger {
+func order(contentType string, body string) int needs Directory, Inventory, Ledger {
 	return api.Serve(http.Request{Method: "POST", Path: "/orders", ContentType: contentType, Body: body}).Status
 }
 
-func TestOrderIsCreated() uses testing.T {
+func TestOrderIsCreated() needs testing.T {
 	with(Shop) {
 		T.Equal(order("application/json", `{"member":"m-1","item":"tea","quantity":"2"}`), 201)
 	}
 }
 
-func TestUnknownMemberIsNotMalformedInput() uses testing.T {
+func TestUnknownMemberIsNotMalformedInput() needs testing.T {
 	with(Shop) {
 		T.Equal(order("application/json", `{"member":"m-9","item":"tea","quantity":"2"}`), 422)
 		T.Equal(order("application/json", `{"member":"m-1"}`), 400)
 	}
 }
 
-func TestHandlerFailureAnswersItsStatus() uses testing.T {
+func TestHandlerFailureAnswersItsStatus() needs testing.T {
 	with(Shop) {
 		T.Equal(order("application/json", `{"member":"m-1","item":"tea","quantity":"9"}`), 409)
 	}
 }
 
-func TestUnsupportedMediaType() uses testing.T {
+func TestUnsupportedMediaType() needs testing.T {
 	with(Shop) {
 		T.Equal(order("text/plain", "{}"), 415)
 	}
 }
 
-func TestStoredOrderSharesTheWireForms() error[json.DecodeFailed | UnknownMember] uses testing.T {
+func TestStoredOrderSharesTheWireForms() error[json.DecodeFailed | UnknownMember] needs testing.T {
 	order := try with(Shop) { restoreOrder(`{"member":"m-1","item":"tea","quantity":"1"}`) }
 	T.Equal(order.Member.Name, "Ada")
 }
 
-func main() error[http.ListenFailed] uses http.Server {
+func main() error[http.ListenFailed] needs http.Server {
 	limits := http.Limits{MaxBodyBytes: 256, ReadHeader: 1s, ReadBody: 1s, Idle: 1s, MaxActive: 8}
 	return with(Shop) { Server.Listen("127.0.0.1:0", limits, api) }
 }

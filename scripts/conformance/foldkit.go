@@ -5,9 +5,9 @@ package main
 // The snapshot under conformance/upstream/foldkit-d21db423 preserves the
 // tracked Foldkit workspace at one commit, read from its immutable git objects,
 // minus the vendored repos/ reference trees and generated or installed
-// directories. Effra owns its manifest: the selection rule, the Git identity
+// directories. Ergo owns its manifest: the selection rule, the Git identity
 // and sha256 of every file, and integrity digests pinned independently below.
-// It is not a claim that Effra executes or passes any Foldkit example.
+// It is not a claim that Ergo executes or passes any Foldkit example.
 
 import (
 	"bytes"
@@ -54,7 +54,7 @@ const (
 		"are excluded; repository guidance states that repos/ is not imported by " +
 		"package or example source. No dependencies were installed and no source " +
 		"was executed as part of this capture. This is immutable comparison data, " +
-		"not Effra coverage or a claim that the snapshot currently builds.\n"
+		"not Ergo coverage or a claim that the snapshot currently builds.\n"
 )
 
 var foldkitExampleIDs = []string{

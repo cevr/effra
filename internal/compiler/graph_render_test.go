@@ -14,8 +14,8 @@ import (
 const hostileGraphLabel = "say \"hi\" \\N back\\slash\nnew line %%{init: {\"theme\":\"dark\"}}%% A --> B |x| <b>bold</b> #35; end; naïve 日本 🙂 \u202Eevil\x00\x1b click n0 call alert()"
 
 func syntheticGraphView(nodes []GraphViewNode, edges []GraphViewEdge) *GraphView {
-	view := &GraphView{ID: "effra-graph:dependency:synthetic", Mode: "directed", Nodes: nodes, Edges: edges}
-	view.Data.Effra = GraphViewFacts{GraphViewVersion: GraphViewVersion, Kind: GraphKindDependency, Limits: defaultGraphViewLimits,
+	view := &GraphView{ID: "ergo-graph:dependency:synthetic", Mode: "directed", Nodes: nodes, Edges: edges}
+	view.Data.Ergo = GraphViewFacts{GraphViewVersion: GraphViewVersion, Kind: GraphKindDependency, Limits: defaultGraphViewLimits,
 		Facts: GraphFactTables{Sources: []SourceInfo{}, Types: []TypeNode{}, Rows: []RowNode{}, Declarations: []Declaration{}}}
 	for i := range view.Nodes {
 		view.Nodes[i].Type = "node"
@@ -27,11 +27,11 @@ func syntheticGraphView(nodes []GraphViewNode, edges []GraphViewEdge) *GraphView
 }
 
 func syntheticNode(id, label, parent string) GraphViewNode {
-	return GraphViewNode{ID: id, Label: label, ParentID: parent, Data: GraphViewNodeData{Effra: GraphNodeFacts{Kind: "function"}}}
+	return GraphViewNode{ID: id, Label: label, ParentID: parent, Data: GraphViewNodeData{Ergo: GraphNodeFacts{Kind: "function"}}}
 }
 
 func syntheticEdge(id, source, target, label string) GraphViewEdge {
-	return GraphViewEdge{ID: id, SourceID: source, TargetID: target, Label: label, Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "calls"}}}
+	return GraphViewEdge{ID: id, SourceID: source, TargetID: target, Label: label, Data: GraphViewEdgeData{Ergo: GraphEdgeFacts{Relation: "calls"}}}
 }
 
 func hostileGraphView() *GraphView {
@@ -125,7 +125,7 @@ func TestRenderGraphViewDOTEscapesHostileText(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := rendering.Text
-	if !strings.HasPrefix(text, "digraph \"effra-graph:dependency:synthetic\" {\n") || !strings.HasSuffix(text, "}\n") || rendering.MediaType != "text/vnd.graphviz" {
+	if !strings.HasPrefix(text, "digraph \"ergo-graph:dependency:synthetic\" {\n") || !strings.HasSuffix(text, "}\n") || rendering.MediaType != "text/vnd.graphviz" {
 		t.Fatalf("dot frame: %q", text)
 	}
 	for _, label := range scanQuoted(t, "dot", text, true) {
@@ -210,7 +210,7 @@ func TestGraphViewPayloadExactResponseLimit(t *testing.T) {
 		escaped, _ := encodedSizeMode(payload, 1<<30, true)
 		// The limit is published inside the view, so iterate to its fixed point.
 		for limit := structured + escaped; ; {
-			view.Data.Effra.Limits.ResponseBytes = limit
+			view.Data.Ergo.Limits.ResponseBytes = limit
 			fitted, _, err := GraphViewPayload(view, format)
 			if err != nil {
 				t.Fatalf("%s exact response limit refused: %v", format, err)
@@ -222,7 +222,7 @@ func TestGraphViewPayloadExactResponseLimit(t *testing.T) {
 			}
 			limit = structured + escaped
 		}
-		view.Data.Effra.Limits.ResponseBytes--
+		view.Data.Ergo.Limits.ResponseBytes--
 		_, _, err = GraphViewPayload(view, format)
 		requireGraphRefusal(t, err, GraphRefusalResponseLimit)
 	}
@@ -235,11 +235,11 @@ func TestRenderGraphViewExactRenderLimit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		view.Data.Effra.Limits.RenderBytes = len(rendering.Text)
+		view.Data.Ergo.Limits.RenderBytes = len(rendering.Text)
 		if _, err := RenderGraphView(view, format); err != nil {
 			t.Fatalf("%s exact render limit refused: %v", format, err)
 		}
-		view.Data.Effra.Limits.RenderBytes--
+		view.Data.Ergo.Limits.RenderBytes--
 		_, err = RenderGraphView(view, format)
 		requireGraphRefusal(t, err, GraphRefusalRenderLimit)
 	}
@@ -339,14 +339,14 @@ func TestRenderGraphViewMarksClosureNodes(t *testing.T) {
 	layout := newGraphRenderLayout(view)
 	closure, plain := []string{}, []string{}
 	for _, node := range layout.nodes {
-		if node.Data.Effra.Closure {
+		if node.Data.Ergo.Closure {
 			closure = append(closure, layout.ids[node.ID])
 		} else {
 			plain = append(plain, layout.ids[node.ID])
 		}
 	}
-	if len(closure) == 0 || view.Data.Effra.Completeness.ClosureNodes != len(closure) {
-		t.Fatalf("fixture has no closure nodes: %+v", view.Data.Effra.Completeness)
+	if len(closure) == 0 || view.Data.Ergo.Completeness.ClosureNodes != len(closure) {
+		t.Fatalf("fixture has no closure nodes: %+v", view.Data.Ergo.Completeness)
 	}
 	mermaid, err := RenderGraphView(view, GraphFormatMermaid)
 	if err != nil {

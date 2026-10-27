@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"effra.local/prototype/runtime/rt"
+	"ergo.local/prototype/runtime/rt"
 )
 
 // TestTraceRecorderIsBounded checks the bound and the drop policy: the

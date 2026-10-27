@@ -102,17 +102,17 @@ const (
 
 // listenerVariable names the descriptor on which the test process sends its
 // filter's listener to the observing parent.
-const listenerVariable = "EFFRA_TESTINPUTS_LISTENER"
+const listenerVariable = "ERGO_TESTINPUTS_LISTENER"
 
 // filteredVariable marks the test process that the filtered child started
 // by exec, with the filter in place from its first instruction. Its value is
 // the descriptor of the child's end of the socket to the observer, kept open
 // across the exec as proof that the observer is there.
-const filteredVariable = "EFFRA_TESTINPUTS_FILTERED"
+const filteredVariable = "ERGO_TESTINPUTS_FILTERED"
 
 // armedPath is the path the test process looks up once the observer holds
 // its listener. The parent sees the lookup only if the filter reports it.
-const armedPath = "/nonexistent/effra-testinputs/armed"
+const armedPath = "/nonexistent/ergo-testinputs/armed"
 
 // observed is true in the observed test process, which runs the tests itself.
 var observed bool

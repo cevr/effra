@@ -5,7 +5,7 @@ type A struct{ Value string }
 type B struct{}
 type Sum interface{ A | B }
 func a() (Sum, error[Fault]) { return Fault{} }
-func main() uses Console {
+func main() needs Console {
   y := a() catch { case Fault: B{} }
   Console.Println(y)
 }

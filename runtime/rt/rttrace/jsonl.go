@@ -6,11 +6,11 @@ import (
 	"os"
 	"reflect"
 
-	"effra.local/prototype/runtime/rt"
+	"ergo.local/prototype/runtime/rt"
 )
 
 // Schema names the JSON Lines format WriteJSONL writes.
-const Schema = "effra-trace-3"
+const Schema = "ergo-trace-3"
 
 // Header is the first line of a JSON Lines trace. The revision is written
 // once here; events carry plain definition IDs, which the revision qualifies.

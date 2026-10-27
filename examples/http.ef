@@ -1,5 +1,5 @@
 import go strings "strings"
-import go sdk "effra.local/prototype/examples/sdk"
+import go sdk "ergo.local/prototype/examples/sdk"
 
 effect fn page(path: string) -> string raises { GoError } uses { Foreign, Files, Scheduler } {
     if path == "/health" {

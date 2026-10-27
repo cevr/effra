@@ -96,14 +96,14 @@ func TestGenericEnumFormattingAdmissionIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := FormatSource(formatted.Text)
-	if err != nil || second.Text != formatted.Text || FormatterIdentity != "effra/formatter-16" || FormatterSchemaVersion != 1 {
+	if err != nil || second.Text != formatted.Text || FormatterIdentity != "ergo/formatter-16" || FormatterSchemaVersion != 1 {
 		t.Fatal("generic syntax formatting identity/idempotence", formatted, second, err)
 	}
 }
 
 func TestGenericDataSharedLayoutsAndExistingCodecOwner(t *testing.T) {
 	var source strings.Builder
-	source.WriteString(`import Convert "effra/conversions"
+	source.WriteString(`import Convert "ergo/conversions"
 record Leaf<T: type> { value: T }
 record Witness<T: type> { codec: Convert.Codec<T, string, effect fn(string) -> T, effect fn(T) -> string> }
 `)

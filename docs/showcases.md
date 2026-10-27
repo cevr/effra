@@ -1,6 +1,6 @@
 # An effect-native language in practice
 
-Effra's direction is **Go-like directness, algebraic data types, and explicit Effect-style contracts**. A function tells you what it returns, how it can fail and what services it needs. An owning scope tells you who must finish before it can return.
+Ergo's direction is **Go-like directness, algebraic data types, and explicit Effect-style contracts**. A function tells you what it returns, how it can fail and what services it needs. An owning scope tells you who must finish before it can return.
 
 These examples come from reading real Effect application and infrastructure code. They use generic domains and original examples. The [source review](research/effect-native-showcases.md) records the snapshots, comparisons and boundaries.
 
@@ -14,11 +14,11 @@ The [contender roadmap](contender-roadmap.md) turns those patterns into concrete
 | Decoded event types and codecs | Proposed; runtime validation remains essential |
 | Owned replay/live streams | Proposed library and stream support |
 | Durable command processing | Proposed application services, not an automatic language guarantee |
-| Infrastructure outputs and provider graphs | Design exploration; no Effra deployment framework exists |
+| Infrastructure outputs and provider graphs | Design exploration; no Ergo deployment framework exists |
 
 Code below labeled **proposed** remains design notation; the records, enums and match examples in the data section use accepted prototype syntax. Proposed service names describe application ports, not an existing standard library.
 
-| In Effect application code | Effra surface | Obligation that remains |
+| In Effect application code | Ergo surface | Obligation that remains |
 | --- | --- | --- |
 | Effect type parameters, generators and yielded calls | `effect fn`, `raises`, `uses`, `run` | Checked contracts and lazy execution |
 | Context.Service and provider composition | `service`, `impl`, explicit provision | Nominal identity, replaceable behavior and initialization lifetime |
@@ -42,13 +42,13 @@ effect fn welcome(id: string) -> string
 }
 ```
 
-Effect applications express this with service tags, `Effect<A, E, R>`, generator bodies and provider composition. Effra makes the success, failures and dependencies a source contract. Each `run` is an execution boundary; constructing `welcome("42")` is still lazy.
+Effect applications express this with service tags, `Effect<A, E, R>`, generator bodies and provider composition. Ergo makes the success, failures and dependencies a source contract. Each `run` is an execution boundary; constructing `welcome("42")` is still lazy.
 
 The full example supplies three demo providers at the entry point, handles each admitted failure, and prints successful and denied outcomes. It sends no real mail. Omitting a provider produces EF108; omitting an admitted failure from the contract produces EF107. An Access requirement exposes a dependency; the provider must still implement the actual authorization policy.
 
 ```sh
-./bin/ef run examples/workflow.ef
-./bin/ef inspect examples/workflow.ef welcome
+./bin/ergo run examples/workflow.ef
+./bin/ergo inspect examples/workflow.ef welcome
 # queued: Welcome, Ada
 # access denied
 ```
@@ -106,7 +106,7 @@ This representation prevents malformed state combinations. It does not prove tha
 **Proposed.** Stored event payloads, metadata, envelopes and interaction decisions require validation. Native data declarations must preserve runtime decoding at those boundaries.
 
 ```rust
-import Json "effra/json"
+import Json "ergo/json"
 
 enum EventV1 {
     Started { runId: string }
@@ -121,7 +121,7 @@ effect fn receive(body: string) -> EventV1 raises {JsonDecodeFailure} {
 }
 ```
 
-This proposes one declaration for a static sum and an explicitly requested codec, spelled as the codec-plan work ships it (illustrative until that work lands on the main line; `Json` is the bundled `effra/json` module). `derive` is a construct: the compiler fulfils the codec's structural plan from the checked declaration, which no library can do without reflection, so the request is visible syntax rather than a library call with hidden fulfilment ([construct status](specs/language-abstractions.md#construct-status)). The byte and depth bounds are required arguments with no defaults: `maxBodyBytes` is a budget, finite in the first profile, and `maxDepth` is a parser safety cap ([budget choices](specs/standard-library-capabilities.md#budget-choices)). Decode and encode are effect operations with `JsonDecodeFailure` and `JsonEncodeFailure` rows. The codec must validate the discriminator and every payload field before returning EventV1. A cast or a tag check cannot substitute for decoding. Refined identifiers, limits and cross-field validation need explicit validators beyond the string fields shown here.
+This proposes one declaration for a static sum and an explicitly requested codec, spelled as the codec-plan work ships it (illustrative until that work lands on the main line; `Json` is the bundled `ergo/json` module). `derive` is a construct: the compiler fulfils the codec's structural plan from the checked declaration, which no library can do without reflection, so the request is visible syntax rather than a library call with hidden fulfilment ([construct status](specs/language-abstractions.md#construct-status)). The byte and depth bounds are required arguments with no defaults: `maxBodyBytes` is a budget, finite in the first profile, and `maxDepth` is a parser safety cap ([budget choices](specs/standard-library-capabilities.md#budget-choices)). Decode and encode are effect operations with `JsonDecodeFailure` and `JsonEncodeFailure` rows. The codec must validate the discriminator and every payload field before returning EventV1. A cast or a tag check cannot substitute for decoding. Refined identifiers, limits and cross-field validation need explicit validators beyond the string fields shown here.
 
 The wire format also needs a defined discriminator, field names and compatibility policy. V1 is a versioned boundary; changing an enum is not permission to reinterpret stored history. Migration/upcasting remains explicit. No blanket automatic JSON support or TypeScript structural soundness claim follows from having an ADT.
 
@@ -148,7 +148,7 @@ Cancellation remains cooperative. Child failures and cleanup defects remain obse
 
 ## 5. A readable consumer of an owned event stream
 
-**Proposed.** A replay/live stream needs subscription ordering, buffering, duplicate filtering, acknowledgements and overflow handling. Effra could simplify its consumer:
+**Proposed.** A replay/live stream needs subscription ordering, buffering, duplicate filtering, acknowledgements and overflow handling. Ergo could simplify its consumer:
 
 ```rust
 effect fn forward(cursor: i64) -> void
@@ -189,7 +189,7 @@ effect fn submit(command: Command) -> Admission
 
 Journal.admit is an application operation with an explicit contract: validate identity and input; atomically record the command receipt, authoritative events, projections and outbox work; return an existing receipt for an identical retry; reject a conflicting retry. A worker delivers outbox work under stable idempotency keys. Remote delivery may still be at least once unless the receiver deduplicates.
 
-Scopes manage running work and cleanup. They do not supply durable transactions, first-answer-wins, crash recovery or exactly-once side effects. Effra should make the dependency and admission result readable while preserving that service boundary. This proposal combines patterns from the inspected applications; it is not a claim that every source uses this exact storage protocol.
+Scopes manage running work and cleanup. They do not supply durable transactions, first-answer-wins, crash recovery or exactly-once side effects. Ergo should make the dependency and admission result readable while preserving that service boundary. This proposal combines patterns from the inspected applications; it is not a claim that every source uses this exact storage protocol.
 
 ## 7. Infrastructure has a different kind of laziness
 
@@ -223,8 +223,8 @@ effect fn test_greeting() -> void raises {AssertionFailed, Missing} uses {Assert
 }
 ```
 
-Run `ef test examples/testing.ef`. Each case gets a fresh scope and completes child shutdown and cleanup before its result is reported. Assertions report actual/expected values; a failed case does not prevent the next case from running. See [testing contracts](testing.md) for the watchdog and current limits.
+Run `ergo test examples/testing.ef`. Each case gets a fresh scope and completes child shutdown and cleanup before its result is reported. Assertions report actual/expected values; a failed case does not prevent the next case from running. See [testing contracts](testing.md) for the watchdog and current limits.
 
 ## 9. Explain a composition without reading generated code
 
-**Implemented.** `ef graph examples/workflow.ef` exposes requirements, provider implementations, call dependencies and provision boundaries. The same JSON comes from MCP `project.graph`. Recipe nodes include their canonical contracts, so a client can render dependencies or follow incoming edges to find dependents. Configured/dependent provider recipes and their materialized values are represented explicitly; fallible acquisition, lifecycle-safe capture and general memoized sharing remain future work.
+**Implemented.** `ergo graph examples/workflow.ef` exposes requirements, provider implementations, call dependencies and provision boundaries. The same JSON comes from MCP `project.graph`. Recipe nodes include their canonical contracts, so a client can render dependencies or follow incoming edges to find dependents. Configured/dependent provider recipes and their materialized values are represented explicitly; fallible acquisition, lifecycle-safe capture and general memoized sharing remain future work.

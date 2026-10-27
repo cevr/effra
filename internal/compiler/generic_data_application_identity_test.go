@@ -26,7 +26,7 @@ func TestGenericDataApplicationArgumentsAreInvariant(t *testing.T) {
 }
 
 func TestGenericDataExplicitCodecConstructionKeepsCallableFieldVariance(t *testing.T) {
-	const source = `import Convert "effra/conversions"
+	const source = `import Convert "ergo/conversions"
 error DecodeFailure
 error EncodeFailure
 record User {name:string}

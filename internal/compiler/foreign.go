@@ -38,7 +38,7 @@ func (r *Result) ForeignReport(snapshot SourceSnapshot, strict bool, lintUnavail
 		if finding.LSP == nil {
 			severity, lspSeverity := diagnosticSeverity(finding.Severity)
 			report.Diagnostics[index].Severity = severity
-			report.Diagnostics[index].LSP = &LSPDiagnostic{Severity: lspSeverity, Code: finding.Code, Source: "effra", Message: lspMessage(finding.Message, finding.Help)}
+			report.Diagnostics[index].LSP = &LSPDiagnostic{Severity: lspSeverity, Code: finding.Code, Source: "ergo", Message: lspMessage(finding.Message, finding.Help)}
 		}
 	}
 	return report

@@ -140,7 +140,7 @@ func TestGoHostMethodsRejectArgumentLabels(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			source := `import go strings "strings"
-import Data "effra/data"
+import Data "ergo/data"
 effect fn main() -> void uses { Foreign } {
     match run strings.NewReader("abc") {
         Data.Option.None => void,

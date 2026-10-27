@@ -15,7 +15,7 @@ import (
 	"sync"
 	"testing"
 
-	"effra.local/prototype/internal/testinputs"
+	"ergo.local/prototype/internal/testinputs"
 )
 
 var fixture struct {
@@ -47,7 +47,7 @@ func executableName(name string) string {
 func fixturePack(t *testing.T) string {
 	t.Helper()
 	fixture.once.Do(func() {
-		fixture.dir, fixture.err = os.MkdirTemp("", "effra-lint-fixture-")
+		fixture.dir, fixture.err = os.MkdirTemp("", "ergo-lint-fixture-")
 		if fixture.err != nil {
 			return
 		}
@@ -239,11 +239,11 @@ func TestRunRefusesSpawnFailuresAndUnselectedPacks(t *testing.T) {
 
 func TestServeAnswersAnUnsupportedProtocolWithItsOwnVersion(t *testing.T) {
 	var out bytes.Buffer
-	err := Serve(testPack(func(*Pass) error { return nil }), strings.NewReader("EFFRA-LINT 2 2\n{}"), &out)
-	if err == nil || !strings.HasPrefix(out.String(), "EFFRA-LINT 1 ") || !strings.Contains(out.String(), "unsupported protocol version 2") {
+	err := Serve(testPack(func(*Pass) error { return nil }), strings.NewReader("ERGO-LINT 2 2\n{}"), &out)
+	if err == nil || !strings.HasPrefix(out.String(), "ERGO-LINT 1 ") || !strings.Contains(out.String(), "unsupported protocol version 2") {
 		t.Fatalf("%q %v", out.String(), err)
 	}
-	for _, input := range []string{"", "EFFRA-LINT 1 05\n{}", "EFFRA-LINT 1 -2\n{}", "EFFRA-LINT 1 2\n{}x", "EFFRA-LINT 1 9\n{}", "EFFRA-LINT 1 2 extra\n{}"} {
+	for _, input := range []string{"", "ERGO-LINT 1 05\n{}", "ERGO-LINT 1 -2\n{}", "ERGO-LINT 1 2\n{}x", "ERGO-LINT 1 9\n{}", "ERGO-LINT 1 2 extra\n{}"} {
 		if err := Serve(testPack(nil), strings.NewReader(input), &out); err == nil {
 			t.Fatalf("accepted framing %q", input)
 		}

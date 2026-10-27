@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 type opMode int

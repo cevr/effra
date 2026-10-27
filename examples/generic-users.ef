@@ -1,4 +1,4 @@
-import Data "effra/data"
+import Data "ergo/data"
 
 error Unavailable
 record User {

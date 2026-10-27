@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // codecBenchLevels nests the deep cases' records: a LevelK holds two
@@ -33,7 +33,7 @@ const codecBenchGroups = 64
 // ticks and union variants. tickCode fails with Refused on "refuse".
 func codecBenchSource() string {
 	var source strings.Builder
-	source.WriteString(`import Json "effra/json"
+	source.WriteString(`import Json "ergo/json"
 
 error Refused
 
@@ -382,7 +382,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	er "effra.generated/runtime"
+	er "ergo.generated/runtime"
 )
 
 var _ = utf8.ValidString
@@ -612,9 +612,9 @@ const codecBenchAllocSlack = 2
 // codecBenchAllocSlack allocations per pass, the same constant on the deep
 // and wide cases. The deep generated entry also stays within 8 KiB
 // retained and allocated over its one MiB value. ns/op is reported, with
-// the ratio, but not bounded. EFFRA_CODEC_BENCH_COUNT and
-// EFFRA_CODEC_BENCH_TIME override -count (default 10) and -benchtime
-// (default 50ms); EFFRA_CODEC_BENCH_OUT receives the table.
+// the ratio, but not bounded. ERGO_CODEC_BENCH_COUNT and
+// ERGO_CODEC_BENCH_TIME override -count (default 10) and -benchtime
+// (default 50ms); ERGO_CODEC_BENCH_OUT receives the table.
 func TestCodecGeneratedGoEncodeMatchesHandWrittenControl(t *testing.T) {
 	t.Parallel()
 	r := CompileFor(codecBenchSource(), "go")
@@ -660,7 +660,7 @@ func TestCodecGeneratedGoEncodeMatchesHandWrittenControl(t *testing.T) {
 		}
 		return dir
 	}
-	count, benchtime := os.Getenv("EFFRA_CODEC_BENCH_COUNT"), os.Getenv("EFFRA_CODEC_BENCH_TIME")
+	count, benchtime := os.Getenv("ERGO_CODEC_BENCH_COUNT"), os.Getenv("ERGO_CODEC_BENCH_TIME")
 	if count == "" {
 		count = "10"
 	}
@@ -715,7 +715,7 @@ func TestCodecGeneratedGoEncodeMatchesHandWrittenControl(t *testing.T) {
 		fmt.Fprintf(&table, "%-12s ns/op ratio generated/control %.3f\n", name, metric(name, "generated", "ns/op").median()/metric(name, "control", "ns/op").median())
 	}
 	t.Log("\n" + table.String())
-	if path := os.Getenv("EFFRA_CODEC_BENCH_OUT"); path != "" {
+	if path := os.Getenv("ERGO_CODEC_BENCH_OUT"); path != "" {
 		if err := os.WriteFile(path, []byte(table.String()+"\n"+string(output)), 0o600); err != nil {
 			t.Fatal(err)
 		}

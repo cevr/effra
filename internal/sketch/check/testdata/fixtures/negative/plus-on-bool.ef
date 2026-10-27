@@ -1,5 +1,5 @@
 package demo
 
-func main() uses Console {
+func main() needs Console {
 	Console.Println(true + false) // want S108
 }

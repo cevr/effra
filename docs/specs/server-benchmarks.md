@@ -6,7 +6,7 @@ Status: implementation authorized by the owner on 2026-10-05. This extends the p
 
 ## Question and scope
 
-How does an Effra native server compare with equivalent TypeScript/Effect, native TypeScript and optimized Go servers? The native target is accepted only when a matched Effra application meets or exceeds optimized idiomatic Go with the same guarantees; measure the cost of those guarantees separately from host runtime differences. Go lowering must pursue every material measurable lowering or specialization opportunity, including match dispatch and generated effect-runtime paths, while retaining the userland contract. TypeScript/Effect and native TypeScript cohorts may stay as external reference measurements; they are no longer Effra targets. Use generic original fixtures; public documentation must not name inspected application projects.
+How does an Ergo native server compare with equivalent TypeScript/Effect, native TypeScript and optimized Go servers? The native target is accepted only when a matched Ergo application meets or exceeds optimized idiomatic Go with the same guarantees; measure the cost of those guarantees separately from host runtime differences. Go lowering must pursue every material measurable lowering or specialization opportunity, including match dispatch and generated effect-runtime paths, while retaining the userland contract. TypeScript/Effect and native TypeScript cohorts may stay as external reference measurements; they are no longer Ergo targets. Use generic original fixtures; public documentation must not name inspected application projects.
 
 The path-routing server remains a transport control. The required framework receipt follows the [native server contract](native-server-contracts.md): checked JSON codecs, actual Effect HttpApi HTTP endpoints and RpcServer unary RPC, matched typed failures, limits, cancellation and completed shutdown. External databases and streams remain subsequent workloads. A constant response or transport-only control cannot establish framework-level benefits.
 
@@ -14,11 +14,11 @@ The path-routing server remains a transport control. The required framework rece
 
 - Keep protocol, routes, response bytes, application inputs and observable failure behavior identical. Verify every route and failure case before load testing; reject responses with incorrect status/body rather than counting them as successful throughput.
 - Include a minimal routing control and a service workflow with meaningful per-request computation/composition. Separate successful and handled-failure paths. Avoid hidden unequal I/O, response caches, repeated runtime construction or allocation work.
-- Use Effra's default native Go executable, pinned Effect for TypeScript/Effect, native TypeScript as a runtime-overhead control, and a carefully optimized idiomatic Go implementation. Document connection, server-limit and concurrency settings and retain the same validation, failure/service rows, ownership, cancellation and completed cleanup in every scored cohort.
+- Use Ergo's default native Go executable, pinned Effect for TypeScript/Effect, native TypeScript as a runtime-overhead control, and a carefully optimized idiomatic Go implementation. Document connection, server-limit and concurrency settings and retain the same validation, failure/service rows, ownership, cancellation and completed cleanup in every scored cohort.
 - The strongest comparable Go baseline must preserve cancellation, request ownership and completed shutdown. A weaker lean baseline may be reported separately as a lower-bound overhead control, with its missing guarantees visible.
 - Source fixtures must remain readable and inspectable. Do not benchmark compiler internals while labeling the result server performance. Optimize all fixtures fairly, preserve correctness, and keep optimization changes reviewable.
 
-When an abstraction or lowering is part of the comparison, pair the Effra
+When an abstraction or lowering is part of the comparison, pair the Ergo
 candidate with semantically equivalent explicit Go and TypeScript/Effect
 programs. Preserve the same validation, failure/service rows, ownership,
 cancellation and completed cleanup before comparing runtime, allocation or
@@ -44,7 +44,7 @@ Use one load generator and workload for every target. Warm servers before sampli
 
 Report single-core comparisons separately from multi-core scaling. A Go runtime using several cores cannot be compared to one JS event loop without saying so; a worker configuration needs its own receipt. Include server CPU and memory observations with their collection method and limits. Measure startup-to-readiness and cancellation-to-exit/cleanup separately from steady-state request latency.
 
-Keep build measurements separate: Effra parse/check/import/emission, Go compilation/linking, TS checking/transformation and cache state. A warm Go cache or TypeScript execution without type checking must not masquerade as equal build work. Report raw repeated samples and summary statistics; do not infer a universal benefit or statistically meaningful win from noise.
+Keep build measurements separate: Ergo parse/check/import/emission, Go compilation/linking, TS checking/transformation and cache state. A warm Go cache or TypeScript execution without type checking must not masquerade as equal build work. Report raw repeated samples and summary statistics; do not infer a universal benefit or statistically meaningful win from noise.
 
 Include generated-code scaling alongside server builds: many ordinary small functions and one long straight-line effectful function must have separate emitted-source, frontend and backend receipts. The scheduler's 1024-signal regression exposed a generated-Go watchdog that includes compilation; the implementation owner reported a roughly 60-second build followed by millisecond execution, without retaining that diagnostic artifact. Reproduce under admitted host/cache conditions before attributing it to lowering or Go optimization. Preserve generated source, binary identity and raw stage logs. A fast frontend or warm build cannot hide a slow fresh backend, and shortening the regression program or extending its timeout is not a compile-speed improvement.
 
@@ -54,6 +54,6 @@ A subsequent [retained diagnostic](../research/generated-go-build-cost.md) obser
 
 - Runnable versioned fixtures and a reproducible local benchmark command produce machine-readable raw samples and a concise report.
 - Functional and owned-shutdown conformance pass before performance measurements; failed/forced-cleanup runs remain failures.
-- Both minimal and service-workflow workloads execute against TypeScript/Effect, native TypeScript, Effra and optimized Go with comparable settings.
+- Both minimal and service-workflow workloads execute against TypeScript/Effect, native TypeScript, Ergo and optimized Go with comparable settings.
 - Results distinguish runtime, lifecycle guarantees, compiler/build cost and workload scope. Claim meeting or exceeding optimized Go only if a repeatable matched result supports it; retain slower/equal results honestly. JS claims must identify the measured lowering/specialization and preserve losing candidates and cold/warm regressions.
 - Independent review checks equivalence and measurement attribution. The repository gate passes and benchmark artifacts do not contain machine secrets or production data.

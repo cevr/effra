@@ -558,18 +558,18 @@ func ownershipNativeTruth(t *testing.T, r *Result) string {
 
 // TestOwnershipMatrixDump writes every generated program (in generator
 // order, with the generator's oracle) and every hand probe (with its recorded
-// truth) to $EFFRA_OWNERSHIP_DUMP/programs.json, for scripts/ownership_truth.py
-// to execute. $EFFRA_OWNERSHIP_FIXTURE names the file the programs open. It
+// truth) to $ERGO_OWNERSHIP_DUMP/programs.json, for scripts/ownership_truth.py
+// to execute. $ERGO_OWNERSHIP_FIXTURE names the file the programs open. It
 // is skipped unless the directory is set; it needs no truth.json, which the
 // script regenerates.
 func TestOwnershipMatrixDump(t *testing.T) {
-	dir := os.Getenv("EFFRA_OWNERSHIP_DUMP")
+	dir := os.Getenv("ERGO_OWNERSHIP_DUMP")
 	if dir == "" {
-		t.Skip("EFFRA_OWNERSHIP_DUMP not set")
+		t.Skip("ERGO_OWNERSHIP_DUMP not set")
 	}
-	fixture := os.Getenv("EFFRA_OWNERSHIP_FIXTURE")
+	fixture := os.Getenv("ERGO_OWNERSHIP_FIXTURE")
 	if fixture == "" {
-		t.Fatal("EFFRA_OWNERSHIP_FIXTURE not set")
+		t.Fatal("ERGO_OWNERSHIP_FIXTURE not set")
 	}
 	type row struct {
 		Set    string `json:"set"`

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/sketch/sketchtest"
+	"ergo.local/prototype/internal/sketch/sketchtest"
 )
 
 // TestMalformed: every malformed input is a located S001 on its line, never
@@ -42,6 +42,37 @@ func TestMalformed(t *testing.T) {
 	}
 }
 
+// TestUsesIsAnIdentifier (#217): `uses` is not a keyword and has no
+// compatibility path (owner, 2026-10-27: "We don't need to give backwards
+// compatible syntax parsing. This is still a prototype"). It is an ordinary
+// name, so the old spelling of a needs clause gets the plain S001 any stray
+// identifier gets, never a dedicated hint.
+func TestUsesIsAnIdentifier(t *testing.T) {
+	for _, c := range []struct {
+		src, message string
+		line, column int
+	}{
+		// `uses` parses as the result type, so the error is at A.
+		{"package p\nfunc f() uses A {}\n", `expected end of declaration, found "A"`, 2, 15},
+		{"package p\nwire W uses A {\n}\n", `expected "{", found "uses"`, 2, 8},
+	} {
+		_, err := Parse(c.src)
+		var e *Error
+		if !errors.As(err, &e) || e.Code != CodeSyntax || e.Message != c.message || e.Line != c.line || e.Column != c.column {
+			t.Errorf("%q: got %v, want %d:%d S001 %s", c.src, err, c.line, c.column, c.message)
+		}
+	}
+	if _, err := Parse("package p\n\nvar uses = 1\n"); err != nil {
+		t.Fatalf("uses is not a name: %v", err)
+	}
+	// needs and provides are keywords, so neither is a name.
+	for _, word := range []string{"needs", "provides"} {
+		if _, err := Parse("package p\n\nvar " + word + " = 1\n"); err == nil {
+			t.Fatalf("%s is a name", word)
+		}
+	}
+}
+
 // TestRefusedForms: Go forms outside the language, and ambiguities that
 // must resolve one way, each give S001 with a message naming the problem.
 func TestRefusedForms(t *testing.T) {
@@ -60,8 +91,8 @@ func TestRefusedForms(t *testing.T) {
 		{"local type", "package p\nfunc f() {\n\ttype T struct{}\n}\n", "package level"},
 		{"catch default", "package p\nfunc f() {\n\tx := g() catch {\n\tdefault:\n\t}\n}\n", "default is not allowed"},
 		{"error row as a parameter", "package p\nfunc f(e error[E]) {}\n", "result list"},
-		{"paren uses on a declaration", "package p\nfunc f() uses (A, B) {}\n", "inside a list"},
-		{"unparenthesised uses in a list", "package p\nfunc f(g func() uses A, B) {}\n", "parameter type"},
+		{"paren needs on a declaration", "package p\nfunc f() needs (A, B) {}\n", "inside a list"},
+		{"unparenthesised needs in a list", "package p\nfunc f(g func() needs A, B) {}\n", "parameter type"},
 		{"variadic result", "package p\nfunc f() (...int) {}\n", "variadic"},
 		{"variadic not last", "package p\nfunc f(a ...int, b int) {}\n", "variadic"},
 		{"if header newline", "package p\nfunc f() {\n\tif x\n\t{\n\t}\n}\n", "newline"},
@@ -169,7 +200,7 @@ func TestAdmittedForms(t *testing.T) {
 		t.Fatalf("params %#v", params)
 	}
 	// Bodiless declaration and the go import.
-	f := parse("package p\nimport (\n\tgo \"net/url\"\n\t. \"html\"\n)\n//ef:go net/url.Parse\nfunc parse(raw string) (url.URL, error[go.Error]) uses go.Foreign\n")
+	f := parse("package p\nimport (\n\tgo \"net/url\"\n\t. \"html\"\n)\n//ef:go net/url.Parse\nfunc parse(raw string) (url.URL, error[go.Error]) needs go.Foreign\n")
 	imp := f.Decls[0].(*ImportDecl)
 	if imp.Specs[0].Kind != ImportGo || imp.Specs[1].Kind != ImportDot {
 		t.Fatal("import kinds")
@@ -181,13 +212,28 @@ func TestAdmittedForms(t *testing.T) {
 	if _, ok := fn.Type.Results.List[1].Type.(*ErrorRow); !ok {
 		t.Fatal("error row")
 	}
-	// uses (A, B) in a function type inside a parameter list.
-	run := parse("package p\nfunc run(f func() uses (A, B), g func() uses R) uses A, B, R {}\n").Decls[0].(*FuncDecl)
-	if u := run.Type.Params.List[0].Type.(*FuncType).Uses; len(u.Names) != 2 || !u.Lparen.IsValid() {
-		t.Fatal("parenthesised uses")
+	// needs (A, B) in a function type inside a parameter list.
+	run := parse("package p\nfunc run(f func() needs (A, B), g func() needs R) needs A, B, R {}\n").Decls[0].(*FuncDecl)
+	if u := run.Type.Params.List[0].Type.(*FuncType).Needs; len(u.Names) != 2 || !u.Lparen.IsValid() {
+		t.Fatal("parenthesised needs")
 	}
-	if len(run.Type.Uses.Names) != 3 {
-		t.Fatal("declaration uses")
+	if len(run.Type.Needs.Names) != 3 {
+		t.Fatal("declaration needs")
+	}
+	// A wire header: provides, needs, both in that order, or neither.
+	wires := parse("package p\nwire A provides X, y.Y {\n\tS = M{}\n}\nwire B needs C {\n\tS = M{}\n}\nwire D provides X needs C, E {\n\tS = M{}\n}\nwire F {\n\tS = M{}\n}\n").Decls
+	for i, want := range []struct{ provides, needs int }{{2, 0}, {0, 1}, {1, 2}, {0, 0}} {
+		w := wires[i].(*WireDecl)
+		provides, needs := 0, 0
+		if w.Provides != nil {
+			provides = len(w.Provides.Names)
+		}
+		if w.Needs != nil {
+			needs = len(w.Needs.Names)
+		}
+		if provides != want.provides || needs != want.needs {
+			t.Fatalf("wire %s: provides %d, needs %d; want %d and %d", w.Name.Name, provides, needs, want.provides, want.needs)
+		}
 	}
 	// Grouped struct fields, several wire keys, an unconstrained parameter.
 	g := parse("package p\ntype P[T] struct {\n\tA, B T\n}\nwire W {\n\tC, D = X{}\n\treplace E = Y{}\n\tShared\n}\n")

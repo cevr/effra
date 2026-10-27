@@ -5,7 +5,7 @@ import (
 	"go/token"
 	"math"
 
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // representable checks that a constant fits the basic type t (constant

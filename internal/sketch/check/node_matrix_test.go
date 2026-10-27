@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/sketch/check"
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/check"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // nodePrelude declares what the matrix programs share. Its names are

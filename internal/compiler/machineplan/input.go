@@ -9,7 +9,7 @@ package machineplan
 // prepare (because preparing it would have exceeded what analysis could
 // afford) is refused with EF142 when analysis reaches it, never guessed.
 
-import "effra.local/prototype/internal/compiler/machineplan/shared"
+import "ergo.local/prototype/internal/compiler/machineplan/shared"
 
 // Row is a failure or service row: the checker's interned labels, shared
 // read-only. Analysis can read and copy a row but cannot write it: the field

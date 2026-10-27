@@ -2,7 +2,7 @@
 // handler that reads the Malformed payload, records it through a service and
 // raises the domain failure. Recovery removes Malformed and adds exactly the
 // handler's InvalidAge failure and Audit requirement.
-import Convert "effra/conversions"
+import Convert "ergo/conversions"
 
 error Malformed {
     input: string

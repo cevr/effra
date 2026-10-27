@@ -1,4 +1,4 @@
-// Package lint is the public Go SDK for Effra custom lint rules.
+// Package lint is the public Go SDK for Ergo custom lint rules.
 //
 // A rule reads a versioned, read-only Snapshot of canonical compiler facts
 // and reports findings. Facts carry resolved declaration identities, nominal
@@ -17,7 +17,7 @@ import "slices"
 // Additive optional fields keep the version; any change in the meaning or
 // shape of an existing field increments it.
 const (
-	FactSchemaName    = "effra.lint.facts"
+	FactSchemaName    = "ergo.lint.facts"
 	FactSchemaVersion = 1
 )
 

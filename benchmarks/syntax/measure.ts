@@ -79,7 +79,7 @@ const ownedFork = new Set(["H"]);
 //   q11       library once receiver methods (#127), whole-value type
 //             parameters (#128 Q9) and the closed-at-the-edge recipe-parameter
 //             contract (#128 Q11, not yet shown: 0 of 29) land, as ordinary
-//             Effra over a construct or as a declared-contract primitive.
+//             Ergo over a construct or as a declared-contract primitive.
 //   rows      library once the rows units land (#126 F3b, #131 catch,
 //             #132 provide, #133 recover), using the shown in-place half of
 //             the recipe-parameter contract.

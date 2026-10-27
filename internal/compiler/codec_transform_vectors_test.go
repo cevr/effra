@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // The transformation vectors extend the structural policy vectors with
 // transform nodes. Each node names a target-neutral behavior that the Go
 // harness implements and the pinned Effect comparator implemented when its
-// frozen output was recorded; every expectation is an Effra outcome.
+// frozen output was recorded; every expectation is an Ergo outcome.
 type codecTransformDocument struct {
 	SchemaVersion int    `json:"schemaVersion"`
 	Profile       string `json:"profile"`
@@ -61,9 +61,9 @@ func runCodecTransformVectorsGo(t *testing.T, document codecTransformDocument) m
 	return results
 }
 
-// codecTransformComparison classifies an Effra outcome against the
+// codecTransformComparison classifies an Ergo outcome against the
 // comparator line. A step failure matches a Schema failure with the same
-// message; Effra returns the step's failure unchanged and so reports no
+// message; Ergo returns the step's failure unchanged and so reports no
 // codec path for it. Structural outcomes use the structural rules.
 func codecTransformComparison(expect codecOutcome, effect codecEffectLine) string {
 	if expect.Step != "" {
@@ -77,7 +77,7 @@ func codecTransformComparison(expect codecOutcome, effect codecEffectLine) strin
 
 // TestCodecTransformVectorsAcrossGoJSAndEffect executes every transformation
 // vector on the native Go engine, with the same obligations as the structural
-// vectors: Go produces the Effra outcome, and each recorded comparison is
+// vectors: Go produces the Ergo outcome, and each recorded comparison is
 // what the frozen pinned Effect Schema output implies.
 func TestCodecTransformVectorsAcrossGoJSAndEffect(t *testing.T) {
 	root := filepath.Join("..", "..")

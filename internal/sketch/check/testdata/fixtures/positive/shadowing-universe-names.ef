@@ -2,7 +2,7 @@ package demo
 
 type Item struct{ ID string }
 
-func main() uses Console {
+func main() needs Console {
 	Item := Item{ID: "ok"}
 	string := "shadow"
 	Scheduler := 1

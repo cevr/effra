@@ -1,7 +1,7 @@
 package check
 
 import (
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // checkTypeDecls checks what a type declaration states beyond its body: a

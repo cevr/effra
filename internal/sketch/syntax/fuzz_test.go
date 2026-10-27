@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/sketch/sketchtest"
+	"ergo.local/prototype/internal/sketch/sketchtest"
 )
 
 // FuzzParse: Parse never panics, and every error is a located S001 whose

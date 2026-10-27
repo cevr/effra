@@ -337,9 +337,9 @@ func (r *Result) DiagnosticReportWith(snapshot SourceSnapshot, strict bool, pack
 		hasSourceSpan := span.Offset != 0 || span.Length != 0 || span.Line != 0 || span.Column != 0
 		if location, ok := positionIndex.rangeFor(snapshot.Text, span); hasSourceSpan && ok {
 			finding.LocationAvailable = true
-			finding.LSP = &LSPDiagnostic{Range: location, Severity: lspSeverity, Code: code, Source: "effra", Message: lspMessage(message, help)}
+			finding.LSP = &LSPDiagnostic{Range: location, Severity: lspSeverity, Code: code, Source: "ergo", Message: lspMessage(message, help)}
 		} else if code == lintRunnerCode && !hasSourceSpan {
-			finding.LSP = &LSPDiagnostic{Severity: lspSeverity, Code: code, Source: "effra", Message: message}
+			finding.LSP = &LSPDiagnostic{Severity: lspSeverity, Code: code, Source: "ergo", Message: message}
 		}
 		if finding.Origin == "compiler" || len(related) > 0 {
 			finding.Related = append([]RelatedLocation{}, related...)

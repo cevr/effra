@@ -12,7 +12,7 @@ import (
 
 // environmentPolicy versions how a pack's process environment is chosen
 // and qualified; it is part of every execution identity.
-const environmentPolicy = "effra.lint.environment/1"
+const environmentPolicy = "ergo.lint.environment/1"
 
 // systemRoot is the variable a Windows process needs to start at all. The
 // runner supplies it from the host even to a pack that selects nothing,
@@ -162,7 +162,7 @@ func (e processEnvironment) entries() []string {
 	return entries
 }
 
-// names lists the variable names, in canonical order. Effra reports names
+// names lists the variable names, in canonical order. Ergo reports names
 // and an opaque digest, never values.
 func (e processEnvironment) names() []string {
 	names := []string{}

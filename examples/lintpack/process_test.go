@@ -11,8 +11,8 @@ import (
 	"runtime"
 	"testing"
 
-	"effra.local/prototype/internal/compiler"
-	"effra.local/prototype/lint"
+	"ergo.local/prototype/internal/compiler"
+	"ergo.local/prototype/lint"
 )
 
 // The built policy-lint program, run over the process protocol on real

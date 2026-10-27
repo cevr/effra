@@ -21,6 +21,6 @@ func lookup(id string) string {
 	return v
 }
 
-func main() uses Console {
+func main() needs Console {
 	Console.Println(lookup("7"))
 }

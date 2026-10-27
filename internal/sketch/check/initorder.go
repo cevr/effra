@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // initDeps records, for each package-level body (a function, a method or a

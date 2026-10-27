@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"effra.local/prototype/internal/sketch/check"
+	"ergo.local/prototype/internal/sketch/check"
 )
 
 // reviewCases reproduce the round-1 review probes (round-1-findings.md) and
@@ -152,7 +152,7 @@ type B interface { N() }
 type S struct{}
 func (S) M() {}
 func (S) N() {}
-func Make() B uses A { A.M(); return S{} }
+func Make() B needs A { A.M(); return S{} }
 wire W { A = S{}; B = Make() }
 func F() { with(W) { B.N() } }`},
 	{"M14", "named-wire-internal-cycle", "S108", `type A interface { M() }
@@ -160,21 +160,21 @@ type B interface { N() }
 type S struct{}
 func (S) M() {}
 func (S) N() {}
-func MakeA() A uses B { B.N(); return S{} }
-func MakeB() B uses A { A.M(); return S{} }
+func MakeA() A needs B { B.N(); return S{} }
+func MakeB() B needs A { A.M(); return S{} }
 wire W { A = MakeA(); B = MakeB() }
 func F() { with(W) { B.N() } }`},
 	{"M14", "named-wire-caller-capability", "S102", `type A interface { M() }
 type B interface { N() }
 type S struct{}
 func (S) N() {}
-func Make() B uses A { A.M(); return S{} }
+func Make() B needs A { A.M(); return S{} }
 wire W { B = Make() }
-func F() uses A { with(W) { B.N() } }`},
+func F() needs A { with(W) { B.N() } }`},
 	{"M14", "named-wire-self-cycle", "S108", `type A interface { M() }
 type S struct{}
 func (S) M() {}
-func MakeA() A uses A { A.M(); return S{} }
+func MakeA() A needs A { A.M(); return S{} }
 wire W { A = MakeA() }
 func F() { with(W) { A.M() } }`},
 	{"M14", "named-wire-three-cycle", "S108", `type A interface { M() }
@@ -184,17 +184,17 @@ type S struct{}
 func (S) M() {}
 func (S) N() {}
 func (S) O() {}
-func MakeA() A uses C { C.O(); return S{} }
-func MakeB() B uses A { A.M(); return S{} }
-func MakeC() C uses B { B.N(); return S{} }
+func MakeA() A needs C { C.O(); return S{} }
+func MakeB() B needs A { A.M(); return S{} }
+func MakeC() C needs B { B.N(); return S{} }
 wire W { A = MakeA(); B = MakeB(); C = MakeC() }
 func F() { with(W) { B.N() } }`},
-	{"M14", "named-wire-uses-embedded", "", `type A interface { M() }
+	{"M14", "named-wire-needs-embedded", "", `type A interface { M() }
 type B interface { N() }
 type S struct{}
 func (S) M() {}
 func (S) N() {}
-func Make() B uses A { A.M(); return S{} }
+func Make() B needs A { A.M(); return S{} }
 wire Base { A = S{} }
 wire W { Base; B = Make() }
 func F() { with(W) { B.N() } }`},
@@ -203,7 +203,7 @@ type B interface { N() }
 type S struct{}
 func (S) M() {}
 func (S) N() {}
-func Make() B uses A { A.M(); return S{} }
+func Make() B needs A { A.M(); return S{} }
 func F() { with(wire{ A = S{}; B = Make() }) { B.N() } }`},
 	{"M15", "main-through-alias", "S113", `func main() {}
 func F() { run := main; run() }`},

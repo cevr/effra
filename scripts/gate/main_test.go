@@ -401,10 +401,10 @@ func TestCheckoutIdentityNamesHeadTreeAndCleanliness(t *testing.T) {
 
 func TestEnvironmentInputsAreInputs(t *testing.T) {
 	root := fixture(t)
-	inputs := &Inputs{Paths: []string{"src/"}, Env: []string{"EFFRA_GATE_ENV_INPUT"}}
-	t.Setenv("EFFRA_GATE_ENV_INPUT", "1")
+	inputs := &Inputs{Paths: []string{"src/"}, Env: []string{"ERGO_GATE_ENV_INPUT"}}
+	t.Setenv("ERGO_GATE_ENV_INPUT", "1")
 	set := keyOf(t, root, inputs)
-	os.Unsetenv("EFFRA_GATE_ENV_INPUT")
+	os.Unsetenv("ERGO_GATE_ENV_INPUT")
 	if keyOf(t, root, inputs) == set {
 		t.Fatal("a declared environment variable did not join the key")
 	}

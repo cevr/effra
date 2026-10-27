@@ -1,4 +1,4 @@
-// Package hosttypes is an ordinary Go package, independent of Effra, whose
+// Package hosttypes is an ordinary Go package, independent of Ergo, whose
 // exported declarations exercise native host types, nullable results and
 // complete return tuples.
 package hosttypes
@@ -184,7 +184,7 @@ func DynamicType(value any) string { return fmt.Sprintf("%T", value) }
 // Sum has a value receiver: both Point and *Point method sets contain it.
 func (p Point) Sum() int64 { return p.X + p.Y }
 
-// Grow has a pointer receiver: a Point value is not addressable from Effra.
+// Grow has a pointer receiver: a Point value is not addressable from Ergo.
 func (p *Point) Grow() { p.X++ }
 
 // Increment has a pointer receiver: only *Counter can call it, and it
@@ -254,7 +254,7 @@ func (s *Sink) Report() string {
 // Join is variadic.
 func Join(parts ...string) string { return strings.Join(parts, "") }
 
-// Narrow uses a fixed width Effra does not admit.
+// Narrow uses a fixed width Ergo does not admit.
 func Narrow(value int32) int32 { return value }
 
 // Identity is generic.

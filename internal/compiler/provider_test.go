@@ -75,7 +75,7 @@ func TestProviderCaptureAgreesAcrossGoAndJS(t *testing.T) {
 		"go.mod":  []byte(r.ModuleFile()),
 		"main.go": []byte(goSource),
 		"provider_test.go": []byte(`package main
-import ("testing"; "fmt"; er "effra.generated/runtime")
+import ("testing"; "fmt"; er "ergo.generated/runtime")
 
 func TestProviderInvocationUsesCurrentOwnerAndCancellation(t *testing.T) {
   out := er.Run(func(construction *er.FiberContext) er.Exit[struct{}] {

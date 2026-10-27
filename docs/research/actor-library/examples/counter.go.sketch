@@ -1,0 +1,30 @@
+// Label: Proposed. Route 1: the counter as a caller of the library actor
+// package. Hand-lowered in prototypes/actorlib/examples/counter.go.
+package counter
+
+import "actor"
+
+type CounterMsg interface{ Inc | Get }
+
+type Inc struct{ By int64 }
+type Get struct{ Reply actor.Reply[int64] }
+
+func count(n int64, m CounterMsg) actor.Next[int64] {
+	switch m := m.(type) {
+	case Inc:
+		return actor.Continue(n + m.By)
+	case Get:
+		m.Reply.Send(n)
+		return actor.Continue(n)
+	}
+}
+
+func Count(c actor.Address[CounterMsg]) (int64, error[actor.Stopped | actor.NoReply]) {
+	return actor.Ask(c, func(r actor.Reply[int64]) CounterMsg { return Get{r} })
+}
+
+func main() error[actor.Stopped | actor.NoReply] needs Console {
+	c := actor.Start(0, 64, count)
+	try c.Send(Inc{By: 2})
+	Console.Println(try Count(c.Address()))
+}

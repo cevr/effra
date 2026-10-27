@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/producer"
-	lintsdk "effra.local/prototype/lint"
+	"ergo.local/prototype/internal/producer"
+	lintsdk "ergo.local/prototype/lint"
 )
 
 const lintFactSource = `error Denied
@@ -214,7 +214,7 @@ func TestLintRegistryReservesBuiltinRules(t *testing.T) {
 			t.Fatalf("%s: %+v", rule.Name, entry)
 		}
 	}
-	for _, document := range []string{`{"version":1,"rules":{"invalid-suppression":"off"}}`, `{"version":1,"rules":{"no-such-rule":"error"}}`, `{"version":1,"rules":{"effra/unused-recipe":"error"}}`} {
+	for _, document := range []string{`{"version":1,"rules":{"invalid-suppression":"off"}}`, `{"version":1,"rules":{"no-such-rule":"error"}}`, `{"version":1,"rules":{"ergo/unused-recipe":"error"}}`} {
 		config, _ := lintsdk.ParseConfig([]byte(document))
 		if _, problems := registry.Configure(config); len(problems) != 1 {
 			t.Fatalf("%s accepted: %+v", document, problems)
@@ -345,7 +345,7 @@ func TestBuiltinLintHasNoCustomOutputLimit(t *testing.T) {
 		var source strings.Builder
 		source.WriteString("effect fn task() -> void { void }\neffect fn main() -> void {\n")
 		if suppressed {
-			source.WriteString("// effra-lint-disable-next-line redundant-provision -- deliberately redundant\n")
+			source.WriteString("// ergo-lint-disable-next-line redundant-provision -- deliberately redundant\n")
 		}
 		for range count {
 			source.WriteString("run task().provide<Console>(Stdout)\n")

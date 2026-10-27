@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-const annotationFixture = `import Data "effra/data"
+const annotationFixture = `import Data "ergo/data"
 error Missing { id: string }
 error E
 record Box { value: string }
@@ -42,7 +42,7 @@ func TestTypeAnnotationsAndRowLabelsSelectCheckedDeclarations(t *testing.T) {
 		{"Wrap<Box: type>", "Box", "declaration", "typeParameter", "Wrap", "Wrap<Box", "Box", "type parameter Wrap.Box: type"},
 		{"inner: Box", "Box", "reference", "typeParameter", "Wrap", "Wrap<Box", "Box", "type parameter Wrap.Box: type"},
 		// Qualified bundled applications keep their alias and nested arguments.
-		{"box: Data.Option<Box>", "Data", "reference", "module", "", "import Data", "Data", `import Data "effra/data"`},
+		{"box: Data.Option<Box>", "Data", "reference", "module", "", "import Data", "Data", `import Data "ergo/data"`},
 		{"box: Data.Option<Box>", "Option", "reference", "enum", "", "", "", "enum Option<T: type> { None, Some { value: T } }"},
 		{"box: Data.Option<Box>", "Box", "reference", "record", "", "record Box", "Box", "record Box { value: string }"},
 		// Callable annotations bind parameters, results and row labels.

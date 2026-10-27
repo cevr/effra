@@ -374,7 +374,7 @@ effect fn main() -> void raises { IoError } {
 	runGenericDataNative(t, safe, "scoped file read complete\n\n")
 }
 
-// An error name that a host language reserves is an ordinary Effra name.
+// An error name that a host language reserves is an ordinary Ergo name.
 func TestRecoveryPayloadNamesAdmitHostReservedWords(t *testing.T) {
 	for _, name := range []string{"class", "type", "from", "await"} {
 		source := "error " + name + " { reason: string }\neffect fn main() -> void { void }\n"

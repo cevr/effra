@@ -1,15 +1,15 @@
-# Effra glossary
+# Ergo glossary
 
-Effra is "Effect for Go": a Go-shaped language whose compiler checks Effect's guarantees (typed failures, explicit dependencies, structured concurrency, completed cleanup) and emits Go. Go is the only target (owner, 2026-10-26). The normative rules are in [`docs/spec/`](docs/spec/README.md). Every domain term is defined only here; the spec files state rules and link to these definitions.
+Ergo is "Effect for Go": a Go-shaped language whose compiler checks Effect's guarantees (typed failures, explicit dependencies, structured concurrency, completed cleanup) and emits Go. Go is the only target (owner, 2026-10-26). The normative rules are in [`docs/spec/`](docs/spec/README.md). Every domain term is defined only here; the spec files state rules and link to these definitions.
 
 The sections are:
 - **Language**: the Go-shaped language of `docs/spec/`.
 - **Constructs, contracts and laws**: how constructs are admitted, and the vocabulary of laws and evidence.
 - **Runtime and providers**: tasks, interruption, exits and lawful providers.
-- **Earlier `.ef` language**: terms of the language that `internal/compiler` implements today. They stay in force for that compiler until [#205](https://github.com/cevr/effra/issues/205) retires it.
+- **Earlier `.ef` language**: terms of the language that `internal/compiler` implements today. They stay in force for that compiler until [#205](https://github.com/cevr/ergo/issues/205) retires it.
 - **Tooling and testing**.
 
-A status in parentheses applies to the term's support: *checked* (the 2026 checker `internal/sketch/check`, [#196](https://github.com/cevr/effra/issues/196), checks it; building may still need [#50](https://github.com/cevr/effra/issues/50)), *implemented in prototype* (`prototypes/sketch9`), *designed* (decided, not implemented), or, in the earlier-language section, the earlier labels.
+A status in parentheses applies to the term's support: *checked* (the 2026 checker `internal/sketch/check`, [#196](https://github.com/cevr/ergo/issues/196), checks it; building may still need [#50](https://github.com/cevr/ergo/issues/50)), *implemented in prototype* (`prototypes/sketch9`), *designed* (decided, not implemented), or, in the earlier-language section, the earlier labels.
 
 ## Language
 
@@ -25,7 +25,7 @@ A status in parentheses applies to the term's support: *checked* (the 2026 check
 
 **Constructor** (designed): An ordinary function named as a `wire` entry, such as `Orders = OpenPostgres`. Its requirements are satisfied from the same wire, and its failures become startup failures of the `with` that builds it.
 
-**Captured provider** (designed): A provider that holds the capabilities its constructor used. Its methods use them without a `uses` clause of their own.
+**Captured provider** (designed): A provider that holds the capabilities its constructor used. Its methods use them without a `needs` clause of their own.
 
 **Prelude**: The names in scope in every package without an import: `Option`, `Task`, `Decision`, `Clock`, `Scheduler`, `Random` and `Console`.
 
@@ -35,7 +35,7 @@ A status in parentheses applies to the term's support: *checked* (the 2026 check
 
 **Error row** (checked): The set of error types a function may fail with, written `error[A | B]` in its result. Order and repetition carry no meaning.
 
-**Capability row** (checked): The set of capabilities a caller must supply, written `uses A, B` after a signature. Also called the `uses` row or requirement row.
+**Capability row** (checked): The set of capabilities a caller must supply, written `needs A, B` after a signature. Also called the `needs` row or requirement row. Before 2026-10-27 it was spelled `uses` ([#217](https://github.com/cevr/ergo/issues/217)); `uses` is now an ordinary identifier.
 
 **Row**: An error row or a capability row. Rows are checked and then erased from the emitted Go.
 
@@ -47,7 +47,7 @@ A status in parentheses applies to the term's support: *checked* (the 2026 check
 
 **Implicit type parameter** (checked): A name of one upper-case letter, optionally followed by digits, that names no declaration in a signature. Its kind follows its position: a type, an error row inside `error[…]`, or a capability row after the capability-row keyword.
 
-**Row parameter** (checked): An implicit or bracket type parameter that ranges over rows, such as `E` in `error[E]` or `R` in `uses R`. A call binds it to the row of a function-typed argument; an unbound row parameter is empty.
+**Row parameter** (checked): An implicit or bracket type parameter that ranges over rows, such as `E` in `error[E]` or `R` in `needs R`. A call binds it to the row of a function-typed argument; an unbound row parameter is empty.
 
 **Fallible expression** (checked): An expression that can fail with a non-empty error row and whose failure is not yet handled. It must be tried, caught or returned.
 
@@ -65,13 +65,15 @@ A status in parentheses applies to the term's support: *checked* (the 2026 check
 
 **Discharge** (checked): Removing a capability from the row a block charges to its enclosing function, because an enclosing `with` binds it.
 
-**Wire** (checked for provider values; constructors designed): A declaration `wire Name { Cap = provider … }`, or an inline `wire{ … }` literal, that binds capabilities to providers or constructors. It is Effra's form of an Effect layer.
+**Wire** (checked for provider values; constructors designed): A declaration `wire Name { Cap = provider … }`, or an inline `wire{ … }` literal, that binds capabilities to providers or constructors. It is Ergo's form of an Effect layer.
+
+**Wire exposure** (parsed; S109 naming [#196](https://github.com/cevr/ergo/issues/196) stage b, which checks it): The `provides A, B` clause of a named wire header: the capabilities a `with` of that wire discharges. Entries the wire builds and does not list stay private to its build. A header may also state the wire's requirements, `wire App provides Account, Invoice needs Config { … }`, which join the `with` site's capability row.
 
 **Inline wire** (checked): A `wire{ … }` literal given directly to `with`. Its provider expressions are evaluated in, and charged to, the enclosing function.
 
 **Named wire** (checked): A top-level `wire Name { … }`. It is built by its own function at each `with` that names it.
 
-**Closed wire** (checked; open named wires are [#37](https://github.com/cevr/effra/issues/37)'s): A named wire whose providers need no capability from the caller and let no failure escape. The checker admits only closed named wires.
+**Closed wire** (checked; open named wires are [#37](https://github.com/cevr/ergo/issues/37)'s): A named wire whose providers need no capability from the caller and let no failure escape. The checker admits only closed named wires.
 
 **Build** (designed): One execution of a wire at one `with`: constructors run once per shared node, and the build owns their releases until the `with` block ends. Each `with` is a new build.
 
@@ -89,7 +91,7 @@ A status in parentheses applies to the term's support: *checked* (the 2026 check
 
 **Defaultable type**: A type with a valid zero value: a basic type, or a struct whose fields are all defaultable. Unions, capabilities, function types, tasks, resources and borrows are not defaultable. Outside its package, a struct with an unexported field is not defaultable either, so its only values there come from the package's exported functions.
 
-**Definite initialisation** (checked for `var x T`; the rest designed, [#197](https://github.com/cevr/effra/issues/197)): The rule that a variable of a non-defaultable type has a value before it is used.
+**Definite initialisation** (checked for `var x T`; the rest designed, [#197](https://github.com/cevr/ergo/issues/197)): The rule that a variable of a non-defaultable type has a value before it is used.
 
 **Type switch** (checked, with one or several subjects): `switch v := u.(type) { case A: … }` over a union value, narrowing `v` to the case's variant. With several subjects, a case is a tuple of variants, and `_` matches any variant.
 
@@ -137,7 +139,7 @@ A status in parentheses applies to the term's support: *checked* (the 2026 check
 
 **Exit cause**: How a task ended when it did not succeed: one or more typed failures, defects and interruptions, all kept.
 
-**Defect**: A failure outside every row, such as a Go panic in Effra code or a crash in `Close`. It re-raises in the parent at the join.
+**Defect**: A failure outside every row, such as a Go panic in Ergo code or a crash in `Close`. It re-raises in the parent at the join.
 
 **Span** (designed): A named trace region, scoped by `with(trace.Span(…))`, keyed to a checked definition identity.
 
@@ -167,57 +169,57 @@ A status in parentheses applies to the term's support: *checked* (the 2026 check
 
 **Notation exception**: A syntax form admitted without an unrepresentability argument because it desugars one-to-one, at parse time, into ordinary calls and adds no checking, typing, evaluation order or runtime behavior.
 
-**Compiler-known construct**: A form whose meaning the compiler must know for checking, inference, plan facts, inspection or special lowering. By owner direction (2026-10-09) it is spelled as syntax or a predeclared language identifier. In the Go-shaped language: `try`, `catch`, `uses`, `wire`, `machine`, `go` and `with`. A dot form is never one: `timeout.After` is an ordinary library function over the kernel primitives `go`, `Task.Stop` and `Scheduler`, and the prototype's name-keyed handling of it is a recorded exception ([spec README, Gap 31](docs/spec/README.md#gaps)).
+**Compiler-known construct**: A form whose meaning the compiler must know for checking, inference, plan facts, inspection or special lowering. By owner direction (2026-10-09) it is spelled as syntax or a predeclared language identifier. In the Go-shaped language: `try`, `catch`, `needs`, `provides`, `wire`, `machine`, `go` and `with`. A dot form is never one: `timeout.After` is an ordinary library function over the kernel primitives `go`, `Task.Stop` and `Scheduler`, and the prototype's name-keyed handling of it is a recorded exception ([spec README, Gap 31](docs/spec/README.md#gaps)).
 
 **Predeclared language identifier**: A name the language specification defines in every package without an import or library declaration, following Go's predeclared `len` and `error`, such as `with`, `duration` and the prelude types. Capability services are not predeclared language identifiers, even when the compiler declares them.
 
 **Special-cased library item** (rejected pattern): A bundled, prelude or library declaration that the compiler recognises by identity or name to produce a semantic fact about it (a diagnostic, checked type, row or ownership fact), also called a lang item. An item stops being one only by losing every such branch or by becoming syntax. Backend retention or emission keyed on the item does not by itself make it one.
 
-**Library intrinsic**: A target implementation the compiler substitutes for an ordinary declared library signature. The signature, together with any declared contract written only in the inferred contract vocabulary, is the only source of diagnostics, checked types, rows and ownership, provided that the declared contract is consumed by the same path as an inferred one and no checker, emitter or reachability branch is keyed on the item's identity beyond backend selection (amended for [#130](https://github.com/cevr/effra/issues/130)). The intrinsic may add backend facts such as retained runtime modules. The implementation of a syntax construct is part of that construct, not a library intrinsic.
+**Library intrinsic**: A target implementation the compiler substitutes for an ordinary declared library signature. The signature, together with any declared contract written only in the inferred contract vocabulary, is the only source of diagnostics, checked types, rows and ownership, provided that the declared contract is consumed by the same path as an inferred one and no checker, emitter or reachability branch is keyed on the item's identity beyond backend selection (amended for [#130](https://github.com/cevr/ergo/issues/130)). The intrinsic may add backend facts such as retained runtime modules. The implementation of a syntax construct is part of that construct, not a library intrinsic.
 
-**Declared contract** ([#130](https://github.com/cevr/effra/issues/130)): A library primitive's statement of what its body does with its parameters, written only in the vocabulary that inference produces, for a primitive that has no reference body to infer from. It is consumed exactly as an inferred contract is, so it grants no meaning that inference could not.
+**Declared contract** ([#130](https://github.com/cevr/ergo/issues/130)): A library primitive's statement of what its body does with its parameters, written only in the vocabulary that inference produces, for a primitive that has no reference body to infer from. It is consumed exactly as an inferred contract is, so it grants no meaning that inference could not.
 
-**Recipe-parameter contract** ([#130](https://github.com/cevr/effra/issues/130)): The inferred summary of what a function's body does with each function-typed parameter: calls it, hands it to a task, stores it or replays it. A caller substitutes its actual argument. In the Go-shaped language it carries the non-escaping, concurrent and replayable facts and travels in the interface summary.
+**Recipe-parameter contract** ([#130](https://github.com/cevr/ergo/issues/130)): The inferred summary of what a function's body does with each function-typed parameter: calls it, hands it to a task, stores it or replays it. A caller substitutes its actual argument. In the Go-shaped language it carries the non-escaping, concurrent and replayable facts and travels in the interface summary.
 
 **Language protocol**: A nominal row label whose charging or discharge a construct's own checking rule defines, such as `go.Foreign` for calls through `import go`, or `sync.Tx` inside `sync.Atomically`. It is predeclared. An ordinary capability, whose label enters a row only through declared operations or requirements, is not a language protocol.
 
-**Constraint** ([#141](https://github.com/cevr/effra/issues/141); was "Where clause"): A requirement on a generic type parameter that its type provides a method or belongs to a named interface such as `comparable` or `cmp.Ordered`. The spelling is provisional until [#135](https://github.com/cevr/effra/issues/135).
+**Constraint** ([#141](https://github.com/cevr/ergo/issues/141); was "Where clause"): A requirement on a generic type parameter that its type provides a method or belongs to a named interface such as `comparable` or `cmp.Ordered`. The spelling is provisional until [#135](https://github.com/cevr/ergo/issues/135).
 
-**Owner package** ([#141](https://github.com/cevr/effra/issues/141); was "Owner module"): The package that declares a type. Methods are declared only there, as in Go, so a constraint on a type has one answer: the owner's method. A function type, a row or a resource handle without such a method satisfies no method constraint.
+**Owner package** ([#141](https://github.com/cevr/ergo/issues/141); was "Owner module"): The package that declares a type. Methods are declared only there, as in Go, so a constraint on a type has one answer: the owner's method. A function type, a row or a resource handle without such a method satisfies no method constraint.
 
-**Method argument** ([#141](https://github.com/cevr/effra/issues/141)): The method value the compiler passes for a satisfied constraint in the lowered code. It is the same function value a caller could pass by hand, and Go generics carry it in their dictionaries.
+**Method argument** ([#141](https://github.com/cevr/ergo/issues/141)): The method value the compiler passes for a satisfied constraint in the lowered code. It is the same function value a caller could pass by hand, and Go generics carry it in their dictionaries.
 
-**Law** (designed): A named behavioral obligation that types cannot state, written as a function `LawX(…) bool` and checked like a fuzz target. A refuted law refuses the build. Laws are one general construct with many clients: codecs, providers, schedules, machines and composition algebra ([#125](https://github.com/cevr/effra/issues/125)).
+**Law** (designed): A named behavioral obligation that types cannot state, written as a function `LawX(…) bool` and checked like a fuzz target. A refuted law refuses the build. Laws are one general construct with many clients: codecs, providers, schedules, machines and composition algebra ([#125](https://github.com/cevr/ergo/issues/125)).
 
-**Provider law** (designed): A law with a `uses` clause. It is checked against every provider wired for that capability.
+**Provider law** (designed): A law with a `needs` clause. It is checked against every provider wired for that capability.
 
-**Contract** ([#170](https://github.com/cevr/effra/issues/170)): An interface used as a constraint together with the laws stated over its methods. A type satisfies the contract when it has the methods and its laws hold.
+**Contract** ([#170](https://github.com/cevr/ergo/issues/170)): An interface used as a constraint together with the laws stated over its methods. A type satisfies the contract when it has the methods and its laws hold.
 
-**Provider protocol** ([#170](https://github.com/cevr/effra/issues/170)): A capability together with its provider laws. A provider is admitted for the capability by passing them, whatever its implementation.
+**Provider protocol** ([#170](https://github.com/cevr/ergo/issues/170)): A capability together with its provider laws. A provider is admitted for the capability by passing them, whatever its implementation.
 
-**Satisfaction** ([#170](https://github.com/cevr/effra/issues/170)): The relation between one type or provider and one contract or provider protocol, with each law's evidence status: tested, refuted, trusted or unresolved.
+**Satisfaction** ([#170](https://github.com/cevr/ergo/issues/170)): The relation between one type or provider and one contract or provider protocol, with each law's evidence status: tested, refuted, trusted or unresolved.
 
-**Admission** ([#170](https://github.com/cevr/effra/issues/170)): The build's decision to accept a satisfaction. A refuted law refuses the build; a trusted law needs a written reason; an unresolved law is allowed with a visible note unless evidence rests on it.
+**Admission** ([#170](https://github.com/cevr/ergo/issues/170)): The build's decision to accept a satisfaction. A refuted law refuses the build; a trusted law needs a written reason; an unresolved law is allowed with a visible note unless evidence rests on it.
 
-**Evidence kind** ([#170](https://github.com/cevr/effra/issues/170)): A nominal wrapper type, such as `SortedBy[S, compare]`, whose values carry the proof that a law-backed check has run on the carrier. Only the checking function mints it.
+**Evidence kind** ([#170](https://github.com/cevr/ergo/issues/170)): A nominal wrapper type, such as `SortedBy[S, compare]`, whose values carry the proof that a law-backed check has run on the carrier. Only the checking function mints it.
 
-**Law receipt** ([#170](https://github.com/cevr/effra/issues/170)): The recorded outcome of running a law suite for one revision, seed and target: the status of each law, its case count and any counterexample. The build reads only the canonical receipt.
+**Law receipt** ([#170](https://github.com/cevr/ergo/issues/170)): The recorded outcome of running a law suite for one revision, seed and target: the status of each law, its case count and any counterexample. The build reads only the canonical receipt.
 
 **Zero-cost abstraction obligation** (destination, not current support): A candidate abstraction must make the illegal states and invalid operations covered by its checked contract unrepresentable in checked source, while foreign and trusted behavior remains explicitly qualified, and then erase or directly lower without an abstraction-induced executable size or runtime penalty against a semantic equivalence baseline. Retained allocation, dispatch, module, byte and residual-check costs must be visible in matched receipts. Native output targets parity with or better performance than the optimized idiomatic Go member, and Go lowering pursues every material measured lowering or specialization opportunity while preserving the userland runtime contract. This obligation never removes a required guardrail and does not promise universally zero overhead or a fixed speedup multiplier.
 
-**Semantic equivalence baseline** (acceptance term): A matched Effra and explicit Go program pair that performs the same validation and observable work while preserving the same rows, ownership, cancellation and completed-cleanup behavior. The Go member is an optimized idiomatic Go control with the same contract. The baseline makes an abstraction's generated and runtime costs attributable rather than inferred from unequal examples. Until 2026-10-26 the baseline also had a TypeScript/Effect member; it went with the JavaScript target.
+**Semantic equivalence baseline** (acceptance term): A matched Ergo and explicit Go program pair that performs the same validation and observable work while preserving the same rows, ownership, cancellation and completed-cleanup behavior. The Go member is an optimized idiomatic Go control with the same contract. The baseline makes an abstraction's generated and runtime costs attributable rather than inferred from unequal examples. Until 2026-10-26 the baseline also had a TypeScript/Effect member; it went with the JavaScript target.
 
 ## Runtime and providers
 
-**Effect runtime provider** (direction): An implementation of the lawful runtime contract that executes Effra effects on a target. `runtime/effra` is the native Go provider of the earlier language, and the prototype's `rt` package is the first provider of the Go-shaped language. Pinned Effect as the JavaScript provider went with the JavaScript target on 2026-10-26.
+**Effect runtime provider** (direction): An implementation of the lawful runtime contract that executes Ergo effects on a target. `runtime/ergo` is the native Go provider of the earlier language, and the prototype's `rt` package is the first provider of the Go-shaped language. Pinned Effect as the JavaScript provider went with the JavaScript target on 2026-10-26.
 
 **Lawful runtime contract** (specified research): The host operations and laws an effect runtime provider must satisfy, with each obligation's evidence classified as nominally checked, trusted decision, tested law, refuted or unresolved/unavailable.
 
-**Uninterruptible host wait** (designed): A blocking Go call with no cancel hook. It is recorded in the footprint and listed by `ef inspect` (G8).
+**Uninterruptible host wait** (designed): A blocking Go call with no cancel hook. It is recorded in the footprint and listed by `ergo inspect` (G8).
 
 **Exit accumulator** (designed): The runtime record that combines a body's outcome with release defects and interruption into one exit cause, so a release never hides a failure.
 
-**Definition ID** (designed): The stable name of one checked definition, derived by the checker from the declaration: `<package>.<Name>`, `<package>.<Type>.<Method>`, or `<enclosing ID>/<construct>#<n>` for a block such as a timeout. It is meaningful only with the source revision it was computed from. Runtime traces, defect chains and `ef inspect` share this ID space ([traceability](docs/research/traceability.md)).
+**Definition ID** (designed): The stable name of one checked definition, derived by the checker from the declaration: `<package>.<Name>`, `<package>.<Type>.<Method>`, or `<enclosing ID>/<construct>#<n>` for a block such as a timeout. It is meaningful only with the source revision it was computed from. Runtime traces, defect chains and `ergo inspect` share this ID space ([traceability](docs/research/traceability.md)).
 
 **Source revision** (designed): The SHA-256 digest of a source file, the revision that qualifies its definition IDs. A trace header carries it once, and a trace query refuses a trace whose revision differs from the file.
 
@@ -229,11 +231,11 @@ A status in parentheses applies to the term's support: *checked* (the 2026 check
 
 **Point event** (designed): A trace event that emitted code raises at its own source site: a capability `call` and its `call-exit` with the outcome (ok, a failure, a defect or interrupted), an `interrupt` at an interruption point, a wire `construct` or a catch `handler`. The runtime raises the other kinds for a task, keyed by the task's definition ID.
 
-**Trace evidence** (designed): The answer of a trace query (`sketchc trace`, later `ef trace` and MCP `code.trace`): the `trace-evidence-1` envelope with the fields of the review evidence schema (#156), then the tasks, the capability calls with their spans, the resolved events and the cause trace. The query validates the trace before it answers and refuses a malformed one with the reason.
+**Trace evidence** (designed): The answer of a trace query (`sketchc trace`, later `ergo trace` and MCP `code.trace`): the `trace-evidence-1` envelope with the fields of the review evidence schema (#156), then the tasks, the capability calls with their spans, the resolved events and the cause trace. The query validates the trace before it answers and refuses a malformed one with the reason.
 
 ## Earlier `.ef` language
 
-These terms describe the `.ef` language that `internal/compiler` and `runtime/effra` implement today, with its `effect fn`, `run`, `raises` and `service` forms. The Go-shaped language replaces it; where a term has a counterpart above, the entry says so.
+These terms describe the `.ef` language that `internal/compiler` and `runtime/ergo` implement today, with its `effect fn`, `run`, `raises` and `service` forms. The Go-shaped language replaces it; where a term has a counterpart above, the entry says so.
 
 **Record**: A nominal data type with declared fields. Construction checks every required field and its type. Counterpart: struct.
 
@@ -255,7 +257,7 @@ These terms describe the `.ef` language that `internal/compiler` and `runtime/ef
 
 **Entry failure report**: The deterministic stderr text and exit status a program entry produces when `main` fails. It lists each cause reason in order, as a named failure with its payload, a defect message or an interruption. Payloads are rendered from the checked types of `main`'s failure row, so the report is deterministic for every failure in that row, including built-in, codec and HTTP listener failures. The one exception is an unclassified HTTP listener failure, which keeps the host's text.
 
-**Effect contract**: The success value, named failures, and required services of a deferred Effra program.
+**Effect contract**: The success value, named failures, and required services of a deferred Ergo program.
 
 **Failure row**: The unordered set of nominal failures admitted by an effect contract. Counterpart: error row.
 
@@ -309,7 +311,7 @@ These terms describe the `.ef` language that `internal/compiler` and `runtime/ef
 
 **Semantic revision**: The identity of the checked snapshot described by inspection or diagnostics, including imported declaration data and behavior contracts when present.
 
-**Managed fiber**: An execution of an Effra effect with an owner and a completion result. Its cancellation request and completed shutdown are distinct states. Counterpart: task.
+**Managed fiber**: An execution of an Ergo effect with an owner and a completion result. Its cancellation request and completed shutdown are distinct states. Counterpart: task.
 
 **Owning scope**: The lifetime that owns managed fibers and resource releases. Its closure establishes their completed shutdown and cleanup. Counterpart: owner scope.
 
@@ -379,9 +381,9 @@ These terms describe the `.ef` language that `internal/compiler` and `runtime/ef
 
 ## Tooling and testing
 
-**Edition**: The language version that governs a source file and selects its front-end. `legacy` is the earlier `.ef` language of `internal/compiler`; `2026` is the Go-shaped language of `docs/spec/` v0. Files of both editions keep the `.ef` extension and build in one workspace. The edition comes only from an edition manifest, never from file content; a file that no manifest governs is `legacy` until [#205](https://github.com/cevr/effra/issues/205). See [editions](docs/specs/editions.md).
+**Edition**: The language version that governs a source file and selects its front-end. `legacy` is the earlier `.ef` language of `internal/compiler`; `2026` is the Go-shaped language of `docs/spec/` v0. Files of both editions keep the `.ef` extension and build in one workspace. The edition comes only from an edition manifest, never from file content; a file that no manifest governs is `legacy` until [#205](https://github.com/cevr/ergo/issues/205). See [editions](docs/specs/editions.md).
 
-**Edition manifest**: A file named `effra.json` that holds exactly one JSON object, `{"edition": "<id>"}`. It governs the source files in its directory and in subdirectories without a nearer manifest, up to the nearest Go module root. A manifest that is unsupported or malformed is the EF144 refusal, never a fallback.
+**Edition manifest**: A file named `ergo.json` that holds exactly one JSON object, `{"edition": "<id>"}`. It governs the source files in its directory and in subdirectories without a nearer manifest, up to the nearest Go module root. A manifest that is unsupported or malformed is the EF144 refusal, never a fallback.
 
 **Lint advice**: Optional guidance about an admitted program, distinct from diagnostics that determine whether its contracts are valid.
 

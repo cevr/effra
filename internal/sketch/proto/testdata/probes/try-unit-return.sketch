@@ -3,4 +3,4 @@ package demo
 type Fault struct{}
 func work() error[Fault] { return Fault{} }
 func forward() error[Fault] { return try work() }
-func main() uses Console { forward() catch { case Fault: Console.Println("handled") } }
+func main() needs Console { forward() catch { case Fault: Console.Println("handled") } }

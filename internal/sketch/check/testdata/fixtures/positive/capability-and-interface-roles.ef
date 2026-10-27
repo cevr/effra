@@ -7,8 +7,8 @@ func (Mem) Get() string { return "m" }
 
 func viaValue(s Store) string { return s.Get() }
 func Exported(s Store) string { return s.Get() }
-func viaCap() string uses Store { return Store.Get() }
+func viaCap() string needs Store { return Store.Get() }
 
-func main() uses Console {
+func main() needs Console {
 	Console.Println(Exported(Mem{}), viaValue(Mem{}), with(wire{ Store = Mem{} }) { viaCap() })
 }

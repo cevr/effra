@@ -1,6 +1,6 @@
 import go strings "strings"
 import go strconv "strconv"
-import go sdk "effra.local/prototype/examples/sdk"
+import go sdk "ergo.local/prototype/examples/sdk"
 
 effect fn program() -> void uses { Foreign, Console, Scheduler } {
     let name = run strings.ToUpper("ada")

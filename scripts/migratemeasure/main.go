@@ -1,4 +1,4 @@
-// Command migratemeasure prints the measurement behind the ef migrate
+// Command migratemeasure prints the measurement behind the ergo migrate
 // decision (docs/research/ef-migrate-decision.md). For each hand-migrated
 // example in docs/research/ef-migrate/ledger.json it computes the code lines
 // and tokens of the earlier source and of its 2026 migration, and checks the
@@ -23,8 +23,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"effra.local/prototype/internal/edition"
-	"effra.local/prototype/internal/sketchfront"
+	"ergo.local/prototype/internal/edition"
+	"ergo.local/prototype/internal/sketchfront"
 )
 
 const ledgerPath = "docs/research/ef-migrate/ledger.json"
@@ -75,7 +75,7 @@ func run(out io.Writer, root string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(out, "| example | earlier code lines | 2026 code lines | tokens before | tokens after | mechanical | judgment | minutes | ef check (2026) |")
+	fmt.Fprintln(out, "| example | earlier code lines | 2026 code lines | tokens before | tokens after | mechanical | judgment | minutes | ergo check (2026) |")
 	fmt.Fprintln(out, "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |")
 	var minutes float64
 	var mechanical, judgment int

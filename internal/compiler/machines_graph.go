@@ -100,7 +100,7 @@ func machineGraphPlan(facts *graphFacts, plan *MachinePlan) bool {
 		functions = append(functions, GraphMachineFunction{Role: f.Role, Name: f.Name, Identity: f.Identity, Kind: f.Kind, Failures: f.Failures, Services: f.Services})
 		values = append(values, f.Contract)
 	}
-	if facts.addNode(GraphViewNode{ID: plan.ID, Label: plan.Name, Data: GraphViewNodeData{Effra: GraphNodeFacts{Kind: "machine", Name: plan.Name, Span: &span, Machine: &GraphMachineFacts{
+	if facts.addNode(GraphViewNode{ID: plan.ID, Label: plan.Name, Data: GraphViewNodeData{Ergo: GraphNodeFacts{Kind: "machine", Name: plan.Name, Span: &span, Machine: &GraphMachineFacts{
 		State: plan.State, Event: plan.Event, Output: plan.Output.Type, Initial: plan.Initial.Variant, Functions: functions,
 		TerminalFailures: plan.TerminalFailures, Requirements: plan.Requirements, Evidence: plan.Evidence,
 	}}}}, dependencyContract{}, values...) == nil {
@@ -111,11 +111,11 @@ func machineGraphPlan(facts *graphFacts, plan *MachinePlan) bool {
 		if !ok {
 			return false
 		}
-		if facts.addNode(GraphViewNode{ID: id, Label: state.Variant, Data: GraphViewNodeData{Effra: GraphNodeFacts{Kind: "machine-state", Name: state.Variant, MachineState: &GraphMachineStateFacts{Variant: state.Variant, Initial: state.Initial, Enterable: state.Enterable}}}}, dependencyContract{}) == nil {
+		if facts.addNode(GraphViewNode{ID: id, Label: state.Variant, Data: GraphViewNodeData{Ergo: GraphNodeFacts{Kind: "machine-state", Name: state.Variant, MachineState: &GraphMachineStateFacts{Variant: state.Variant, Initial: state.Initial, Enterable: state.Enterable}}}}, dependencyContract{}) == nil {
 			return false
 		}
 		edgeID, ok := machineGraphID(facts, "edge", "contains", plan.ID, id)
-		if !ok || !facts.addEdge(GraphViewEdge{ID: edgeID, SourceID: plan.ID, TargetID: id, Label: "contains", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "contains", Plan: plan.ID}}}) {
+		if !ok || !facts.addEdge(GraphViewEdge{ID: edgeID, SourceID: plan.ID, TargetID: id, Label: "contains", Data: GraphViewEdgeData{Ergo: GraphEdgeFacts{Relation: "contains", Plan: plan.ID}}}) {
 			return false
 		}
 	}
@@ -125,14 +125,14 @@ func machineGraphPlan(facts *graphFacts, plan *MachinePlan) bool {
 		return false
 	}
 	initialEdge, ok := machineGraphID(facts, "edge", "initial", plan.ID, initial)
-	if !ok || !facts.addEdge(GraphViewEdge{ID: initialEdge, SourceID: plan.ID, TargetID: initial, Label: "initial", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "initial", Span: &initialSpan, Plan: plan.ID}}}) {
+	if !ok || !facts.addEdge(GraphViewEdge{ID: initialEdge, SourceID: plan.ID, TargetID: initial, Label: "initial", Data: GraphViewEdgeData{Ergo: GraphEdgeFacts{Relation: "initial", Span: &initialSpan, Plan: plan.ID}}}) {
 		return false
 	}
 	output, ok := machineGraphID(facts, "machine-output", plan.ID)
 	if !ok {
 		return false
 	}
-	if plan.Terminal && facts.addNode(GraphViewNode{ID: output, Label: "output", Data: GraphViewNodeData{Effra: GraphNodeFacts{Kind: "machine-output", Name: plan.Name}}}, dependencyContract{}) == nil {
+	if plan.Terminal && facts.addNode(GraphViewNode{ID: output, Label: "output", Data: GraphViewNodeData{Ergo: GraphNodeFacts{Kind: "machine-output", Name: plan.Name}}}, dependencyContract{}) == nil {
 		return false
 	}
 	for _, t := range plan.Transitions {
@@ -148,7 +148,7 @@ func machineGraphPlan(facts *graphFacts, plan *MachinePlan) bool {
 		label := t.Decision + ": " + strings.Join(t.On, " | ")
 		edge := func(relation, source, target string) bool {
 			id, ok := machineGraphID(facts, "edge", relation, source, target, t.ID)
-			return ok && facts.addEdge(GraphViewEdge{ID: id, SourceID: source, TargetID: target, Label: label, Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: relation, Span: &at, Plan: plan.ID, Transition: transition}}})
+			return ok && facts.addEdge(GraphViewEdge{ID: id, SourceID: source, TargetID: target, Label: label, Data: GraphViewEdgeData{Ergo: GraphEdgeFacts{Relation: relation, Span: &at, Plan: plan.ID, Transition: transition}}})
 		}
 		for _, from := range t.From {
 			source, ok := machineGraphID(facts, "machine-state", plan.ID, from)

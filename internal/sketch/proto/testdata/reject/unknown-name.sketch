@@ -32,6 +32,6 @@ func (FakeGateway) Charge(order Order) (string, error[GatewayDown]) {
 	return "auth-7"
 }
 
-func main() uses Console {
+func main() needs Console {
 	Console.Println(missing)
 }

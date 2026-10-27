@@ -2,7 +2,7 @@ package demo
 
 type Store interface{ Get() string }
 
-func read() string uses Store { return Store.Get() }
+func read() string needs Store { return Store.Get() }
 
 func Run() string {
 	return read() // want S102

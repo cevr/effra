@@ -33,9 +33,9 @@ func use() int64 {
 	return Max[int64](1, 2) + On[Failed | timeout.Expired](3)
 }
 `},
-	{"function-type-uses-row", `package p
+	{"function-type-needs-row", `package p
 
-func run(f func() uses (Clock, Console), g func(), h func(int64) (int64, error[E]) uses R) error[E] uses Clock, Console, R {
+func run(f func() needs (Clock, Console), g func(), h func(int64) (int64, error[E]) needs R) error[E] needs Clock, Console, R {
 	f()
 	g()
 	try h(1)
@@ -49,11 +49,15 @@ wire Test {
 	Gateway = OpenGateway
 }
 
-wire App uses Account, Invoice {
+wire App provides Account, Invoice {
 	Store = MemoryStore{}
 }
 
-func main() uses Console {
+wire Live provides Orders needs Config, Clock {
+	Orders = OpenOrders
+}
+
+func main() needs Console {
 	with(wire{ http.Client = FakeClient{} }) { serve() }
 	with(Test, trace.Span("t")) {
 		serve()
@@ -198,11 +202,11 @@ type Shape interface{ Circle | Square }
 
 type Store interface {
 	Get(key string) (string, error[NotFound])
-	Put(key string, v string) uses Clock
+	Put(key string, v string) needs Clock
 }
 
 //ef:go net/url.Parse
-func parseURL(raw string) (url.URL, error[go.Error]) uses go.Foreign
+func parseURL(raw string) (url.URL, error[go.Error]) needs go.Foreign
 
 func (t *Tally) Bump(xs ...int64) (int64, bool) {
 	r := 'x' /* a rune */
@@ -246,7 +250,7 @@ type Malformed struct {
 
 // MalformedTable: each input must give a located, registered syntax
 // diagnostic (S0xx in docs/spec/diagnostics.md) on one of the listed lines;
-// ef fmt must exit 2, name the code and leave the file unchanged.
+// ergo fmt must exit 2, name the code and leave the file unchanged.
 var MalformedTable = []Malformed{
 	{Name: "enum-type", Src: "package p\n\ntype Payment enum {\n\tPending\n}\n", Lines: []int{3}},
 	{Name: "const-removed", Src: "package p\n\nconst limit = 3\n", Lines: []int{3}},
@@ -277,6 +281,7 @@ var MalformedTable = []Malformed{
 	{Name: "defer-non-simple", Src: "package p\n\nfunc f() {\n\tdefer if true {}\n}\n", Lines: []int{4}},
 	{Name: "empty-type-parameters", Src: "package p\n\nfunc f[]() {}\n", Lines: []int{3}},
 	{Name: "parenless-trailing-block", Src: "package p\n\nfunc f() {\n\tsync.Atomically {\n\t\tmove()\n\t}\n}\n", Lines: []int{5}},
+	{Name: "wire-needs-before-provides", Src: "package p\n\nwire App needs Config provides Account {\n\tStore = M{}\n}\n", Lines: []int{3}},
 	{Name: "deep-nesting", Generate: func() string {
 		return "package p\n\nvar x = " + strings.Repeat("(", 200000) + "1" + strings.Repeat(")", 200000) + "\n"
 	}, Lines: []int{3}},

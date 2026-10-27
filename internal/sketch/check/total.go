@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // typeSwitch checks a single- or multi-subject type switch over unions. Each

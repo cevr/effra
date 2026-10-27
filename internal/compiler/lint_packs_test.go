@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	lintsdk "effra.local/prototype/lint"
+	lintsdk "ergo.local/prototype/lint"
 )
 
 func lintConfiguration(t *testing.T, document string) *lintsdk.Configuration {
@@ -28,7 +28,7 @@ func lintConfiguration(t *testing.T, document string) *lintsdk.Configuration {
 // unused-suppression check, and a configured severity replaces the default.
 func TestLintWithAppliesConfiguredBuiltinSeverity(t *testing.T) {
 	const forgotten = "effect fn task() -> string { \"ok\" }\neffect fn main() -> void { let forgotten = task(); void }"
-	const suppressed = "effect fn task() -> string { \"ok\" }\neffect fn main() -> void {\n// effra-lint-disable-next-line unused-recipe -- kept\nlet forgotten = task()\nlet used = 1\nvoid\n}"
+	const suppressed = "effect fn task() -> string { \"ok\" }\neffect fn main() -> void {\n// ergo-lint-disable-next-line unused-recipe -- kept\nlet forgotten = task()\nlet used = 1\nvoid\n}"
 	cases := []struct {
 		name, source, config string
 		severity             string

@@ -3,7 +3,7 @@ package check
 import (
 	"go/constant"
 
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // isEntry reports whether f is this package's entry function, main.
@@ -596,7 +596,7 @@ func (c *checker) funcLit(x *syntax.FuncLit, expected *Signature, in *inferer) o
 		t.errors = newRow()
 	}
 	switch {
-	case x.Type.Uses != nil:
+	case x.Type.Needs != nil:
 		t.declUses = sig.Uses
 	case expected != nil && (in == nil || !in.rowFree(expected.Uses)):
 		t.declUses = expected.Uses

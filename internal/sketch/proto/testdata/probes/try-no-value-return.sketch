@@ -6,6 +6,6 @@ func g() error[Fault] {
   try f()
   return
 }
-func main() uses Console {
+func main() needs Console {
   g() catch { case Fault: Console.Println("handled") }
 }

@@ -1,6 +1,6 @@
 // want S001
 package demo
-func main() uses Console {
+func main() needs Console {
   x⪪ := "ok"
   Console.Println(x⪪)
 }

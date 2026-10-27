@@ -5,7 +5,7 @@ type Point struct {
 	Y int64
 }
 
-func main() uses Console {
+func main() needs Console {
 	a := int64(7)
 	b := a*2 - 3/1 + a%2
 	same := Point{1, 2} == Point{1, 2}

@@ -277,7 +277,7 @@ func (r *Result) GoApplication(mode GoGenerationMode) (*GoApplication, error) {
 // generated main carries //line directives naming origin's base name, so Go's
 // diagnostics, stack traces and profiles report user code at its .ef lines.
 // Only the base name is emitted: Go resolves a relative directive against
-// the generated module, which -trimpath reports as effra.generated/<name>,
+// the generated module, which -trimpath reports as ergo.generated/<name>,
 // so the same source produces the same bytes from any checkout.
 func (r *Result) GoApplicationFrom(mode GoGenerationMode, origin string) (*GoApplication, error) {
 	name := filepath.Base(origin)
@@ -347,9 +347,9 @@ var builtinGoProviders = map[string]string{
 	"Assertions":    "func efProvider_Assertions()efService_Assert{return efService_Assert{m_check:func(condition bool,message string)efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{if !condition{return er.Fail[struct{}](\"AssertionFailed\",message)};return er.Succeed(struct{}{})})},m_equalText:func(actual,expected string)efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{if actual!=expected{return er.Fail[struct{}](\"AssertionFailed\",\"expected \"+er.QuoteText(expected)+\"; received \"+er.QuoteText(actual))};return er.Succeed(struct{}{})})}}}\n",
 	"Stdout":        "func efProvider_Stdout()efService_Console{return efService_Console{m_log:func(message string)efEffect[struct{}]{return efFromRuntime(er.Println(message))}}}\n",
 	"LiveClock":     "func efProvider_LiveClock()efService_Clock{return efService_Clock{m_sleep:func(ms int64)efEffect[struct{}]{return efFromRuntime(er.SleepWithDriver(nil,ms))}}}\n",
-	"TestClock":     "func efProvider_TestClock(scheduler *er.TestScheduler)efService_Clock{return efService_Clock{driver:scheduler,m_sleep:func(ms int64)efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{if scheduler==nil{return er.Die[struct{}](fmt.Errorf(\"test clock requires the ef test harness\"))};return er.Invoke(fc,er.SleepWithDriver(scheduler,ms))})}}}\n",
+	"TestClock":     "func efProvider_TestClock(scheduler *er.TestScheduler)efService_Clock{return efService_Clock{driver:scheduler,m_sleep:func(ms int64)efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{if scheduler==nil{return er.Die[struct{}](fmt.Errorf(\"test clock requires the ergo test harness\"))};return er.Invoke(fc,er.SleepWithDriver(scheduler,ms))})}}}\n",
 	"LiveScheduler": "func efProvider_LiveScheduler()efService_Scheduler{return efService_Scheduler{m_sleep:func(ms int64)efEffect[struct{}]{return efFromRuntime(er.SleepWithDriver(nil,ms))},m_advance:func(int64)efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{return er.Die[struct{}](fmt.Errorf(\"live scheduler cannot advance\"))})},m_awaitRegistration:func()efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{return er.Die[struct{}](fmt.Errorf(\"live scheduler has no registration barrier\"))})}}}\n",
-	"TestScheduler": "func efProvider_TestScheduler(scheduler *er.TestScheduler)efService_Scheduler{return efService_Scheduler{driver:scheduler,m_sleep:func(ms int64)efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{if scheduler==nil{return er.Die[struct{}](fmt.Errorf(\"test scheduler requires the ef test harness\"))};return er.Invoke(fc,er.SleepWithDriver(scheduler,ms))})},m_advance:func(ms int64)efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{if scheduler==nil{return er.Die[struct{}](fmt.Errorf(\"test scheduler adjustment is only available in the ef test harness\"))};return er.AdjustTestScheduler(fc,scheduler,ms)})},m_awaitRegistration:func()efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{if scheduler==nil{return er.Die[struct{}](fmt.Errorf(\"test scheduler registration barrier is only available in the ef test harness\"))};return er.AwaitTestSchedulerRegistration(fc,scheduler)})}}}\n",
+	"TestScheduler": "func efProvider_TestScheduler(scheduler *er.TestScheduler)efService_Scheduler{return efService_Scheduler{driver:scheduler,m_sleep:func(ms int64)efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{if scheduler==nil{return er.Die[struct{}](fmt.Errorf(\"test scheduler requires the ergo test harness\"))};return er.Invoke(fc,er.SleepWithDriver(scheduler,ms))})},m_advance:func(ms int64)efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{if scheduler==nil{return er.Die[struct{}](fmt.Errorf(\"test scheduler adjustment is only available in the ergo test harness\"))};return er.AdjustTestScheduler(fc,scheduler,ms)})},m_awaitRegistration:func()efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{if scheduler==nil{return er.Die[struct{}](fmt.Errorf(\"test scheduler registration barrier is only available in the ergo test harness\"))};return er.AwaitTestSchedulerRegistration(fc,scheduler)})}}}\n",
 	"TestSync":      "func efProvider_TestSync()efService_Sync{return efService_Sync{m_latch:func()efEffect[*er.Latch]{return efFromRuntime(func(*er.FiberContext)er.Exit[*er.Latch]{return er.Succeed(er.NewLatch())})},m_await:func(latch *er.Latch)efEffect[struct{}]{return efFromRuntime(er.AwaitLatch(latch))},m_signal:func(latch *er.Latch)efEffect[struct{}]{return efFromRuntime(er.SignalLatch(latch))}}}\n",
 	"LiveFiles":     "func efProvider_LiveFiles()efService_Files{return efService_Files{m_openRead:func(path string)efEffect[*er.File]{return efFromRuntime(er.OpenRead(path))},m_readText:func(file *er.File)efEffect[string]{return efFromRuntime(er.ReadText(file))},m_readFile:func(path string)efEffect[string]{return efFromRuntime(er.ReadFile(path))}}}\n",
 	"LiveEnv":       "func efProvider_LiveEnv()efService_Env{return efService_Env{m_get:func(name string)efEffect[string]{return efFromRuntime(er.Env(name))}}}\n",
@@ -418,7 +418,7 @@ func (r *Result) emitMarkedGo(plan *ApplicationPlan, source string) ([]byte, err
 	}
 	g := &goEmitter{program: r.Program, plan: plan, source: source}
 	var out strings.Builder
-	out.WriteString("// Generated by the Effra prototype. Source revision: " + r.Revision + "\npackage main\nimport (\"fmt\"; \"os\"; \"context\"; \"os/signal\"; \"syscall\"; er " + strconv.Quote(generatedModulePath+"/runtime") + "\n")
+	out.WriteString("// Generated by the Ergo prototype. Source revision: " + r.Revision + "\npackage main\nimport (\"fmt\"; \"os\"; \"context\"; \"os/signal\"; \"syscall\"; er " + strconv.Quote(generatedModulePath+"/runtime") + "\n")
 	if tests != nil {
 		out.WriteString("\"encoding/json\"\n")
 	}
@@ -1059,7 +1059,7 @@ func (g *goEmitter) blockTail(b *Block, effect bool, ret string, noResult bool, 
 
 // goLineReset marks the end of a user declaration in emitted Go; from there
 // on, code has its own position in the generated file again.
-const goLineReset = "//effra:line-reset"
+const goLineReset = "//ergo:line-reset"
 
 // goMainFile is the name of the generated main in its module.
 const goMainFile = "main.go"
@@ -1450,7 +1450,7 @@ func goTemplateDeclaration(r *Record) string {
 		marker := "efVariantTemplate_" + r.EmissionName
 		// The marker takes no type arguments: a method set that mentions T would
 		// make every instantiation a distinct Go GC shape, so each runtime generic
-		// over an option would be stenciled once per payload type. The Effra
+		// over an option would be stenciled once per payload type. The Ergo
 		// checker is the type authority; the variant structs stay generic so a
 		// type switch still tells Some[A] from Some[B].
 		out.WriteString("type efTemplate_" + r.EmissionName + params + " interface { " + marker + "() }\n")

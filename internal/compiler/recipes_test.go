@@ -72,7 +72,7 @@ func TestRecipeTypesShareCanonicalIdentityAndPreserveRows(t *testing.T) {
 	}
 }
 
-const recipeRowDeclarations = `import Data "effra/data"
+const recipeRowDeclarations = `import Data "ergo/data"
 error A
 error B
 record Slot<T: type> {
@@ -158,7 +158,7 @@ effect fn main() -> void {
 	}
 }
 
-const recipeOwnershipHolder = `import Data "effra/data"
+const recipeOwnershipHolder = `import Data "ergo/data"
 record Holder<T: type> {
     task: Effect<T, { IoError }, { Files }>
 }
@@ -282,7 +282,7 @@ effect fn main() -> void {
 
 func recipeDAGSource(depth int) string {
 	var source strings.Builder
-	source.WriteString("import Data \"effra/data\"\nerror Lost\nrecord Leaf<T: type> { value: T }\n")
+	source.WriteString("import Data \"ergo/data\"\nerror Lost\nrecord Leaf<T: type> { value: T }\n")
 	previous := "Leaf"
 	for i := 0; i < depth; i++ {
 		name := fmt.Sprintf("Layer%d", i)
@@ -325,7 +325,7 @@ func TestRecipeSharedDAGStaysLinearAndBounded(t *testing.T) {
 }
 
 func TestRecipeTypeFormattingRoundTrip(t *testing.T) {
-	const source = `import Data "effra/data"
+	const source = `import Data "ergo/data"
 error A error B
 record Slot<T: type> { now: Effect<T,{B,A},{Console}>; plain: Effect<T>; failing: Effect<T,{A}>; later: Data.Option<Effect<T,{A},{Console}>> }
 fn keep(slot: Slot<string>) -> Effect<string,{A,B},{Console}> { slot.now }

@@ -1,15 +1,15 @@
 # Rows: errors, capabilities, `wire` and `with`
 
-Every function has two rows besides its result: an error row, `error[...]`, and a capability row, `uses`. The checker proves that each row is an upper bound on what the body can do. Rows are checked and then erased: the lowered Go has interfaces, structs, early returns and type switches. Definitions are in the [glossary](../../GLOSSARY.md).
+Every function has two rows besides its result: an error row, `error[...]`, and a capability row, `needs`. The checker proves that each row is an upper bound on what the body can do. Rows are checked and then erased: the lowered Go has interfaces, structs, early returns and type switches. Definitions are in the [glossary](../../GLOSSARY.md).
 
 *Prior art:* Effect's `Effect<A, E, R>` tracks the same two rows as type parameters; Koka types effects as rows and checks that each is handled; OCaml 5 has effect handlers but does not track effects in types, so an unhandled effect is a run-time exception; Go tracks neither and threads `error` and `context.Context` by hand.
 
 ## Error rows
 
-Status: **checked** by `internal/sketch/check` ([#196](https://github.com/cevr/effra/issues/196)); runs through the prototype emitter.
+Status: **checked** by `internal/sketch/check` ([#196](https://github.com/cevr/ergo/issues/196)); runs through the prototype emitter.
 
 ```go
-func pay(id string) (string, error[OrderNotFound | GatewayDown]) uses Orders, Gateway {
+func pay(id string) (string, error[OrderNotFound | GatewayDown]) needs Orders, Gateway {
 	order := try Orders.Find(id)
 	return Gateway.Charge(order)
 }
@@ -36,7 +36,7 @@ func pay(id string) (string, error[OrderNotFound | GatewayDown]) uses Orders, Ga
 
 ## Catch
 
-Status: **checked** (#196), the binding form and statement arms included; the build refuses the binding form and statement arms until [#50](https://github.com/cevr/effra/issues/50).
+Status: **checked** (#196), the binding form and statement arms included; the build refuses the binding form and statement arms until [#50](https://github.com/cevr/ergo/issues/50).
 
 ```go
 outcome := with(Live) { checkout(id) } catch {
@@ -55,40 +55,40 @@ case OrderNotFound:
 1. **Arms.** `e catch { case T, U: v … }` handles failures of the fallible expression `e`. `catch` on an expression that cannot fail is an error (S108).
 2. Each type in an arm must be in `e`'s row (S108). A type may appear in only one arm (S108).
 3. **Value.** When `e` has a value of type `T`, each arm's value must be assignable to `T` (S108), and the catch expression has type `T`. When `e` has no value, an arm must have no value (S108). An arm's value whose own failure is not handled is S105.
-4. **Total catch (S103).** A `catch` without `try` must handle every error type in `e`'s row. *Prior art:* Rust and Gleam exhaustive `match` on an error enum; Swift propagates an error that no `catch` clause matches to the enclosing scope, and a non-throwing function must handle every error; Effra's total catch is the same obligation stated per error type.
+4. **Total catch (S103).** A `catch` without `try` must handle every error type in `e`'s row. *Prior art:* Rust and Gleam exhaustive `match` on an error enum; Swift propagates an error that no `catch` clause matches to the enclosing scope, and a non-throwing function must handle every error; Ergo's total catch is the same obligation stated per error type.
 5. **Partial catch.** `try e catch { … }` handles the named types and escapes the rest through `try`. The rest escapes to the enclosing failure target and is checked against its row (rules 4 and 5 of [Error rows](#error-rows); fixture `try … catch` in `sketch/sketch_test.go`, "partial catch under try still needs the rest declared", S101).
 6. **Typed failures only (README Gap 1).** A `catch` covers the typed row only. Interruption and defects are not in any row, and they always pass through a `catch`, total or partial. A total catch therefore has no default arm in source. Its lowering must still pass interruption and defects on; the prototype emits a default arm that re-panics with them.
 7. **Binding and statements.** `catch e { case T: … }` binds the caught error, as `switch e := err.(type)` does; inside an arm with one type, `e` has that type. An arm may hold statements. When the `catch` is an expression, the arm's last statement is an expression that yields its value, or the arm leaves the function. With several types in one arm, `e` has the union of those types. `e` must be read in some arm (S110). `return` in an arm leaves the enclosing function, because an arm is not a block (README Gap 11).
-8. **Lowering.** A catch becomes a type switch on the Go error value, inline, with no closure. *Prior art:* XGo lowers `expr!` and `expr?:default` through a generated closure; Effra's catch stays inline.
+8. **Lowering.** A catch becomes a type switch on the Go error value, inline, with no closure. *Prior art:* XGo lowers `expr!` and `expr?:default` through a generated closure; Ergo's catch stays inline.
 
 ## Capability rows
 
 Status: **checked** (#196), with inference (rule 6); runs.
 
-1. **Spelling.** `uses A, B` lists capabilities ([types.md](types.md#capabilities)). The row is a set.
+1. **Spelling.** `needs A, B` lists capabilities ([types.md](types.md#capabilities)). The row is a set.
 2. **Charges.** A body charges a capability when it:
    - calls a capability method, `A.m(…)`, which charges `A`;
    - calls a function whose row lists `A`;
-   - calls `timeout.After`, an ordinary library function whose signature lists `uses R, Scheduler` (README Gap 31).
-3. **Upper bound (S102).** Every capability a body charges must be in its `uses` clause or discharged by an enclosing `with`. A name in a `uses` clause must denote a capability (S104).
+   - calls `timeout.After`, an ordinary library function whose signature lists `needs R, Scheduler` (README Gap 31).
+3. **Upper bound (S102).** Every capability a body charges must be in its `needs` clause or discharged by an enclosing `with`. A name in a `needs` clause must denote a capability (S104).
 4. **Entry.** `main` takes no parameters and returns no value; an error row is allowed (S113). It cannot be called (S113). The checker does not restrict its capability row; the build refuses what the host cannot supply (README Gaps 4 and 5).
-5. **Names.** A written capability row binds each listed capability's bare name in the body's frame, beside the parameters; `uses http.Client` binds `Client` (with packages; when two packages export the same name, the body qualifies it). A local of that name in the same frame is S104. A local in an inner frame, or a local beside a capability the row does not list, may shadow a package or prelude capability (rows-and-constraints §7 amendment 3; fixtures `local-and-binding-one-frame`, `same-local-as-cap`). A capability name is the capability in a capability row, a wire key, a `replace` target and as the receiver of `X.m(…)`; in a type position it is the interface type ([types.md](types.md#capabilities)).
-6. **Inference.** Inside a package the checker infers each unwritten row of an unexported function with a body and of a function literal; a written row is declared. `main`, `LawX`, exported functions, methods, interface methods, bodiless declarations and the step of an exported machine type spell their rows, and an unwritten row there is empty, so a changed body never silently widens a public contract. A literal passed where a function type is expected is checked against that type's rows. Inference runs per strongly connected component of the package's reference graph, joining rows to a fixpoint, callees before callers (rows-and-constraints §7 amendment 1). *Prior art:* Go export data; OCaml `.mli` signatures; Effra's earlier rule for exported contracts.
+5. **Names.** A written capability row binds each listed capability's bare name in the body's frame, beside the parameters; `needs http.Client` binds `Client` (with packages; when two packages export the same name, the body qualifies it). A local of that name in the same frame is S104. A local in an inner frame, or a local beside a capability the row does not list, may shadow a package or prelude capability (rows-and-constraints §7 amendment 3; fixtures `local-and-binding-one-frame`, `same-local-as-cap`). A capability name is the capability in a capability row, a wire key, a `replace` target and as the receiver of `X.m(…)`; in a type position it is the interface type ([types.md](types.md#capabilities)).
+6. **Inference.** Inside a package the checker infers each unwritten row of an unexported function with a body and of a function literal; a written row is declared. `main`, `LawX`, exported functions, methods, interface methods, bodiless declarations and the step of an exported machine type spell their rows, and an unwritten row there is empty, so a changed body never silently widens a public contract. A literal passed where a function type is expected is checked against that type's rows. Inference runs per strongly connected component of the package's reference graph, joining rows to a fixpoint, callees before callers (rows-and-constraints §7 amendment 1). *Prior art:* Go export data; OCaml `.mli` signatures; Ergo's earlier rule for exported contracts.
 7. **Lowering.** Capabilities become Go interfaces whose methods take the task handle first. A function takes a hidden environment with one field per capability, and the task. When `wire` knows the concrete provider, the call may be devirtualised.
 
 ## Footprints
 
 Status: **designed, not yet implemented**.
 
-1. A function's footprint is every capability its body exercises, including those its own `with` provides, plus `go`. The compiler infers it and never asks for it. `ef inspect` shows it.
-2. A function is pure when its footprint is empty, not when its `uses` row is empty. `with(wire{ Console = Stdout{} }) { Console.Println("x") }` has an empty row and a non-empty footprint.
+1. A function's footprint is every capability its body exercises, including those its own `with` provides, plus `go`. The compiler infers it and never asks for it. `ergo inspect` shows it.
+2. A function is pure when its footprint is empty, not when its `needs` row is empty. `with(wire{ Console = Stdout{} }) { Console.Println("x") }` has an empty row and a non-empty footprint.
 3. A function type carries requirements only (README Gap 24). A call through an unknown function value counts as impure. A call is pure only when the compiler specialises it to a known function with an empty footprint.
 4. **Capability safety.** Only providers in host packages call Go. Ordinary code reaches the operating system only through a capability, so every effect appears in some footprint ([stdlib.md](stdlib.md#host-packages)).
-5. A function value whose row names a capability bound by `with` cannot escape that `with`. *Prior art:* Scala 3 capture checking and scoped capabilities; Effekt second-class blocks. A purity-carrying function type stays a candidate for [#189](https://github.com/cevr/effra/issues/189).
+5. A function value whose row names a capability bound by `with` cannot escape that `with`. *Prior art:* Scala 3 capture checking and scoped capabilities; Effekt second-class blocks. A purity-carrying function type stays a candidate for [#189](https://github.com/cevr/ergo/issues/189).
 
 ## Wire
 
-Status: **checked** (#196): provider literals, closed named wires, embedding, `replace` and several keys in one entry; the build refuses embedding, `replace` and several keys until #50. Constructors are **designed, not yet implemented**: S109 naming [#37](https://github.com/cevr/effra/issues/37).
+Status: **checked** (#196): provider literals, closed named wires, embedding, `replace` and several keys in one entry; the build refuses embedding, `replace` and several keys until #50. Constructors are **designed, not yet implemented**: S109 naming [#37](https://github.com/cevr/ergo/issues/37).
 
 ```go
 wire Live {
@@ -103,8 +103,12 @@ wire Live {
 3. **Inline wires.** `wire{ A = X{}; B = Y{} }` appears only as the argument of `with` (S108 elsewhere). Its provider expressions are evaluated in the enclosing function, before the block's discharge, so their requirements and failures charge the enclosing function. A provider expression does not see the capabilities of its own wire (fixture `wire-sibling`, S102); it sees those of an enclosing `with` (fixture `wire-order`).
 4. **Named wires.** A named wire is built by its own function at each `with` that names it, so its provider expressions do not see the caller's locals (fixture `named-wire-shadow`). A named wire is closed: its providers require no capability from the caller (S102) and let no failure escape (S101). It may use a capability it binds itself. Open named wires are #37's (README Gap 6).
 5. **Cycles.** A named wire whose build can reach itself is an error (S108): a provider expression that enters it with `with`, a function or method a provider calls that does, a capability method whose provider in the package does, or an embedding. Entries of one named wire whose providers use each other's capabilities (Wire 4) form a cycle too, since none can be built first (S108, once per cycle). The checker follows every method of the called name for a call on a value of interface type, which over-approximates.
-6. **Constructors (designed; S109 naming #37).** An entry may name a constructor: `Orders = OpenPostgres`. A constructor is an ordinary function. Its `uses` row is satisfied from the same wire graph, and its error row joins the startup errors of every `with` that builds it. A constructor that returns a resource gives the wire its release ([resources.md](resources.md#wire)). *Prior art:* Effect `Layer.effect` and `Layer.scoped`; Google Wire's generated constructor with cleanups in reverse order.
+6. **Constructors (designed; S109 naming #37).** An entry may name a constructor: `Orders = OpenPostgres`. A constructor is an ordinary function. Its `needs` row is satisfied from the same wire graph, and its error row joins the startup errors of every `with` that builds it. A constructor that returns a resource gives the wire its release ([resources.md](resources.md#wire)). *Prior art:* Effect `Layer.effect` and `Layer.scoped`; Google Wire's generated constructor with cleanups in reverse order.
 7. **Composition.** A wire may embed another wire by name. `replace Cap = provider` overrides an embedded entry; a second entry for one capability without `replace` is an error (S111). Two embedded wires that bind one capability are S111 unless a `replace` entry of the embedding wire, named or inline, overrides it; a `replace` of a capability no embedded wire binds is S108. A shared node is built once per build, and each `with` is a new build. *Prior art:* Effect `Layer.merge`, `Layer.provide` and `Layer.fresh` (README Gap 22).
+8. **Header (parsed; S109 naming [#196](https://github.com/cevr/ergo/issues/196) stage b).** A named wire may state what it exposes and what it requires: `wire App provides Account, Invoice needs Config { … }`. Both clauses are optional, and `provides` comes first.
+   - `provides A, B` lists the capabilities a `with(App)` discharges. An entry the wire builds and does not list stays private to its build: `Store = MemoryStore{}` can serve `Account` and `Invoice` without reaching the `with` body. Without `provides`, every entry is exposed. `binds(W)` in [Composition laws](#composition-laws) is this list.
+   - `needs C, D` lists the capabilities its providers require from the `with` site. They join that site's row (`needs(W)` in [Composition laws](#composition-laws)).
+   - The parser and formatter implement both; the checker refuses them with S109 naming #196 stage b, which checks them. *Prior art:* Roc, where an app `provides` entry points to a platform that `requires` them; Effect's `Layer<ROut, E, RIn>`; OSGi's `Provide-Capability` and `Require-Capability`; Dagger's `@Provides` (README Gap 33).
 
 ## With
 
@@ -157,12 +161,12 @@ Status: **designed**. These laws state the algebra of the row constructs. Law te
 
 | Composition | Error row | Capability row |
 | --- | --- | --- |
-| `a; b` (sequence) | `rows(a) ∪ rows(b)` | `uses(a) ∪ uses(b)` |
-| `try e` | escapes `rows(e)` | `uses(e)` |
-| `e catch { case T: h }` (total) | `rows(h)` | `uses(e) ∪ uses(h)` |
-| `try e catch { case T: h }` | `rows(e) − {T} ∪ rows(h)` | `uses(e) ∪ uses(h)` |
-| `with(W) { b }` | `rows(b) ∪ startup(W)` | `uses(b) − binds(W) ∪ needs(W)` |
-| `timeout.After(d) { b }` | `rows(b) ∪ {timeout.Expired}` | `uses(b) ∪ {Scheduler}` |
+| `a; b` (sequence) | `rows(a) ∪ rows(b)` | `needs(a) ∪ needs(b)` |
+| `try e` | escapes `rows(e)` | `needs(e)` |
+| `e catch { case T: h }` (total) | `rows(h)` | `needs(e) ∪ needs(h)` |
+| `try e catch { case T: h }` | `rows(e) − {T} ∪ rows(h)` | `needs(e) ∪ needs(h)` |
+| `with(W) { b }` | `rows(b) ∪ startup(W)` | `needs(b) − binds(W) ∪ needs(W)` |
+| `timeout.After(d) { b }` | `rows(b) ∪ {timeout.Expired}` | `needs(b) ∪ {Scheduler}` |
 
 1. **Wrapping.** Moving a body into a function `f` and calling `f()` changes no row, provided `f` declares the body's rows. Ordinary functions wrap every construct losslessly.
 2. **Nesting keeps both scopes.** `with(W1) { with(W2) { b } }` is not, in general, one `with` of an overlaid wire: `W2`'s initializers see `W1`'s bindings, and `W1`'s providers keep their startup errors and releases ([With](#with), rule 3). The body `b` sees `W2`'s entries over `W1`'s.

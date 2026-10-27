@@ -1,3 +1,3 @@
-module effra.local/spike-where/comparable
+module ergo.local/spike-where/comparable
 
 go 1.27

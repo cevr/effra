@@ -6,7 +6,7 @@ import (
 )
 
 func TestVoidIsOneCanonicalPrimitiveAcrossContracts(t *testing.T) {
-	const source = `import Data "effra/data"
+	const source = `import Data "ergo/data"
 error Stopped
 record Box<T: type> { value: T }
 fn pure() -> void { void }
@@ -96,7 +96,7 @@ func TestFormatterRejectsLegacyNoValueWithoutReplacement(t *testing.T) {
 	if !ok || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code != "EF002" || result.Text != "" || result.OutputDigest != "" {
 		t.Fatalf("formatter accepted or rewrote legacy no-value syntax: result=%+v err=%v", result, err)
 	}
-	if FormatterIdentity != "effra/formatter-16" {
+	if FormatterIdentity != "ergo/formatter-16" {
 		t.Fatalf("formatter identity did not advance with syntax admission: %s", FormatterIdentity)
 	}
 }

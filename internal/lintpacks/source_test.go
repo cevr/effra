@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"effra.local/prototype/internal/lintpacks"
+	"ergo.local/prototype/internal/lintpacks"
 )
 
 // admittedBytes is a SourceReader over bytes the caller already admitted.
@@ -25,7 +25,7 @@ func TestAdmittedEntriesReadOnlyTheAdmittedSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "provider_boundary.ef")
-	if err := os.WriteFile(path, []byte("not effra source\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("not ergo source\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	session := load(t, lintpacks.Selection{Manifests: []string{serve}})

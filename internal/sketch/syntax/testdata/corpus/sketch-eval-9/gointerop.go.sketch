@@ -14,9 +14,9 @@ type BadURL struct{ Raw string }
 // the declaration says URL, or a panic, becomes a defect, never a nil value.
 //
 //ef:go net/url.Parse
-func parseURL(raw string) (url.URL, error[go.Error]) uses go.Foreign
+func parseURL(raw string) (url.URL, error[go.Error]) needs go.Foreign
 
-func absolute(base url.URL, href string) (string, error[BadURL]) uses go.Foreign {
+func absolute(base url.URL, href string) (string, error[BadURL]) needs go.Foreign {
 	ref := parseURL(href) catch {
 	case go.Error:
 		return BadURL{href}
@@ -30,7 +30,7 @@ func absolute(base url.URL, href string) (string, error[BadURL]) uses go.Foreign
 // semantics hold. Go code that takes a context.Context receives this task's
 // interruption as cancellation; a blocking Go call without one is listed by
 // ef inspect as an uninterruptible host wait.
-func links(page string, base url.URL) ([]string, error[go.Error | BadURL]) uses go.Foreign {
+func links(page string, base url.URL) ([]string, error[go.Error | BadURL]) needs go.Foreign {
 	doc := try goquery.NewDocumentFromReader(strings.NewReader(page))
 	var out []string
 	for _, a := range doc.Find("a[href]").Nodes() {

@@ -3,7 +3,7 @@ package check
 import (
 	"fmt"
 
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // target is a failure target and a capability boundary: a function body, a
@@ -503,10 +503,10 @@ func typeParamsAsArgs(tps []*TypeParam) []Type {
 // its frame (rows-and-constraints §7 amendment 3): a local of one of these
 // names in the same frame is S104.
 func (c *checker) bindRequirements(frame *Scope, ft *syntax.FuncType) {
-	if ft == nil || ft.Uses == nil {
+	if ft == nil || ft.Needs == nil {
 		return
 	}
-	for _, x := range ft.Uses.Names {
+	for _, x := range ft.Needs.Names {
 		var bare string
 		switch x := x.(type) {
 		case *syntax.Ident:

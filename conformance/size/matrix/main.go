@@ -4,11 +4,11 @@
 // controls in conformance/size/controls, all under one matched toolchain
 // configuration.
 //
-// Effra rows are measured by `ef build --receipt`; controls, stripped
+// Ergo rows are measured by `ergo build --receipt`; controls, stripped
 // companions and counterfactuals are measured by the same internal/receipt
 // functions, so one package owns the measurement policy. Every program's
 // output is compared with its expected output. The gate runs only the
-// deterministic retention checks (cmd/ef/size_process_test.go); this command
+// deterministic retention checks (cmd/ergo/size_process_test.go); this command
 // is the explicit, expensive matrix. Results are raw measurements, never
 // performance claims.
 //
@@ -29,13 +29,13 @@ import (
 	"slices"
 	"strings"
 
-	"effra.local/prototype/internal/compiler"
-	"effra.local/prototype/internal/receipt"
-	rt "effra.local/prototype/runtime/effra"
+	"ergo.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/receipt"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // Schema versions the recorded matrix.
-const Schema = "effra.size-conformance/3"
+const Schema = "ergo.size-conformance/3"
 
 type fixture struct {
 	name string
@@ -89,7 +89,7 @@ type dependencySummary struct {
 	Platform    []string `json:"platform"`
 }
 
-type effraNative struct {
+type ergoNative struct {
 	RuntimeModules []rt.RuntimeModule                          `json:"runtimeModules"`
 	Requirements   map[compiler.ApplicationRequirementKind]int `json:"requirements"`
 	MainBytes      int                                         `json:"mainBytes"`
@@ -101,8 +101,8 @@ type effraNative struct {
 }
 
 type fixtureRow struct {
-	ExpectedOutput string      `json:"expectedOutput,omitempty"`
-	Go             effraNative `json:"go"`
+	ExpectedOutput string     `json:"expectedOutput,omitempty"`
+	Go             ergoNative `json:"go"`
 }
 
 type controlRow struct {
@@ -156,7 +156,7 @@ func run(outDir, record string) error {
 		return err
 	}
 	if outDir == "" {
-		if outDir, err = os.MkdirTemp("", "effra-size-"); err != nil {
+		if outDir, err = os.MkdirTemp("", "ergo-size-"); err != nil {
 			return err
 		}
 	}
@@ -177,8 +177,8 @@ func run(outDir, record string) error {
 	}
 	r := runner{root: root, out: outDir, env: os.Environ()}
 
-	ef := filepath.Join(outDir, "ef")
-	if err := r.goBuild(root, ef, "./cmd/ef"); err != nil {
+	ef := filepath.Join(outDir, "ergo")
+	if err := r.goBuild(root, ef, "./cmd/ergo"); err != nil {
 		return err
 	}
 	result := matrix{Schema: Schema, Fixtures: map[string]fixtureRow{}, Controls: map[string]controlRow{}}
@@ -243,7 +243,7 @@ func repositoryRoot() (string, error) {
 		}
 		parent := filepath.Dir(directory)
 		if parent == directory {
-			return "", fmt.Errorf("run from inside the Effra repository")
+			return "", fmt.Errorf("run from inside the Ergo repository")
 		}
 		directory = parent
 	}
@@ -351,7 +351,7 @@ func (r runner) fixture(ef string, row fixture) (fixtureRow, error) {
 			runtimeFiles = append(runtimeFiles, name)
 		}
 	}
-	measured := fixtureRow{ExpectedOutput: row.output, Go: effraNative{
+	measured := fixtureRow{ExpectedOutput: row.output, Go: ergoNative{
 		RuntimeModules: native.Plan.RuntimeModules,
 		Requirements:   native.Plan.Requirements,
 		MainBytes:      native.Generation.MainBytes,

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // with checks `with(W) { block }`: W is a named wire or an inline wire
@@ -417,8 +417,13 @@ func (c *checker) checkWires() {
 	for _, w := range wires {
 		c.cur = w.file
 		d := w.Decl
-		if d.Uses != nil {
-			c.errorf(d.Uses, CodeOutside, "a capability row on a wire is open (README Gap 33): the corpus means exposure, and its spelling is an owner question; it is not checked yet")
+		// The wire header (#217) is checked by #196's second stage; until
+		// then it is refused, never read partly (rows.md, Wire 8).
+		if d.Provides != nil {
+			c.errorf(d.Provides, CodeOutside, "a wire's provides clause is #196 stage b's (the wire header, rows.md Wire 8); it is not checked yet")
+		}
+		if d.Needs != nil {
+			c.errorf(d.Needs, CodeOutside, "a wire's needs clause is #196 stage b's (the wire header, rows.md Wire 8); it is not checked yet")
 		}
 		t := &target{name: "wire " + w.Name, declErrors: newRow(), declUses: newRow(), wire: true}
 		// The wire's providers may use what the wire binds (Wire 4).

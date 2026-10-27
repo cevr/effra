@@ -2,7 +2,7 @@
 
 > **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
 
-Owner requirement, 2026-10-06: do not represent nil in Effra. This contract also excludes a bare null language value, nullable ordinary types and observable uninitialized fields. It sharpens [generic data](language-abstractions.md), [Go protocols](go-protocol-interop.md) and future TypeScript interop. It does not prohibit target runtime internals, protocol JSON null or explicitly tagged wire data.
+Owner requirement, 2026-10-06: do not represent nil in Ergo. This contract also excludes a bare null language value, nullable ordinary types and observable uninitialized fields. It sharpens [generic data](language-abstractions.md), [Go protocols](go-protocol-interop.md) and future TypeScript interop. It does not prohibit target runtime internals, protocol JSON null or explicitly tagged wire data.
 
 ## Ordinary values
 
@@ -12,7 +12,7 @@ Current source lacks a nil/null literal and checks required record fields. Ordin
 
 ## Native Go boundary
 
-Keep original Go type/assignment authority and concrete values. Nullable native results adapt to Option or an equally explicit specified alternative; a nil pointer, map, slice or function must never be returned as an ordinary Effra host reference. Distinguish native nil from a present empty container when native round-trip semantics depend on that distinction. Unsupported adaptation diagnoses before emission.
+Keep original Go type/assignment authority and concrete values. Nullable native results adapt to Option or an equally explicit specified alternative; a nil pointer, map, slice or function must never be returned as an ordinary Ergo host reference. Distinguish native nil from a present empty container when native round-trip semantics depend on that distinction. Unsupported adaptation diagnoses before emission.
 
 Native interfaces need a separate rule: a nil interface is absent, while a nonnil interface holding a nil dynamic payload is still a present Go interface. Preserve that distinction as opaque host-boundary state. Do not expose its nil dynamic pointer as an admitted source pointer; a downcast/result projection to such a pointer must produce absence. A present interface does not prove its methods are safe, nonblocking or cancellation-aware. Managed invocation preserves the actual foreign defect/trust policy.
 
@@ -26,7 +26,7 @@ No signature alone establishes semantic presence. Pointer-typed fields inside a 
 
 ## Wire and JavaScript boundaries
 
-JSON null is wire data. A codec may map it to None under an explicit representation policy, or preserve it as a named `JsonValue.Null` alternative. Neither creates a bare null Effra value. Required fields reject null/missing input where their codec contract requires a present value. Missing, null and empty are not interchangeable by default.
+JSON null is wire data. A codec may map it to None under an explicit representation policy, or preserve it as a named `JsonValue.Null` alternative. Neither creates a bare null Ergo value. Required fields reject null/missing input where their codec contract requires a present value. Missing, null and empty are not interchangeable by default.
 
 Future TS/JS interop must adapt null/undefined/optional properties into checked alternatives. Where host round-trip behavior distinguishes them, preserve that distinction through a specified tagged representation instead of collapsing both to None. A declaration is a trust input; runtime absence checks occur at the admitted boundary. JSON-RPC null IDs and inspection JSON null fields keep their protocol meaning.
 
@@ -35,11 +35,11 @@ Future TS/JS interop must adapt null/undefined/optional properties into checked 
 - Separate source cases reject bare nil, bare null, nullable annotations, missing required fields/results and unchecked Option extraction on both targets. A present `void` value and explicit domain Missing/Found alternatives remain valid.
 - Generic Option preserves exact payload types, exhaustive matching and owner provenance. Some of a shorter-lived acquired resource cannot escape its owner; a borrowed present value remains admitted where proven.
 - Actual native calls distinguish nil pointer from nonnil pointer, nil/empty slice and map, nil interface from typed-nil dynamic payload, nil error from typed-nil error with partial results, and successful typed-nil matches from failed matches. CLI/MCP show the same boundary/presence facts without publishing a nullable source type.
-- Native error identity tests exercise the real Go helper boundary. Native reference tests alone establish zero Effra passes. Unknown/unsupported adaptation diagnoses rather than producing an opaque unusable value.
+- Native error identity tests exercise the real Go helper boundary. Native reference tests alone establish zero Ergo passes. Unknown/unsupported adaptation diagnoses rather than producing an opaque unusable value.
 - Native method fast paths and concrete object identity survive present-value adaptation. Mutation/downcast controls cannot use stale presence evidence. JS wire tests preserve required-field refusal and explicitly chosen absence policy.
 
 These gates belong to generic-data and host-types, with their full review/gates and later managed-resource controls. No new syntax or runtime guarantee is claimed by this document.
 
 ## Prior art: Elixir and MoonBit
 
-MoonBit abbreviates `Option[T]` as `T?` (`next/language/fundamentals.md:L361` at docs `8d9f3ba2`). An optional argument without a default has type `T?`, and a supplied argument is wrapped in `Some` (`L734-L754`); `unwrap` panics on `None` (core `builtin/option.mbt:L35-L44` at `e96ede8b`). Its compiler may lay out `None` as a null or sentinel (`src/pass_layout.ml:L98-L155` at `d4ada10d`). Effra keeps the closed alternative but rejects the postfix spelling, implicit `Some` wrapping and unchecked unwrap. An internal null layout is compatible with the rule that runtime representations may contain null. Elixir's `nil` is an ordinary atom, and `JSON.decode` maps JSON null to it (`lib/elixir/lib/json.ex:L314-L326` at `91ee75bb`); the owner's no-nil rule rejects such a value. Pins are in [PRIOR_ART](../../PRIOR_ART.md#moonbit).
+MoonBit abbreviates `Option[T]` as `T?` (`next/language/fundamentals.md:L361` at docs `8d9f3ba2`). An optional argument without a default has type `T?`, and a supplied argument is wrapped in `Some` (`L734-L754`); `unwrap` panics on `None` (core `builtin/option.mbt:L35-L44` at `e96ede8b`). Its compiler may lay out `None` as a null or sentinel (`src/pass_layout.ml:L98-L155` at `d4ada10d`). Ergo keeps the closed alternative but rejects the postfix spelling, implicit `Some` wrapping and unchecked unwrap. An internal null layout is compatible with the rule that runtime representations may contain null. Elixir's `nil` is an ordinary atom, and `JSON.decode` maps JSON null to it (`lib/elixir/lib/json.ex:L314-L326` at `91ee75bb`); the owner's no-nil rule rejects such a value. Pins are in [PRIOR_ART](../../PRIOR_ART.md#moonbit).

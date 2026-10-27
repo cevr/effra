@@ -19,7 +19,7 @@ interface Sink {
 }
 
 // The ticker stops when the loop ends. A full queue blocks Send.
-func poll(out Queue[Reading]) uses Source, Clock, Console {
+func poll(out Queue[Reading]) needs Source, Clock, Console {
 	for at in Clock.Every(1s) {
 		v := Source.Read() catch {
 		case SourceDown:
@@ -30,7 +30,7 @@ func poll(out Queue[Reading]) uses Source, Clock, Console {
 	}
 }
 
-func batch(in Queue[Reading], size int) error[FlushFailed] uses Sink {
+func batch(in Queue[Reading], size int) error[FlushFailed] needs Sink {
 	var buf []Reading
 	for r in in {
 		buf.Append(r)
@@ -45,7 +45,7 @@ func batch(in Queue[Reading], size int) error[FlushFailed] uses Sink {
 }
 
 // A flush failure exits Run, and that exit interrupts the producer.
-func Run(d Duration) error[FlushFailed] uses Source, Sink, Clock, Scheduler, Console {
+func Run(d Duration) error[FlushFailed] needs Source, Sink, Clock, Scheduler, Console {
 	q := Queue[Reading](16)
 	producer := go {
 		timeout.After(d) { poll(q) } catch {

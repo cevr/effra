@@ -1,0 +1,49 @@
+// Label: Proposed. Route 1, agent form: the same roster served as calls on
+// its state. The protocol is Room's methods, which take a lent *Room
+// receiver; there is no message union and no reply address. Callers spell
+// the literal's parameter types until #214 infers them from Call's expected
+// type. Hand-lowered in prototypes/actorlib/examples/roster.go.
+package roster
+
+import (
+	"actor"
+	"slices"
+)
+
+type RoomFull struct{ Limit int64 }
+
+type Room struct {
+	limit int64
+	names []string
+}
+
+func (r *Room) Join(name string) (int64, error[RoomFull]) {
+	if len(r.names) >= r.limit {
+		return RoomFull{r.limit}
+	}
+	r.names = append(r.names, name)
+	return len(r.names)
+}
+
+func (r *Room) Leave(name string) int64 {
+	r.names = slices.DeleteFunc(r.names, func(n string) bool { return n == name })
+	return len(r.names)
+}
+
+func (r *Room) Members() []string { return r.names }
+
+func StartRoom(limit int64) actor.Agent[Room] {
+	return actor.StartAgent(Room{limit: limit}, 64)
+}
+
+func JoinRoom(room actor.AgentAddress[Room], name string) (int64, error[RoomFull | actor.Stopped | actor.NoReply]) {
+	return actor.Call(room, func(r *Room) (int64, error[RoomFull]) { return r.Join(name) })
+}
+
+func LeaveRoom(room actor.AgentAddress[Room], name string) (int64, error[actor.Stopped | actor.NoReply]) {
+	return actor.Call(room, func(r *Room) int64 { return r.Leave(name) })
+}
+
+func RoomMembers(room actor.AgentAddress[Room]) ([]string, error[actor.Stopped | actor.NoReply]) {
+	return actor.Call(room, func(r *Room) []string { return r.Members() })
+}

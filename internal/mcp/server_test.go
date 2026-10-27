@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/compiler"
-	"effra.local/prototype/internal/producer"
-	rt "effra.local/prototype/runtime/effra"
+	"ergo.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/producer"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 func TestProtocolLifecycleAndSemanticParity(t *testing.T) {
@@ -892,7 +892,7 @@ func TestLintSuppressionSemanticParity(t *testing.T) {
 	root := t.TempDir()
 	source := `effect fn task() -> string { "ok" }
 effect fn main() -> void {
-// effra-lint-disable-next-line unused-recipe -- intentional deferred hook
+// ergo-lint-disable-next-line unused-recipe -- intentional deferred hook
 let forgotten = task();
 void}`
 	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
@@ -921,7 +921,7 @@ void}`
 	}
 
 	source = `effect fn main() -> void {
-// effra-lint-disable-next-line future-rule -- deliberate invalid example
+// ergo-lint-disable-next-line future-rule -- deliberate invalid example
 void}`
 	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
 		t.Fatal(err)

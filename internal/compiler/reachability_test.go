@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 func checkedApplicationPlan(t *testing.T, source string, mode GoGenerationMode) (*Result, *ApplicationPlan) {
@@ -134,7 +134,7 @@ func sameRuntimeModules(plan *ApplicationPlan, want ...rt.RuntimeModule) bool {
 	return slices.Equal(got, want)
 }
 
-const applicationHigherOrderSource = `import Fns "effra/functions"
+const applicationHigherOrderSource = `import Fns "ergo/functions"
 fn unused(input: string) -> string {
     input + "!"
 }
@@ -557,7 +557,7 @@ func TestApplicationPlanRetainsExampleHTTPCapabilities(t *testing.T) {
 	route := symbolIdentity(t, r, "route")
 	requireProvenance(t, plan, RequiresCallableValue, route, symbolIdentity(t, r, "main"), "function-value")
 	requireProvenance(t, plan, RequiresRuntimeModule, string(rt.RuntimeModuleHTTP), providerIdentity(t, r, "LiveHttp"), "provider-runtime")
-	requirePlanned(t, plan, RequiresGoImport, "strings", "effra.local/prototype/examples/sdk")
+	requirePlanned(t, plan, RequiresGoImport, "strings", "ergo.local/prototype/examples/sdk")
 	requirePlanned(t, plan, RequiresHelper, "timeout")
 	if !sameRuntimeModules(plan, rt.RuntimeModuleCore, rt.RuntimeModuleFiles, rt.RuntimeModuleHTTP, rt.RuntimeModuleInterop) {
 		t.Fatalf("http runtime modules = %v", plan.RuntimeModules())
@@ -727,7 +727,7 @@ effect fn main() -> string {
 }
 
 func TestApplicationPlanOmitsBundledMembersOnlyUsedByUnreachableCode(t *testing.T) {
-	r, plan := checkedApplicationPlan(t, `import Fns "effra/functions"
+	r, plan := checkedApplicationPlan(t, `import Fns "ergo/functions"
 effect fn keep(file: File) -> File {
     file
 }
@@ -747,7 +747,7 @@ effect fn main() -> string {
 		t.Fatalf("unreachable File code selected %v", plan.RuntimeModules())
 	}
 
-	r, plan = checkedApplicationPlan(t, `import Fns "effra/functions"
+	r, plan = checkedApplicationPlan(t, `import Fns "ergo/functions"
 effect fn keep(file: File) -> File {
     file
 }
@@ -765,7 +765,7 @@ effect fn main() -> string raises { IoError } {
 }
 
 func TestApplicationPlanRetainsTemplatesOnlyWhenReachable(t *testing.T) {
-	r, plan := checkedApplicationPlan(t, `import Data "effra/data"
+	r, plan := checkedApplicationPlan(t, `import Data "ergo/data"
 fn unused() -> Data.Option<string> {
     Data.Option<string>.None {}
 }

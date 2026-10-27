@@ -1,6 +1,6 @@
 // A retry policy stores lazy recipes as data. Constructing the policy runs
 // nothing; each retry executes the stored recipes again.
-import Data "effra/data"
+import Data "ergo/data"
 
 error Transient
 

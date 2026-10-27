@@ -9,4 +9,4 @@ type Sum interface{ A | B }
 type Other interface{ A | C }
 func one() Sum { return A{Value: "one"} }
 func two() Other { return A{Value: "two"} }
-func main() uses Console { Console.Println(one(), two()) }
+func main() needs Console { Console.Println(one(), two()) }

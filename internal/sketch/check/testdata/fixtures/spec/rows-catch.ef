@@ -36,12 +36,12 @@ wire Live {
 	Scheduler = LiveScheduler{}
 }
 
-func checkout(id string) (string, error[OrderNotFound | GatewayDown | timeout.Expired]) uses Orders, Gateway, Scheduler {
+func checkout(id string) (string, error[OrderNotFound | GatewayDown | timeout.Expired]) needs Orders, Gateway, Scheduler {
 	order := try Orders.Find(id)
 	return Gateway.Charge(order)
 }
 
-func demo(id string) string uses Orders {
+func demo(id string) string needs Orders {
 outcome := with(Live) { checkout(id) } catch {
 case OrderNotFound:
 	"no such order"

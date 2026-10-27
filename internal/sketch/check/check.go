@@ -8,8 +8,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"effra.local/prototype/internal/sketch/std"
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/std"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // Importer resolves an import path to a checked package (Go types2's seam).

@@ -8,7 +8,7 @@ func immediate() string {
 	return "child joined"
 }
 
-func pending() string uses Clock {
+func pending() string needs Clock {
 	Clock.Sleep(10s)
 	return "late"
 }
@@ -18,7 +18,7 @@ func bad() (string, error[Bad]) {
 }
 
 // The function body is the owner block: every child is consumed or awaited before it returns.
-func program() error[Bad] uses Clock, Console, Scheduler {
+func program() error[Bad] needs Clock, Console, Scheduler {
 	child := go immediate()
 	Console.Log(await child)
 
@@ -40,6 +40,6 @@ func program() error[Bad] uses Clock, Console, Scheduler {
 	return
 }
 
-func main() error[Bad] uses Clock, Console, Scheduler {
+func main() error[Bad] needs Clock, Console, Scheduler {
 	return program()
 }

@@ -91,7 +91,7 @@ func TestInitializeAdvertisesOnlyImplementedRequests(t *testing.T) {
 }
 
 func TestNavigationReadsTheCurrentAcceptedVersion(t *testing.T) {
-	uri := "file:///tmp/effra-navigation.ef"
+	uri := "file:///tmp/ergo-navigation.ef"
 	first := "fn first() -> string { \"a\" }\nfn caller() -> string { first() }\n"
 	second := "fn second() -> string { \"b\" }\n\nfn caller() -> string { second() }\n"
 	use := at(t, second, "{ second()", "second")
@@ -132,7 +132,7 @@ func TestNavigationReadsTheCurrentAcceptedVersion(t *testing.T) {
 }
 
 func TestHoverPresentsCheckedParameterRolesAndDefaults(t *testing.T) {
-	uri := "file:///tmp/effra-parameter-default-hover.ef"
+	uri := "file:///tmp/ergo-parameter-default-hover.ef"
 	source := "fn render(required key: string, suffix: string = \"!\") -> string { key + suffix }\n"
 	callable := at(t, source, "fn render", "render")
 	parameter := at(t, source, "suffix: string", "suffix")
@@ -153,7 +153,7 @@ func TestHoverPresentsCheckedParameterRolesAndDefaults(t *testing.T) {
 }
 
 func TestHoverPresentsCheckedConstants(t *testing.T) {
-	uri := "file:///tmp/effra-constant-hover.ef"
+	uri := "file:///tmp/ergo-constant-hover.ef"
 	source := "const Suffix: string = \"!\"\nconst Limit: i64 = -1\nconst Enabled: bool = true\n" +
 		"fn render(value: string = Suffix, limit: i64 = Limit, enabled: bool = Enabled) -> string { value }\n"
 	probes := []struct{ context, name, hover string }{
@@ -185,7 +185,7 @@ func TestHoverPresentsCheckedConstants(t *testing.T) {
 }
 
 func TestNavigationUsesUTF16PositionsAndDeclarations(t *testing.T) {
-	uri := "file:///tmp/effra-positions.ef"
+	uri := "file:///tmp/ergo-positions.ef"
 	source := "// 𐐀 note\r\nfn helper(value: string) -> string { value }\r\nfn caller() -> string { let s = \"𐐀é\"; helper(s) }\r\n"
 	call_ := at(t, source, "helper(s)", "helper")
 	use := at(t, source, "(s)", "s")
@@ -239,7 +239,7 @@ func TestNavigationUsesUTF16PositionsAndDeclarations(t *testing.T) {
 }
 
 func TestNavigationOnUncheckedSourceAnswersNull(t *testing.T) {
-	uri := "file:///tmp/effra-unchecked.ef"
+	uri := "file:///tmp/ergo-unchecked.ef"
 	source := "fn helper() -> string { \"a\" }\nfn broken() -> string { helper( }\n"
 	messages, err := runSession(t, initialize(), initialized(), open(uri, source, 1),
 		pointAt(uri, "textDocument/hover", "hover", source, at(t, source, "{ helper(", "helper")),
@@ -268,7 +268,7 @@ func TestNavigationOnUncheckedSourceAnswersNull(t *testing.T) {
 // A service operation has no body, so its parameters are declared only by its
 // checked signature; they answer like a body-checked parameter does.
 func TestNavigationAnswersSignatureOnlyParameters(t *testing.T) {
-	uri := "file:///tmp/effra-service-parameters.ef"
+	uri := "file:///tmp/ergo-service-parameters.ef"
 	source := "// 𐐀\r\nservice Users { effect fn get(id: string, n: i64) -> string } // 𐐀\r\n" +
 		"impl Fixed for Users { effect fn get(key: string, count: i64) -> string { key } }\r\n"
 	probes := []struct{ context, name, declaration, hover string }{
@@ -306,7 +306,7 @@ func TestNavigationAnswersSignatureOnlyParameters(t *testing.T) {
 }
 
 func TestNavigationResolvesArgumentLabelsToParameters(t *testing.T) {
-	uri := "file:///tmp/effra-labels.ef"
+	uri := "file:///tmp/ergo-labels.ef"
 	source := "service Pairs { effect fn join(left: string, right: string) -> string }\nimpl Prefixed(prefix: string, suffix: string) for Pairs { effect fn join(left: string, right: string) -> string { prefix + left + right + suffix } }\nfn card(title: string, body: string) -> string { title + body }\neffect fn caller() -> string uses { Pairs } { let c = card(body: \"b\", title: \"t\") run Pairs.join(right: c, left: c) }\neffect fn configured() -> string { let pairs = run Prefixed(suffix: \">\", prefix: \"<\") run Pairs.join(\"l\", \"r\").provide<Pairs>(pairs) }\n"
 	label := at(t, source, "card(body:", "body")
 	operation := at(t, source, "join(right:", "right")
@@ -340,13 +340,13 @@ func TestNavigationResolvesArgumentLabelsToParameters(t *testing.T) {
 // shadow same-spelled module declarations, bundled targets have no location
 // in this document, and primitives name no declaration.
 func TestNavigationResolvesTypeAnnotationsAndRowLabels(t *testing.T) {
-	uri := "file:///tmp/effra-annotations.ef"
-	source := "import Data \"effra/data\" // 𐐀\r\nerror E\r\nrecord Box { value: string }\r\nrecord Wrap<Box: type> { inner: Box }\r\n" +
+	uri := "file:///tmp/ergo-annotations.ef"
+	source := "import Data \"ergo/data\" // 𐐀\r\nerror E\r\nrecord Box { value: string }\r\nrecord Wrap<Box: type> { inner: Box }\r\n" +
 		"effect fn apply<E: raises>(box: Data.Option<Box>, cb: effect fn(Box) -> string raises {E}) -> Wrap<Box> raises {E} { Wrap { inner: Box { value: \"x\" } } }\r\n"
 	probes := []struct{ context, name, declaration, hover string }{
 		{"inner: Box }", "Box", "Wrap<Box:", "type parameter Wrap.Box: type"},
 		{"fn(Box)", "Box", "record Box {", "record Box { value: string }"},
-		{"Data.Option<Box>", "Data", "import Data", "import Data \"effra/data\""},
+		{"Data.Option<Box>", "Data", "import Data", "import Data \"ergo/data\""},
 		{"-> Wrap<Box> raises", "Wrap", "record Wrap", "record Wrap<Box: type> { inner: Box }"},
 		{"raises {E}) ->", "E", "apply<E", "row parameter apply.E: raises"},
 		{"Wrap<Box> raises {E}", "E", "apply<E", "row parameter apply.E: raises"},
@@ -397,7 +397,7 @@ func TestNavigationResolvesTypeAnnotationsAndRowLabels(t *testing.T) {
 // Annotations the checker could not resolve publish no references: hover and
 // definition answer null, and the server keeps serving afterwards.
 func TestNavigationOnUnresolvedAnnotationsAnswersNull(t *testing.T) {
-	uri := "file:///tmp/effra-unresolved-annotations.ef"
+	uri := "file:///tmp/ergo-unresolved-annotations.ef"
 	source := "record Box { value: string }\nrecord Bad<F: callable fn(Missing) -> Box> { cb: F }\nfn lost(value: Unknown) -> Box raises {Nope} { value }\n"
 	probes := map[string]int{
 		"constraint": at(t, source, "fn(Missing)", "Missing"),

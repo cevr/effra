@@ -12,7 +12,7 @@ func TestGenericDataLivePresentNativeFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("managed generic read"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	source := `import Data "effra/data"
+	source := `import Data "ergo/data"
 fn forward(value:Data.Option<File>)->Data.Option<File>{value}
 effect fn main()->string raises {IoError} {
  scope {
@@ -24,13 +24,13 @@ effect fn main()->string raises {IoError} {
 	runGenericDataNative(t, source, "managed generic read\n")
 }
 
-const genericUnitPresence = `import Data "effra/data"
+const genericUnitPresence = `import Data "ergo/data"
 fn describe(value:Data.Option<void>)->string {
  match value {Data.Option.None => "absent"; Data.Option.Some {value:unit} => { let present = unit; "present" }}
 }
 effect fn main()->string{describe(Data.Option.Some {value:void})+":"+describe(Data.Option<void>.None {})}`
 
-const genericAliasShadow = `import Data "effra/data"
+const genericAliasShadow = `import Data "ergo/data"
 record Local {Option:fn()->string}
 fn text()->string {"local"}
 fn local(Data:Local)->string {Data.Option()}
@@ -45,7 +45,7 @@ func TestGenericDataPresenceAndAliasExecution(t *testing.T) {
 	} {
 		runGenericDataNative(t, fixture.source, fixture.output+"\n")
 	}
-	const sameName = `import Data "effra/data"
+	const sameName = `import Data "ergo/data"
 enum Option<T:type>{Missing; Present {value:T}}
 fn local()->Option<string>{Option.Present {value:"local"}}
 fn bundled()->Data.Option<string>{Data.Option<string>.None {}}
@@ -54,7 +54,7 @@ effect fn main()->string {
  let b = match bundled(){Data.Option.None => "missing"; Data.Option.Some {value} => value}
  a+":"+b
 }`
-	const sameResult = `import Data "effra/data"
+	const sameResult = `import Data "ergo/data"
 enum Result<T:type,E:type>{Missing; Present {value:T}}
 fn local()->Result<string,bool>{Result<string,bool>.Present {value:"local"}}
 fn bundled()->Data.Result<string,bool>{Data.Result<string,bool>.Err {error:false}}
@@ -69,7 +69,7 @@ effect fn main()->string {
 }
 
 func TestGenericDataAbsenceAndOwnerControls(t *testing.T) {
-	const declarations = `import Data "effra/data" record User {name:string}`
+	const declarations = `import Data "ergo/data" record User {name:string}`
 	for _, source := range []string{
 		`fn bad()->Data.Option<User>{nil}`,
 		`fn bad()->Data.Option<User>{null}`,
@@ -85,14 +85,14 @@ func TestGenericDataAbsenceAndOwnerControls(t *testing.T) {
 			t.Fatal("go", "absence/owner control admitted", source, r.Diagnostics)
 		}
 	}
-	borrowed := CompileFor(`import Data "effra/data"
+	borrowed := CompileFor(`import Data "ergo/data"
 fn wrap(file:File)->Data.Option<File>{Data.Option.Some {value:file}}
 fn unwrap(value:Data.Option<File>,fallback:File)->File{match value {Data.Option.None => fallback; Data.Option.Some {value:file} => file}}
 effect fn outer(file:File)->File{scope {unwrap(wrap(file),file)}}`, "go")
 	if !borrowed.Checked {
 		t.Fatal("go", "borrowed present file rejected", borrowed.Diagnostics)
 	}
-	acquired := CompileFor(`import Data "effra/data"
+	acquired := CompileFor(`import Data "ergo/data"
 fn wrap(file:File)->Data.Option<File>{Data.Option.Some {value:file}}
 fn unwrap(value:Data.Option<File>,fallback:File)->File{match value {Data.Option.None => fallback; Data.Option.Some {value:file} => file}}
 effect fn outer(file:File)->File raises {IoError}{scope {let owned = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles); unwrap(wrap(owned),file)}}`, "go")
@@ -117,7 +117,7 @@ func TestGenericDataUnrelatedCallerExecutionAndSharedSources(t *testing.T) {
 			t.Fatal(fixture.path, "go", r.Diagnostics)
 		}
 		for _, declaration := range r.Program.BundledTemplates {
-			if declaration.Module != "effra/data" || declaration.SourceID != "source:effra/data/"+declaration.Name {
+			if declaration.Module != "ergo/data" || declaration.SourceID != "source:ergo/data/"+declaration.Name {
 				t.Fatal(declaration)
 			}
 		}
@@ -132,7 +132,7 @@ func TestGenericDataUnrelatedCallerExecutionAndSharedSources(t *testing.T) {
 	}
 	a, b := Compile(string(firstData)), Compile(string(secondData))
 	for _, source := range a.Sources {
-		if source.Module != "effra/data" {
+		if source.Module != "ergo/data" {
 			continue
 		}
 		found := false

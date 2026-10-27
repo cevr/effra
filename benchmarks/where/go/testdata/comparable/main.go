@@ -1,5 +1,5 @@
 // Option (c) control for spike-where (#116): the Go that a structural
-// comparable / cmp.Ordered design would emit, hand-written because Effra has
+// comparable / cmp.Ordered design would emit, hand-written because Ergo has
 // no such constraint. It is under testdata so `go build ./...` skips it; run
 // it with `go run .` in this directory.
 //

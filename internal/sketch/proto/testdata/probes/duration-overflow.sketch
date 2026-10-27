@@ -1,7 +1,7 @@
 // want S108
 package demo
 import "timeout"
-func main() uses Console {
+func main() needs Console {
   value := with(wire{ Scheduler = LiveScheduler{} }) {
     timeout.After(9223372036854775807s) { "ok" }
   } catch { case timeout.Expired: "late" }

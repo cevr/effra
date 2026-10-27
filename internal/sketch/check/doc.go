@@ -25,7 +25,7 @@
 // would follow from it: one mistake, one diagnostic.
 //
 // The prelude (internal/sketch/std/prelude.ef) and the standard library are
-// Effra source checked by this checker, so no library item is a checker
+// Ergo source checked by this checker, so no library item is a checker
 // branch (timeout.After is an ordinary bodiless declaration).
 //
 // Prior art:
@@ -56,7 +56,7 @@
 //     whose rows are supersets, never the reverse.
 //   - Elixir: its gradual set-theoretic types infer across modules without
 //     requiring written signatures, so it does not impose explicit exported
-//     rows; Effra's written exported rows (types.md, Generics 4) follow
+//     rows; Ergo's written exported rows (types.md, Generics 4) follow
 //     MoonBit and Go's export data instead, and Elixir is the contrast.
 //   - MoonBit: top-level signatures are annotated and locals inferred, and
 //     its raise rows are part of the function type.

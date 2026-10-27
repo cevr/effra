@@ -12,12 +12,12 @@ import (
 	"strings"
 	"testing"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // The policy vectors are target-neutral: plans name nodes by index, encode
 // values use $-markers for carriers JSON cannot spell, and every expectation
-// is an Effra outcome. The comparator file is a frozen golden: the pinned
+// is an Ergo outcome. The comparator file is a frozen golden: the pinned
 // Effect Schema behavior for the same vectors, recorded when Effect was the
 // JavaScript runtime. Encode vector targets name the carriers that can hold
 // the value: Go strings, or the JavaScript carriers that comparator used.
@@ -79,7 +79,7 @@ type codecVector struct {
 	Note       string          `json:"note"`
 }
 
-// codecOutcome is one Effra engine result: encoded output on success (for
+// codecOutcome is one Ergo engine result: encoded output on success (for
 // decode vectors, the decoded value re-encoded), the typed codec failure, or
 // a transformation step's own failure, returned unchanged.
 type codecOutcome struct {
@@ -133,7 +133,7 @@ func readCodecVectors(t *testing.T) (codecVectorDocument, string) {
 
 // TestCodecPolicyVectorsAcrossGoJSAndEffect executes every policy vector a
 // Go string can carry on the native Go engine, which must produce the
-// vector's Effra outcome, and checks each vector's recorded comparison
+// vector's Ergo outcome, and checks each vector's recorded comparison
 // against the frozen pinned Effect Schema output. Vectors only JavaScript
 // carriers can hold keep their recorded comparison and are not executed.
 func TestCodecPolicyVectorsAcrossGoJSAndEffect(t *testing.T) {
@@ -223,9 +223,9 @@ func TestCodecPolicyVectorsAcrossGoJSAndEffect(t *testing.T) {
 	}
 }
 
-// codecComparison classifies an Effra outcome against the comparator line.
+// codecComparison classifies an Ergo outcome against the comparator line.
 // Success matches identical output. A failure matches only at the same path
-// and with the corresponding Schema issue: an Effra syntax failure is a
+// and with the corresponding Schema issue: an Ergo syntax failure is a
 // JSON.parse rejection; each structural reason has its Schema message family.
 // Bound, duplicate-key and Unicode admission have no Schema counterpart.
 func codecComparison(expect codecOutcome, effect codecEffectLine, parseFailure string) string {

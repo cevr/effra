@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-const hostTypesImport = `import go host "effra.local/prototype/examples/hosttypes"
+const hostTypesImport = `import go host "ergo.local/prototype/examples/hosttypes"
 import go strconv "strconv"
-import Data "effra/data"
+import Data "ergo/data"
 `
 
 const hostTypesEntry = `
@@ -164,8 +164,8 @@ import (
 	"context"
 	"fmt"
 
-	er "effra.generated/runtime"
-	host "effra.local/prototype/examples/hosttypes"
+	er "ergo.generated/runtime"
+	host "ergo.local/prototype/examples/hosttypes"
 )
 
 func main() {
@@ -207,7 +207,7 @@ effect fn program() -> void uses { Console, Foreign } {
 	var pointer, option *TypeNode
 	for i := range r.Types {
 		node := &r.Types[i]
-		if node.Kind == "host" && node.Declaration == "go:*effra.local/prototype/examples/hosttypes.Counter" {
+		if node.Kind == "host" && node.Declaration == "go:*ergo.local/prototype/examples/hosttypes.Counter" {
 			pointer = node
 		}
 		if node.Kind == "application" && node.Declaration == hostOptionTemplate {
@@ -272,7 +272,7 @@ effect fn program() -> void uses { Console, Foreign } {
 
 func TestHostTypeAdmissionDiagnostics(t *testing.T) {
 	for _, tc := range []struct{ name, body, code, message string }{
-		{"fixed width", `run host.Narrow(1)`, "EF112", "native scalar int32 has no admitted Effra width"},
+		{"fixed width", `run host.Narrow(1)`, "EF112", "native scalar int32 has no admitted Ergo width"},
 		{"float", `run host.Ratio()`, "EF112", "native scalar float64"},
 		{"generic", `run host.Identity("x")`, "EF112", "generic Go functions are unsupported"},
 		{"variadic", `run host.Join("a", "b")`, "EF112", "variadic Go functions are unsupported"},
@@ -370,16 +370,16 @@ func TestUnsupportedTargetRefusesHostTypesBeforeGoTools(t *testing.T) {
 // the bundled Option they adapt through, separately from call imports.
 func TestApplicationPlanRetainsHostTypePackages(t *testing.T) {
 	r, plan := exampleApplicationPlan(t, "host-types.ef", GoGenerationBuild)
-	counter := "go:*effra.local/prototype/examples/hosttypes.Counter"
-	requirePlanned(t, plan, RequiresHostType, counter, "go:effra.local/prototype/examples/hosttypes.Shape", "go:error", "go:int", "go:[]string")
-	requirePlanned(t, plan, RequiresGoImport, "effra.local/prototype/examples/hosttypes")
+	counter := "go:*ergo.local/prototype/examples/hosttypes.Counter"
+	requirePlanned(t, plan, RequiresHostType, counter, "go:ergo.local/prototype/examples/hosttypes.Shape", "go:error", "go:int", "go:[]string")
+	requirePlanned(t, plan, RequiresGoImport, "ergo.local/prototype/examples/hosttypes")
 	// bytes is never imported by source; only a reachable native type names it.
 	requireProvenance(t, plan, RequiresGoImport, "bytes", "go:bytes.Buffer", "host-type")
 	requirePlanned(t, plan, RequiresDeclaration, hostOptionTemplate)
-	requirePlanned(t, plan, RequiresForeign, "go:strconv.Itoa", "go:io.Copy", "go:(*effra.local/prototype/examples/hosttypes.Counter).Increment", "go:(*bytes.Buffer).String")
-	requirePlanned(t, plan, RequiresHostType, "go:*effra.local/prototype/examples/hosttypes.Source", "go:*effra.local/prototype/examples/hosttypes.Problem")
-	requireUnplanned(t, plan, RequiresForeign, "go:effra.local/prototype/examples/hosttypes.Narrow")
-	requireUnplanned(t, plan, RequiresHostType, "go:effra.local/prototype/examples/hosttypes.Square")
+	requirePlanned(t, plan, RequiresForeign, "go:strconv.Itoa", "go:io.Copy", "go:(*ergo.local/prototype/examples/hosttypes.Counter).Increment", "go:(*bytes.Buffer).String")
+	requirePlanned(t, plan, RequiresHostType, "go:*ergo.local/prototype/examples/hosttypes.Source", "go:*ergo.local/prototype/examples/hosttypes.Problem")
+	requireUnplanned(t, plan, RequiresForeign, "go:ergo.local/prototype/examples/hosttypes.Narrow")
+	requireUnplanned(t, plan, RequiresHostType, "go:ergo.local/prototype/examples/hosttypes.Square")
 	if !strings.Contains(plan.Revision, r.Revision) {
 		t.Fatalf("plan revision %s does not match %s", plan.Revision, r.Revision)
 	}

@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-const codecDomainSource = `import Convert "effra/conversions"
-import Json "effra/json"
+const codecDomainSource = `import Convert "ergo/conversions"
+import Json "ergo/json"
 
 record User {
     id: i64
@@ -64,7 +64,7 @@ func TestCodecDeriveSynthesizesCheckedDirectionFunctions(t *testing.T) {
 		t.Fatalf("go: want three derived witnesses: %+v", r.Codecs)
 	}
 	user := r.Codecs[0]
-	if user.Name != "userJson" || user.Derivation != "effra/json.codec" || user.Profile != "effra/json-structural-1" || user.Domain != "User" || user.Wire != "string" || user.DomainType == "" {
+	if user.Name != "userJson" || user.Derivation != "ergo/json.codec" || user.Profile != "ergo/json-structural-1" || user.Domain != "User" || user.Wire != "string" || user.DomainType == "" {
 		t.Fatalf("go: user witness: %+v", user)
 	}
 	if !slices.Equal(user.Decode.Failures, []string{"JsonDecodeFailure"}) || !slices.Equal(user.Encode.Failures, []string{"JsonEncodeFailure"}) || len(user.Decode.Requirements) != 0 || len(user.Encode.Requirements) != 0 {
@@ -88,11 +88,11 @@ func TestCodecDeriveSynthesizesCheckedDirectionFunctions(t *testing.T) {
 }
 
 func TestCodecDerivationRefusals(t *testing.T) {
-	header := "import Json \"effra/json\"\nimport Data \"effra/data\"\n"
+	header := "import Json \"ergo/json\"\nimport Data \"ergo/data\"\n"
 	cases := []struct {
 		name, source, code, message string
 	}{
-		{"callable field", "record Job { run: effect fn() -> void }\nderive c = Json.codec<Job>(maxBodyBytes: 1024, maxDepth: 8)", "EF138", "codec c cannot derive effra/json-structural-1 for Job: effect fn() -> void at Job.run is a function or effect recipe"},
+		{"callable field", "record Job { run: effect fn() -> void }\nderive c = Json.codec<Job>(maxBodyBytes: 1024, maxDepth: 8)", "EF138", "codec c cannot derive ergo/json-structural-1 for Job: effect fn() -> void at Job.run is a function or effect recipe"},
 		{"nested host field", "record Inner { latch: Latch }\nrecord Outer { inner: Inner }\nderive c = Json.codec<Outer>(maxBodyBytes: 1024, maxDepth: 8)", "EF138", "Latch at Outer.inner.latch"},
 		{"bytes", "derive c = Json.codec<bytes>(maxBodyBytes: 1024, maxDepth: 8)", "EF138", "bytes at bytes is not representable"},
 		{"generic application", "record Maybe { value: Data.Option<string> }\nderive c = Json.codec<Maybe>(maxBodyBytes: 1024, maxDepth: 8)", "EF138", "Data.Option<string> at Maybe.value is generic data"},
@@ -116,8 +116,8 @@ func TestCodecDerivationRefusals(t *testing.T) {
 		{"local generic application", "record Box<T: type> { value: T }\nderive c = Json.codec<Box<string>>(maxBodyBytes: 1024, maxDepth: 8)", "EF138", "Box<string> at Box<string> is generic data"},
 		{"bundled generic without arguments", "derive c = Json.codec<Data.Option>(maxBodyBytes: 1024, maxDepth: 8)", "EF102", "unknown or unsupported value type Data.Option"},
 		{"unimported derivation", "derive c = Yaml.codec<string>", "EF102", "unknown derivation Yaml.codec"},
-		{"unknown derivation member", "derive c = Json.schema<string>", "EF126", "unknown bundled declaration effra/json/schema"},
-		{"not a derivation", "import Convert \"effra/conversions\"\nrecord User { name: string }\nfn read(text: string) -> User { User { name: text } }\nderive c = Convert.witness<User>", "EF138", "Convert.witness is not a codec derivation"},
+		{"unknown derivation member", "derive c = Json.schema<string>", "EF126", "unknown bundled declaration ergo/json/schema"},
+		{"not a derivation", "import Convert \"ergo/conversions\"\nrecord User { name: string }\nfn read(text: string) -> User { User { name: text } }\nderive c = Convert.witness<User>", "EF138", "Convert.witness is not a codec derivation"},
 		{"duplicate witness name", "derive c = Json.codec<string>(maxBodyBytes: 1024, maxDepth: 8)\nderive c = Json.codec<bool>(maxBodyBytes: 1024, maxDepth: 8)", "EF101", "duplicate declaration c"},
 		{"witness collides with function", "fn c() -> string { \"x\" }\nderive c = Json.codec<string>(maxBodyBytes: 1024, maxDepth: 8)", "EF101", "duplicate declaration c"},
 		{"failure name collides", "error JsonDecodeFailure\nderive c = Json.codec<string>(maxBodyBytes: 1024, maxDepth: 8)", "EF101", "duplicate declaration JsonDecodeFailure"},
@@ -148,15 +148,15 @@ func TestCodecDerivationRefusals(t *testing.T) {
 		})
 	}
 	if r := Compile("effect fn main() -> void raises { JsonDecodeFailure } { void }"); r.Checked || !hasCode(r, "EF102") {
-		t.Fatalf("codec failures must require the effra/json import: %+v", r.Diagnostics)
+		t.Fatalf("codec failures must require the ergo/json import: %+v", r.Diagnostics)
 	}
 }
 
 // Derive declarations format as one line with canonical spacing, and the
 // formatter's output is a fixed point that checks unchanged.
 func TestCodecDeriveDeclarationsFormat(t *testing.T) {
-	source := "import Json \"effra/json\"\nrecord User { name: string }\nderive   userJson=Json.codec< User >( maxBodyBytes:4096,maxDepth : 4 )\nderive userArchive = Json.codec<User>(maxBodyBytes: 64, maxDepth: 1)\n"
-	want := "import Json \"effra/json\"\nrecord User {\n    name: string\n}\nderive userJson = Json.codec<User>(maxBodyBytes: 4096, maxDepth: 4)\nderive userArchive = Json.codec<User>(maxBodyBytes: 64, maxDepth: 1)\n"
+	source := "import Json \"ergo/json\"\nrecord User { name: string }\nderive   userJson=Json.codec< User >( maxBodyBytes:4096,maxDepth : 4 )\nderive userArchive = Json.codec<User>(maxBodyBytes: 64, maxDepth: 1)\n"
+	want := "import Json \"ergo/json\"\nrecord User {\n    name: string\n}\nderive userJson = Json.codec<User>(maxBodyBytes: 4096, maxDepth: 4)\nderive userArchive = Json.codec<User>(maxBodyBytes: 64, maxDepth: 1)\n"
 	assertFormat(t, source, want)
 	if r := Compile(want); !r.Checked || len(r.Codecs) != 2 || r.CodecPlans[0].Bounds != (CodecPlanBounds{MaxBodyBytes: 4096, MaxDepth: 4}) {
 		t.Fatalf("formatted derive declarations: %+v %+v", r.Diagnostics, r.CodecPlans)
@@ -164,8 +164,8 @@ func TestCodecDeriveDeclarationsFormat(t *testing.T) {
 }
 
 func TestCodecDeriveFormattingSharesAngleFactsWithComparisons(t *testing.T) {
-	source := "import Json \"effra/json\"\nrecord User { name: string }\nenum Status { Ready Done }\nderive userJson = Json.codec< User >(maxBodyBytes: 4096, maxDepth: 4)\nderive statusJson = Json.codec< Status >(maxBodyBytes: 64, maxDepth: 1)\nfn ordinaryComparison(left: i64, right: i64) -> bool { left < right }\n"
-	want := "import Json \"effra/json\"\nrecord User {\n    name: string\n}\nenum Status {\n    Ready\n    Done\n}\nderive userJson = Json.codec<User>(maxBodyBytes: 4096, maxDepth: 4)\nderive statusJson = Json.codec<Status>(maxBodyBytes: 64, maxDepth: 1)\nfn ordinaryComparison(left: i64, right: i64) -> bool {\n    left < right\n}\n"
+	source := "import Json \"ergo/json\"\nrecord User { name: string }\nenum Status { Ready Done }\nderive userJson = Json.codec< User >(maxBodyBytes: 4096, maxDepth: 4)\nderive statusJson = Json.codec< Status >(maxBodyBytes: 64, maxDepth: 1)\nfn ordinaryComparison(left: i64, right: i64) -> bool { left < right }\n"
+	want := "import Json \"ergo/json\"\nrecord User {\n    name: string\n}\nenum Status {\n    Ready\n    Done\n}\nderive userJson = Json.codec<User>(maxBodyBytes: 4096, maxDepth: 4)\nderive statusJson = Json.codec<Status>(maxBodyBytes: 64, maxDepth: 1)\nfn ordinaryComparison(left: i64, right: i64) -> bool {\n    left < right\n}\n"
 	assertFormat(t, source, want)
 	r := Compile(want)
 	if !r.Checked || len(r.Codecs) != 2 || len(r.CodecPlans) != 2 {

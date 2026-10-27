@@ -30,7 +30,7 @@ func TestIdentifierRunesMatchGo(t *testing.T) {
 // S001 at the offending byte, wherever it falls in the name.
 func TestIdentifierBytes(t *testing.T) {
 	for _, name := range []string{"x\xff", "\xffx", "x\xe2\xaa", "x\xc0\x80"} {
-		src := "package demo\nfunc main() uses Console {\n  " + name + " := \"ok\"\n}\n"
+		src := "package demo\nfunc main() needs Console {\n  " + name + " := \"ok\"\n}\n"
 		_, err := Parse(src)
 		var e *Error
 		if !errors.As(err, &e) || e.Code != CodeSyntax || e.Line != 3 {
@@ -99,11 +99,11 @@ func TestNumberForms(t *testing.T) {
 	}
 }
 
-// TestKeywords: 27 keywords; goto, fallthrough and const are not keywords
+// TestKeywords: 28 keywords; goto, fallthrough and const are not keywords
 // but are never names.
 func TestKeywords(t *testing.T) {
-	if n := len(Keywords()); n != 27 {
-		t.Fatalf("%d keywords, want 27", n)
+	if n := len(Keywords()); n != 28 {
+		t.Fatalf("%d keywords, want 28", n)
 	}
 	for word := range removed {
 		if _, ok := keywords[word]; ok {

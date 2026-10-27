@@ -18,8 +18,8 @@ func TestRound5IntrinsicDeclarations(t *testing.T) {
 		{"wire", `wire NAME{};func main(){}`},
 		{"param", `func f(NAME string){};func main(){}`},
 		{"receiver", `type Box struct{};func(NAME Box) F(){};func main(){}`},
-		{"local", `func main()uses Console{NAME:="ok";Console.Println(NAME)}`},
-		{"switch", `type A struct{Value string};type U interface{A};func value()U{return A{Value:"ok"}};func main()uses Console{switch NAME:=value().(type){case A:Console.Println(NAME)}}`},
+		{"local", `func main()needs Console{NAME:="ok";Console.Println(NAME)}`},
+		{"switch", `type A struct{Value string};type U interface{A};func value()U{return A{Value:"ok"}};func main()needs Console{switch NAME:=value().(type){case A:Console.Println(NAME)}}`},
 	}
 	for _, name := range []string{"Console", "Println", "with", "wire", "timeout", "After", "duration", "LiveScheduler", "Scheduler"} {
 		for _, pos := range positions {
@@ -57,7 +57,7 @@ func TestRound5StringRepresentations(t *testing.T) {
 		for _, quote := range []string{"\"", "`"} {
 			t.Run(fmt.Sprintf("%s/%q", tc.name, quote), func(t *testing.T) {
 				literal := quote + tc.value + quote
-				src := "package demo\nfunc main() uses Console{Console.Println(" + literal + ")}\n"
+				src := "package demo\nfunc main() needs Console{Console.Println(" + literal + ")}\n"
 				f, err := Parse("string.sketch", src)
 				if err != nil {
 					t.Logf("parse rejects: %v", err)

@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"effra.local/prototype/internal/testinputs"
+	"ergo.local/prototype/internal/testinputs"
 )
 
 func TestMain(m *testing.M) {

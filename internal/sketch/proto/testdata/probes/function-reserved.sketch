@@ -3,4 +3,4 @@ package demo
 type Fault struct{}
 func unused() error[Fault] { return Fault{} }
 func fmt() string { return "x" }
-func main() uses Console { Console.Println(fmt()) }
+func main() needs Console { Console.Println(fmt()) }

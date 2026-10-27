@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"effra.local/prototype/lint"
+	"ergo.local/prototype/lint"
 )
 
 var pack = &lint.Pack{
@@ -179,7 +179,7 @@ func main() {
 		lint.Main(pack)
 	case "huge-header":
 		io.ReadAll(os.Stdin)
-		fmt.Printf("EFFRA-LINT %d %d\n", lint.ProtocolVersion, 1<<30)
+		fmt.Printf("ERGO-LINT %d %d\n", lint.ProtocolVersion, 1<<30)
 		os.Stdout.Write(make([]byte, 1<<20))
 	case "silent":
 		io.ReadAll(os.Stdin)
@@ -293,5 +293,5 @@ func raw(scenario string) {
 		panic("unknown scenario " + scenario)
 	}
 	body, _ := json.Marshal(response)
-	fmt.Printf("EFFRA-LINT %d %d\n%s%s", version, len(body), body, trailing)
+	fmt.Printf("ERGO-LINT %d %d\n%s%s", version, len(body), body, trailing)
 }

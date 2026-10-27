@@ -1,11 +1,11 @@
 # Resources and automatic release
 
-Status: **designed, not yet implemented**. The prototype has no resources. This file follows the owner's direction of 2026-10-26 ("How can we make it simpler so that defers are automatic … Kind of like acquire release"), adopted in the body of [#65](https://github.com/cevr/effra/issues/65). It replaces the earlier rules that made a resource linear with a checked `defer` and registered constructor resources with `build.Scope` (README Gap 13). Definitions of resource, owner scope, move, lend and consume are in the [glossary](../../GLOSSARY.md).
+Status: **designed, not yet implemented**. The prototype has no resources. This file follows the owner's direction of 2026-10-26 ("How can we make it simpler so that defers are automatic … Kind of like acquire release"), adopted in the body of [#65](https://github.com/cevr/ergo/issues/65). It replaces the earlier rules that made a resource linear with a checked `defer` and registered constructor resources with `build.Scope` (README Gap 13). Definitions of resource, owner scope, move, lend and consume are in the [glossary](../../GLOSSARY.md).
 
 The guarantee is Effect's `acquireRelease`: if an acquisition succeeds, its release runs, once, on every exit. The spelling is Go's: no `defer` to write and none to forget.
 
 ```go
-func copyFile(src, dst string) error[NotFound | WriteFailed] uses FS {
+func copyFile(src, dst string) error[NotFound | WriteFailed] needs FS {
 	in := try FS.Open(src)
 	out := try FS.Create(dst) // if this fails, in is still closed
 	try io.Copy(out, in)      // lends out and in
@@ -25,7 +25,7 @@ func copyFile(src, dst string) error[NotFound | WriteFailed] uses FS {
 3. **R6. Loop iterations.** The body of a loop is its own owner scope. A resource acquired in an iteration is closed at the end of that iteration, not at function exit.
 
    ```go
-   func importAll(paths []string) error[NotFound] uses FS {
+   func importAll(paths []string) error[NotFound] needs FS {
    	for _, p := range paths {
    		f := try FS.Open(p)
    		try load(f)
@@ -72,7 +72,7 @@ type Postgres struct {
 	refresh Task[struct{}] // declared after pool: stopped and drained first
 }
 
-func OpenPostgres() (Postgres, error[ConnectFailed]) uses Config, Clock, Scheduler {
+func OpenPostgres() (Postgres, error[ConnectFailed]) needs Config, Clock, Scheduler {
 	pool := try retry.On[ConnectFailed](retry.Exponential(200ms).Times(5)) {
 		sql.Open(Config.String("DATABASE_URL"))
 	}
@@ -151,7 +151,7 @@ func goodTask() {
 
 1. **R16.** Passing a resource as an argument lends it. The caller keeps ownership, and the resource is usable again after the call.
 2. **R17.** A lent resource must not be stored, returned, sent or captured by an escaping closure or by `go` inside the callee, except by a structured lend (R27, R31) to a task or owner that the callee releases before it returns. Each of these is an error. A call that lends `r` while `r` is consumed in the same call is an error.
-3. **R18.** Lending needs no lifetime annotations, because a lent value cannot escape the call. *Prior art:* Swift non-escaping borrowed parameters; Rust borrows, whose lifetimes Effra drops because a lend never escapes.
+3. **R18.** Lending needs no lifetime annotations, because a lent value cannot escape the call. *Prior art:* Swift non-escaping borrowed parameters; Rust borrows, whose lifetimes Ergo drops because a lend never escapes.
 4. A lend of a `Task` lets the callee read it but not `Wait` or `Stop` it.
 
 ## Closures
@@ -162,7 +162,7 @@ func goodTask() {
 4. **R33.** Every other escaping capture of a resource is an error. *Prior art:* Swift does not let an escaping closure capture a `borrowing` parameter of non-copyable type; Rust requires `move` closures to own what they capture, or a lifetime that outlives them.
 
 ```go
-func run(signals chan Signal) uses Probe, Clock, Scheduler {
+func run(signals chan Signal) needs Probe, Clock, Scheduler {
 	b := actor.Start(Breaker{}, 16)
 	set := tasks.Set(tasks.Restart(schedule.Exponential(1s).UpTo(5))) // bound after b
 	set.Go(func() { actor.Pump(b, signals) })                          // structured lend of b (R31)
@@ -191,7 +191,7 @@ func keys() map[Key]string {
 }
 ```
 
-*Prior art:* Rust's `Vec<T>` forbids moving out by index and moves out through `Vec::remove` and `swap_remove`; Effra keeps that shape and chooses reverse order for release, to match its scope rule (R5). Rust's `HashMap<K, V>` owns and drops its keys as well as its values; Effra defers owned keys (R40) rather than add key extraction and replacement rules in v0.
+*Prior art:* Rust's `Vec<T>` forbids moving out by index and moves out through `Vec::remove` and `swap_remove`; Ergo keeps that shape and chooses reverse order for release, to match its scope rule (R5). Rust's `HashMap<K, V>` owns and drops its keys as well as its values; Ergo defers owned keys (R40) rather than add key extraction and replacement rules in v0.
 
 ## Channels
 
@@ -220,22 +220,22 @@ func keys() map[Key]string {
 
 ## `defer`
 
-`defer` stays for statements that are not releases, such as `defer done <- i`. `defer r.Close()` on a resource the scope owns is an error, because the scope already releases `r`; consume it with `r.Close()` where it should end early. *Prior art:* Zig keeps explicit `defer` and `errdefer` to avoid hidden control flow; Effra answers that cost with visibility (below).
+`defer` stays for statements that are not releases, such as `defer done <- i`. `defer r.Close()` on a resource the scope owns is an error, because the scope already releases `r`; consume it with `r.Close()` where it should end early. *Prior art:* Zig keeps explicit `defer` and `errdefer` to avoid hidden control flow; Ergo answers that cost with visibility (below).
 
 ## Visibility
 
 1. The language server shows an inlay hint `closes: out, in` at each block end that releases resources.
-2. `ef inspect` lists every inserted release with its source position, and every move and consume.
+2. `ergo inspect` lists every inserted release with its source position, and every move and consume.
 
 ## Lowering
 
-The emitted Go is the `defer` a careful Go programmer writes, with an exit accumulator so that a release defect is not lost. A loop body becomes its own Go function, or gets an explicit close on each exit edge; both shapes are measured before one is chosen ([#190](https://github.com/cevr/effra/issues/190)).
+The emitted Go is the `defer` a careful Go programmer writes, with an exit accumulator so that a release defect is not lost. A loop body becomes its own Go function, or gets an explicit close on each exit edge; both shapes are measured before one is chosen ([#190](https://github.com/cevr/ergo/issues/190)).
 
 ## Prior art
 
-- **Rust `Drop` with moves.** The model. Effra keeps moves and drops lifetimes, because a lent value cannot escape.
+- **Rust `Drop` with moves.** The model. Ergo keeps moves and drops lifetimes, because a lent value cannot escape.
 - **Swift `~Copyable`.** `consume`, `deinit` and non-escaping borrowed parameters.
-- **C# `using var` and Python `with`.** Scoped release with a marker at each binding. Effra infers it from the type.
+- **C# `using var` and Python `with`.** Scoped release with a marker at each binding. Ergo infers it from the type.
 - **Gleam `use`.** `use f <- with_file(path)` flattens callback-scoped cleanup; it is explicit, and each resource needs a wrapper function.
-- **Elixir/OTP.** A port or file belongs to its process and closes when the process exits. Effra's per-task scope has the same "the owner's end releases it" rule.
+- **Elixir/OTP.** A port or file belongs to its process and closes when the process exits. Ergo's per-task scope has the same "the owner's end releases it" rule.
 - **Effect.** `acquireRelease`, `Scope`, `addFinalizer`, `ensuring` and `forkScoped`, replaced by one rule.

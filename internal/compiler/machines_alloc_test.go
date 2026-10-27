@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"effra.local/prototype/internal/compiler/machineplan"
+	"ergo.local/prototype/internal/compiler/machineplan"
 )
 
 // Resource closure of machine analysis. The analysis phase (package
@@ -920,7 +920,7 @@ func measureMachineGraphView(t *testing.T, label string, r *Result, units int, r
 	credit := 0
 	switch {
 	case err == nil:
-		credit = view.Data.Effra.Usage.Work
+		credit = view.Data.Ergo.Usage.Work
 	case graphRefusalCode(err) == GraphRefusalWorkLimit:
 		credit = limits.Work
 	case graphRefusalCode(err) == GraphRefusalUnchecked:
@@ -935,7 +935,7 @@ func measureMachineGraphView(t *testing.T, label string, r *Result, units int, r
 		liftedView, liftedErr := copied.GraphView(liftedRequest)
 		switch {
 		case liftedErr == nil:
-			credit = liftedView.Data.Effra.Usage.Work
+			credit = liftedView.Data.Ergo.Usage.Work
 		case graphRefusalCode(liftedErr) == GraphRefusalWorkLimit:
 			credit = limits.Work
 		default:

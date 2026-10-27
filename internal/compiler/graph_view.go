@@ -13,8 +13,8 @@ import (
 	"strconv"
 	"strings"
 
-	"effra.local/prototype/internal/producer"
-	rt "effra.local/prototype/runtime/effra"
+	"ergo.local/prototype/internal/producer"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // GraphViewVersion versions the GraphView wire contract independently of the
@@ -22,8 +22,8 @@ import (
 const GraphViewVersion = 1
 
 // GraphView is GraphViewV1: one selected, compiler-owned projection of
-// checked facts in the structural shape of a Stately Graph. All Effra
-// semantics live under data.effra; diagrams render this view and never
+// checked facts in the structural shape of a Stately Graph. All Ergo
+// semantics live under data.ergo; diagrams render this view and never
 // re-derive facts.
 type GraphView struct {
 	ID            string          `json:"id"`
@@ -35,7 +35,7 @@ type GraphView struct {
 }
 
 type GraphViewData struct {
-	Effra GraphViewFacts `json:"effra"`
+	Ergo GraphViewFacts `json:"ergo"`
 }
 
 type GraphViewNode struct {
@@ -57,7 +57,7 @@ type GraphViewPort struct {
 }
 
 type GraphViewNodeData struct {
-	Effra GraphNodeFacts `json:"effra"`
+	Ergo GraphNodeFacts `json:"ergo"`
 }
 
 type GraphViewEdge struct {
@@ -72,7 +72,7 @@ type GraphViewEdge struct {
 }
 
 type GraphViewEdgeData struct {
-	Effra GraphEdgeFacts `json:"effra"`
+	Ergo GraphEdgeFacts `json:"ergo"`
 }
 
 // GraphNodeFacts are the checked facts of one published node. Each kind fills
@@ -376,8 +376,8 @@ var graphKindContainment = map[GraphKind]string{
 	GraphKindMachine:     "contains",
 }
 
-// graphApplicationModes maps the public entry modes, named after the `ef
-// build` and `ef test` commands, to their checked generation modes.
+// graphApplicationModes maps the public entry modes, named after the `ergo
+// build` and `ergo test` commands, to their checked generation modes.
 var graphApplicationModes = map[string]GoGenerationMode{"build": GoGenerationBuild, "test": GoGenerationTest}
 
 // ParseGraphRequest admits graph options decoded from MCP JSON or from CLI
@@ -807,19 +807,19 @@ type dependencyFactCollector struct{ facts *graphFacts }
 
 func (c dependencyFactCollector) node(id, kind, name string, span Span, contract dependencyContract) bool {
 	at := span
-	return c.facts.addNode(GraphViewNode{ID: id, Label: name, Data: GraphViewNodeData{Effra: GraphNodeFacts{Kind: kind, Name: name, Span: &at}}}, contract) != nil
+	return c.facts.addNode(GraphViewNode{ID: id, Label: name, Data: GraphViewNodeData{Ergo: GraphNodeFacts{Kind: kind, Name: name, Span: &at}}}, contract) != nil
 }
 
 func (c dependencyFactCollector) source(id, source string) {
 	if node := c.facts.nodes[id]; node != nil {
-		node.node.Data.Effra.Source = source
+		node.node.Data.Ergo.Source = source
 	}
 }
 
 func (c dependencyFactCollector) edge(relationship GraphEdge) bool {
 	at := relationship.Span
 	id := graphTupleID("edge", relationship.Kind, relationship.From, relationship.To, relationship.Service, strconv.Itoa(at.Offset), strconv.Itoa(at.Length))
-	return c.facts.addEdge(GraphViewEdge{ID: id, SourceID: relationship.From, TargetID: relationship.To, Label: relationship.Kind, Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: relationship.Kind, Service: relationship.Service, Span: &at}}})
+	return c.facts.addEdge(GraphViewEdge{ID: id, SourceID: relationship.From, TargetID: relationship.To, Label: relationship.Kind, Data: GraphViewEdgeData{Ergo: GraphEdgeFacts{Relation: relationship.Kind, Service: relationship.Service, Span: &at}}})
 }
 
 func (r *Result) dependencyGraphFacts(limits GraphViewLimits) (*graphFacts, error) {
@@ -854,7 +854,7 @@ func (r *Result) layerGraphFacts(limits GraphViewLimits) (*graphFacts, error) {
 	for i := range plans {
 		plan := &plans[i]
 		span := plan.Span
-		facts.addNode(GraphViewNode{ID: plan.ID, Label: plan.Name, Data: GraphViewNodeData{Effra: GraphNodeFacts{Kind: "layer", Name: plan.Name, Span: &span, Layer: &GraphLayerFacts{
+		facts.addNode(GraphViewNode{ID: plan.ID, Label: plan.Name, Data: GraphViewNodeData{Ergo: GraphNodeFacts{Kind: "layer", Name: plan.Name, Span: &span, Layer: &GraphLayerFacts{
 			Provides: plan.Provides, InferredProvides: plan.InferredProvides, Failures: plan.Failures, Requirements: plan.Requirements,
 			DeclaredProvides: plan.DeclaredProvides, DeclaredFailures: plan.DeclaredFailures, DeclaredRequirements: plan.DeclaredRequirements,
 			Owner: plan.Owner, Evidence: plan.Evidence, ChildFailurePolicy: plan.ChildFailurePolicy,
@@ -864,31 +864,31 @@ func (r *Result) layerGraphFacts(limits GraphViewLimits) (*graphFacts, error) {
 		plan := &plans[i]
 		for _, merge := range plan.Merges {
 			at := merge.Span
-			facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "merges", plan.ID, merge.ID, strconv.Itoa(at.Offset)), SourceID: plan.ID, TargetID: merge.ID, Label: "merges", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "merges", Span: &at, Plan: plan.ID}}})
+			facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "merges", plan.ID, merge.ID, strconv.Itoa(at.Offset)), SourceID: plan.ID, TargetID: merge.ID, Label: "merges", Data: GraphViewEdgeData{Ergo: GraphEdgeFacts{Relation: "merges", Span: &at, Plan: plan.ID}}})
 		}
 		for _, node := range plan.Nodes {
 			bindingSpan := node.Span
-			facts.addNode(GraphViewNode{ID: node.ID, Label: node.Service, Data: GraphViewNodeData{Effra: GraphNodeFacts{Kind: "layer-binding", Name: node.Service, Span: &bindingSpan, Binding: &GraphBindingFacts{Service: node.Service, ServiceIdentity: node.ServiceIdentity}}}}, dependencyContract{})
+			facts.addNode(GraphViewNode{ID: node.ID, Label: node.Service, Data: GraphViewNodeData{Ergo: GraphNodeFacts{Kind: "layer-binding", Name: node.Service, Span: &bindingSpan, Binding: &GraphBindingFacts{Service: node.Service, ServiceIdentity: node.ServiceIdentity}}}}, dependencyContract{})
 			facts.addLayerSelection(plan.ID, node.ID, node)
 			for _, dependency := range node.Dependencies {
-				facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "depends-on", node.ID, dependency, plan.ID), SourceID: node.ID, TargetID: dependency, Label: "depends-on", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "depends-on", Plan: plan.ID}}})
+				facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "depends-on", node.ID, dependency, plan.ID), SourceID: node.ID, TargetID: dependency, Label: "depends-on", Data: GraphViewEdgeData{Ergo: GraphEdgeFacts{Relation: "depends-on", Plan: plan.ID}}})
 			}
 			for _, replacement := range node.Replacements {
 				at := replacement.Span
-				facts.addNode(GraphViewNode{ID: replacement.ID, Label: "replace " + node.Service, Data: GraphViewNodeData{Effra: GraphNodeFacts{Kind: "layer-replacement", Name: replacement.Name, Span: &at}}}, dependencyContract{})
-				facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "replaces", replacement.ID, node.ID, plan.ID), SourceID: replacement.ID, TargetID: node.ID, Label: "replaces", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "replaces", Span: &at, Plan: plan.ID}}})
+				facts.addNode(GraphViewNode{ID: replacement.ID, Label: "replace " + node.Service, Data: GraphViewNodeData{Ergo: GraphNodeFacts{Kind: "layer-replacement", Name: replacement.Name, Span: &at}}}, dependencyContract{})
+				facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "replaces", replacement.ID, node.ID, plan.ID), SourceID: replacement.ID, TargetID: node.ID, Label: "replaces", Data: GraphViewEdgeData{Ergo: GraphEdgeFacts{Relation: "replaces", Span: &at, Plan: plan.ID}}})
 			}
 		}
 		for _, input := range plan.Requirements {
 			id := graphTupleID("layer-input", plan.ID, input)
-			facts.addNode(GraphViewNode{ID: id, Label: input, Data: GraphViewNodeData{Effra: GraphNodeFacts{Kind: "layer-input", Name: input}}}, dependencyContract{})
-			facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "requires-input", plan.ID, id), SourceID: plan.ID, TargetID: id, Label: "requires-input", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "requires-input", Service: input, Plan: plan.ID}}})
+			facts.addNode(GraphViewNode{ID: id, Label: input, Data: GraphViewNodeData{Ergo: GraphNodeFacts{Kind: "layer-input", Name: input}}}, dependencyContract{})
+			facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "requires-input", plan.ID, id), SourceID: plan.ID, TargetID: id, Label: "requires-input", Data: GraphViewEdgeData{Ergo: GraphEdgeFacts{Relation: "requires-input", Service: input, Plan: plan.ID}}})
 		}
 		for _, path := range plan.ConstructionPaths {
 			at := path.Span
 			input := graphTupleID("layer-input", plan.ID, path.Input)
 			for _, consumer := range path.Nodes {
-				facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "consumes-input", consumer, input, strconv.Itoa(at.Offset)), SourceID: consumer, TargetID: input, Label: "consumes-input", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "consumes-input", Service: path.Input, Span: &at, Plan: plan.ID}}})
+				facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "consumes-input", consumer, input, strconv.Itoa(at.Offset)), SourceID: consumer, TargetID: input, Label: "consumes-input", Data: GraphViewEdgeData{Ergo: GraphEdgeFacts{Relation: "consumes-input", Service: path.Input, Span: &at, Plan: plan.ID}}})
 			}
 		}
 	}
@@ -946,7 +946,7 @@ func (f *graphFacts) addLayerSelection(planNode, bindingNode string, node LayerN
 		ConstructionRequirements: node.Requirements, ConstructionFailures: node.Failures,
 		Constructor: node.Constructor, Parameters: node.Parameters, Arguments: node.Arguments, Owner: node.Owner,
 	}
-	f.addEdge(GraphViewEdge{ID: graphTupleID("edge", "selects", planNode, bindingNode), SourceID: planNode, TargetID: bindingNode, Label: "selects", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "selects", Plan: planNode, Selection: selection}}}, layerNodeContracts(node)...)
+	f.addEdge(GraphViewEdge{ID: graphTupleID("edge", "selects", planNode, bindingNode), SourceID: planNode, TargetID: bindingNode, Label: "selects", Data: GraphViewEdgeData{Ergo: GraphEdgeFacts{Relation: "selects", Plan: planNode, Selection: selection}}}, layerNodeContracts(node)...)
 }
 
 // GraphRetentionFacts identify one retained application requirement or a
@@ -979,7 +979,7 @@ func (f *graphFacts) selectGraph(request GraphRequest, limits GraphViewLimits) (
 		allowed[relation] = true
 	}
 	included := func(edge GraphViewEdge) bool {
-		return len(allowed) == 0 || allowed[edge.Data.Effra.Relation]
+		return len(allowed) == 0 || allowed[edge.Data.Ergo.Relation]
 	}
 	for _, fact := range f.edges {
 		if f.nodes[fact.edge.SourceID] == nil || f.nodes[fact.edge.TargetID] == nil {
@@ -1092,7 +1092,7 @@ func (f *graphFacts) collapse(request GraphRequest, selection *graphSelection) e
 	containment := graphKindContainment[f.kind]
 	children := map[string][]string{}
 	for _, fact := range f.edges {
-		if fact.edge.Data.Effra.Relation == containment && selection.nodes[fact.edge.SourceID] && selection.nodes[fact.edge.TargetID] {
+		if fact.edge.Data.Ergo.Relation == containment && selection.nodes[fact.edge.SourceID] && selection.nodes[fact.edge.TargetID] {
 			children[fact.edge.SourceID] = append(children[fact.edge.SourceID], fact.edge.TargetID)
 		}
 	}
@@ -1252,17 +1252,17 @@ func (r *Result) GraphView(request GraphRequest) (*GraphView, error) {
 		node := fact.node
 		node.ParentID = selection.parents[id]
 		if hidden := selection.hidden[id]; len(hidden) > 0 {
-			node.Data.Effra.Collapsed = &GraphCollapsedFacts{HiddenMembers: hidden, HiddenEdges: selection.hiddenN[id], HiddenFrontier: selection.hiddenFrontier[id]}
+			node.Data.Ergo.Collapsed = &GraphCollapsedFacts{HiddenMembers: hidden, HiddenEdges: selection.hiddenN[id], HiddenFrontier: selection.hiddenFrontier[id]}
 		}
-		node.Data.Effra.Frontier = slices.Contains(selection.frontier, id)
-		node.Data.Effra.Closure = selection.closure[id]
+		node.Data.Ergo.Frontier = slices.Contains(selection.frontier, id)
+		node.Data.Ergo.Closure = selection.closure[id]
 		contract, size, err := r.materializeDependencyContract(fact.contract, limits.TypeProjection.CompatibilityBytes-compatibility)
 		if err != nil {
 			return nil, graphRefusal(GraphRefusalTypeLimit, "graph view contract metadata: %v", err)
 		}
 		compatibility += size
 		if contract != nil {
-			node.Data.Effra.Contract = contract
+			node.Data.Ergo.Contract = contract
 			contracts = append(contracts, *contract)
 		}
 		contracts = append(contracts, fact.values...)
@@ -1288,7 +1288,7 @@ func (r *Result) GraphView(request GraphRequest) (*GraphView, error) {
 	if selection.frontier == nil {
 		selection.frontier = []string{}
 	}
-	view.Data.Effra = GraphViewFacts{
+	view.Data.Ergo = GraphViewFacts{
 		GraphViewVersion: GraphViewVersion,
 		Kind:             request.Kind,
 		Producer:         r.producerMetadata.Producer,
@@ -1309,7 +1309,7 @@ func (r *Result) GraphView(request GraphRequest) (*GraphView, error) {
 		Usage:       GraphViewUsage{Nodes: len(view.Nodes), Edges: len(view.Edges), Work: facts.work, MaterializedNodes: len(view.Nodes), TypeProjection: projection.Usage},
 		Limitations: append([]string{}, facts.limitations...),
 	}
-	view.ID = graphViewID(view.Data.Effra)
+	view.ID = graphViewID(view.Data.Ergo)
 	// Size the response before validating it, so an oversized view is
 	// refused before any work proportional to its contents. Neither step
 	// serialises the view.
@@ -1396,7 +1396,7 @@ func graphViewID(facts GraphViewFacts) string {
 		Selection        GraphSelection        `json:"selection"`
 	}{GraphViewVersion, facts.Kind, facts.Snapshot, facts.ProducerIdentity, facts.Selection})
 	sum := sha256.Sum256(identity)
-	return "effra-graph:" + string(facts.Kind) + ":" + hex.EncodeToString(sum[:16])
+	return "ergo-graph:" + string(facts.Kind) + ":" + hex.EncodeToString(sum[:16])
 }
 
 // ValidateGraphView checks a view's structural closure (unique IDs, existing
@@ -1408,12 +1408,12 @@ func ValidateGraphView(view *GraphView) error {
 	if view == nil {
 		return fmt.Errorf("graph view is absent")
 	}
-	effra := view.Data.Effra
-	if view.ID == "" || view.Mode != "directed" || effra.GraphViewVersion != GraphViewVersion {
+	ergo := view.Data.Ergo
+	if view.ID == "" || view.Mode != "directed" || ergo.GraphViewVersion != GraphViewVersion {
 		return fmt.Errorf("graph view header is not GraphViewV1")
 	}
-	if _, known := graphKindRelations[effra.Kind]; !known {
-		return fmt.Errorf("graph view kind %q is unknown", effra.Kind)
+	if _, known := graphKindRelations[ergo.Kind]; !known {
+		return fmt.Errorf("graph view kind %q is unknown", ergo.Kind)
 	}
 	nodes := map[string]*GraphViewNode{}
 	for i := range view.Nodes {
@@ -1444,14 +1444,14 @@ func ValidateGraphView(view *GraphView) error {
 			}
 			seen[parent] = true
 		}
-		if collapsed := node.Data.Effra.Collapsed; collapsed != nil {
+		if collapsed := node.Data.Ergo.Collapsed; collapsed != nil {
 			for _, member := range collapsed.HiddenMembers {
 				if nodes[member] != nil {
 					return fmt.Errorf("hidden member %s of %s is also published", member, node.ID)
 				}
 			}
 			for _, member := range collapsed.HiddenFrontier {
-				if !slices.Contains(collapsed.HiddenMembers, member) || !node.Data.Effra.Frontier {
+				if !slices.Contains(collapsed.HiddenMembers, member) || !node.Data.Ergo.Frontier {
 					return fmt.Errorf("hidden frontier member %s of %s is not a hidden member of a frontier root", member, node.ID)
 				}
 			}
@@ -1460,7 +1460,7 @@ func ValidateGraphView(view *GraphView) error {
 	if view.InitialNodeID != "" && nodes[view.InitialNodeID] == nil {
 		return fmt.Errorf("initial node %s is not published", view.InitialNodeID)
 	}
-	relations := graphKindRelations[effra.Kind]
+	relations := graphKindRelations[ergo.Kind]
 	edges, incident := map[string]bool{}, map[string]bool{}
 	for _, edge := range view.Edges {
 		if edge.Type != "edge" || edge.ID == "" || edges[edge.ID] {
@@ -1475,10 +1475,10 @@ func ValidateGraphView(view *GraphView) error {
 		if !portExists(source, edge.SourcePort) || !portExists(target, edge.TargetPort) {
 			return fmt.Errorf("graph edge %s names an unknown port", edge.ID)
 		}
-		if !slices.Contains(relations, edge.Data.Effra.Relation) {
-			return fmt.Errorf("graph edge %s has relation %q outside kind %s", edge.ID, edge.Data.Effra.Relation, effra.Kind)
+		if !slices.Contains(relations, edge.Data.Ergo.Relation) {
+			return fmt.Errorf("graph edge %s has relation %q outside kind %s", edge.ID, edge.Data.Ergo.Relation, ergo.Kind)
 		}
-		for _, reference := range graphEdgeReferences(effra.Kind, edge) {
+		for _, reference := range graphEdgeReferences(ergo.Kind, edge) {
 			if nodes[reference.id] == nil {
 				return fmt.Errorf("graph edge %s references unpublished %s %s", edge.ID, reference.role, reference.id)
 			}
@@ -1486,19 +1486,19 @@ func ValidateGraphView(view *GraphView) error {
 	}
 	closure := 0
 	for _, node := range view.Nodes {
-		if !node.Data.Effra.Closure {
+		if !node.Data.Ergo.Closure {
 			continue
 		}
 		closure++
 		if incident[node.ID] {
 			return fmt.Errorf("closure node %s has a relation; closure nodes are untraversed references", node.ID)
 		}
-		if node.Data.Effra.Frontier || slices.Contains(effra.Completeness.Frontier, node.ID) {
+		if node.Data.Ergo.Frontier || slices.Contains(ergo.Completeness.Frontier, node.ID) {
 			return fmt.Errorf("closure node %s is on the frontier; closure nodes are untraversed references", node.ID)
 		}
 	}
-	if closure != effra.Completeness.ClosureNodes {
-		return fmt.Errorf("completeness counts %d closure nodes but %d are marked", effra.Completeness.ClosureNodes, closure)
+	if closure != ergo.Completeness.ClosureNodes {
+		return fmt.Errorf("completeness counts %d closure nodes but %d are marked", ergo.Completeness.ClosureNodes, closure)
 	}
 	return validateGraphViewReferences(view)
 }
@@ -1513,10 +1513,10 @@ type graphNodeReference struct{ role, id string }
 // requirements, so there they stay inline source sites of the selection.
 func graphEdgeReferences(kind GraphKind, edge GraphViewEdge) []graphNodeReference {
 	references := []graphNodeReference{}
-	if plan := edge.Data.Effra.Plan; plan != "" {
+	if plan := edge.Data.Ergo.Plan; plan != "" {
 		references = append(references, graphNodeReference{"plan", plan})
 	}
-	if selection := edge.Data.Effra.Selection; selection != nil && kind == GraphKindLayers {
+	if selection := edge.Data.Ergo.Selection; selection != nil && kind == GraphKindLayers {
 		for _, replacement := range selection.Replacements {
 			references = append(references, graphNodeReference{"replacement", replacement.ID})
 		}
@@ -1574,7 +1574,7 @@ func portExists(node *GraphViewNode, port string) bool {
 // only marshaler reachable from GraphView and that its published form adds no
 // checked key.
 func validateGraphViewReferences(view *GraphView) error {
-	facts := view.Data.Effra.Facts
+	facts := view.Data.Ergo.Facts
 	types, rows, declarations, sources, parameters := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, node := range facts.Types {
 		types[node.ID] = true
@@ -1673,7 +1673,7 @@ func validateGraphViewReferences(view *GraphView) error {
 		return err
 	}
 	for i := range view.Nodes {
-		entity := &view.Nodes[i].Data.Effra
+		entity := &view.Nodes[i].Data.Ergo
 		if entity.Source != "" && !sources[entity.Source] {
 			return fmt.Errorf("unpublished source reference %q", entity.Source)
 		}
@@ -1682,7 +1682,7 @@ func validateGraphViewReferences(view *GraphView) error {
 		}
 	}
 	for i := range view.Edges {
-		if err := walk("edges", reflect.ValueOf(&view.Edges[i].Data.Effra)); err != nil {
+		if err := walk("edges", reflect.ValueOf(&view.Edges[i].Data.Ergo)); err != nil {
 			return err
 		}
 	}
@@ -1751,13 +1751,13 @@ func (r *Result) applicationGraphFacts(request GraphRequest, limits GraphViewLim
 		layers[r.Layers[i].ID] = &r.Layers[i]
 	}
 	for _, requirement := range plan.Requirements {
-		facts.addNode(GraphViewNode{ID: applicationNodeID(requirement.Kind, requirement.Identity), Label: requirement.Identity, Data: GraphViewNodeData{Effra: GraphNodeFacts{
+		facts.addNode(GraphViewNode{ID: applicationNodeID(requirement.Kind, requirement.Identity), Label: requirement.Identity, Data: GraphViewNodeData{Ergo: GraphNodeFacts{
 			Kind: string(requirement.Kind), Name: requirement.Identity,
 			Retention: &GraphRetentionFacts{Kind: string(requirement.Kind), Identity: requirement.Identity, Reason: requirement.Reason, Retained: true},
 		}}}, dependencyContract{})
 	}
 	for _, origin := range plan.Origins {
-		facts.addNode(GraphViewNode{ID: applicationNodeID(origin.Kind, origin.Identity), Label: origin.Identity, Data: GraphViewNodeData{Effra: GraphNodeFacts{
+		facts.addNode(GraphViewNode{ID: applicationNodeID(origin.Kind, origin.Identity), Label: origin.Identity, Data: GraphViewNodeData{Ergo: GraphNodeFacts{
 			Kind: string(origin.Kind), Name: origin.Identity,
 			Retention: &GraphRetentionFacts{Kind: string(origin.Kind), Identity: origin.Identity},
 		}}}, dependencyContract{})
@@ -1767,7 +1767,7 @@ func (r *Result) applicationGraphFacts(request GraphRequest, limits GraphViewLim
 		if facts.nodes[source] == nil {
 			return graphRefusal(GraphRefusalInvalidView, "application requirement %s %s has unretained witness %s %s", kind, identity, viaKind, via)
 		}
-		facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "retains", source, target), SourceID: source, TargetID: target, Label: reason, Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "retains", Reason: reason, FirstWitness: true}}})
+		facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "retains", source, target), SourceID: source, TargetID: target, Label: reason, Data: GraphViewEdgeData{Ergo: GraphEdgeFacts{Relation: "retains", Reason: reason, FirstWitness: true}}})
 		return nil
 	}
 	for _, requirement := range plan.Requirements {
@@ -1796,7 +1796,7 @@ func (r *Result) applicationGraphFacts(request GraphRequest, limits GraphViewLim
 				return nil, graphRefusal(GraphRefusalInvalidView, "layer node %s of retained plan %s is not retained", node.ID, layer.ID)
 			}
 			fact.node.Label = node.Service
-			fact.node.Data.Effra.Binding = &GraphBindingFacts{Service: node.Service, ServiceIdentity: node.ServiceIdentity}
+			fact.node.Data.Ergo.Binding = &GraphBindingFacts{Service: node.Service, ServiceIdentity: node.ServiceIdentity}
 			facts.addLayerSelection(planNode, bindingNode, node)
 		}
 	}
@@ -1812,7 +1812,7 @@ func (r *Result) applicationGraphFacts(request GraphRequest, limits GraphViewLim
 	for _, module := range closure {
 		id := applicationNodeID(RequiresRuntimeModule, string(module))
 		if facts.nodes[id] == nil {
-			facts.addNode(GraphViewNode{ID: graphTupleID("runtime-closure", string(module)), Label: string(module), Data: GraphViewNodeData{Effra: GraphNodeFacts{
+			facts.addNode(GraphViewNode{ID: graphTupleID("runtime-closure", string(module)), Label: string(module), Data: GraphViewNodeData{Ergo: GraphNodeFacts{
 				Kind: "runtime-closure", Name: string(module),
 				Retention: &GraphRetentionFacts{Kind: string(RequiresRuntimeModule), Identity: string(module), Reason: "catalog-dependency", Retained: true},
 			}}}, dependencyContract{})
@@ -1831,7 +1831,7 @@ func (r *Result) applicationGraphFacts(request GraphRequest, limits GraphViewLim
 		}
 		for _, dependency := range dependencies {
 			source, target := moduleNode(module), moduleNode(dependency)
-			facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "runtime-requires", source, target), SourceID: source, TargetID: target, Label: "runtime-requires", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "runtime-requires"}}})
+			facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "runtime-requires", source, target), SourceID: source, TargetID: target, Label: "runtime-requires", Data: GraphViewEdgeData{Ergo: GraphEdgeFacts{Relation: "runtime-requires"}}})
 		}
 	}
 	if facts.err != nil {

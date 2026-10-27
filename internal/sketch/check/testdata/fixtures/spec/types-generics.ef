@@ -1,4 +1,4 @@
 package demo
 
-func Map(xs []A, limit int64, f func(A) (B, error[E]) uses R) ([]B, error[E]) uses R
+func Map(xs []A, limit int64, f func(A) (B, error[E]) needs R) ([]B, error[E]) needs R
 func main() {}

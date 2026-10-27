@@ -34,7 +34,7 @@ var Supported = []Edition{Legacy, E2026}
 const Default = Legacy
 
 // ManifestName is the file name of an edition manifest.
-const ManifestName = "effra.json"
+const ManifestName = "ergo.json"
 
 // MaxManifestBytes bounds the manifest a resolution reads.
 const MaxManifestBytes = 64 << 10

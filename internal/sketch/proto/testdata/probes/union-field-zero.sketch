@@ -12,7 +12,7 @@ func pick(s Sum) string {
   case B: return "b"
   }
 }
-func main() uses Console {
+func main() needs Console {
   box := Box{}
   Console.Println(pick(box.Choice))
 }

@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-const targetFixture = `import Fns "effra/functions"
-import Data "effra/data"
+const targetFixture = `import Fns "ergo/functions"
+import Data "ergo/data"
 error Missing { id: string }
 record Box { value: string }
 record Tag { value: string }
@@ -61,8 +61,8 @@ func TestSelectedNamesPublishCheckerResolvedDeclarationTargets(t *testing.T) {
 		presentation    string
 	}
 	expectations := []expectation{
-		{"import Fns", "Fns", "declaration", "module", "", "import Fns", "Fns", `import Fns "effra/functions"`},
-		{"Fns.identity", "Fns", "reference", "module", "", "import Fns", "Fns", `import Fns "effra/functions"`},
+		{"import Fns", "Fns", "declaration", "module", "", "import Fns", "Fns", `import Fns "ergo/functions"`},
+		{"Fns.identity", "Fns", "reference", "module", "", "import Fns", "Fns", `import Fns "ergo/functions"`},
 		{"Fns.identity", "identity", "expression", "function", "", "", "", "fn identity(input: string) -> string"},
 		{"error Missing", "Missing", "declaration", "error", "", "error Missing", "Missing", "error Missing { id: string }"},
 		{"fail Missing", "Missing", "reference", "error", "", "error Missing", "Missing", "error Missing { id: string }"},
@@ -75,7 +75,7 @@ func TestSelectedNamesPublishCheckerResolvedDeclarationTargets(t *testing.T) {
 		{"Shape.Circle {", "Circle", "reference", "variant", "Shape", "Circle { radius: i64 }", "Circle", "variant Shape.Circle { radius: i64 }"},
 		{"radius: r", "radius", "reference", "field", "Shape.Circle", "radius: i64", "radius", "field Shape.Circle.radius: i64"},
 		{"Shape.Square =>", "Square", "reference", "variant", "Shape", "Square }", "Square", "variant Shape.Square"},
-		{"Data.Option.Some { value: v }", "Data", "reference", "module", "", "import Data", "Data", `import Data "effra/data"`},
+		{"Data.Option.Some { value: v }", "Data", "reference", "module", "", "import Data", "Data", `import Data "ergo/data"`},
 		{"Data.Option.Some { value: v }", "Option", "reference", "enum", "", "", "", "enum Option<T: type> { None, Some { value: T } }"},
 		{"Data.Option.Some { value: v }", "Some", "reference", "variant", "Option", "", "", "variant Option.Some { value: T }"},
 		{"Data.Option.Some { value: text }", "Some", "expression", "variant", "Option", "", "", "variant Option.Some { value: T }"},
@@ -213,7 +213,7 @@ func TestPresentationBoundsSharedTypeGraphs(t *testing.T) {
 // original source with a location, and a bundled one keeps its identity
 // without a location in this snapshot.
 func TestIdentitySelectionMatchesDeclarationTokenSelection(t *testing.T) {
-	const source = `import Data "effra/data"
+	const source = `import Data "ergo/data"
 record Box<T: type> { value: T }
 enum Choice<T: type> { Left { value: T }, Right }
 fn pick(o: Data.Option<string>) -> string { match o { Data.Option.Some { value: v } => v, Data.Option.None => "none" } }

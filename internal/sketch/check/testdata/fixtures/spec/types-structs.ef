@@ -4,7 +4,7 @@ type Order struct {
 	ID    string
 	Total int64
 }
-func main() uses Console {
+func main() needs Console {
 order := Order{ID: "42", Total: 1999}
 same := Order{"42", 1999}
 Console.Println(order, same)

@@ -24,17 +24,17 @@ The exact public API remains implementation work. Its finite boundary must expos
 
 Provider construction and execution retain ordinary service requirements and failure rows. A provider does not introspect private compiler structures, invoke hidden builtin hooks, erase `R`/requirements, or accept unchecked JavaScript passthrough. It may reject an incompatible identity, missing requirement, unsupported binding or contract-erasing adapter through the normal language diagnostics. An adapter that changes a callable's ownership, failures, services or output shape must be visible at its own typed boundary.
 
-Effra's first provider will use the shared owned actor core: bounded item/byte admission, reserved completion and stop controls, serialized evaluation, entry-epoch fencing, cleanup before state/output commit, and full Cause preservation. This is the intended execution boundary for the first provider; it does not claim that provider implementation is delivered, make the actor core a machine-only runtime or require every actor to have machine transitions. A second provider must consume the same checked plan through the same public facts and retain tested, refuted or unresolved evidence for its own runtime obligations under the [lawful runtime contract](../research/lawful-runtime-contract.md), never a proof claim.
+Ergo's first provider will use the shared owned actor core: bounded item/byte admission, reserved completion and stop controls, serialized evaluation, entry-epoch fencing, cleanup before state/output commit, and full Cause preservation. This is the intended execution boundary for the first provider; it does not claim that provider implementation is delivered, make the actor core a machine-only runtime or require every actor to have machine transitions. A second provider must consume the same checked plan through the same public facts and retain tested, refuted or unresolved evidence for its own runtime obligations under the [lawful runtime contract](../research/lawful-runtime-contract.md), never a proof claim.
 
 ## Draft plan interface (2026-10-09)
 
-Status: draft. Nothing in this section is implemented, and no runtime exists. It fixes the shape of the boundary against the checked plan that [the declaration checker now publishes](state-machines.md#implementation-status-2026-10-09). Sketches use ordinary Effra spelling, but they are not admitted syntax or library surface until plan lowering lands.
+Status: draft. Nothing in this section is implemented, and no runtime exists. It fixes the shape of the boundary against the checked plan that [the declaration checker now publishes](state-machines.md#implementation-status-2026-10-09). Sketches use ordinary Ergo spelling, but they are not admitted syntax or library surface until plan lowering lands.
 
 ### Two layers of plan
 
 A provider receives two layers. Neither layer gives access to the compiler.
 
-1. **Plan facts.** These are compiler-proved data, identical to the `machines` entry of `project.check` and `ef inspect`, and they are portable values:
+1. **Plan facts.** These are compiler-proved data, identical to the `machines` entry of `project.check` and `ergo inspect`, and they are portable values:
    - `id` and `revision`;
    - the `state`, `event` and `output` identities and their variants;
    - `initial`;
@@ -117,11 +117,11 @@ The engine loop in `gen_statem` (OTP `516126e9`, `lib/stdlib/src/gen_statem.erl`
 
 ### Prior art
 
-- *XState v6.* `ActorLogic` with `transition`/`getInitialSnapshot` and `createActor(logic)` separates logic from the runtime with many type parameters that users rarely write. Effra's split is the same, except that the decision is a checked `decision<S, O>` value rather than a snapshot.
+- *XState v6.* `ActorLogic` with `transition`/`getInitialSnapshot` and `createActor(logic)` separates logic from the runtime with many type parameters that users rarely write. Ergo's split is the same, except that the decision is a checked `decision<S, O>` value rather than a snapshot.
 - *Erlang gen_statem.* A callback module supplies `init` and the state functions, the `gen_statem` behaviour owns the process, and `keep_state` corresponds to `stay`. The provider here plays the behaviour's part. See the comparison below.
 - *Elixir.* There is no machine abstraction in core; Elixir programs use `:gen_statem` directly or a wrapper library. `GenServer` shows the same split between behaviour and process.
 - *effect-machine and Effect.* `Machine<State, Event, R>` keeps services in the type, which is the model for `uses { R }` as the spawn charge.
-- *Akka Typed.* `Behavior[T]` is a value that a separate `ActorSystem` runs, and `Behaviors.same` is a runtime keep-state marker. Effra checks the narrowed case statically.
+- *Akka Typed.* `Behavior[T]` is a value that a separate `ActorSystem` runs, and `Behaviors.same` is a runtime keep-state marker. Ergo checks the narrowed case statically.
 - *Rust typestate.* Illegal transitions are unrepresentable for statically known states. The checked plan carries that guarantee as facts, and the provider never re-derives it.
 - *MoonBit and Roc.* The platform/application split, where the application is pure description and the platform owns effects, matches the plan and provider split: the provider is the swappable platform for one plan.
 
@@ -134,7 +134,7 @@ The units remain independently reviewable and have no cyclic ownership:
 | Declaration and checking | State/event declarations, callable rows, finite transition checking and diagnostics | Runtime execution or provider choice |
 | Plan lowering | Provider-independent canonical plan representation for Go and inspection | A builtin machine engine |
 | Provider contract | Typed plan/provider boundary and negative controls | A completed provider or lifecycle conformance |
-| First provider | Planned Effra provider using the shared owned actor core for execution, admission and cleanup laws | A delivered provider, universal provider behavior or external transactions |
+| First provider | Planned Ergo provider using the shared owned actor core for execution, admission and cleanup laws | A delivered provider, universal provider behavior or external transactions |
 | Cross-provider conformance | Two unrelated programs on two providers with unchanged source/compiler selection | Durability, exactly-once delivery or rollback |
 
 Adoption requires two unrelated machine programs, such as search/reload and timed lease/session or circuit breaker, executed by the planned first provider and a separately authored provider on the same target. Declarations and compiler configuration stay unchanged. Tests cover pure and effectful steps/completions, identity and rows, entry cleanup before commit, `enter` re-entry versus `stay`, stale completion fencing, bounded admission, stop/waiter control and composite causes. CLI/MCP inspection must observe the canonical plan and snapshots without running behavior. Missing requirements, incompatible identities, unsupported bindings and contract-erasing providers are causal negative controls.
@@ -143,4 +143,4 @@ Source sketches, copied fixtures and a plan snapshot are reference data. They be
 
 ## Prior art: Erlang/OTP behaviours
 
-OTP's `gen_statem` is one engine in the standard library: a user module supplies callbacks, and the engine owns the loop, timeouts and postponement (`lib/stdlib/src/gen_statem.erl:L65-L71` at OTP `516126e9`). Elixir checks such callback modules through behaviours, where a missing callback is only a compile-time warning (`lib/elixir/pages/references/typespecs.md:L279-L354` at Elixir `91ee75bb`). Effra inverts the ownership: the compiler produces a provider-independent plan that any userland provider can execute, and an incompatible provider is a checked diagnostic rather than a warning. This follows the owner's machine direction and **Capabilities as layers** in [NORTH_STAR](../../NORTH_STAR.md). Pins are in [PRIOR_ART](../../PRIOR_ART.md#elixir-with-erlangotp).
+OTP's `gen_statem` is one engine in the standard library: a user module supplies callbacks, and the engine owns the loop, timeouts and postponement (`lib/stdlib/src/gen_statem.erl:L65-L71` at OTP `516126e9`). Elixir checks such callback modules through behaviours, where a missing callback is only a compile-time warning (`lib/elixir/pages/references/typespecs.md:L279-L354` at Elixir `91ee75bb`). Ergo inverts the ownership: the compiler produces a provider-independent plan that any userland provider can execute, and an incompatible provider is a checked diagnostic rather than a warning. This follows the owner's machine direction and **Capabilities as layers** in [NORTH_STAR](../../NORTH_STAR.md). Pins are in [PRIOR_ART](../../PRIOR_ART.md#elixir-with-erlangotp).

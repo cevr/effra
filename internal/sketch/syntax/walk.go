@@ -62,7 +62,7 @@ func Inspect(n Node, f func(Node) bool) {
 	case *FuncDecl:
 		walk(n.Recv, n.Name, n.TypeParams, n.Type, n.Body)
 	case *WireDecl:
-		walk(n.Name, n.Uses, n.Body)
+		walk(n.Name, n.Provides, n.Needs, n.Body)
 	case *WireBody:
 		for _, e := range n.Entries {
 			Inspect(e, f)
@@ -76,7 +76,9 @@ func Inspect(n Node, f func(Node) bool) {
 		walk(n.Type)
 	case *FieldList:
 		fields(n)
-	case *UsesClause:
+	case *NeedsClause:
+		exprs(n.Names)
+	case *ProvidesClause:
 		exprs(n.Names)
 	case *CompositeLit:
 		walk(n.Type)
@@ -129,7 +131,7 @@ func Inspect(n Node, f func(Node) bool) {
 	case *ChanType:
 		walk(n.Value)
 	case *FuncType:
-		walk(n.Params, n.Results, n.Uses)
+		walk(n.Params, n.Results, n.Needs)
 	case *StructType:
 		walk(n.Fields)
 	case *InterfaceType:
@@ -211,7 +213,9 @@ func isNilNode(n Node) bool {
 		return n == nil
 	case *FieldList:
 		return n == nil
-	case *UsesClause:
+	case *NeedsClause:
+		return n == nil
+	case *ProvidesClause:
 		return n == nil
 	case *BlockStmt:
 		return n == nil

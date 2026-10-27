@@ -1,27 +1,27 @@
 # Editions
 
-Ticket [#194](https://github.com/cevr/effra/issues/194), part of the compiler track [#192](https://github.com/cevr/effra/issues/192). Status: implemented.
+Ticket [#194](https://github.com/cevr/ergo/issues/194), part of the compiler track [#192](https://github.com/cevr/ergo/issues/192). Status: implemented.
 
-Two Effra languages live in one repository until [#205](https://github.com/cevr/effra/issues/205) retires the earlier one: the earlier `.ef` language that `internal/compiler` implements, and the Go-shaped language of [`docs/spec/`](../spec/README.md) v0. An [edition](../../GLOSSARY.md) names the language a source file is written in, and so the front-end that reads it. Files of both editions keep the `.ef` extension. Owner decision O13 on [#173](https://github.com/cevr/effra/issues/173): "per-package edition in the manifest; compiler flag until a manifest exists". The basis is [`docs/research/primitives.md`](../research/primitives.md) §9: the edition is never inferred from file content, with Go's `go` directive as the precedent.
+Two Ergo languages live in one repository until [#205](https://github.com/cevr/ergo/issues/205) retires the earlier one: the earlier `.ef` language that `internal/compiler` implements, and the Go-shaped language of [`docs/spec/`](../spec/README.md) v0. An [edition](../../GLOSSARY.md) names the language a source file is written in, and so the front-end that reads it. Files of both editions keep the `.ef` extension. Owner decision O13 on [#173](https://github.com/cevr/ergo/issues/173): "per-package edition in the manifest; compiler flag until a manifest exists". The basis is [`docs/research/primitives.md`](../research/primitives.md) §9: the edition is never inferred from file content, with Go's `go` directive as the precedent.
 
 ## Edition ids
 
 | Id | Language | Front-end |
 | --- | --- | --- |
 | `legacy` | The earlier `.ef` language | `internal/compiler` |
-| `2026` | The Go-shaped language of `docs/spec/` v0 | `internal/sketchfront`: the parser `internal/sketch/syntax` and the formatter `internal/sketch/format` ([#195](https://github.com/cevr/effra/issues/195)), the checker `internal/sketch/check` ([#196](https://github.com/cevr/effra/issues/196)), and the prototype emitter behind the bridge `internal/sketch/proto` for `build` and `run` until [#50](https://github.com/cevr/effra/issues/50) |
+| `2026` | The Go-shaped language of `docs/spec/` v0 | `internal/sketchfront`: the parser `internal/sketch/syntax` and the formatter `internal/sketch/format` ([#195](https://github.com/cevr/ergo/issues/195)), the checker `internal/sketch/check` ([#196](https://github.com/cevr/ergo/issues/196)), and the prototype emitter behind the bridge `internal/sketch/proto` for `build` and `run` until [#50](https://github.com/cevr/ergo/issues/50) |
 
 Ids are exact and case-sensitive: `"Legacy"`, `" 2026"` and `"sketch"` are not ids. The id `2026` names the language, not a compiler version, as Rust's edition years do, so it stays meaningful after #205 removes the other front-end.
 
 ## Edition manifest
 
-An [edition manifest](../../GLOSSARY.md) is a file named `effra.json` that holds exactly one JSON object with one field:
+An [edition manifest](../../GLOSSARY.md) is a file named `ergo.json` that holds exactly one JSON object with one field:
 
 ```json
 {"edition": "2026"}
 ```
 
-The manifest is strict. Each of these is the EF144 refusal: an id that is not in the table above, a non-string value, invalid JSON, an unknown field, a repeated `edition` field, data after the object, a missing `edition`, a value that is not an object, a manifest that is not a regular file (a directory, a FIFO, a device or a link to a missing file), and a file over 64 KiB. A FIFO is refused before it is opened, so resolution never blocks. JSON matches `effra.bindings.json` and needs no schema to read; the parser is the standard library's.
+The manifest is strict. Each of these is the EF144 refusal: an id that is not in the table above, a non-string value, invalid JSON, an unknown field, a repeated `edition` field, data after the object, a missing `edition`, a value that is not an object, a manifest that is not a regular file (a directory, a FIFO, a device or a link to a missing file), and a file over 64 KiB. A FIFO is refused before it is opened, so resolution never blocks. JSON matches `ergo.bindings.json` and needs no schema to read; the parser is the standard library's.
 
 ## Resolution
 
@@ -29,7 +29,7 @@ Every surface admits a source file in the same way, before any front-end reads i
 
 1. The surface opens the file once. It opens without blocking, so a FIFO cannot stall it. Admission checks that the open file is a regular file.
 2. Admission gets the physical path P of the open file from the descriptor, not from the spelled path. On Linux, P is the target of `/proc/self/fd/N`. On macOS, P comes from `fcntl(F_GETPATH)`. On other platforms, and on Linux without `/proc`, P is `filepath.EvalSymlinks` of the spelling, and admission checks that P names the open file (`os.SameFile`). P must name the open file now, and must not be a link.
-3. Admission walks from the directory of P upward to the go.mod boundary (the rule below). It opens each directory as an `os.Root`, holds it open until validation, and records the directory's identity (device and inode), its `go.mod` entry (read through the held directory, and for a link the file it reaches), and its `effra.json`: the manifest's identity, size, mode and modification time, and its bytes. Manifest bytes (at most 64 KiB) are read through a descriptor opened relative to the directory, never through a spelled path again, and the snapshot keeps them.
+3. Admission walks from the directory of P upward to the go.mod boundary (the rule below). It opens each directory as an `os.Root`, holds it open until validation, and records the directory's identity (device and inode), its `go.mod` entry (read through the held directory, and for a link the file it reaches), and its `ergo.json`: the manifest's identity, size, mode and modification time, and its bytes. Manifest bytes (at most 64 KiB) are read through a descriptor opened relative to the directory, never through a spelled path again, and the snapshot keeps them.
 4. The edition is chosen from that record. Then admission gets P from the same descriptor again and checks every recorded directory, `go.mod` and manifest again. Each manifest is read again through the directory handle the walk held, with the same link and regular-file checks, and its bytes are compared with the recorded bytes. If P differs, or any directory, `go.mod` or manifest differs, has appeared or has disappeared, admission fails with EF146. A `go.mod` is read again through the held directory too. An inspection error is never evidence of absence. An entry on the walk can be a directory, a `go.mod`, a manifest, or the file or directory that a link reaches. Each entry is present, absent (it does not exist, or it is a link that reaches nothing), or unknown (any other error, such as a permission or I/O error, or a target directory that cannot be opened). An unknown entry refuses the admission with EF146. The refusal names the path and the error. Admission never chooses the edition of an ancestor across a boundary it could not inspect. A directory on the walk must be readable, because admission opens it as an `os.Root`. A manifest whose bytes differ is a difference even when its identity, size, mode and modification time are equal.
 5. The surface reads, formats and digests the source from the open file, never from a path. The admitted source carries P, the manifest path and the edition for diagnostics. An in-place format writes a temporary file in the same directory and renames it over P, after it checks again that P names the file that was read.
 
@@ -37,12 +37,12 @@ The two equal snapshots are the admission: the open file was at P, and P's direc
 
 - **CLI.** For `check`, `diagnostics`, `build`, `run` and the other loader commands, the path is the admitted source path, made absolute as the go command makes its file arguments absolute. For `lint test` and `lint receipt`, it is the source made absolute, and the rule packs read the open file through `lintpacks.Session.FixtureSource` and `ReceiptSource`. For `fmt FILE`, it is the spelling as given, because the formatter walks a link before a `..`.
 - **MCP.** The path is `ROOT/file`, with `ROOT` the canonical workspace root. The file is opened through an `os.Root` on the workspace at its physical path, so a path or a link that leaves the workspace cannot be opened. `project.edition` opens and binds the file but does not read it. The 2 MiB source bound applies only to the tools that read the source.
-- **LSP.** The path is the document URI's path (`edition.ResolveDocument`). The LSP opens and binds a document that has a file on disk, but analyses the editor's text. A document with no file, such as an unsaved buffer, resolves at the path the file system would create (`edition.PhysicalPath`). Existing links in the spelling are followed, including a dangling final link, whose target is read relative to the link's directory. Missing directories and the file name are kept as spelled. Only a missing component leads to this path. The deepest existing directory of that path is opened and admitted as a source is, with the walk starting at that directory, so the existing part of the chain is validated by the same snapshot; the directory must still be at that path afterwards. The missing suffix is part of the snapshot too: at validation, each missing directory, the `go.mod` and `effra.json` it would hold, and the document itself must still be missing below the held directory. If any of them appeared during the admission, the document gets EF146, and the next open or change event admits it again against the new chain. Any other admission failure gives EF146 with source `admission`, for example a directory, a FIFO, a non-directory parent or a link loop.
+- **LSP.** The path is the document URI's path (`edition.ResolveDocument`). The LSP opens and binds a document that has a file on disk, but analyses the editor's text. A document with no file, such as an unsaved buffer, resolves at the path the file system would create (`edition.PhysicalPath`). Existing links in the spelling are followed, including a dangling final link, whose target is read relative to the link's directory. Missing directories and the file name are kept as spelled. Only a missing component leads to this path. The deepest existing directory of that path is opened and admitted as a source is, with the walk starting at that directory, so the existing part of the chain is validated by the same snapshot; the directory must still be at that path afterwards. The missing suffix is part of the snapshot too: at validation, each missing directory, the `go.mod` and `ergo.json` it would hold, and the document itself must still be missing below the held directory. If any of them appeared during the admission, the document gets EF146, and the next open or change event admits it again against the new chain. Any other admission failure gives EF146 with source `admission`, for example a directory, a FIFO, a non-directory parent or a link loop.
 
 `edition.Resolve(dir)` decides the edition of the link-free directory `dir`. The rule:
 
 1. Walk from `dir` upward.
-2. At each directory, an `effra.json` decides. A valid manifest gives its edition with source `manifest`. Any other manifest is EF144. A refused manifest is never skipped in favour of an ancestor's.
+2. At each directory, an `ergo.json` decides. A valid manifest gives its edition with source `manifest`. Any other manifest is EF144. A refused manifest is never skipped in favour of an ancestor's.
 3. Stop after the first directory that contains a `go.mod` file (the Go module root): a manifest never governs across a module boundary. Without a `go.mod`, stop at the filesystem root.
 4. With no manifest, the edition is `legacy` with source `default`.
 
@@ -50,19 +50,19 @@ The resolver reads no source file and keeps no cache. A manifest edit takes effe
 
 There is no `--edition` flag. O13 asked for a flag only until a manifest exists; a flag would be a second way to select an edition that the surfaces could disagree on.
 
-Inputs without a path have no directory and resolve to the default `legacy`: `ef fmt --stdin`, MCP `code.format` with `source`, `ef lint rules`, MCP `lint.rules` and `project.describe`.
+Inputs without a path have no directory and resolve to the default `legacy`: `ergo fmt --stdin`, MCP `code.format` with `source`, `ergo lint rules`, MCP `lint.rules` and `project.describe`.
 
 ## Canonical projection
 
-`ef edition FILE`, MCP `project.edition` and LSP `effra/edition` return the same bytes, produced once by `internal/edition`: compact JSON with the keys `edition`, `source`, `manifest`, and `diagnostic` on a refusal only: EF144 on every surface, and on the LSP also EF146 with source `admission`, for a document path that exists but cannot be admitted (the CLI and MCP report EF146 as the command or tool error). `manifest` is absolute and clean, in the link-resolved directory of the file.
+`ergo edition FILE`, MCP `project.edition` and LSP `ergo/edition` return the same bytes, produced once by `internal/edition`: compact JSON with the keys `edition`, `source`, `manifest`, and `diagnostic` on a refusal only: EF144 on every surface, and on the LSP also EF146 with source `admission`, for a document path that exists but cannot be admitted (the CLI and MCP report EF146 as the command or tool error). `manifest` is absolute and clean, in the link-resolved directory of the file.
 
 ```json
 {"edition":"legacy","source":"default","manifest":""}
-{"edition":"2026","source":"manifest","manifest":"/abs/path/effra.json"}
-{"edition":null,"source":"manifest","manifest":"/abs/path/effra.json","diagnostic":{"code":"EF144","message":"…"}}
+{"edition":"2026","source":"manifest","manifest":"/abs/path/ergo.json"}
+{"edition":null,"source":"manifest","manifest":"/abs/path/ergo.json","diagnostic":{"code":"EF144","message":"…"}}
 ```
 
-`ef edition` exits 0, or 1 on EF144 after printing the projection. MCP returns the projection as a successful result; the `diagnostic` field carries EF144. A test drives the three processes over a fixed table and 24 generated trees and requires byte-identical answers.
+`ergo edition` exits 0, or 1 on EF144 after printing the projection. MCP returns the projection as a successful result; the `diagnostic` field carries EF144. A test drives the three processes over a fixed table and 24 generated trees and requires byte-identical answers.
 
 ## Routing
 
@@ -72,16 +72,16 @@ A legacy file reaches `internal/compiler` exactly as before this change, and its
 | --- | --- | --- |
 | CLI | `edition`, `check`, `diagnostics`, `build` (no `--receipt`), `run`, `fmt FILE` | `lint FILE`, `lint test`, `lint receipt`, `test`, `graph`, `query`, `type`, `inspect`, `explain`, `build --receipt`, `diagnostics` with rule packs |
 | MCP | `project.edition`, `project.check`, `project.diagnostics`, `code.format` with `file` | `code.inspect`, `code.explain`, `code.type`, `code.typeAt`, `project.graph`, `project.lint`, `project.tests`, `project.diagnostics` with rule packs |
-| LSP | `effra/edition`, diagnostics on `didOpen` and `didChange`, `textDocument/formatting` | `hover` and `definition` return a `null` result |
+| LSP | `ergo/edition`, diagnostics on `didOpen` and `didChange`, `textDocument/formatting` | `hover` and `definition` return a `null` result |
 
 - **The tables are the routes.** The CLI admits a file command only from its `fileCommands` table, and MCP refuses a file tool missing from its `fileTools` table for every edition but `legacy`. A command or tool added later is therefore routed by edition too. The process tests enumerate the commands from that table and the tools from `tools/list`.
-- **2026 formatting.** `effra-2026/formatter-1` ([formatting spec](formatting.md#2026-edition)), with the legacy limits, `EFMT_*` codes, write and stale-source rules. A request may mix editions; each file is formatted by its own edition's formatter, and its CLI file report names that formatter in `formatterVersion`. The LSP refuses formatting with EF145 when the manifest changed the document's edition since its last analysis, until the next change.
-- **2026 diagnostics.** The parser's `S001` and the checker's other `S` codes ([diagnostics](../spec/diagnostics.md)), with UTF-8 byte spans and UTF-16 LSP ranges, through the shared diagnostic report. Lint is unavailable (`lintAvailable: false`, with the EF145 reason naming [#203](https://github.com/cevr/effra/issues/203)).
-- **2026 check.** `checked`, `revision`, `target`, `edition` and the bounded diagnostics. There are no symbol, type or application tables before [#203](https://github.com/cevr/effra/issues/203).
+- **2026 formatting.** `ergo-2026/formatter-1` ([formatting spec](formatting.md#2026-edition)), with the legacy limits, `EFMT_*` codes, write and stale-source rules. A request may mix editions; each file is formatted by its own edition's formatter, and its CLI file report names that formatter in `formatterVersion`. The LSP refuses formatting with EF145 when the manifest changed the document's edition since its last analysis, until the next change.
+- **2026 diagnostics.** The parser's `S001` and the checker's other `S` codes ([diagnostics](../spec/diagnostics.md)), with UTF-8 byte spans and UTF-16 LSP ranges, through the shared diagnostic report. Lint is unavailable (`lintAvailable: false`, with the EF145 reason naming [#203](https://github.com/cevr/ergo/issues/203)).
+- **2026 check.** `checked`, `revision`, `target`, `edition` and the bounded diagnostics. There are no symbol, type or application tables before [#203](https://github.com/cevr/ergo/issues/203).
 - **2026 build.** The checker runs first; a diagnostic refuses the build and names its code. Then the bridge, the prototype checker and the prototype's direct-Go emitter lower the program: any refusal there is re-coded `S109` with the message "the prototype emitter cannot lower this program yet (#50): …" at its position, and nothing is written. Otherwise the emitter writes a temporary Go module, `go build` links it with the flags of every native build, and the module is removed.
 - **EF144.** Every file command and tool reports EF144 alone, with no front-end diagnostic. `check` and `diagnostics` (and `project.check`, `project.diagnostics`, LSP publications) carry it in their usual report, without a location; LSP projects it to the document start. Every other operation reports `EF144: message` as its error. `build` writes nothing.
 
-The codes are declared once in `internal/edition` and documented in [the tooling table](../tooling.md#edition-diagnostics). EF### and S### codes live side by side until the registry ([#79](https://github.com/cevr/effra/issues/79)) unifies them.
+The codes are declared once in `internal/edition` and documented in [the tooling table](../tooling.md#edition-diagnostics). EF### and S### codes live side by side until the registry ([#79](https://github.com/cevr/ergo/issues/79)) unifies them.
 
 ## Deprecation timeline
 
@@ -89,13 +89,13 @@ The earlier front-end retires in four phases, each keyed to a ticket rather than
 
 | Phase | Ticket | `legacy` | No manifest | EF145 rows left |
 | --- | --- | --- | --- | --- |
-| 0 | [#194](https://github.com/cevr/effra/issues/194) | Supported; may be written explicitly | `legacy` | All rows of the routing table |
-| 1 | [#195](https://github.com/cevr/effra/issues/195), [#196](https://github.com/cevr/effra/issues/196), [#197](https://github.com/cevr/effra/issues/197) | Frozen: fixes only, no new features | `legacy` | Shrinking: #195 removes formatting; #196 checks every construct; [#203](https://github.com/cevr/effra/issues/203) removes the type, inspection, explanation, query, graph and lint rows; tests and `build --receipt` remain |
-| 2 | [#204](https://github.com/cevr/effra/issues/204) | Supported with a deprecation warning (#204 allocates the code) | `legacy`, with the warning | Only what #204 leaves; the gate runs every example as `2026` |
-| 3 | [#205](https://github.com/cevr/effra/issues/205) | EF144 with the message "retired in #205" and a migration pointer | `2026` | None |
+| 0 | [#194](https://github.com/cevr/ergo/issues/194) | Supported; may be written explicitly | `legacy` | All rows of the routing table |
+| 1 | [#195](https://github.com/cevr/ergo/issues/195), [#196](https://github.com/cevr/ergo/issues/196), [#197](https://github.com/cevr/ergo/issues/197) | Frozen: fixes only, no new features | `legacy` | Shrinking: #195 removes formatting; #196 checks every construct; [#203](https://github.com/cevr/ergo/issues/203) removes the type, inspection, explanation, query, graph and lint rows; tests and `build --receipt` remain |
+| 2 | [#204](https://github.com/cevr/ergo/issues/204) | Supported with a deprecation warning (#204 allocates the code) | `legacy`, with the warning | Only what #204 leaves; the gate runs every example as `2026` |
+| 3 | [#205](https://github.com/cevr/ergo/issues/205) | EF144 with the message "retired in #205" and a migration pointer | `2026` | None |
 
 - **Phase 0 (#194, this change).** Both editions build in one workspace. New Go-shaped code opts in with `{"edition": "2026"}`.
-- **Phase 1 (#195, #196, #197).** The 2026 edition gains the formatter, the checker and the linearity pass, and its EF145 rows shrink. #195 moves the parser into the main module, removes the `effra.local/sketch9` requirement from `go.mod`, repoints `internal/sketchfront` and adds 2026 formatting on the three surfaces.
+- **Phase 1 (#195, #196, #197).** The 2026 edition gains the formatter, the checker and the linearity pass, and its EF145 rows shrink. #195 moves the parser into the main module, removes the `ergo.local/sketch9` requirement from `go.mod`, repoints `internal/sketchfront` and adds 2026 formatting on the three surfaces.
 - **Phase 2 (#204).** Every example gets a `2026` manifest, and the gate runs them. The migration is by hand or with a tool, as [the migrate decision](../research/ef-migrate-decision.md) records. Legacy files get a deprecation warning.
 - **Phase 3 (#205).** The earlier front-end and its 172 compiler fixtures are removed. A `legacy` manifest becomes EF144, and a file without a manifest is `2026`. The registry history keeps the retired codes (#79).
 
@@ -104,10 +104,10 @@ The earlier front-end retires in four phases, each keyed to a ticket rather than
 How other compile-to-host languages select or evolve a language version per package. None infers the version from file content.
 
 - **Rust editions.** `edition = "2021"` per crate in `Cargo.toml`. Crates of different editions link in one build. `cargo fix --edition` migrates. A missing key means 2015. `rustc --edition` exists for builds without Cargo.
-- **Go `go` directive.** `go 1.22` in `go.mod` sets the language version per module, so the 1.22 per-iteration loop variables apply only to modules that declare 1.22 or later. A `//go:build go1.N` line can lower one file's version. Effra keeps no per-file override (O13: never from content).
+- **Go `go` directive.** `go 1.22` in `go.mod` sets the language version per module, so the 1.22 per-iteration loop variables apply only to modules that declare 1.22 or later. A `//go:build go1.N` line can lower one file's version. Ergo keeps no per-file override (O13: never from content).
 - **Gleam.** The `gleam = ">= 1.x"` key in `gleam.toml` is a compiler-version constraint, not an edition. Gleam evolves one language with deprecation warnings; before v1 it shipped `gleam fix` to rewrite breaking syntax changes, and the command is now a no-op.
 - **ReScript.** `rescript.json` (JSON, formerly `bsconfig.json`). ReScript 11's `"uncurried"` key was a project-wide language-mode switch with a migration path, which is the closest analogue to an edition.
 - **Elixir.** The `elixir: "~> 1.17"` key in `mix.exs` is a version requirement. There are no editions; deprecations run warning first, removal later.
 - **MoonBit.** The `moon.mod.json` JSON manifest has no edition field. Breaking changes ship as deprecation warnings and are migrated with tooling.
 
-Effra takes Rust's model (a per-package id independent of the compiler version, mixed editions in one build) with Go's module-root walk, and ReScript's and MoonBit's JSON manifest form.
+Ergo takes Rust's model (a per-package id independent of the compiler version, mixed editions in one build) with Go's module-root walk, and ReScript's and MoonBit's JSON manifest form.

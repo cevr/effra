@@ -29,7 +29,7 @@ package compiler
 import (
 	"fmt"
 
-	"effra.local/prototype/internal/compiler/machineplan"
+	"ergo.local/prototype/internal/compiler/machineplan"
 )
 
 const (

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // Type is a checked type. Named types are nominal: two are identical only

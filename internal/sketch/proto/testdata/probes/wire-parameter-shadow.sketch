@@ -5,4 +5,4 @@ type Holder struct{ Value string }
 func (h Holder) Get() string { return h.Value }
 func envc() string { return "ok" }
 wire W { Store = Holder{Value: envc()} }
-func main() uses Console { Console.Println(with(W) { Store.Get() }) }
+func main() needs Console { Console.Println(with(W) { Store.Get() }) }

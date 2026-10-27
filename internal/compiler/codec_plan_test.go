@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 var testCodecBounds = CodecPlanBounds{MaxBodyBytes: 1 << 20, MaxDepth: rt.CodecMaxDepth}
@@ -57,7 +57,7 @@ func TestCodecPlanIsAStableSharedDAG(t *testing.T) {
 	if !slices.Equal(ids, want) || event.Root != 0 || event.Nesting != 2 || event.Bounds != testCodecBounds {
 		t.Fatalf("plan order or bounds: %v %+v", ids, event)
 	}
-	if event.ID != "codec-plan:effra/json-structural-1:enum:module:file:module:Event:1048576:512" {
+	if event.ID != "codec-plan:ergo/json-structural-1:enum:module:file:module:Event:1048576:512" {
 		t.Fatalf("plan identity: %s", event.ID)
 	}
 	variants := event.Nodes[0].Variants
@@ -123,7 +123,7 @@ func TestCodecPlanRefusesUnrepresentableTypes(t *testing.T) {
 		{"nested host field", "record Inner { latch: Latch }\nrecord Outer { inner: Inner }", "Outer", "Latch at Outer.inner.latch is a host or runtime type", testCodecBounds},
 		{"variant host field", "record Inner { latch: Latch }\nenum Mode { Held { inner: Inner } }", "Mode", "Latch at Mode.Held.inner.latch", testCodecBounds},
 		{"bytes", "record Blob { data: bytes }", "Blob", "bytes at Blob.data is not representable in this profile", testCodecBounds},
-		{"generic application", "import Data \"effra/data\"\nrecord Maybe { value: Data.Option<string> }", "Maybe", "Data.Option<string> at Maybe.value is generic data", testCodecBounds},
+		{"generic application", "import Data \"ergo/data\"\nrecord Maybe { value: Data.Option<string> }", "Maybe", "Data.Option<string> at Maybe.value is generic data", testCodecBounds},
 		{"empty enum", "enum Never { }\nrecord Holder { never: Never }", "Holder", "Never at Holder.never has no variants to decode", testCodecBounds},
 		{"nesting beyond maxDepth", "record A { b: B }\nrecord B { c: C }\nrecord C { text: string }", "A", "plan nesting 3 exceeds maxDepth 2", CodecPlanBounds{MaxBodyBytes: 64, MaxDepth: 2}},
 	}
@@ -230,11 +230,11 @@ func TestCodecPlanRefusesStructuralBudgets(t *testing.T) {
 		})
 	}
 	// A derive declaration reports the refusal as EF138 at its type.
-	source := "import Json \"effra/json\"\n" + wide(maxCodecPlanEdges+1) + "derive wideJson = Json.codec<Wide>(maxBodyBytes: 1048576, maxDepth: 512)\n"
+	source := "import Json \"ergo/json\"\n" + wide(maxCodecPlanEdges+1) + "derive wideJson = Json.codec<Wide>(maxBodyBytes: 1048576, maxDepth: 512)\n"
 	r := Compile(source)
 	at := strings.LastIndex(source, "Wide>")
 	if r.Checked || len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != codecDerivationCode || r.Diagnostics[0].Span.Offset != at || r.Diagnostics[0].Span.Length != len("Wide") ||
-		r.Diagnostics[0].Message != "codec wideJson cannot derive effra/json-structural-1 for Wide: plan exceeds 65536 fields and variants at Wide.V65536" {
+		r.Diagnostics[0].Message != "codec wideJson cannot derive ergo/json-structural-1 for Wide: plan exceeds 65536 fields and variants at Wide.V65536" {
 		t.Fatalf("derive past the edge ceiling: %+v", r.Diagnostics)
 	}
 }

@@ -1,13 +1,13 @@
-// Package std holds the Effra source of the 2026 edition's prelude and
+// Package std holds the Ergo source of the 2026 edition's prelude and
 // standard-library root (docs/spec/stdlib.md). The sources are ordinary
-// Effra code: internal/sketch/check checks them with the same rules as user
+// Ergo code: internal/sketch/check checks them with the same rules as user
 // packages, so no library item is a compiler branch (owner, 2026-10-12;
 // GLOSSARY, special-cased library). #206 adds packages here without checker
 // changes.
 //
 // Prior art: MoonBit and OCaml ship their standard library as source that
 // the same compiler checks; Gleam keeps its prelude in the compiler
-// (compiler-core/src/type_/prelude.rs), which Effra does not copy.
+// (compiler-core/src/type_/prelude.rs), which Ergo does not copy.
 package std
 
 import (

@@ -4,7 +4,7 @@ import (
 	_ "embed"
 	"slices"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // Builtin services and providers name the native runtime modules their

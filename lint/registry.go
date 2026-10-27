@@ -509,7 +509,7 @@ type AnalysisIdentity struct {
 // code. The libraries a native executable loads are outside it either way.
 // Environment digests the exact process environment under the environment
 // policy and platform: every variable's name and value bytes, an empty
-// value distinct from an absent one. Variables lists those names; Effra
+// value distinct from an absent one. Variables lists those names; Ergo
 // reports names and the digest, never values.
 type ExecutionIdentity struct {
 	Program     string   `json:"program"`

@@ -8,7 +8,7 @@ import (
 
 // The emitted runtime package's own seam, since no language caller can cancel
 // one waiter yet. Only the waiter's context is cancelled.
-const layerWaiterSeamProbe = `package effra
+const layerWaiterSeamProbe = `package ergo
 import ("context";"testing";"time")
 func TestLayerWaiterSeam(t *testing.T){
  for _,fails:=range []bool{false,true}{

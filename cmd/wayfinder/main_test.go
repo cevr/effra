@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/testinputs"
+	"ergo.local/prototype/internal/testinputs"
 )
 
 const testRepo = "acme/widgets"
@@ -242,7 +242,7 @@ func doc(references []any, issues ...record) map[string]any {
 	if references == nil {
 		references = []any{}
 	}
-	return map[string]any{"schema": "effra-wayfinder-snapshot/1", "repository": testRepo, "map": 1, "mapReferences": references, "issues": all}
+	return map[string]any{"schema": "ergo-wayfinder-snapshot/1", "repository": testRepo, "map": 1, "mapReferences": references, "issues": all}
 }
 
 // canonical is the published snapshot format: two-space indentation, sorted keys, trailing newline.
@@ -813,7 +813,7 @@ func TestSnapshotBytesAreCanonical(t *testing.T) {
 		issue(1, "wayfinder:map", "null", "Issue 1") + ",\n" +
 		issue(2, "wayfinder:task", "1", "q\\\" b\\\\ \\b\\f\\u0001\\u001f del\x7f ls  é 😀 <&>") + "\n" +
 		"  ],\n  \"map\": 1,\n  \"mapReferences\": [],\n  \"repository\": \"acme/widgets\",\n" +
-		"  \"schema\": \"effra-wayfinder-snapshot/1\"\n}\n"
+		"  \"schema\": \"ergo-wayfinder-snapshot/1\"\n}\n"
 	got, _ := os.ReadFile(path)
 	if string(got) != want {
 		t.Fatalf("snapshot bytes differ:\n got %q\nwant %q", got, want)

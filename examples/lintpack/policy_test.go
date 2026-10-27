@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/compiler"
-	"effra.local/prototype/lint"
+	"ergo.local/prototype/internal/compiler"
+	"ergo.local/prototype/lint"
 )
 
 type expected struct {

@@ -13,7 +13,7 @@ fn marked(required required:string = "x") -> string { required }`
 	if err != nil {
 		t.Fatalf("format contextual parameter syntax: %v", err)
 	}
-	if FormatterIdentity != "effra/formatter-16" || !strings.Contains(first.Text, `ordinary(required: string,`) || !strings.Contains(first.Text, `fn marked(required required: string = "x")`) || !strings.Contains(first.Text, `suffix: string = "!"`) {
+	if FormatterIdentity != "ergo/formatter-16" || !strings.Contains(first.Text, `ordinary(required: string,`) || !strings.Contains(first.Text, `fn marked(required required: string = "x")`) || !strings.Contains(first.Text, `suffix: string = "!"`) {
 		t.Fatalf("formatter epoch or parameter formatting is stale: identity=%s text=%s", FormatterIdentity, first.Text)
 	}
 	second, err := FormatSource(first.Text)
@@ -23,7 +23,7 @@ fn marked(required required:string = "x") -> string { required }`
 }
 
 func TestCheckedParameterFactsArePublicAndContextual(t *testing.T) {
-	source := `import Defaults "effra/constants"
+	source := `import Defaults "ergo/constants"
 const LocalSuffix: string = Defaults.defaultSuffix
 const Zero: i64 = 0
 const Disabled: bool = false
@@ -39,7 +39,7 @@ fn marked(required required: string) -> string { required }`
 	if !r.Checked {
 		t.Fatalf("checked parameter facts rejected: %+v", r.Diagnostics)
 	}
-	if r.SchemaVersion != SemanticSchemaVersion || SemanticSchemaVersion != 9 || TypeQuerySchemaVersion != 4 || interfaceSummarySchema != 5 || SemanticProducerIdentity != "effra/checker-abi-10/bundled-interface-5" {
+	if r.SchemaVersion != SemanticSchemaVersion || SemanticSchemaVersion != 9 || TypeQuerySchemaVersion != 4 || interfaceSummarySchema != 5 || SemanticProducerIdentity != "ergo/checker-abi-10/bundled-interface-5" {
 		t.Fatalf("semantic contract epoch is stale: schema=%d query=%d interface=%d producer=%s", r.SchemaVersion, TypeQuerySchemaVersion, interfaceSummarySchema, SemanticProducerIdentity)
 	}
 	findSymbol := func(name string) *Symbol {
@@ -111,20 +111,20 @@ fn marked(required required: string) -> string { required }`
 	}
 	at := defaultAt + len("suffix: string = Defaults.")
 	selected, err := r.QueryType(TypeSelection{Offset: &at})
-	if err != nil || selected.Selection.Target == nil || selected.Selection.Target.Kind != "constant" || selected.Selection.Target.Constant == nil || selected.Selection.Target.Constant.Value != "!" || selected.Selection.Target.Module != "effra/constants" || selected.Selection.Target.Source == "" || selected.Selection.Target.LocationAvailable {
+	if err != nil || selected.Selection.Target == nil || selected.Selection.Target.Kind != "constant" || selected.Selection.Target.Constant == nil || selected.Selection.Target.Constant.Value != "!" || selected.Selection.Target.Module != "ergo/constants" || selected.Selection.Target.Source == "" || selected.Selection.Target.LocationAvailable {
 		t.Fatalf("default alias lost its checked lexical target: %+v err=%v", selected.Selection, err)
 	}
 	if len(r.Sources) < 2 || len(r.BundledBindings) == 0 {
 		t.Fatalf("distributed default constant was not loaded into the source revision: %+v", r.Sources)
 	}
 	for _, source := range []string{
-		`import Defaults "effra/constants" fn onlyDefault(value: string = Defaults.defaultSuffix) -> string { value }`,
-		`import Defaults "effra/constants" service Settings { effect fn read(value: string = Defaults.defaultSuffix) -> string }`,
+		`import Defaults "ergo/constants" fn onlyDefault(value: string = Defaults.defaultSuffix) -> string { value }`,
+		`import Defaults "ergo/constants" service Settings { effect fn read(value: string = Defaults.defaultSuffix) -> string }`,
 	} {
 		r := Compile(source)
 		foundDefault := false
 		for _, binding := range r.BundledBindings {
-			foundDefault = foundDefault || binding.Module == "effra/constants" && binding.Name == "defaultSuffix"
+			foundDefault = foundDefault || binding.Module == "ergo/constants" && binding.Name == "defaultSuffix"
 		}
 		if !r.Checked || !foundDefault {
 			t.Fatalf("default-only compiler-distributed alias did not enter the checked import revision: %+v %+v", r.Diagnostics, r.BundledBindings)
@@ -149,8 +149,8 @@ effect fn main() -> string { run Store.label().provide(Shared) }`
 	if err != nil {
 		t.Fatalf("build layer GraphView: %v", err)
 	}
-	facts := view.Data.Effra
-	if facts.GraphViewVersion != 1 || facts.Snapshot.SchemaVersion != SemanticSchemaVersion || facts.ProducerIdentity != "effra/checker-abi-10/bundled-interface-5" {
+	facts := view.Data.Ergo
+	if facts.GraphViewVersion != 1 || facts.Snapshot.SchemaVersion != SemanticSchemaVersion || facts.ProducerIdentity != "ergo/checker-abi-10/bundled-interface-5" {
 		t.Fatalf("GraphView envelope or nested semantic qualification changed: view=%d snapshot=%d producer=%q", facts.GraphViewVersion, facts.Snapshot.SchemaVersion, facts.ProducerIdentity)
 	}
 	if SemanticSchemaVersion != 9 {
@@ -158,8 +158,8 @@ effect fn main() -> string { run Store.label().provide(Shared) }`
 	}
 	var selectedParameter *Param
 	for _, edge := range view.Edges {
-		selection := edge.Data.Effra.Selection
-		if edge.Data.Effra.Relation == "selects" && selection != nil && len(selection.Parameters) > 0 {
+		selection := edge.Data.Ergo.Selection
+		if edge.Data.Ergo.Relation == "selects" && selection != nil && len(selection.Parameters) > 0 {
 			selectedParameter = &selection.Parameters[0]
 			break
 		}
@@ -179,11 +179,11 @@ effect fn main() -> string { run Store.label().provide(Shared) }`
 	for _, rawEdge := range raw["edges"].([]any) {
 		edge := rawEdge.(map[string]any)
 		data := edge["data"].(map[string]any)
-		effra := data["effra"].(map[string]any)
-		if effra["relation"] != "selects" {
+		ergo := data["ergo"].(map[string]any)
+		if ergo["relation"] != "selects" {
 			continue
 		}
-		selection, ok := effra["selection"].(map[string]any)
+		selection, ok := ergo["selection"].(map[string]any)
 		if !ok {
 			continue
 		}

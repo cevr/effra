@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/examples/hosttypes"
+	"ergo.local/prototype/examples/hosttypes"
 )
 
 // Methods follow Go's method sets: a value-receiver method is callable on a
@@ -43,7 +43,7 @@ func TestHostMethodSetsSelectPointerAndValueReceivers(t *testing.T) {
 			increment = binding
 		}
 	}
-	want := HostComponent{Native: "*effra.local/prototype/examples/hosttypes.Counter", Type: "*host.Counter", Adaptation: hostAdaptReceiver}
+	want := HostComponent{Native: "*ergo.local/prototype/examples/hosttypes.Counter", Type: "*host.Counter", Adaptation: hostAdaptReceiver}
 	if len(increment.HostParameters) != 1 || increment.HostParameters[0] != want || increment.Return != "int" {
 		t.Fatalf("method binding inspection: %+v", increment)
 	}
@@ -69,10 +69,10 @@ func TestHostMethodSetsSelectPointerAndValueReceivers(t *testing.T) {
 	}
 }
 
-const hostProtocolsImport = `import go host "effra.local/prototype/examples/hosttypes"
+const hostProtocolsImport = `import go host "ergo.local/prototype/examples/hosttypes"
 import go io "io"
 import go strconv "strconv"
-import Data "effra/data"
+import Data "ergo/data"
 `
 
 // A concrete host value is passed to a native interface directly, so
@@ -307,7 +307,7 @@ effect fn program() -> void uses { Console, Foreign } {
 	}
 }
 
-// effra.bindings.json attaches behavior to a method by its go/types full name,
+// ergo.bindings.json attaches behavior to a method by its go/types full name,
 // the declaring method's identity: a promoted method carries the contract of
 // the method it promotes, and a context-forwarding method observes the managed
 // fiber's cancellation. The timeout's deadline comes from a Scheduler provider
@@ -389,7 +389,7 @@ type Instance struct{ Generic[int64] }
 
 func NewInstance() Instance { return Instance{} }
 `,
-		"effra.bindings.json": `{"(*example.test/methods.Client).Lookup":{"context":"fiber","cancellation":"cooperative"},
+		"ergo.bindings.json": `{"(*example.test/methods.Client).Lookup":{"context":"fiber","cancellation":"cooperative"},
 			"(example.test/methods.Generic[T]).Lookup":{"context":"fiber","cancellation":"cooperative"}}`,
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0600); err != nil {
@@ -397,7 +397,7 @@ func NewInstance() Instance { return Instance{} }
 		}
 	}
 	r := CompileAt(`import go m "example.test/methods"
-import Data "effra/data"
+import Data "ergo/data"
 impl AfterEntry for Scheduler {
     effect fn sleep(milliseconds: i64) -> void {
         if run m.AwaitEntered().provide<Foreign>(Host) { void } else { void }
@@ -440,11 +440,11 @@ effect fn main() -> string raises {GoError} {
 	if output := runGeneratedGo(t, r); output != "done:entered-live,cancelled:Ada:generic:client\n" {
 		t.Fatalf("method contracts: %q", output)
 	}
-	if err := os.WriteFile(filepath.Join(root, "effra.bindings.json"), []byte(`{"(*example.test/methods.Client).Name":{"context":"fiber"}}`), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "ergo.bindings.json"), []byte(`{"(*example.test/methods.Client).Name":{"context":"fiber"}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	refused := CompileAt(`import go m "example.test/methods"
-import Data "effra/data"
+import Data "ergo/data"
 effect fn main() -> string {
     match run m.New().provide<Foreign>(Host) {
         Data.Option.None => "none",
@@ -454,7 +454,7 @@ effect fn main() -> string {
 	if refused.Checked || !hasDiagnosticContaining(refused, "the context contract requires a first context.Context parameter") {
 		t.Fatalf("context contract on a method without context accepted: %+v", refused.Diagnostics)
 	}
-	if err := os.WriteFile(filepath.Join(root, "effra.bindings.json"), []byte(`{"(*example.test/methods.Client).Name":{"cancellation":"eventually"}}`), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "ergo.bindings.json"), []byte(`{"(*example.test/methods.Client).Name":{"cancellation":"eventually"}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if invalid := CompileAt(`import go m "example.test/methods"
@@ -511,8 +511,8 @@ func Second() interface {
 	} {
 		root := t.TempDir()
 		files := map[string]string{
-			"go.mod":              "module example.test/anonymous\n\ngo 1.27\n",
-			"effra.bindings.json": `{"(interface).Lookup":{"context":"fiber","cancellation":"cooperative"}}`,
+			"go.mod":             "module example.test/anonymous\n\ngo 1.27\n",
+			"ergo.bindings.json": `{"(interface).Lookup":{"context":"fiber","cancellation":"cooperative"}}`,
 		}
 		maps.Copy(files, tc.files)
 		for name, contents := range files {
@@ -521,7 +521,7 @@ func Second() interface {
 			}
 		}
 		r := CompileAt(`import go a "example.test/anonymous"
-import Data "effra/data"
+import Data "ergo/data"
 effect fn main() -> void {
     match run a.First().provide<Foreign>(Host) {
         Data.Option.None => void,
@@ -531,7 +531,7 @@ effect fn main() -> void {
         }
     }
 }`, "go", root)
-		want := `effra.bindings.json key "(interface).Lookup" names a method of an unnamed interface, which Go spells this way whatever its package or signature, so it names no single declaration and carries no contract; pass an explicit context.Context argument, or declare a named Go interface with the method in the module and key that method`
+		want := `ergo.bindings.json key "(interface).Lookup" names a method of an unnamed interface, which Go spells this way whatever its package or signature, so it names no single declaration and carries no contract; pass an explicit context.Context argument, or declare a named Go interface with the method in the module and key that method`
 		if r.Checked || len(r.Diagnostics) == 0 || r.Diagnostics[0].Code != "EF111" || r.Diagnostics[0].Message != want {
 			t.Fatalf("%s: unnamed-interface key: %+v", tc.name, r.Diagnostics)
 		}
@@ -579,7 +579,7 @@ func Named(v interface {
 	return v
 }
 `,
-		"effra.bindings.json": `{"(example.test/remedies.Lookuper).Lookup":{"context":"fiber","cancellation":"cooperative"}}`,
+		"ergo.bindings.json": `{"(example.test/remedies.Lookuper).Lookup":{"context":"fiber","cancellation":"cooperative"}}`,
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0600); err != nil {
 			t.Fatal(err)
@@ -587,7 +587,7 @@ func Named(v interface {
 	}
 	r := CompileAt(`import go r "example.test/remedies"
 import go gctx "context"
-import Data "effra/data"
+import Data "ergo/data"
 effect fn explicit() -> string raises {GoError} {
     let background = run gctx.Background().provide<Foreign>(Host)
     match run r.First().provide<Foreign>(Host) {
@@ -707,9 +707,9 @@ func TestHostUnnamedInterfaceClosesOverSignaturePackages(t *testing.T) {
 // standard *bytes.Buffer both display as *bytes.Buffer, yet each String call
 // keeps its own signature and inspection reports both receivers.
 func TestHostMethodBindingsUseCanonicalReceiverIdentity(t *testing.T) {
-	const imports = `import go bytes "effra.local/prototype/examples/hosttypes"
+	const imports = `import go bytes "ergo.local/prototype/examples/hosttypes"
 import go strconv "strconv"
-import Data "effra/data"
+import Data "ergo/data"
 `
 	r := CompileAt(imports+`effect fn program() -> void uses { Console, Foreign } {
     match run bytes.NewProbeShadowBuffer() {
@@ -728,8 +728,8 @@ import Data "effra/data"
 	for _, binding := range r.Bindings {
 		identities[binding.Identity] = binding
 	}
-	shadow, standard := identities["go:(*effra.local/prototype/examples/hosttypes.Buffer).String"], identities["go:(*bytes.Buffer).String"]
-	if shadow.Symbol != "(*bytes.Buffer).String" || standard.Symbol != "(*bytes.Buffer).String" || shadow.Return != "i64" || standard.Return != "string" || shadow.HostParameters[0].Native != "*effra.local/prototype/examples/hosttypes.Buffer" || standard.HostParameters[0].Native != "*bytes.Buffer" {
+	shadow, standard := identities["go:(*ergo.local/prototype/examples/hosttypes.Buffer).String"], identities["go:(*bytes.Buffer).String"]
+	if shadow.Symbol != "(*bytes.Buffer).String" || standard.Symbol != "(*bytes.Buffer).String" || shadow.Return != "i64" || standard.Return != "string" || shadow.HostParameters[0].Native != "*ergo.local/prototype/examples/hosttypes.Buffer" || standard.HostParameters[0].Native != "*bytes.Buffer" {
 		t.Fatalf("colliding displays shared a binding: %+v", r.Bindings)
 	}
 	if output := runGeneratedGo(t, r); output != "7\nx\n" {

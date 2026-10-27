@@ -1,6 +1,6 @@
 # Runtime rules
 
-The runtime gives Effect's guarantees on Go's scheduler: structured tasks, cooperative interruption, release that always completes, and typed exits. Go supplies goroutines, the garbage collector and preemption; Effra adds no scheduler of its own. Definitions are in the [glossary](../../GLOSSARY.md).
+The runtime gives Effect's guarantees on Go's scheduler: structured tasks, cooperative interruption, release that always completes, and typed exits. Go supplies goroutines, the garbage collector and preemption; Ergo adds no scheduler of its own. Definitions are in the [glossary](../../GLOSSARY.md).
 
 Status summary: the prototype's runtime (`prototypes/sketch9/sketch/rt`) implements the task tree, stop propagation, the stop check before each capability call, `timeout.After` and defect propagation. Every other rule here is **designed, not yet implemented**.
 
@@ -27,7 +27,7 @@ Status: **implemented in prototype** for capability calls; **designed, not yet i
 4. A loop with an empty footprint has no interruption point. Such a loop cannot be stopped until it ends, as with Effect on JavaScript. Go preemption keeps the scheduler fair but does not stop the loop.
 5. A blocking runtime primitive waits for either its event or the stop, so a stopped task never stays parked.
 
-*Prior art:* the `select` on `ctx.Done()` Go programmers write by hand; Effect checks interruption between steps; BEAM processes are preempted and can be killed outright, which Effra does not do.
+*Prior art:* the `select` on `ctx.Done()` Go programmers write by hand; Effect checks interruption between steps; BEAM processes are preempted and can be killed outright, which Ergo does not do.
 
 ## I2. Automatic masks
 
@@ -48,7 +48,7 @@ Status: **partly implemented in prototype**.
 
 1. A task ends with one exit: a success value, or a cause. A cause holds one or more of: a typed failure from the error row, a defect, and an interruption.
 2. **Interruption is not a typed error.** No error row names it, and every `catch` passes it on ([rows.md](rows.md#catch)). In a function with no error row, interruption still propagates as part of the exit, not through the row (README Gap 2). Prototype: such a function panics with `rt.Interrupted`, and the nearest task boundary recovers it.
-3. **Defects.** A Go panic in Effra code is a defect. A defect in a child re-raises in the parent at the join, on every path, including the timeout and stop paths. Prototype: implemented for `timeout.After`.
+3. **Defects.** A Go panic in Ergo code is a defect. A defect in a child re-raises in the parent at the join, on every path, including the timeout and stop paths. Prototype: implemented for `timeout.After`.
 4. **Release defects.** A defect or an interruption during a release joins the cause beside the body's outcome. No cause is dropped.
 5. **Stop wins.** When a task is stopped while its body runs, interruption wins over the body's success.
 6. **Entry.** When `main`'s exit is a cause, the program prints each reason and exits with status 130 when every reason is an interruption, and 1 otherwise, as the current [entry failure report](../design.md#entry-failure-report) does. Prototype: an interruption that reaches `main` exits 130; a defect prints `defect: …` and exits 2.
@@ -64,10 +64,10 @@ payment := try timeout.After(500ms) { Gateway.Authorize(order) }
 **Classification.** `timeout.After` is an ordinary library function in the `timeout` package, not a construct. Under the owner's rules, constructs get keywords, a dot form is library, and kernel primitives are functions (owner, 2026-10-12). Its kernel primitives are task start (`go`), `Task.Stop` and `Task.Wait`, and the `Scheduler` capability. Its designed signature, in the provisional generic spelling of [types.md](types.md#generics):
 
 ```go
-func After(d duration, body func() (T, error[E]) uses R) (T, error[E | Expired]) uses Scheduler, R
+func After(d duration, body func() (T, error[E]) needs R) (T, error[E | Expired]) needs Scheduler, R
 ```
 
-The callback type carries `uses R`, so the requirements of the block appear in `After`'s own row. A trailing block is the `body` argument ([grammar.md](grammar.md#expressions)). *Prior art:* Effect's `Effect.timeout` is an ordinary combinator over fibers and the clock; Go's `context.WithTimeout` is a library function.
+The callback type carries `needs R`, so the requirements of the block appear in `After`'s own row. A trailing block is the `body` argument ([grammar.md](grammar.md#expressions)). *Prior art:* Effect's `Effect.timeout` is an ordinary combinator over fibers and the clock; Go's `context.WithTimeout` is a library function.
 
 1. `timeout.After(d) { block }` needs `import "timeout"`. It takes one `duration` (S108) and a block (S108). The duration is a value position, so a fallible duration is S105.
 2. It charges `Scheduler` and the block's requirements ([rows.md](rows.md#capability-rows)), because its signature says so.
@@ -82,7 +82,7 @@ The callback type carries `uses R`, so the requirements of the block appear in `
 
 ## Observability and supervision
 
-Status: **designed, not yet implemented** ([#69](https://github.com/cevr/effra/issues/69), [#200](https://github.com/cevr/effra/issues/200), [#207](https://github.com/cevr/effra/issues/207)).
+Status: **designed, not yet implemented** ([#69](https://github.com/cevr/ergo/issues/69), [#200](https://github.com/cevr/ergo/issues/200), [#207](https://github.com/cevr/ergo/issues/207)).
 
 ### G1. Context through `with`
 
@@ -105,11 +105,11 @@ Status: **designed, not yet implemented** ([#69](https://github.com/cevr/effra/i
 
 3. Ancestry retention is bounded.
 
-### G3. `ef ps <pid>`
+### G3. `ergo ps <pid>`
 
-1. `ef ps <pid>` shows the live task tree of a running program: each task's state, what it waits on, its span and its restarts.
+1. `ergo ps <pid>` shows the live task tree of a running program: each task's state, what it waits on, its span and its restarts.
 2. It is served over a debug endpoint, for people and agents, with the same schema in CLI and MCP.
-3. Spans are keyed to checked definition identities ([#188](https://github.com/cevr/effra/issues/188)), so a trace line links to the source definition and to `ef inspect`.
+3. Spans are keyed to checked definition identities ([#188](https://github.com/cevr/ergo/issues/188)), so a trace line links to the source definition and to `ergo inspect`.
 
 ### G4. `tasks.Set`
 
@@ -121,23 +121,23 @@ Status: **designed, not yet implemented** ([#69](https://github.com/cevr/effra/i
 
 ## Channels
 
-Status: **designed, not yet implemented** ([#64](https://github.com/cevr/effra/issues/64)).
+Status: **designed, not yet implemented** ([#64](https://github.com/cevr/ergo/issues/64)).
 
 1. `chan T` is Go's channel. There are no nil channels and no direction types.
 2. Values copy into a channel. A channel whose element type is a resource is an error in v0 ([resources.md](resources.md#channels); README Gap 30).
 3. Send and receive are interruption points.
-4. A send on a closed channel interrupts the sender instead of panicking. This is Effra's own policy, not Effect parity: Effect's `Queue.offer` returns `false` after shutdown.
+4. A send on a closed channel interrupts the sender instead of panicking. This is Ergo's own policy, not Effect parity: Effect's `Queue.offer` returns `false` after shutdown.
 5. `ch.Receive()` returns `Option[T]` when `T` is not defaultable ([types.md](types.md#zero-values-and-definite-initialisation)).
 
 ## Machines and actors
 
-Status: **designed, not yet implemented** ([#57](https://github.com/cevr/effra/issues/57)).
+Status: **designed, not yet implemented** ([#57](https://github.com/cevr/ergo/issues/57)).
 
 ```go
 type State interface{ Closed | Open | HalfOpen }
 type Signal interface{ Failure | Success | Retry }
 
-func step(s State, sig Signal) (Decision[State, string], error[ProbeDown]) uses Probe {
+func step(s State, sig Signal) (Decision[State, string], error[ProbeDown]) needs Probe {
 	switch _, sig := s.(type), sig.(type) {
 	case (Closed, Failure):
 		return Enter{Open{sig.Endpoint}}
@@ -154,15 +154,24 @@ type Breaker machine[State, Signal] {
 }
 ```
 
-1. **Machine.** `type X machine[S, E] { initial v; step f }` declares a state machine. `S` and `E` are unions. `initial` is a value of `S`; `step` names a function from `S` and `E` to `Decision[S, O]`, with any error and `uses` rows.
+1. **Machine.** `type X machine[S, E] { initial v; step f }` declares a state machine. `S` and `E` are unions. `initial` is a value of `S`; `step` names a function from `S` and `E` to `Decision[S, O]`, with any error and `needs` rows.
 2. **Decision.** A step returns `Enter{next}` (re-enter, even with the same variant), `Stay{next}` (keep the entry), `Ignore{}`, `Reject{}` (observable, state unchanged) or `Done{output}` (terminal).
 3. **Totality.** The step's switch is total over `S × E` (README Gap 12).
-4. **Inspection.** `ef inspect` draws the machine's graph from the step's cases. A helper the step calls is static in the graph only when its footprint is empty, not its row ([rows.md](rows.md#footprints)).
+4. **Inspection.** `ergo inspect` draws the machine's graph from the step's cases. A helper the step calls is static in the graph only when its footprint is empty, not its row ([rows.md](rows.md#footprints)).
 5. **Protocol.** A machine is a plan that any lawful provider can run; the actor below is the standard library's provider. *Prior art:* XState machines with interpreters; Erlang `gen_statem`.
-6. **Actor.** `actor.Start(machine, capacity)` returns a resource handle with `Send`, `Ask`, `State` and `Stop`. `Send` blocks only when the mailbox is full. `Ask` waits for that message's decision. `State` returns a snapshot, never a shared reference. `actor.Run` runs a machine under a `tasks.Set` for supervision; a restart starts from `initial`.
-7. Open item: splitting an actor's ownership (`Stop`) from shareable `Send`/`Ask` addresses.
+6. **Actors are library code** (owner, 2026-10-27: "Let's see if we can make actor a library mechanism"; [#101](https://github.com/cevr/ergo/issues/101); [research note](../research/actor-library.md)). The `actor` package is ordinary code over generics, unions, function types with rows, resources and tasks. No compiler rule names it, and it has no syntax.
+   - `actor.Start(initial, capacity, handle)` runs `handle func(S, M) (actor.Next[S], error[E]) needs R` over a mailbox of `capacity` messages and returns an `actor.Actor[M, E]`. It charges `R`, which the actor captures. A handler failure ends the actor.
+   - A message that wants an answer carries an `actor.Reply[T, E]`. `actor.Ask(to, request)` builds the message around a fresh reply and returns `(T, error[E | actor.Stopped | actor.NoReply])`. `T` and `E` come from `request`'s parameter type, so a wrong reply type is a type error.
+   - `Reply[T, E]` is a resource. `Send` and `Fail` consume it. Releasing it unanswered answers `NoReply` while the actor runs, and `Stopped` once its stop is requested. An answer nobody can receive, because the asker was stopped and detached, is released exactly once (README Gap 37); an answer or failure the library releases is released masked, by its kind, and a refusal releases nothing. A successful result discarded by stop-wins after the handoff (an answer taken just before the asker's task stops, a callback result discarded by a scope's stop) needs README Gap 47.
+   - A message, a reply, an agent result and a state snapshot cross a task boundary, so each is a copy that shares no mutable storage with the sender's value (Tasks rule 6; README Gap 45). A resource moves.
+   - `Send` waits only while the mailbox is full. Messages are handled in admission order.
+   - `Stop` closes admission, then interrupts the actor and waits until it ends. After the stop is requested, no `Send` or `Ask` is admitted: each fails with `actor.Stopped`. Queued requests are answered `Stopped`, every queued message and then the state is released, and every release runs even when an earlier one panics. It returns the typed failure that ended the actor, if any, and every defect in order.
+   - `actor.StartMachine(m, capacity)` runs a machine value `m Machine[S, E, O, F, R]` (README Gap 46) with `Send`, `Ask`, `State` and `Stop`. `Ask` returns the step's `Decision[S, O]` or the step's failure. `State` returns a snapshot, never a shared reference. A step failure goes to the asker; a step failure after a `Send` ends the actor, because it has no other observer.
+   - `actor.StartAgent(initial, capacity)` and `actor.Call(a, f)` serve calls on a state value. The protocol is the state's methods with a `*S` receiver. `f func(r *S) (T, error[E])` borrows the state for one call, and the borrow cannot escape ([types.md](types.md#borrows) Borrows rules 1 and 4; R17, R30, R33). `f` has an empty `needs` row, which is not purity: `f` runs on the actor's task, so a wait inside it is an interruption point (I1) that `Stop` interrupts. A typed failure of `f` is the caller's; an interruption or a defect ends the agent, and the agent releases its state.
+   - `actor.Run` runs a machine under a `tasks.Set` for supervision; a restart starts from `initial`.
+7. **Owner and address (resolved 2026-10-27).** `actor.Actor[M, E]` holds the actor's task, so it is a resource (R1, R14): its owner scope stops it at scope end, and `Stop` consumes it. `actor.Address[M]`, from `a.Address()`, holds only synchronised handles, so it copies into tasks and is not a resource. After the actor ends, `Send` and `Ask` on an address fail with `actor.Stopped`. The rules these items need from the checker and the linearity pass are README Gaps 35 to 47.
 
-*Prior art:* Erlang/OTP `gen_server` and `gen_statem`; Gleam OTP actors with typed subjects; Effect cluster entities.
+*Prior art:* Erlang/OTP `gen_server` and `gen_statem`; Gleam OTP `process.call` with a typed reply subject in the message, and Akka Typed `ask` with `replyTo`, which `actor.Ask` follows; Tokio's `oneshot::Sender`, whose drop answers the receiver as a released `Reply` does; Elixir `Agent` for `actor.Call`; Effect cluster entities. Swift and Pony give actors syntax to check shared mutable state; Ergo's actor state is a value owned by the actor's task, so it needs none.
 
 ## Host and lowering notes
 
@@ -171,5 +180,5 @@ These notes are not normative; they record the prototype's lowering, which the m
 - A function takes a hidden environment pointer (one field per capability) and the task handle.
 - Each interruption point is `if t.Stopped() { return zero, rt.Interrupted }`, or `t.Check()` in a function with no error row.
 - `main` defers `rt.Recover`, which turns an interruption into exit 130.
-- Source positions are carried with `//line` directives, so Go panics, pprof, delve and the race detector point at Effra lines.
-- *Prior art:* Effra's earlier Go emitter built a closure per effect step and measured a 47.8 s `go build` for 1,024 sequential operations; direct calls rebuilt in 2.08 s in the same measurement. Gleam source maps and ReScript's readable output follow the same "erase to idiomatic host code" goal.
+- Source positions are carried with `//line` directives, so Go panics, pprof, delve and the race detector point at Ergo lines.
+- *Prior art:* Ergo's earlier Go emitter built a closure per effect step and measured a 47.8 s `go build` for 1,024 sequential operations; direct calls rebuilt in 2.08 s in the same measurement. Gleam source maps and ReScript's readable output follow the same "erase to idiomatic host code" goal.

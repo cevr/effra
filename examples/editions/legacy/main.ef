@@ -1,4 +1,4 @@
-// A module of the earlier edition: the effra.json beside this file names
+// A module of the earlier edition: the ergo.json beside this file names
 // "legacy" explicitly, the edition a file without a manifest also gets. The
 // same workspace builds the 2026 edition's module in ../sketch.
 error NotFound

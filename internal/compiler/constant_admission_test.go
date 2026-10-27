@@ -6,7 +6,7 @@ import (
 )
 
 func TestScalarConstantAliasAndBundledImportFacts(t *testing.T) {
-	source := `import Defaults "effra/constants"
+	source := `import Defaults "ergo/constants"
 const LocalSuffix: string = Defaults.defaultSuffix
 const AliasSuffix: string = LocalSuffix
 const Enabled: bool = true
@@ -18,7 +18,7 @@ const MinimumAlias: i64 = Minimum`
 		t.Fatalf("scalar constants rejected on go: %+v", r.Diagnostics)
 	}
 	imported := r.Program.BundledConstantBindings["Defaults"]["defaultSuffix"]
-	if imported == nil || imported.Identity != constantIdentity("effra/constants", "defaultSuffix") || imported.Value == nil || imported.Value.Value != "!" {
+	if imported == nil || imported.Identity != constantIdentity("ergo/constants", "defaultSuffix") || imported.Value == nil || imported.Value.Value != "!" {
 		t.Fatalf("compiler-distributed constant binding missing: %+v", r.Program.BundledConstantBindings)
 	}
 	values := map[string]string{}
@@ -32,7 +32,7 @@ const MinimumAlias: i64 = Minimum`
 	}
 	foundSource := false
 	for _, importedSource := range r.Sources {
-		foundSource = foundSource || importedSource.Module == "effra/constants" && importedSource.Digest != ""
+		foundSource = foundSource || importedSource.Module == "ergo/constants" && importedSource.Digest != ""
 	}
 	if !foundSource {
 		t.Fatalf("bundled constant source digest missing: %+v", r.Sources)
@@ -108,7 +108,7 @@ const Alias:string=Ending`
 	if err != nil {
 		t.Fatalf("format constant declaration syntax: %v", err)
 	}
-	if FormatterIdentity != "effra/formatter-16" || !strings.Contains(first.Text, "const Ending: string = \"!\"") {
+	if FormatterIdentity != "ergo/formatter-16" || !strings.Contains(first.Text, "const Ending: string = \"!\"") {
 		t.Fatalf("constant syntax has stale producer identity or formatting: identity=%s text=%s", FormatterIdentity, first.Text)
 	}
 	second, err := FormatSource(first.Text)
@@ -118,7 +118,7 @@ const Alias:string=Ending`
 }
 
 func TestConstantSelectionsPresentCheckedDeclarations(t *testing.T) {
-	source := `import Defaults "effra/constants"
+	source := `import Defaults "ergo/constants"
 const Suffix: string = "!"
 const Limit: i64 = -9223372036854775808
 const Enabled: bool = true

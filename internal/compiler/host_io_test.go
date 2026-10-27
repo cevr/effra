@@ -10,17 +10,17 @@ import (
 	"testing"
 	"testing/iotest"
 
-	"effra.local/prototype/examples/hosttypes"
+	"ergo.local/prototype/examples/hosttypes"
 )
 
-const hostIOImport = `import go host "effra.local/prototype/examples/hosttypes"
+const hostIOImport = `import go host "ergo.local/prototype/examples/hosttypes"
 import go fs "io/fs"
 import go io "io"
 import go os "os"
 import go iotest "testing/iotest"
 import go strings "strings"
 import go strconv "strconv"
-import Data "effra/data"
+import Data "ergo/data"
 `
 
 func compileHostIO(t *testing.T, source string) *Result {
@@ -382,7 +382,7 @@ func TestHostImpossibleIOCountsAreDefects(t *testing.T) {
 }
 
 // I/O protocol methods are reported with their adapted shapes; a Read
-// argument is a buffer length, not an Effra bytes value Go could overwrite.
+// argument is a buffer length, not an Ergo bytes value Go could overwrite.
 func TestHostIOProtocolBindingsAndRefusals(t *testing.T) {
 	r := compileHostIO(t, `effect fn program() -> void uses { Console, Foreign } {
     match run strings.NewReader("abc") {
@@ -468,7 +468,7 @@ func TestApplicationPlanRetainsIOProtocolPackages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	write := "go:(*effra.local/prototype/examples/hosttypes.ShortWriter).Write"
+	write := "go:(*ergo.local/prototype/examples/hosttypes.ShortWriter).Write"
 	requirePlanned(t, plan, RequiresForeign, write)
 	requireProvenance(t, plan, RequiresGoImport, "io", write, "io-protocol")
 	if output := runGeneratedGo(t, r); output != "he\n" {

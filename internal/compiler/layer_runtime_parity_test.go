@@ -14,7 +14,7 @@ import (
 // Scenario keys name the behavior; traces use release/cancel markers and the
 // complete Cause in order ("Fail:<tag>", "Die:<message>", "Interrupt").
 
-const layerParityGoHelpers = `package effra
+const layerParityGoHelpers = `package ergo
 import ("context";"encoding/json";"errors";"fmt";"strings";"sync";"testing")
 var _ = errors.New
 var _ = fmt.Sprint

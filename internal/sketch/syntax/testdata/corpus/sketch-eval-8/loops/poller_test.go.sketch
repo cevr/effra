@@ -35,7 +35,7 @@ wire TestLive {
 	Console = testing.Discard{}
 }
 
-func TestRunBatches() error[FlushFailed] uses testing.T {
+func TestRunBatches() error[FlushFailed] needs testing.T {
 	with(TestLive) {
 		try Run(10500ms)
 		T.Equal(Recorded.Sizes(), []int{5, 5})

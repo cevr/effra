@@ -6,7 +6,7 @@ type B struct{}
 type Sum interface{ A | B }
 func a() Sum { return A{Value: "a"} }
 func fail() (string, error[Fault]) { return Fault{} }
-func main() uses Console {
+func main() needs Console {
   x := fail() catch { case Fault: "ok" }
   y := a()
   Console.Println(x, y)

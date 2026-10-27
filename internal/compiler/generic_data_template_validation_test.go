@@ -27,7 +27,7 @@ func TestGenericDataTemplatePayloadTypeAdmission(t *testing.T) {
 }
 
 func TestGenericDataBracePayloadCannotExecuteEffects(t *testing.T) {
-	const service = `import Data "effra/data" service Secret {effect fn get()->string}`
+	const service = `import Data "ergo/data" service Secret {effect fn get()->string}`
 	bad := CompileFor(service+` effect fn bad()->Data.Option<string>{Data.Option.Some {value:run Secret.get()}}`, "go")
 	if bad.Checked || !hasCode(bad, "EF105") {
 		t.Fatalf("go brace payload must remain pure: checked=%v diagnostics=%+v", bad.Checked, bad.Diagnostics)

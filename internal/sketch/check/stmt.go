@@ -1,7 +1,7 @@
 package check
 
 import (
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 func (c *checker) stmtList(list []syntax.Stmt, _ bool) {

@@ -2,6 +2,6 @@ package demo
 
 func word() string { return "w" }
 
-func main() uses Console {
+func main() needs Console {
 	Console.Println(try word()) // want S108
 }

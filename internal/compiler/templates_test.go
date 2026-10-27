@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-const bundledSwitchWitness = `import Convert "effra/conversions"
+const bundledSwitchWitness = `import Convert "ergo/conversions"
 record Switch { enabled: bool }
 effect fn fromWire(input: bool) -> Switch { Switch { enabled: input } }
 effect fn toWire(value: Switch) -> bool { value.enabled }
@@ -21,7 +21,7 @@ effect fn main() -> string {
  if enabled { "enabled" } else { "disabled" }
 }`
 
-const bundledUserWitness = `import Convert "effra/conversions"
+const bundledUserWitness = `import Convert "ergo/conversions"
 record User { name: string }
 effect fn decode(input: string) -> User { User { name: input } }
 effect fn encode(user: User) -> string { user.name }
@@ -56,7 +56,7 @@ func TestBundledWitnessInitializesActualFunctions(t *testing.T) {
 	}
 }
 
-const bundledAnnotatedWitness = `import Convert "effra/conversions"
+const bundledAnnotatedWitness = `import Convert "ergo/conversions"
 record User { name: string }
 effect fn decode(input: string) -> User { User { name: input } }
 effect fn encode(user: User) -> string { user.name }
@@ -70,7 +70,7 @@ effect fn main() -> string {
  run converter.encode(user)
 }`
 
-const bundledPayloadWitness = `import Convert "effra/conversions"
+const bundledPayloadWitness = `import Convert "ergo/conversions"
 record User { name: string }
 record Holder { converter: Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string> }
 enum Bundle { Value { converter: Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string> } }
@@ -115,7 +115,7 @@ func TestBundledWitnessCompleteBoundaryAndShapeDiagnostics(t *testing.T) {
 
 func TestBundledWitnessUnavailableGenericLayoutsDiagnose(t *testing.T) {
 	for _, source := range []string{
-		`import Convert "effra/conversions"
+		`import Convert "ergo/conversions"
 fn keep(input: string) -> string { input }
 effect fn decode(input: string) -> (fn(string) -> string) { keep }
 effect fn encode(value: fn(string) -> string) -> string { value("x") }
@@ -129,7 +129,7 @@ effect fn main() -> void { let converter = Convert.witness(decode, encode); void
 	}
 }
 
-const bundledDirectionalWitness = `import Convert "effra/conversions"
+const bundledDirectionalWitness = `import Convert "ergo/conversions"
 error DecodeFailure
 error EncodeFailure
 record User { name: string }
@@ -179,7 +179,7 @@ func TestBundledWitnessFieldEvidencePreservesManagedOwnership(t *testing.T) {
 			if acquired {
 				body = `run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`
 			}
-			source := `import Convert "effra/conversions"
+			source := `import Convert "ergo/conversions"
 effect fn chosen(file: File) -> File raises {IoError} { ` + body + ` }
 effect fn keep(file: File) -> File raises {IoError} { file }
 fn forward(value: Convert.Codec<File, File, effect fn(File) -> File raises {IoError}, effect fn(File) -> File raises {IoError}>) -> Convert.Codec<File, File, effect fn(File) -> File raises {IoError}, effect fn(File) -> File raises {IoError}> { value }
@@ -198,7 +198,7 @@ effect fn main() -> void { void }`
 				t.Fatalf("go %s acquire=%v: %v", direction, acquired, r.Diagnostics)
 			}
 			plain := strings.ReplaceAll(source, "Convert.Codec<File, File, effect fn(File) -> File raises {IoError}, effect fn(File) -> File raises {IoError}>", "Local")
-			plain = strings.Replace(plain, `import Convert "effra/conversions"`, `record Local { decode: effect fn(File) -> File raises {IoError}, encode: effect fn(File) -> File raises {IoError} }`, 1)
+			plain = strings.Replace(plain, `import Convert "ergo/conversions"`, `record Local { decode: effect fn(File) -> File raises {IoError}, encode: effect fn(File) -> File raises {IoError} }`, 1)
 			plain = strings.ReplaceAll(plain, "Convert.witness(chosen, keep)", "Local { decode: chosen, encode: keep }")
 			plain = strings.ReplaceAll(plain, "Convert.witness(keep, chosen)", "Local { decode: keep, encode: chosen }")
 			ordinary := CompileFor(plain, "go")
@@ -226,7 +226,7 @@ func TestBundledWitnessNativeExecution(t *testing.T) {
 		if err := application.WriteRuntime(dir); err != nil {
 			t.Fatal(err)
 		}
-		for name, content := range map[string]string{"go.mod": "module effra.generated\n\ngo 1.27\n", "main.go": generated} {
+		for name, content := range map[string]string{"go.mod": "module ergo.generated\n\ngo 1.27\n", "main.go": generated} {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -246,7 +246,7 @@ func TestBundledWitnessTransportRejectsFieldAndShapeCorruption(t *testing.T) {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	dto := r.projector.admittedSummaries["effra/conversions"]
+	dto := r.projector.admittedSummaries["ergo/conversions"]
 	for _, test := range []struct {
 		name   string
 		mutate func(*interfaceSummary)
@@ -298,7 +298,7 @@ func TestBundledWitnessTransportRejectsFieldAndShapeCorruption(t *testing.T) {
 }
 
 func TestBundledWitnessClassOnlyClosure(t *testing.T) {
-	source := `import Convert "effra/conversions"
+	source := `import Convert "ergo/conversions"
 record User { name: string }
 fn pass(value: Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string>) -> Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string> { value }
 effect fn main() -> void { void }`

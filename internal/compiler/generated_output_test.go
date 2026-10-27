@@ -514,7 +514,7 @@ func testGoSourceSnapshot(origin string, mode GoGenerationMode) GoSourceSnapshot
 		Mode:     mode,
 		Revision: "revision-1",
 		Main:     []byte("package main\nfunc main(){println(1)}\n"),
-		Module:   []byte("module effra.generated\n\ngo 1.27\n"),
+		Module:   []byte("module ergo.generated\n\ngo 1.27\n"),
 		Runtime: map[string][]byte{
 			"effect.go": []byte("package runtime\n"),
 			"files.go":  []byte("package runtime\n"),

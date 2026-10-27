@@ -2177,7 +2177,7 @@ func CompileAt(source, target, dir string) *Result {
 	return checkParsed(r, program, dir, source)
 }
 
-// Target is Effra's only compilation target.
+// Target is Ergo's only compilation target.
 const Target = "go"
 
 // UnsupportedTarget returns the EF110 diagnostic for any target other than

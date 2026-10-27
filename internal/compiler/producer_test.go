@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/producer"
+	"ergo.local/prototype/internal/producer"
 )
 
 func TestPassiveProducerQualificationPreservesSemanticIdentity(t *testing.T) {

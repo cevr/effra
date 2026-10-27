@@ -75,7 +75,7 @@ func viewNode(view *GraphView, id string) *GraphViewNode {
 func viewEdges(view *GraphView, relation string) []GraphViewEdge {
 	edges := []GraphViewEdge{}
 	for _, edge := range view.Edges {
-		if edge.Data.Effra.Relation == relation {
+		if edge.Data.Ergo.Relation == relation {
 			edges = append(edges, edge)
 		}
 	}
@@ -97,7 +97,7 @@ func TestGraphViewDependencySerializesLegacyFacts(t *testing.T) {
 		}
 		for _, node := range legacy.Nodes {
 			published := viewNode(view, node.ID)
-			if published == nil || published.Data.Effra.Kind != node.Kind || published.Data.Effra.Source != node.Source || !reflect.DeepEqual(published.Data.Effra.Contract, node.Contract) {
+			if published == nil || published.Data.Ergo.Kind != node.Kind || published.Data.Ergo.Source != node.Source || !reflect.DeepEqual(published.Data.Ergo.Contract, node.Contract) {
 				t.Fatalf("%s/go: node %s differs from the legacy fact", name, node.ID)
 			}
 		}
@@ -106,18 +106,18 @@ func TestGraphViewDependencySerializesLegacyFacts(t *testing.T) {
 			occurrences[[3]string{edge.From, edge.To, edge.Kind}]++
 		}
 		for _, edge := range view.Edges {
-			occurrences[[3]string{edge.SourceID, edge.TargetID, edge.Data.Effra.Relation}]--
+			occurrences[[3]string{edge.SourceID, edge.TargetID, edge.Data.Ergo.Relation}]--
 		}
 		for key, count := range occurrences {
 			if count != 0 {
 				t.Fatalf("%s/go: relation %v differs by %d", name, key, count)
 			}
 		}
-		if !reflect.DeepEqual(view.Data.Effra.Facts.Types, nonNilTypes(legacy.Types)) {
+		if !reflect.DeepEqual(view.Data.Ergo.Facts.Types, nonNilTypes(legacy.Types)) {
 			t.Fatalf("%s/go: whole-kind type closure differs from the legacy closure", name)
 		}
-		if view.Data.Effra.Completeness.Scope != "kind" || view.Data.Effra.Completeness.FactNodes != len(view.Nodes) {
-			t.Fatalf("%s/go: whole-kind completeness %+v", name, view.Data.Effra.Completeness)
+		if view.Data.Ergo.Completeness.Scope != "kind" || view.Data.Ergo.Completeness.FactNodes != len(view.Nodes) {
+			t.Fatalf("%s/go: whole-kind completeness %+v", name, view.Data.Ergo.Completeness)
 		}
 	}
 }
@@ -126,7 +126,7 @@ func TestGraphViewDependencySerializesLegacyFacts(t *testing.T) {
 // must not make the dependency collector drop the call fact, for either the
 // direct or pipe invocation form.
 func TestGraphViewDependencyIncludesCheckedDerivedCodecCalls(t *testing.T) {
-	source := `import Json "effra/json"
+	source := `import Json "ergo/json"
 error LedgerFailure
 service Ledger {
   effect fn touch() -> void raises { LedgerFailure }
@@ -189,10 +189,10 @@ effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure, Ledger
 		}
 	}
 	typesByID, rowsByID := map[string]TypeNode{}, map[string]RowNode{}
-	for _, typeNode := range selected.Data.Effra.Facts.Types {
+	for _, typeNode := range selected.Data.Ergo.Facts.Types {
 		typesByID[typeNode.ID] = typeNode
 	}
-	for _, row := range selected.Data.Effra.Facts.Rows {
+	for _, row := range selected.Data.Ergo.Facts.Rows {
 		rowsByID[row.ID] = row
 	}
 	requireRowRef := func(owner, id string) {
@@ -226,8 +226,8 @@ effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure, Ledger
 		}
 	}
 	var parcel *Declaration
-	for i := range selected.Data.Effra.Facts.Declarations {
-		declaration := &selected.Data.Effra.Facts.Declarations[i]
+	for i := range selected.Data.Ergo.Facts.Declarations {
+		declaration := &selected.Data.Ergo.Facts.Declarations[i]
 		if declaration.Kind == "record" && declaration.Name == "Parcel" {
 			parcel = declaration
 		}
@@ -238,7 +238,7 @@ effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure, Ledger
 	parcelType := TypeNode{}
 	parcelQualifier := parcel.Kind + ":" + currentModuleIdentity + ":" + parcel.Name + ":"
 	for _, typeNode := range typesByID {
-		if typeNode.Kind == parcel.Kind && typeNode.Name == parcel.Name && strings.HasPrefix(typeNode.Declaration, parcelQualifier) && qualifiedDeclarationPublished(typeNode.Declaration, selected.Data.Effra.Facts.Declarations) {
+		if typeNode.Kind == parcel.Kind && typeNode.Name == parcel.Name && strings.HasPrefix(typeNode.Declaration, parcelQualifier) && qualifiedDeclarationPublished(typeNode.Declaration, selected.Data.Ergo.Facts.Declarations) {
 			if parcelType.ID != "" {
 				t.Fatalf("Parcel declaration has multiple published nominal type nodes: %+v and %+v", parcelType, typeNode)
 			}
@@ -270,11 +270,11 @@ effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure, Ledger
 		"function:parcelJson.encode": {argument: "Parcel", result: "string", failures: []string{"JsonEncodeFailure"}},
 	} {
 		node := viewNode(selected, callee)
-		if node == nil || node.Data.Effra.Contract == nil || node.Data.Effra.Contract.Callable == nil || node.Data.Effra.Source == "" || node.Data.Effra.Span == nil {
+		if node == nil || node.Data.Ergo.Contract == nil || node.Data.Ergo.Contract.Callable == nil || node.Data.Ergo.Source == "" || node.Data.Ergo.Span == nil {
 			t.Fatalf("focused view lost callable contract for %s: %+v", callee, node)
 		}
-		contract := node.Data.Effra.Contract.Callable
-		valueContract := node.Data.Effra.Contract
+		contract := node.Data.Ergo.Contract.Callable
+		valueContract := node.Data.Ergo.Contract
 		for _, ref := range []TypeRef{valueContract.Type, valueContract.Contract} {
 			requireTypeRef(callee+" signature", ref)
 		}
@@ -341,7 +341,7 @@ effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure, Ledger
 	}
 	for _, target := range []string{"function:parcelJson.decode", "function:parcelJson.encode"} {
 		node := viewNode(view, target)
-		if node == nil || node.Data.Effra.Contract == nil || node.Data.Effra.Source == "" || node.Data.Effra.Span == nil {
+		if node == nil || node.Data.Ergo.Contract == nil || node.Data.Ergo.Source == "" || node.Data.Ergo.Span == nil {
 			t.Fatalf("derived codec node lost checked contract/source/span closure: %+v", node)
 		}
 	}
@@ -377,7 +377,7 @@ effect fn main() -> string uses { Users } {
 		t.Fatalf("parallel calls were merged or misidentified: %+v", calls)
 	}
 	for _, edge := range calls {
-		at := edge.Data.Effra.Span
+		at := edge.Data.Ergo.Span
 		want := graphTupleID("edge", "calls", edge.SourceID, edge.TargetID, "Users", fmt.Sprint(at.Offset), fmt.Sprint(at.Length))
 		if edge.ID != want {
 			t.Fatalf("edge ID %q is not its semantic tuple %q", edge.ID, want)
@@ -413,12 +413,12 @@ func TestGraphViewFocusBoundsMaterializationNotEnumeration(t *testing.T) {
 	_, err := r.GraphView(graphRequest(t, map[string]any{"kind": "dependency"}))
 	requireGraphRefusal(t, err, GraphRefusalNodeLimit)
 	view := graphView(t, r, map[string]any{"focus": "function:main", "depth": 2, "direction": "outgoing"})
-	completeness := view.Data.Effra.Completeness
+	completeness := view.Data.Ergo.Completeness
 	if completeness.FactNodes <= maxGraphNodes || completeness.Scope != "selection" || !completeness.Complete {
 		t.Fatalf("focused completeness lost the full fact totals: %+v", completeness)
 	}
-	if view.Data.Effra.Usage.MaterializedNodes != len(view.Nodes) || len(view.Nodes) > 10 {
-		t.Fatalf("focused view materialized %d nodes for %d published", view.Data.Effra.Usage.MaterializedNodes, len(view.Nodes))
+	if view.Data.Ergo.Usage.MaterializedNodes != len(view.Nodes) || len(view.Nodes) > 10 {
+		t.Fatalf("focused view materialized %d nodes for %d published", view.Data.Ergo.Usage.MaterializedNodes, len(view.Nodes))
 	}
 	if viewNode(view, "function:f0") == nil || viewNode(view, "service:Store") == nil || viewNode(view, "function:f1") != nil {
 		t.Fatalf("focused neighborhood is wrong: %v", view.Nodes)
@@ -426,7 +426,7 @@ func TestGraphViewFocusBoundsMaterializationNotEnumeration(t *testing.T) {
 	if view.InitialNodeID != "function:main" {
 		t.Fatalf("focus is not the initial node: %q", view.InitialNodeID)
 	}
-	usage := view.Data.Effra.Usage
+	usage := view.Data.Ergo.Usage
 	if usage.Work < completeness.FactNodes+completeness.FactEdges {
 		t.Fatalf("focused work %d does not cover enumerating %d fact nodes and %d fact edges", usage.Work, completeness.FactNodes, completeness.FactEdges)
 	}
@@ -461,16 +461,16 @@ func TestGraphViewDirectionDepthAndRelations(t *testing.T) {
 	}
 	requires := graphView(t, r, map[string]any{"focus": "function:welcome", "edgeKinds": []any{"requires"}, "depth": 3})
 	for _, edge := range requires.Edges {
-		if edge.Data.Effra.Relation != "requires" {
-			t.Fatalf("relation filter published %s", edge.Data.Effra.Relation)
+		if edge.Data.Ergo.Relation != "requires" {
+			t.Fatalf("relation filter published %s", edge.Data.Ergo.Relation)
 		}
 	}
 	shallow := graphView(t, r, map[string]any{"focus": "function:main", "direction": "outgoing", "depth": 1})
-	if len(shallow.Data.Effra.Completeness.Frontier) == 0 {
+	if len(shallow.Data.Ergo.Completeness.Frontier) == 0 {
 		t.Fatal("a depth-limited selection must report its frontier")
 	}
-	for _, id := range shallow.Data.Effra.Completeness.Frontier {
-		if node := viewNode(shallow, id); node == nil || !node.Data.Effra.Frontier {
+	for _, id := range shallow.Data.Ergo.Completeness.Frontier {
+		if node := viewNode(shallow, id); node == nil || !node.Data.Ergo.Frontier {
 			t.Fatalf("frontier node %s is not marked", id)
 		}
 	}
@@ -483,10 +483,10 @@ func TestGraphViewDirectionDepthAndRelations(t *testing.T) {
 func syntheticDependencyFacts() *graphFacts {
 	facts := newGraphFacts(GraphKindDependency, defaultGraphViewLimits)
 	for _, id := range []string{"A", "G", "H1", "H2", "H3", "B"} {
-		facts.addNode(GraphViewNode{ID: id, Label: id, Data: GraphViewNodeData{Effra: GraphNodeFacts{Kind: "function"}}}, dependencyContract{})
+		facts.addNode(GraphViewNode{ID: id, Label: id, Data: GraphViewNodeData{Ergo: GraphNodeFacts{Kind: "function"}}}, dependencyContract{})
 	}
 	for _, edge := range [][3]string{{"G", "H1", "contains"}, {"G", "H2", "contains"}, {"G", "H3", "contains"}, {"A", "H1", "references"}, {"H2", "B", "calls"}} {
-		facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", edge[2], edge[0], edge[1]), SourceID: edge[0], TargetID: edge[1], Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: edge[2]}}})
+		facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", edge[2], edge[0], edge[1]), SourceID: edge[0], TargetID: edge[1], Data: GraphViewEdgeData{Ergo: GraphEdgeFacts{Relation: edge[2]}}})
 	}
 	return facts
 }
@@ -543,10 +543,10 @@ func TestGraphViewCollapsePublishesOnlyFactEdges(t *testing.T) {
 	}
 	collapsed := graphView(t, r, map[string]any{"kind": "dependency", "collapse": []any{"function:main"}})
 	root := viewNode(collapsed, "function:main")
-	if root == nil || root.Data.Effra.Collapsed == nil || len(root.Data.Effra.Collapsed.HiddenMembers) == 0 {
+	if root == nil || root.Data.Ergo.Collapsed == nil || len(root.Data.Ergo.Collapsed.HiddenMembers) == 0 {
 		t.Fatal("collapse hid no interior member")
 	}
-	for _, member := range root.Data.Effra.Collapsed.HiddenMembers {
+	for _, member := range root.Data.Ergo.Collapsed.HiddenMembers {
 		if viewNode(collapsed, member) != nil || viewNode(full, member) == nil {
 			t.Fatalf("hidden member %s is published or not a fact", member)
 		}
@@ -556,7 +556,7 @@ func TestGraphViewCollapsePublishesOnlyFactEdges(t *testing.T) {
 			t.Fatalf("collapse published summary edge %s", edge.ID)
 		}
 	}
-	completeness := collapsed.Data.Effra.Completeness
+	completeness := collapsed.Data.Ergo.Completeness
 	if completeness.SelectedNodes != len(full.Nodes) || completeness.PublishedNodes != len(collapsed.Nodes) {
 		t.Fatalf("collapse accounting is wrong: %+v", completeness)
 	}
@@ -585,7 +585,7 @@ func TestGraphViewLayersShowOpenInputsAndReplacements(t *testing.T) {
 	view := graphView(t, r, map[string]any{"kind": "layers"})
 	accounts := layerID("Accounts")
 	input := graphTupleID("layer-input", accounts, "Store")
-	if node := viewNode(view, input); node == nil || node.Data.Effra.Kind != "layer-input" {
+	if node := viewNode(view, input); node == nil || node.Data.Ergo.Kind != "layer-input" {
 		t.Fatal("open layer input is not an explicit boundary node")
 	}
 	consumed := false
@@ -597,7 +597,7 @@ func TestGraphViewLayersShowOpenInputsAndReplacements(t *testing.T) {
 	}
 	store := ""
 	for _, node := range view.Nodes {
-		if node.Data.Effra.Kind == "layer-binding" && node.Data.Effra.Binding.Service == "Store" {
+		if node.Data.Ergo.Kind == "layer-binding" && node.Data.Ergo.Binding.Service == "Store" {
 			if store != "" {
 				t.Fatal("shared binding is not one canonical node")
 			}
@@ -607,7 +607,7 @@ func TestGraphViewLayersShowOpenInputsAndReplacements(t *testing.T) {
 	selections := map[string]*GraphLayerSelectFacts{}
 	for _, edge := range viewEdges(view, "selects") {
 		if edge.TargetID == store {
-			selections[edge.SourceID] = edge.Data.Effra.Selection
+			selections[edge.SourceID] = edge.Data.Ergo.Selection
 		}
 	}
 	fixture, shared := selections[layerID("Fixture")], selections[layerID("Shared")]
@@ -619,12 +619,12 @@ func TestGraphViewLayersShowOpenInputsAndReplacements(t *testing.T) {
 	}
 	replaced := false
 	for _, edge := range viewEdges(view, "replaces") {
-		replaced = replaced || edge.SourceID == fixture.Replacements[0].ID && edge.TargetID == store && edge.Data.Effra.Plan == layerID("Fixture")
+		replaced = replaced || edge.SourceID == fixture.Replacements[0].ID && edge.TargetID == store && edge.Data.Ergo.Plan == layerID("Fixture")
 	}
 	if !replaced || viewNode(view, fixture.Replacements[0].ID) == nil {
 		t.Fatal("replacement site is not a published fact")
 	}
-	if len(view.Data.Effra.Facts.Types) == 0 {
+	if len(view.Data.Ergo.Facts.Types) == 0 {
 		t.Fatal("constructor and configuration types are not in the fact closure")
 	}
 	_, err := r.GraphView(graphRequest(t, map[string]any{"kind": "layers", "focus": "missing"}))
@@ -757,7 +757,7 @@ func TestGraphViewExactLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	usage := view.Data.Effra.Usage
+	usage := view.Data.Ergo.Usage
 	for _, test := range []struct {
 		name  string
 		limit func(*GraphViewLimits)
@@ -835,11 +835,11 @@ func TestValidateGraphViewRejectsBrokenClosure(t *testing.T) {
 	}
 	referencedType, referencedRow := "", ""
 	for _, node := range valid.Nodes {
-		if contract := node.Data.Effra.Contract; contract != nil && referencedType == "" {
+		if contract := node.Data.Ergo.Contract; contract != nil && referencedType == "" {
 			referencedType = contract.Type.ID
 		}
 	}
-	for _, node := range valid.Data.Effra.Facts.Types {
+	for _, node := range valid.Data.Ergo.Facts.Types {
 		if referencedRow == "" && node.FailureRow != "" {
 			referencedRow = node.FailureRow
 		}
@@ -848,14 +848,14 @@ func TestValidateGraphViewRejectsBrokenClosure(t *testing.T) {
 		t.Fatal("fixture lacks a referenced type and row")
 	}
 	without := func(v *GraphView, id string) {
-		v.Data.Effra.Facts.Types = slices.DeleteFunc(v.Data.Effra.Facts.Types, func(node TypeNode) bool { return node.ID == id })
-		v.Data.Effra.Facts.Rows = slices.DeleteFunc(v.Data.Effra.Facts.Rows, func(row RowNode) bool { return row.ID == id })
+		v.Data.Ergo.Facts.Types = slices.DeleteFunc(v.Data.Ergo.Facts.Types, func(node TypeNode) bool { return node.ID == id })
+		v.Data.Ergo.Facts.Rows = slices.DeleteFunc(v.Data.Ergo.Facts.Rows, func(row RowNode) bool { return row.ID == id })
 	}
 	for name, mutate := range map[string]func(*GraphView){
 		"missing type":     func(v *GraphView) { without(v, referencedType) },
 		"missing row":      func(v *GraphView) { without(v, referencedRow) },
-		"missing decl":     func(v *GraphView) { v.Data.Effra.Facts.Declarations = nil },
-		"missing source":   func(v *GraphView) { v.Data.Effra.Facts.Sources = nil },
+		"missing decl":     func(v *GraphView) { v.Data.Ergo.Facts.Declarations = nil },
+		"missing source":   func(v *GraphView) { v.Data.Ergo.Facts.Sources = nil },
 		"dangling edge":    func(v *GraphView) { v.Edges[0].TargetID = "missing" },
 		"duplicate node":   func(v *GraphView) { v.Nodes = append(v.Nodes, v.Nodes[0]) },
 		"duplicate edge":   func(v *GraphView) { v.Edges = append(v.Edges, v.Edges[0]) },
@@ -863,15 +863,15 @@ func TestValidateGraphViewRejectsBrokenClosure(t *testing.T) {
 		"cyclic parents":   func(v *GraphView) { v.Nodes[0].ParentID, v.Nodes[1].ParentID = v.Nodes[1].ID, v.Nodes[0].ID },
 		"unknown initial":  func(v *GraphView) { v.InitialNodeID = "missing" },
 		"unknown port":     func(v *GraphView) { v.Edges[0].SourcePort = "out" },
-		"foreign relation": func(v *GraphView) { v.Edges[0].Data.Effra.Relation = "selects" },
+		"foreign relation": func(v *GraphView) { v.Edges[0].Data.Ergo.Relation = "selects" },
 		"hidden published": func(v *GraphView) {
-			v.Nodes[0].Data.Effra.Collapsed = &GraphCollapsedFacts{HiddenMembers: []string{v.Nodes[1].ID}}
+			v.Nodes[0].Data.Ergo.Collapsed = &GraphCollapsedFacts{HiddenMembers: []string{v.Nodes[1].ID}}
 		},
 		"stray hidden frontier": func(v *GraphView) {
-			v.Nodes[0].Data.Effra.Collapsed = &GraphCollapsedFacts{HiddenMembers: []string{"missing"}, HiddenFrontier: []string{"other"}}
+			v.Nodes[0].Data.Ergo.Collapsed = &GraphCollapsedFacts{HiddenMembers: []string{"missing"}, HiddenFrontier: []string{"other"}}
 		},
 		"untyped node":      func(v *GraphView) { v.Nodes[0].Type = "vertex" },
-		"wrong view header": func(v *GraphView) { v.Data.Effra.GraphViewVersion = 2 },
+		"wrong view header": func(v *GraphView) { v.Data.Ergo.GraphViewVersion = 2 },
 	} {
 		broken := clone()
 		mutate(broken)
@@ -885,22 +885,22 @@ func TestValidateGraphViewRejectsBrokenClosure(t *testing.T) {
 	if err := ValidateGraphView(layers); err != nil {
 		t.Fatal(err)
 	}
-	closure := slices.IndexFunc(layers.Nodes, func(node GraphViewNode) bool { return node.Data.Effra.Closure })
+	closure := slices.IndexFunc(layers.Nodes, func(node GraphViewNode) bool { return node.Data.Ergo.Closure })
 	if closure < 0 {
 		t.Fatal("fixture has no closure node")
 	}
 	for name, mutate := range map[string]func(*GraphView){
 		"closure node with a relation": func(v *GraphView) {
 			endpoint := viewNode(v, v.Edges[0].SourceID)
-			endpoint.Data.Effra.Closure = true
-			v.Data.Effra.Completeness.ClosureNodes++
+			endpoint.Data.Ergo.Closure = true
+			v.Data.Ergo.Completeness.ClosureNodes++
 		},
-		"closure node marked frontier": func(v *GraphView) { v.Nodes[closure].Data.Effra.Frontier = true },
+		"closure node marked frontier": func(v *GraphView) { v.Nodes[closure].Data.Ergo.Frontier = true },
 		"closure node listed on the frontier": func(v *GraphView) {
-			v.Data.Effra.Completeness.Frontier = append(v.Data.Effra.Completeness.Frontier, v.Nodes[closure].ID)
+			v.Data.Ergo.Completeness.Frontier = append(v.Data.Ergo.Completeness.Frontier, v.Nodes[closure].ID)
 		},
-		"closure count above the marked nodes": func(v *GraphView) { v.Data.Effra.Completeness.ClosureNodes++ },
-		"closure mark without its count":       func(v *GraphView) { v.Nodes[closure].Data.Effra.Closure = false },
+		"closure count above the marked nodes": func(v *GraphView) { v.Data.Ergo.Completeness.ClosureNodes++ },
+		"closure mark without its count":       func(v *GraphView) { v.Nodes[closure].Data.Ergo.Closure = false },
 	} {
 		encoded, _ := json.Marshal(layers)
 		var broken GraphView
@@ -917,7 +917,7 @@ func TestValidateGraphViewRejectsBrokenClosure(t *testing.T) {
 func layerBindingNode(t *testing.T, view *GraphView, plan, service string) string {
 	t.Helper()
 	for _, node := range view.Nodes {
-		if node.Data.Effra.Kind == "layer-binding" && node.Data.Effra.Binding.Service == service && strings.HasPrefix(node.ID, plan+":binding:") {
+		if node.Data.Ergo.Kind == "layer-binding" && node.Data.Ergo.Binding.Service == service && strings.HasPrefix(node.ID, plan+":binding:") {
 			return node.ID
 		}
 	}
@@ -979,15 +979,15 @@ func requireReferenceClosure(t *testing.T, whole, view *GraphView) []string {
 	}
 	closure := []string{}
 	for _, node := range view.Nodes {
-		if !node.Data.Effra.Closure {
+		if !node.Data.Ergo.Closure {
 			continue
 		}
-		if !referenced[node.ID] || incident[node.ID] || node.Data.Effra.Frontier || slices.Contains(view.Data.Effra.Completeness.Frontier, node.ID) {
+		if !referenced[node.ID] || incident[node.ID] || node.Data.Ergo.Frontier || slices.Contains(view.Data.Ergo.Completeness.Frontier, node.ID) {
 			t.Fatalf("closure node %s is not an untraversed reference", node.ID)
 		}
 		closure = append(closure, node.ID)
 	}
-	completeness := view.Data.Effra.Completeness
+	completeness := view.Data.Ergo.Completeness
 	if completeness.ClosureNodes != len(closure) || completeness.PublishedNodes != len(view.Nodes) || completeness.SelectedNodes != len(view.Nodes)-len(closure) {
 		t.Fatalf("closure accounting is wrong: %+v with %d closure nodes", completeness, len(closure))
 	}
@@ -1003,7 +1003,7 @@ func TestGraphViewFocusedLayersPublishReferencedClosure(t *testing.T) {
 	account := layerBindingNode(t, whole, layerID("Accounts"), "Account")
 	replacement := ""
 	for _, node := range whole.Nodes {
-		if node.Data.Effra.Kind == "layer-replacement" && strings.HasPrefix(node.ID, layerID("Fixture")+":replace:") {
+		if node.Data.Ergo.Kind == "layer-replacement" && strings.HasPrefix(node.ID, layerID("Fixture")+":replace:") {
 			replacement = node.ID
 		}
 	}
@@ -1091,31 +1091,31 @@ func TestGraphViewCollapseKeepsTheDepthFrontier(t *testing.T) {
 	r := checkedGraphExample(t, "workflow", "go")
 	fields := map[string]any{"focus": "function:main", "depth": 1, "direction": "outgoing"}
 	plain := graphView(t, r, fields)
-	if len(plain.Data.Effra.Completeness.Frontier) == 0 {
+	if len(plain.Data.Ergo.Completeness.Frontier) == 0 {
 		t.Fatal("fixture has no depth frontier")
 	}
 	fields["collapse"] = []any{"function:main"}
 	collapsed := graphView(t, r, fields)
 	root := viewNode(collapsed, "function:main")
-	if root == nil || root.Data.Effra.Collapsed == nil || len(root.Data.Effra.Collapsed.HiddenMembers) == 0 {
+	if root == nil || root.Data.Ergo.Collapsed == nil || len(root.Data.Ergo.Collapsed.HiddenMembers) == 0 {
 		t.Fatal("collapse hid no frontier member")
 	}
-	frontier := collapsed.Data.Effra.Completeness.Frontier
-	for _, id := range plain.Data.Effra.Completeness.Frontier {
+	frontier := collapsed.Data.Ergo.Completeness.Frontier
+	for _, id := range plain.Data.Ergo.Completeness.Frontier {
 		switch {
 		case viewNode(collapsed, id) != nil:
 			if !slices.Contains(frontier, id) {
 				t.Fatalf("visible frontier member %s left the frontier", id)
 			}
-		case !slices.Contains(root.Data.Effra.Collapsed.HiddenFrontier, id) || !slices.Contains(root.Data.Effra.Collapsed.HiddenMembers, id):
+		case !slices.Contains(root.Data.Ergo.Collapsed.HiddenFrontier, id) || !slices.Contains(root.Data.Ergo.Collapsed.HiddenMembers, id):
 			t.Fatalf("hidden frontier member %s is not listed on its root", id)
 		}
 	}
-	if !slices.Contains(frontier, root.ID) || !root.Data.Effra.Frontier {
+	if !slices.Contains(frontier, root.ID) || !root.Data.Ergo.Frontier {
 		t.Fatalf("collapse root does not stand on the frontier for its hidden members: %v", frontier)
 	}
 	for _, id := range frontier {
-		if node := viewNode(collapsed, id); node == nil || !node.Data.Effra.Frontier {
+		if node := viewNode(collapsed, id); node == nil || !node.Data.Ergo.Frontier {
 			t.Fatalf("frontier node %s is not a published frontier node", id)
 		}
 	}

@@ -9,10 +9,13 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/sketch/check"
+	"ergo.local/prototype/internal/sketch/check"
 )
 
 var wantMarker = regexp.MustCompile(`// want (S\d{3})\s*$`)
+
+// usesWord finds the keyword the frozen prototype fixtures spell before #217.
+var usesWord = regexp.MustCompile(`\buses\b`)
 
 // expected lists the `// want CODE` markers of a source as CODE@LINE.
 func expected(src string) []string {
@@ -118,7 +121,10 @@ func TestParity(t *testing.T) {
 			if expect == "skip" {
 				t.Skip("restated as a fixture")
 			}
-			_, diags := check.CheckSource(string(data))
+			// The frozen prototype fixtures spell needs as uses (before #217);
+			// the test translates them, as the acceptance driver does: the
+			// language keeps no compatibility path.
+			_, diags := check.CheckSource(usesWord.ReplaceAllString(string(data), "needs"))
 			if expect == "clean" {
 				if len(diags) > 0 {
 					t.Errorf("want no diagnostics, got\n\t%s", describe(diags))

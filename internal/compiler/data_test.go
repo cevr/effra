@@ -195,7 +195,7 @@ effect fn main() -> string {
 	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module ergo.generated\n\ngo 1.27\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(goSource), 0644); err != nil {
@@ -219,14 +219,14 @@ func TestClosedDataRunsOnBothBackends(t *testing.T) {
 	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module ergo.generated\n\ngo 1.27\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(goSource), 0644); err != nil {
 		t.Fatal(err)
 	}
 	goAssertions := `package main
-import("testing"; er "effra.generated/runtime")
+import("testing"; er "ergo.generated/runtime")
 func TestClosedDataPayload(t *testing.T) { er.Run(func(fc *er.FiberContext) er.Exit[struct{}] { failed := efFunction_failWithPayload()(efContext{Runtime: fc}); interpreted := efFunction_interpret(efTypeV_8_RunState_7_Running{EfField_5_runId:"branch"})(efContext{Runtime: fc}); for _, exit := range []er.Exit[string]{failed, interpreted} { if exit.Failure == nil { t.Fatal("failure missing") }; payload, ok := exit.Failure.Payload.(efType_Invalid); if !ok || (payload.EfField_7_message != "bad" && payload.EfField_7_message != "branch") { t.Fatalf("payload lost: %#v", exit.Failure.Payload) } }; return er.Succeed(struct{}{}) }) }
 `
 	if err := os.WriteFile(filepath.Join(dir, "main_test.go"), []byte(goAssertions), 0644); err != nil {
@@ -311,7 +311,7 @@ func TestClosedDataGoFieldNamesAreInjective(t *testing.T) {
 	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module ergo.generated\n\ngo 1.27\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(goSource), 0644); err != nil {

@@ -24,7 +24,7 @@ type Gateway interface {
 	Authorize(order Order) (Payment, error[GatewayDown])
 }
 
-func checkout(id string) (string, error[OrderNotFound | GatewayDown | timeout.Expired]) uses Orders, Gateway, Scheduler {
+func checkout(id string) (string, error[OrderNotFound | GatewayDown | timeout.Expired]) needs Orders, Gateway, Scheduler {
 	order := try Orders.Find(id)
 	payment := try timeout.After(500ms) { Gateway.Authorize(order) }
 	switch p := payment.(type) {
@@ -58,7 +58,7 @@ wire Live {
 	Scheduler = LiveScheduler{}
 }
 
-func report(id string) uses Console {
+func report(id string) needs Console {
 	outcome := with(Live) { checkout(id) } catch { // Live lives for this call only
 	case OrderNotFound:
 		"no such order"
@@ -70,7 +70,7 @@ func report(id string) uses Console {
 	Console.Log(outcome)
 }
 
-func main() uses Console {
+func main() needs Console {
 	report("42")
 	report("7")
 }

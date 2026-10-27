@@ -1,4 +1,4 @@
-// Package rt is the runtime that Effra's emitted sketch code links against.
+// Package rt is the runtime that Ergo's emitted sketch code links against.
 // It implements the runtime rules of docs/spec/runtime.md (I1 interruption
 // points, I2 masks, G1 context inheritance through the task tree, G2 fork-tree
 // defects) and the release rules of docs/spec/resources.md (R5, R7, R8, R9,

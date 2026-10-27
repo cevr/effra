@@ -22,12 +22,12 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"effra.local/prototype/internal/compiler"
-	"effra.local/prototype/internal/receipt"
-	"effra.local/prototype/internal/sketch/check"
-	"effra.local/prototype/internal/sketch/format"
-	"effra.local/prototype/internal/sketch/proto"
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/receipt"
+	"ergo.local/prototype/internal/sketch/check"
+	"ergo.local/prototype/internal/sketch/format"
+	"ergo.local/prototype/internal/sketch/proto"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // Analysis is the 2026 front-end's outcome for one source text.
@@ -224,7 +224,7 @@ func Build(a Analysis, lineName, output string, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("2026 emission failed: %w", err)
 	}
-	module, err := os.MkdirTemp("", "effra-2026-")
+	module, err := os.MkdirTemp("", "ergo-2026-")
 	if err != nil {
 		return err
 	}

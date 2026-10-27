@@ -1,0 +1,42 @@
+// Label: Proposed. Size scope "definitions plus an inline caller" for Q5: the
+// agent definitions and one exported caller that runs all three operations
+// with actor.Call inline, literal types spelled. Scope from the round-2
+// review (round-2-findings m1).
+package roster
+
+import (
+	"actor"
+	"slices"
+)
+
+type RoomFull struct{ Limit int64 }
+
+type Room struct {
+	limit int64
+	names []string
+}
+
+func (r *Room) Join(name string) (int64, error[RoomFull]) {
+	if len(r.names) >= r.limit {
+		return RoomFull{r.limit}
+	}
+	r.names = append(r.names, name)
+	return len(r.names)
+}
+
+func (r *Room) Leave(name string) int64 {
+	r.names = slices.DeleteFunc(r.names, func(n string) bool { return n == name })
+	return len(r.names)
+}
+
+func (r *Room) Members() []string { return r.names }
+
+func StartRoom(limit int64) actor.Agent[Room] {
+	return actor.StartAgent(Room{limit: limit}, 64)
+}
+
+func Use(room actor.AgentAddress[Room], name string) ([]string, error[RoomFull | actor.Stopped | actor.NoReply]) {
+	try actor.Call(room, func(r *Room) (int64, error[RoomFull]) { return r.Join(name) })
+	try actor.Call(room, func(r *Room) int64 { return r.Leave(name) })
+	return actor.Call(room, func(r *Room) []string { return r.Members() })
+}

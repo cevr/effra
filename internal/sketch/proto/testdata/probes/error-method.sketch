@@ -3,4 +3,4 @@ package demo
 type Fault struct{}
 func (Fault) Error() string { return "manual" }
 func fail() error[Fault] { return Fault{} }
-func main() uses Console { fail() catch { case Fault: Console.Println("handled") } }
+func main() needs Console { fail() catch { case Fault: Console.Println("handled") } }

@@ -1,6 +1,6 @@
 # Testing with explicit effects
 
-`ef test FILE [--target go] [--live] [--timeout-ms 30000]` discovers top-level `test_` functions in source order. Each must be an effect with no parameters returning `void`. `Assert` is implicit; `Clock`, `Scheduler` and `Sync` are explicit capability rows that receive fresh deterministic fixtures when the test declares them. The test file does not need `main`.
+`ergo test FILE [--target go] [--live] [--timeout-ms 30000]` discovers top-level `test_` functions in source order. Each must be an effect with no parameters returning `void`. `Assert` is implicit; `Clock`, `Scheduler` and `Sync` are explicit capability rows that receive fresh deterministic fixtures when the test declares them. The test file does not need `main`.
 
 ```rust
 effect fn test_greeting() -> void raises {AssertionFailed, Missing} uses {Assert} {

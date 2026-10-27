@@ -5,6 +5,6 @@ func f() string {
 	return "after"
 }
 
-func main() uses Console {
+func main() needs Console {
 	Console.Println(f())
 }

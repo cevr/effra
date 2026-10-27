@@ -57,7 +57,7 @@ type Sig struct {
 	Result   string
 	Fallible bool
 	Errors   []QName
-	Uses     []QName
+	Needs    []QName
 }
 
 // FuncDecl is a function, or a method when Recv is set.

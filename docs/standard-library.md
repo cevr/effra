@@ -1,12 +1,12 @@
 # A bundled Effect-grade standard library
 
-Direction recorded from the owner on 2026-10-05. Effra's distribution should include the capabilities needed to build an Effect-style server application on Go. This is the target parity map, not a claim that the current prototype already supplies the full library.
+Direction recorded from the owner on 2026-10-05. Ergo's distribution should include the capabilities needed to build an Effect-style server application on Go. This is the target parity map, not a claim that the current prototype already supplies the full library.
 
 The [finite capability contracts](specs/standard-library-capabilities.md) turn this direction into five open implementation batches, causal acceptance cases and visible exclusions. They incorporate pinned Effect4.0.1 source/tests and generic sharing, batching and worker patterns from application-source review.
 
 ## Distribution and compiler boundary
 
-Ship the standard library with the compiler and managed runtime, under one compatible release. A Go application should not need a second language toolchain or handwritten wrappers for the basic concurrency, configuration, observability and platform facilities. Go is the only target: the library covers what Effect does, restated in Effra's idioms, with native Go implementations (owner, 2026-10-26).
+Ship the standard library with the compiler and managed runtime, under one compatible release. A Go application should not need a second language toolchain or handwritten wrappers for the basic concurrency, configuration, observability and platform facilities. Go is the only target: the library covers what Effect does, restated in Ergo's idioms, with native Go implementations (owner, 2026-10-26).
 
 The compiler owns effect rows, nominal type identity, checked provision, target restrictions and enforceable ownership rules. Bundled libraries own algorithms and policies: retry schedules, bounded queues, streams, pools, caches and adapters. A facility needs compiler support only when its contract requires new language semantics. Keep the implicit prelude small; ordinary library modules still expose explicit contracts and remain inspectable through the same CLI/MCP model.
 
@@ -24,7 +24,7 @@ Library functions put the value they transform first, so they read under the [pi
 
 Reference families were inspected in the pinned Effect source, including its core, concurrency, data, scheduling and service modules. This map tracks behavioral families rather than reproducing every TypeScript overload.
 
-| Family | Current Effra receipt | Required library contract |
+| Family | Current Ergo receipt | Required library contract |
 | --- | --- | --- |
 | Core effects, failures and recovery | Lazy recipes, explicit rows, execution, pure fallback catch | Payload-aware effectful handlers, typed effect-function values, composable row contracts |
 | Data and interpretation | Nominal records, payload enums, exhaustive match | Option/Result, collections, iteration and constrained generics |
@@ -60,4 +60,4 @@ The finite foundation stage is integrated and reviewed; its [retained receipts](
 
 ## Upstream conformance inputs
 
-Use pinned Effect implementations and their tests as direct inputs to each library family. Record selected upstream behavior cases with their pinned file, line and label (`conformance/effect-cases.json`) and map them to executable Effra tests; the repository keeps no upstream checkout (owner, 2026-10-26). Distinguish reference-only, ported/passing, deliberately different and not-yet-supported cases; unsupported families cannot disappear from a parity report. Real application usage should constrain composition and operational fixtures, while public examples stay generic. The [native server contract](specs/native-server-contracts.md) applies this requirement to the first codec and HTTP/RPC slice.
+Use pinned Effect implementations and their tests as direct inputs to each library family. Record selected upstream behavior cases with their pinned file, line and label (`conformance/effect-cases.json`) and map them to executable Ergo tests; the repository keeps no upstream checkout (owner, 2026-10-26). Distinguish reference-only, ported/passing, deliberately different and not-yet-supported cases; unsupported families cannot disappear from a parity report. Real application usage should constrain composition and operational fixtures, while public examples stay generic. The [native server contract](specs/native-server-contracts.md) applies this requirement to the first codec and HTTP/RPC slice.

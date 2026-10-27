@@ -3,8 +3,8 @@ package rt_test
 import (
 	"testing"
 
-	"effra.local/prototype/runtime/rt"
-	"effra.local/prototype/runtime/rt/rttrace"
+	"ergo.local/prototype/runtime/rt"
+	"ergo.local/prototype/runtime/rt/rttrace"
 )
 
 // callExits returns the call-exit records of call.

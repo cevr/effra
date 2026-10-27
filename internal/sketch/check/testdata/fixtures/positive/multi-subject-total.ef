@@ -20,6 +20,6 @@ func pair(p AB, q XY) string {
 	}
 }
 
-func main() uses Console {
+func main() needs Console {
 	Console.Println(pair(A{}, X{}))
 }

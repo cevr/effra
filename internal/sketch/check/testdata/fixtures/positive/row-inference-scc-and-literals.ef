@@ -23,12 +23,12 @@ func odd(n int64) string {
 	return even(n - 1)
 }
 
-func Run(n int64) (string, error[Fault]) uses Store {
+func Run(n int64) (string, error[Fault]) needs Store {
 	f := func() string { return even(n) }
 	return f()
 }
 
-func main() uses Console {
+func main() needs Console {
 	v := with(wire{ Store = Mem{} }) { Run(3) } catch {
 	case Fault:
 		"fault"

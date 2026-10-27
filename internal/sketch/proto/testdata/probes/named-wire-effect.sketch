@@ -10,4 +10,4 @@ func build() string {
   } catch { case timeout.Expired: "late" }
 }
 wire W { Store = Holder{Value: build()} }
-func main() uses Console { Console.Println(with(W) { Store.Get() }) }
+func main() needs Console { Console.Println(with(W) { Store.Get() }) }

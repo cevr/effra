@@ -10,7 +10,7 @@ import (
 	"testing"
 	"unicode/utf16"
 
-	"effra.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/compiler"
 )
 
 // utf16Column counts the UTF-16 code units of text, independently of the
@@ -24,19 +24,19 @@ func TestSketchCheckReportsLocatedDiagnostics(t *testing.T) {
 		{
 			// The lexer refuses `$` after non-ASCII text on its line.
 			name:   "lexer S001",
-			source: "package p\n\n// héllo 🌍\nfunc main() uses Console {\n\tConsole.Println(\"日本🌍\") $\n}\n",
+			source: "package p\n\n// héllo 🌍\nfunc main() needs Console {\n\tConsole.Println(\"日本🌍\") $\n}\n",
 			code:   "S001", at: "$", token: "$",
 		},
 		{
 			// The parser refuses the second, stray `)` after non-ASCII text.
 			name:   "parser S001",
-			source: "package p\n\nfunc main() uses Console {\n\tConsole.Println(\"ü€\"))\n}\n",
+			source: "package p\n\nfunc main() needs Console {\n\tConsole.Println(\"ü€\"))\n}\n",
 			code:   "S001", at: ")\n}", token: ")",
 		},
 		{
 			// The checker reports an unknown name after an astral character.
 			name:   "checker S104",
-			source: "package p\n\nfunc main() uses Console {\n\tConsole.Println(\"🌍🌍\" + mïssing)\n}\n",
+			source: "package p\n\nfunc main() needs Console {\n\tConsole.Println(\"🌍🌍\" + mïssing)\n}\n",
 			code:   "S104", at: "mïssing", token: "mïssing",
 		},
 	}
@@ -104,8 +104,8 @@ func TestSketchCheckReportsLocatedDiagnostics(t *testing.T) {
 // TestFormat: the 2026 formatter keeps the legacy result shape, reports a
 // syntax error as a located S001 failure, and honours the output limit.
 func TestFormat(t *testing.T) {
-	source := "package p\n\nfunc main()  uses Console {\nConsole.Println(\"a\")\n}\n"
-	want := "package p\n\nfunc main() uses Console {\n\tConsole.Println(\"a\")\n}\n"
+	source := "package p\n\nfunc main()  needs Console {\nConsole.Println(\"a\")\n}\n"
+	want := "package p\n\nfunc main() needs Console {\n\tConsole.Println(\"a\")\n}\n"
 	result, err := Format(source, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestFormat(t *testing.T) {
 	if err != nil || again.Changed || again.Text != want {
 		t.Fatalf("formatted text changed again: %+v, %v", again, err)
 	}
-	if FormatterIdentity != "effra-2026/formatter-1" {
+	if FormatterIdentity != "ergo-2026/formatter-1" {
 		t.Fatalf("identity %q", FormatterIdentity)
 	}
 
@@ -181,7 +181,7 @@ func TestSketchBuildRunsProgram(t *testing.T) {
 // Build refuses it with S109 naming #50 and writes nothing (spec D12). A
 // checker diagnostic refuses the build with its own code.
 func TestSketchBuildRefusesWhatTheEmitterCannotLower(t *testing.T) {
-	source := "package demo\n\nfunc main() uses Console {\n\tfor i := 0; i < 3; i++ {\n\t\tConsole.Println(i)\n\t}\n}\n"
+	source := "package demo\n\nfunc main() needs Console {\n\tfor i := 0; i < 3; i++ {\n\t\tConsole.Println(i)\n\t}\n}\n"
 	analysis := Check(source)
 	if len(analysis.Diagnostics) != 0 {
 		t.Fatalf("checker diagnostics: %+v", analysis.Diagnostics)
@@ -200,7 +200,7 @@ func TestSketchBuildRefusesWhatTheEmitterCannotLower(t *testing.T) {
 	if _, statErr := os.Stat(output); statErr == nil {
 		t.Fatal("a refused build wrote its output")
 	}
-	bad := Check("package demo\n\nfunc main() uses Console {\n\tConsole.Println(missing)\n}\n")
+	bad := Check("package demo\n\nfunc main() needs Console {\n\tConsole.Println(missing)\n}\n")
 	err = Build(bad, "main.ef", output, &stderr)
 	if !errors.As(err, &refusal) || refusal.Diagnostics[0].Code != "S104" || !strings.HasPrefix(err.Error(), "S104 at 4:18: ") {
 		t.Fatalf("build of a checker error gave %v", err)

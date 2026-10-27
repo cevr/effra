@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"effra.local/prototype/internal/sketch/check"
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/check"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // The round-2 review found the round-1 classes again on inputs the round-2
@@ -575,7 +575,7 @@ type Box[T, E] struct { Next []Other[T, E]; Run func() error[E] }`},
 type B[E] struct { c []C[E] }
 type C[E] struct { a []A[E]; run func() error[E] }`},
 	{"recursive-capability-row", "", `type Svc interface{ Ping() }
-type Job[R] struct { next []Job[R]; run func() uses R }
+type Job[R] struct { next []Job[R]; run func() needs R }
 func Run(j Job[Svc]) {}`},
 	{"recursive-conflict", "S108", `type L[E] struct { next []L[E]; run func() error[E]; v E }`},
 	{"function-of-recursive", "", `type List[T, E] struct { Tail []List[T, E]; Run func() error[E] }

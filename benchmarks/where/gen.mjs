@@ -3,7 +3,7 @@
 //
 //   node gen.mjs --style a|b --sites N --types K [--layout distinct|shared]
 //
-// Prints an Effra program with K record types and N constrained call sites
+// Prints an Ergo program with K record types and N constrained call sites
 // of a generic three-element sort. Style b is where-clause dispatch
 // (`where T.compare: fn(T, T) -> i64`, receiver methods resolved by the
 // checker); style a passes the ordering explicitly as a function value, which
@@ -25,7 +25,7 @@ if (!["a", "b"].includes(style) || !(sites > 0) || !(types > 0) || !["distinct",
 }
 const field = (k) => (layout === "distinct" ? `f${k}` : "n");
 const out = [];
-out.push("import I64 \"effra/i64\"", "");
+out.push("import I64 \"ergo/i64\"", "");
 out.push("record Three<T: type> {", "    a: T;", "    b: T;", "    c: T", "}");
 if (style === "b") {
   out.push(

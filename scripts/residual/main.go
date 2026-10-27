@@ -17,7 +17,7 @@
 //     where it was written; "moved to heap" lines are not counted;
 //   - go vet's verdict.
 //
-// Builds use ef build's flags. Samples interleave the two lowerings and
+// Builds use ergo build's flags. Samples interleave the two lowerings and
 // alternate which goes first, and record the load average beside each time.
 //
 // Run from the repository root:
@@ -41,8 +41,8 @@ import (
 	"strings"
 	"time"
 
-	"effra.local/prototype/internal/compiler"
-	"effra.local/prototype/internal/receipt"
+	"ergo.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/receipt"
 )
 
 // Attribution counts compiler diagnostic lines by the file Go names.
@@ -91,7 +91,7 @@ type Report struct {
 	Examples  []Example `json:"examples"`
 }
 
-const diagnosticFlags = "-gcflags=effra.generated/...=-m -d=ssa/check_bce/debug=1"
+const diagnosticFlags = "-gcflags=ergo.generated/...=-m -d=ssa/check_bce/debug=1"
 
 func main() {
 	pattern := flag.String("examples", "examples/*.ef", "glob of examples to measure")
@@ -279,7 +279,7 @@ func measureExample(path, work string, samples, lowerings int) (Example, error) 
 	return example, nil
 }
 
-// writeModule lays out a generated module as ef build publishes it.
+// writeModule lays out a generated module as ergo build publishes it.
 func writeModule(directory string, snapshot compiler.GoSourceSnapshot) error {
 	files := map[string][]byte{"main.go": snapshot.Main, "go.mod": snapshot.Module}
 	if len(snapshot.ModuleSum) > 0 {
@@ -309,7 +309,7 @@ func nonce(directory string) error {
 		return err
 	}
 	text := hex.EncodeToString(value)
-	for path, pkg := range map[string]string{"zz_residual_nonce.go": "main", filepath.Join("runtime", "zz_residual_nonce.go"): "effra"} {
+	for path, pkg := range map[string]string{"zz_residual_nonce.go": "main", filepath.Join("runtime", "zz_residual_nonce.go"): "ergo"} {
 		source := "package " + pkg + "\n\nconst residualNonce = \"" + text + "\"\n"
 		if err := os.WriteFile(filepath.Join(directory, path), []byte(source), 0o644); err != nil {
 			return err
@@ -345,11 +345,11 @@ func attribute(output []byte, source string) (bounds, escapes Attribution) {
 		}
 		// A file name may itself contain colons, so match whole prefixes.
 		switch {
-		case strings.HasPrefix(line, "effra.generated/"+source+":"):
+		case strings.HasPrefix(line, "ergo.generated/"+source+":"):
 			counter.Source++
-		case strings.HasPrefix(line, "effra.generated/main.go:"):
+		case strings.HasPrefix(line, "ergo.generated/main.go:"):
 			counter.Main++
-		case strings.HasPrefix(line, "effra.generated/runtime/"):
+		case strings.HasPrefix(line, "ergo.generated/runtime/"):
 			counter.Runtime++
 		default:
 			counter.Other++

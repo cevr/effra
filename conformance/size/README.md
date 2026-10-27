@@ -12,26 +12,26 @@ Public programs and controls for the [small executable contract](../../docs/spec
 | `fixtures/direct.ef`, `fixtures/pipe.ef` | The same program written with direct calls and with the pipe. |
 | `controls/go/minimal`, `controls/go/managed` | Matched idiomatic Go controls that keep the fixture's contract with the standard library only. The minimal control cancels on a termination signal through `signal.NotifyContext` and runs its work in an owning scope. |
 | `controls/go/minimal-floor` | Unmatched floor: the minimal result printed with no cancellation or scope. It bounds the minimal row from below and is never compared as an equivalent program. |
-| `matrix/` | The explicit matrix, a Go program over `internal/receipt`, the same measurement package `ef build --receipt` uses. |
-| `receipts/*.json` | Recorded matrix runs. Each one is bound to its commit, dirty state, toolchain and fixture/control/runtime hashes. Runs recorded before 2026-10-26 (schema `effra.size-conformance/2`) also measured the removed JavaScript target and TypeScript controls. |
+| `matrix/` | The explicit matrix, a Go program over `internal/receipt`, the same measurement package `ergo build --receipt` uses. |
+| `receipts/*.json` | Recorded matrix runs. Each one is bound to its commit, dirty state, toolchain and fixture/control/runtime hashes. Runs recorded before 2026-10-26 (schema `ergo.size-conformance/2`) also measured the removed JavaScript target and TypeScript controls. |
 
 ## Commands
 
 ```sh
 # Deterministic retention and receipt checks. These run in the gate as part of go test ./...
-go test ./cmd/ef -run 'TestSizeFixtures|TestBuildReceipt'
+go test ./cmd/ergo -run 'TestSizeFixtures|TestBuildReceipt'
 go test ./internal/receipt
 
 # One application's receipt
-ef build conformance/size/fixtures/managed.ef -o dist/managed --receipt dist/managed.receipt.json
+ergo build conformance/size/fixtures/managed.ef -o dist/managed --receipt dist/managed.receipt.json
 
 # The explicit matrix. It needs go
-go run ./conformance/size/matrix -out /tmp/effra-size [-record conformance/size/receipts/DATE.json]
+go run ./conformance/size/matrix -out /tmp/ergo-size [-record conformance/size/receipts/DATE.json]
 ```
 
 `--receipt` refuses a path that names the build's source or one of its artifacts, including aliases through symbolic or hard links and spellings where `..` follows a link, and any path inside `dist/go/apps`. It publishes the receipt atomically inside the directory it admitted.
 
-The matrix builds with `CGO_ENABLED=0`, an empty `GOFLAGS` and `-trimpath -mod=readonly -buildvcs=false`, and builds a `-ldflags=-s -w` companion for every unstripped binary. Effra rows are the `ef build --receipt` receipts; controls and counterfactuals are measured with the same `internal/receipt` functions. The matrix fails if any program's output differs from the expected output.
+The matrix builds with `CGO_ENABLED=0`, an empty `GOFLAGS` and `-trimpath -mod=readonly -buildvcs=false`, and builds a `-ldflags=-s -w` companion for every unstripped binary. Ergo rows are the `ergo build --receipt` receipts; controls and counterfactuals are measured with the same `internal/receipt` functions. The matrix fails if any program's output differs from the expected output.
 
 The all-source counterfactual rebuilds the minimal, managed and codec generations with every runtime source the compiler distributes. It measures what source selection removes that the Go linker's own dead-code elimination does not.
 

@@ -1,7 +1,7 @@
 // The minimal entry plus declarations it never reaches. Each one would retain
 // a runtime module, codec plan, provider or bundled member if it were a root.
-import Json "effra/json"
-import Functions "effra/functions"
+import Json "ergo/json"
+import Functions "ergo/functions"
 
 error Missing
 

@@ -2,7 +2,7 @@ package demo
 
 import "timeout"
 
-func Run() string uses Scheduler {
+func Run() string needs Scheduler {
 	return timeout.After(1s) { "ok" } // want S101
 }
 

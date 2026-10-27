@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // codecDerivationCode refuses a derive declaration whose checked type, bounds
@@ -175,13 +175,13 @@ type codecDerivation struct {
 
 func (d *codecDerivation) identity() string { return d.Module + "." + d.Member }
 
-var jsonCodecDerivation = &codecDerivation{Module: "effra/json", Member: "codec", Profile: rt.CodecProfileJSON, Wire: "string", DecodeFailure: "JsonDecodeFailure", EncodeFailure: "JsonEncodeFailure"}
+var jsonCodecDerivation = &codecDerivation{Module: "ergo/json", Member: "codec", Profile: rt.CodecProfileJSON, Wire: "string", DecodeFailure: "JsonDecodeFailure", EncodeFailure: "JsonEncodeFailure"}
 
 // bundledFailures are the failure declarations a bundled module's interface
 // admits on import. They are tag failures whose payload is a bounded
 // message, like the builtin failures, and their names are claimed against
 // every other declaration.
-var bundledFailures = map[string][]string{"effra/json": {jsonCodecDerivation.DecodeFailure, jsonCodecDerivation.EncodeFailure}, i64TextModule: {i64ParseFailure}}
+var bundledFailures = map[string][]string{"ergo/json": {jsonCodecDerivation.DecodeFailure, jsonCodecDerivation.EncodeFailure}, i64TextModule: {i64ParseFailure}}
 
 // memberFunction resolves a qualified function member: a bundled module
 // function through its import alias, or an operation of a derived codec.

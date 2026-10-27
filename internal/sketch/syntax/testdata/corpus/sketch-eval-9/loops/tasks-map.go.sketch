@@ -5,7 +5,7 @@ package tasks
 // fills, it waits for whichever task finishes first, so a failure is seen
 // when that task ends. Map then exits, and the exit stops and drains every
 // task still running.
-func Map(xs []A, limit int, f func(A) (B, error[E]) uses R) ([]B, error[E]) uses R {
+func Map(xs []A, limit int, f func(A) (B, error[E]) needs R) ([]B, error[E]) needs R {
 	slots := make([]Option[B], len(xs)) // Option is defaultable; B may not be
 	running := map[int]Task[B, E]{}
 	done := make(chan int, len(xs))

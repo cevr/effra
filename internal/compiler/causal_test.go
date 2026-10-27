@@ -164,7 +164,7 @@ func TestExplicitTestProvidersRejectLiveExecutionWithoutHarness(t *testing.T) {
 		t.Fatal(r.Diagnostics)
 	}
 	goOutput, err := runWithWatchdog(buildGeneratedGo(t, r, GoGenerationBuild))
-	if err == nil || !strings.Contains(string(goOutput), "test clock requires the ef test harness") {
+	if err == nil || !strings.Contains(string(goOutput), "test clock requires the ergo test harness") {
 		t.Fatalf("Go TestClock escaped its harness: %v\n%s", err, goOutput)
 	}
 }

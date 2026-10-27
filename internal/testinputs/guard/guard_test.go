@@ -13,12 +13,12 @@ import (
 	"strings"
 	"testing"
 
-	"effra.local/prototype/internal/testinputs"
+	"ergo.local/prototype/internal/testinputs"
 )
 
 func TestMain(m *testing.M) { os.Exit(testinputs.Main(m)) }
 
-const testinputsPath = "effra.local/prototype/internal/testinputs"
+const testinputsPath = "ergo.local/prototype/internal/testinputs"
 
 // exempt are the test packages that run without Main, with the reason.
 var exempt = map[string]string{
@@ -32,7 +32,7 @@ var exempt = map[string]string{
 
 // generateVariable, set to 1, makes TestEveryTestPackageIsObserved write a
 // main_test.go into each test package that has no TestMain.
-const generateVariable = "EFFRA_TESTINPUTS_GENERATE"
+const generateVariable = "ERGO_TESTINPUTS_GENERATE"
 
 // TestEveryTestPackageIsObserved checks that every test package in the
 // module has a TestMain, built on every platform, that calls
@@ -96,8 +96,8 @@ func moduleRoot(t *testing.T) string {
 	}
 	for {
 		if data, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil {
-			if !strings.Contains(string(data), "module effra.local/prototype\n") {
-				t.Fatalf("%s/go.mod is not the effra.local/prototype module", dir)
+			if !strings.Contains(string(data), "module ergo.local/prototype\n") {
+				t.Fatalf("%s/go.mod is not the ergo.local/prototype module", dir)
 			}
 			return dir
 		}

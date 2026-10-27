@@ -1,7 +1,7 @@
 package check
 
 import (
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 func unparen(x syntax.Expr) syntax.Expr {

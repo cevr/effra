@@ -1,6 +1,6 @@
 package demo
 
-func main() uses Console {
+func main() needs Console {
 	n := 3
 	var big int64 = 1 << 40
 	f := float64(5) / 2

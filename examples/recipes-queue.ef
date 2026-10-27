@@ -1,6 +1,6 @@
 // A job queue stores lazy recipes as enum payloads, inside bundled Result
 // values and as the results of stored callables. Each run executes again.
-import Data "effra/data"
+import Data "ergo/data"
 
 error Rejected
 

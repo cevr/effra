@@ -4,7 +4,7 @@ type Fault struct{}
 
 func fail() (string, error[Fault]) { return Fault{} }
 
-func main() uses Console {
+func main() needs Console {
 	v := fail() // want S105
 	Console.Println(v)
 }

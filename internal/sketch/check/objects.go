@@ -3,13 +3,13 @@ package check
 import (
 	"sort"
 
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // requirementKeyword is the spelling of a capability (requirement) row in
 // source. The keyword is the only place the checker names it, so a rename of
 // the keyword (#217) touches this constant and the syntax nodes only.
-const requirementKeyword = "uses"
+const requirementKeyword = "needs"
 
 // Object is a named entity: a type, a function, a variable, a constant, a
 // package, a builtin or a wire.
@@ -56,7 +56,7 @@ type Var struct {
 	param   bool
 	pkg     bool
 	group   *switchGroup // a type-switch or catch binding: used if any arm reads it
-	bindRow bool         // a capability-row binding (uses X): an entry of the frame, not a value
+	bindRow bool         // a capability-row binding (needs X): an entry of the frame, not a value
 }
 
 // Const is a predeclared constant (true, false).

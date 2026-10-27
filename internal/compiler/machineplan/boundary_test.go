@@ -16,7 +16,7 @@ import (
 )
 
 // sharedPath is the package that holds the read-only row view.
-const sharedPath = "effra.local/prototype/internal/compiler/machineplan/shared"
+const sharedPath = "ergo.local/prototype/internal/compiler/machineplan/shared"
 
 // The analysis boundary is structural. The package imports only these
 // standard packages and the row view, so it cannot name the checker, its

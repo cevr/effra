@@ -31,7 +31,7 @@ wire Invoices {
 	Invoice = InvoiceLive
 }
 
-wire App uses Account, Invoice { // exposes two; Store stays hidden, built once
+wire App provides Account, Invoice { // exposes two; Store stays hidden, built once
 	Accounts
 	Invoices
 }
@@ -41,7 +41,7 @@ wire Fixture {
 	replace Store = Memory{Text: "fixture"}
 }
 
-func labels() string uses Account, Invoice {
+func labels() string needs Account, Invoice {
 	return Account.Label() + ":" + Invoice.Label()
 }
 

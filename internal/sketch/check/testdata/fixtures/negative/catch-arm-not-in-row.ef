@@ -5,7 +5,7 @@ type B struct{}
 
 func fail() (string, error[A]) { return A{} }
 
-func main() uses Console {
+func main() needs Console {
 	v := fail() catch {
 	case A:
 		"a"

@@ -1,8 +1,8 @@
-import go host "effra.local/prototype/examples/hosttypes"
+import go host "ergo.local/prototype/examples/hosttypes"
 import go io "io"
 import go fs "io/fs"
 import go strconv "strconv"
-import Data "effra/data"
+import Data "ergo/data"
 
 fn same(point: host.Point) -> host.Point {
     point

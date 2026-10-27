@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	rt "effra.local/prototype/runtime/effra"
+	rt "ergo.local/prototype/runtime/ergo"
 )
 
 // codecVectorJob is one vector the generated Go harness runs: a decode body
@@ -27,7 +27,7 @@ type codecVectorJob struct {
 
 // runCodecVectorsGenerated runs vectors on the native Go engine's generated
 // path. Each plan becomes generated Go declarations shaped as the Go backend
-// shapes Effra data (records as structs holding nested records inline,
+// shapes Ergo data (records as structs holding nested records inline,
 // unions as interfaces over variant structs), Construct adapters, and the
 // writer goCodecWriters emits for compiler-derived plans; values become Go
 // literals. Transform nodes run the named target-neutral behaviors over
@@ -49,7 +49,7 @@ import (
 	"os"
 	"strings"
 
-	er "effra.generated/runtime"
+	er "ergo.generated/runtime"
 )
 
 var _ = strings.ToLower

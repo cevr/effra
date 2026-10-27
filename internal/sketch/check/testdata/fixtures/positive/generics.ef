@@ -11,7 +11,7 @@ type Just[T] struct{ Value T }
 type Nothing struct{}
 type Maybe[T] interface{ Just[T] | Nothing }
 
-func Map(xs []A, f func(A) (B, error[E]) uses R) ([]B, error[E]) uses R {
+func Map(xs []A, f func(A) (B, error[E]) needs R) ([]B, error[E]) needs R {
 	out := []B{}
 	for _, x := range xs {
 		out = append(out, try f(x))
@@ -19,7 +19,7 @@ func Map(xs []A, f func(A) (B, error[E]) uses R) ([]B, error[E]) uses R {
 	return out
 }
 
-func On[F error](f func() (A, error[E]) uses R) (A, error[E]) uses R
+func On[F error](f func() (A, error[E]) needs R) (A, error[E]) needs R
 
 func same[T comparable](a, b T) bool { return a == b }
 
@@ -41,12 +41,12 @@ func wrap(n int64) Maybe[int64] {
 
 func double(n int64) int64 { return n * 2 }
 
-func both(f func() int64 uses (Clocky, Sleepy)) int64 uses Clocky, Sleepy { return f() }
+func both(f func() int64 needs (Clocky, Sleepy)) int64 needs Clocky, Sleepy { return f() }
 
 type Clocky interface{ Now() int64 }
 type Sleepy interface{ Nap(d duration) }
 
-func main() uses Console {
+func main() needs Console {
 	p := Pair[string, int64]{Key: "a", Value: 1}
 	ys := Map([]int64{1, 2}, double)
 	n := On[Fault](func() (int64, error[Fault]) { return Fault{} }) catch {

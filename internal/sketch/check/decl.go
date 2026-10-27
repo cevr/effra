@@ -6,7 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"effra.local/prototype/internal/sketch/syntax"
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // run checks the package: collect declarations, resolve types lazily, check
@@ -388,8 +388,8 @@ func (c *checker) interfaceType(spec *syntax.InterfaceType, ctx *typeCtx) *Inter
 		name := m.Names[0]
 		mctx := &typeCtx{params: ctx.params, method: true, decl: ctx.decl, reported: new(bool)}
 		sig := c.signature(ft, mctx)
-		if ft.Uses != nil {
-			c.errorf(ft.Uses, CodeType, "an interface method writes no capability row: a provider's requirements are captured when it is built (types.md, Capabilities 4; README Gap 17)")
+		if ft.Needs != nil {
+			c.errorf(ft.Needs, CodeType, "an interface method writes no capability row: a provider's requirements are captured when it is built (types.md, Capabilities 4; README Gap 17)")
 			sig.Uses = newRow()
 		}
 		if seen[name.Name] {
@@ -927,8 +927,8 @@ func (w typeWalker) walk(x syntax.Node, k Kind) {
 	case *syntax.FuncType:
 		w.fields(x.Params)
 		w.fields(x.Results)
-		if x.Uses != nil {
-			for _, n := range x.Uses.Names {
+		if x.Needs != nil {
+			for _, n := range x.Needs.Names {
 				w.walk(n, KindUses)
 			}
 		}
@@ -1083,8 +1083,8 @@ func (c *checker) signature(ft *syntax.FuncType, ctx *typeCtx) *Signature {
 			}
 		}
 	}
-	if ft.Uses != nil {
-		if row := c.rowExpr(ft.Uses.Names, KindUses, &rctx); row != nil {
+	if ft.Needs != nil {
+		if row := c.rowExpr(ft.Needs.Names, KindUses, &rctx); row != nil {
 			sig.Uses = row
 		}
 	}
@@ -1264,5 +1264,5 @@ func (c *checker) inferFlags(f *Func) {
 		}
 	}
 	f.inferErrors = !hasErrRow
-	f.inferUses = d.Type.Uses == nil
+	f.inferUses = d.Type.Needs == nil
 }

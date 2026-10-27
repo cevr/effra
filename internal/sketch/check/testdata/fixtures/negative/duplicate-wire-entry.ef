@@ -5,7 +5,7 @@ type Mem struct{ V string }
 
 func (m Mem) Get() string { return m.V }
 
-func main() uses Console {
+func main() needs Console {
 	v := with(wire{ Store = Mem{V: "a"}; Store = Mem{V: "b"} }) { Store.Get() } // want S111
 	Console.Println(v)
 }

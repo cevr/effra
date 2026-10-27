@@ -3,8 +3,8 @@ package rt_test
 import (
 	"testing"
 
-	"effra.local/prototype/runtime/rt"
-	"effra.local/prototype/runtime/rt/rttrace"
+	"ergo.local/prototype/runtime/rt"
+	"ergo.local/prototype/runtime/rt/rttrace"
 )
 
 // keyed is a typed failure with a field, so each value is stored on its own

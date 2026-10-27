@@ -12,7 +12,7 @@ func TestBundledCallersMissingRowsAndLocalHelperEquivalence(t *testing.T) {
 		{bundledConfiguration, "effect fn configuration(key: string) -> string raises {MissingSetting} uses {Settings}", "configuration", "MissingSetting", "Settings"},
 	} {
 		imported := CompileFor(fixture.source, "go")
-		localSource := strings.Replace(fixture.source, `import Fns "effra/functions"`, `effect fn call<E: raises, R: uses>(callback: effect fn(string) -> string raises {E} uses {R}, input: string) -> string raises {E} uses {R} { run callback(input) }`, 1)
+		localSource := strings.Replace(fixture.source, `import Fns "ergo/functions"`, `effect fn call<E: raises, R: uses>(callback: effect fn(string) -> string raises {E} uses {R}, input: string) -> string raises {E} uses {R} { run callback(input) }`, 1)
 		localSource = strings.ReplaceAll(localSource, "Fns.call", "call")
 		local := CompileFor(localSource, "go")
 		if !imported.Checked || !local.Checked {
@@ -35,9 +35,9 @@ func TestBundledCallersMissingRowsAndLocalHelperEquivalence(t *testing.T) {
 }
 
 func TestBundledGraphUsesQualifiedReferencesAndFullProvenance(t *testing.T) {
-	localGreeting := strings.Replace(bundledGreeting, `import Fns "effra/functions"`, `effect fn call<E: raises, R: uses>(callback: effect fn(string) -> string raises {E} uses {R}, input: string) -> string raises {E} uses {R} { run callback(input) }`, 1)
+	localGreeting := strings.Replace(bundledGreeting, `import Fns "ergo/functions"`, `effect fn call<E: raises, R: uses>(callback: effect fn(string) -> string raises {E} uses {R}, input: string) -> string raises {E} uses {R} { run callback(input) }`, 1)
 	localGreeting = strings.ReplaceAll(localGreeting, "Fns.call", "call")
-	for _, source := range []string{bundledGreeting, bundledConfiguration, localGreeting, `import Fns "effra/functions"
+	for _, source := range []string{bundledGreeting, bundledConfiguration, localGreeting, `import Fns "ergo/functions"
 fn apply(callback: fn(string) -> string, input: string) -> string { callback(input) }
 effect fn main() -> string { apply(Fns.identity, "passed") }`} {
 		r := CompileFor(source, "go")
@@ -63,7 +63,7 @@ effect fn main() -> string { apply(Fns.identity, "passed") }`} {
 		if strings.Contains(source, "Fns.identity") {
 			found := false
 			for _, edge := range graph.Edges {
-				found = found || edge.Kind == "references" && edge.To == "function:effra/functions.identity"
+				found = found || edge.Kind == "references" && edge.To == "function:ergo/functions.identity"
 			}
 			if !found {
 				t.Fatal("passed imported function missing from dependencies", graph.Edges)
@@ -101,7 +101,7 @@ func TestBundledSelectedTemplateDefinitions(t *testing.T) {
 			resolved := false
 			for _, declaration := range declarations {
 				if declaration.Identity == node.Declaration {
-					resolved = declaration.Kind == "template" && len(declaration.Fields) == 2 && len(declaration.TemplateParameters) == 4 && declaration.Source == "source:effra/conversions/Codec"
+					resolved = declaration.Kind == "template" && len(declaration.Fields) == 2 && len(declaration.TemplateParameters) == 4 && declaration.Source == "source:ergo/conversions/Codec"
 				}
 			}
 			if !resolved {
@@ -126,7 +126,7 @@ func TestBundledTemplateInspectionRespectsQualifiedBindings(t *testing.T) {
 		t.Fatal(r.Diagnostics)
 	}
 	local, imported := r.FindDeclaration("Codec"), r.FindDeclaration("Convert.Codec")
-	if local == nil || imported == nil || local.Kind != "record" || imported.Kind != "template" || local.Identity == imported.Identity || imported.Source != "source:effra/conversions/Codec" {
+	if local == nil || imported == nil || local.Kind != "record" || imported.Kind != "template" || local.Identity == imported.Identity || imported.Source != "source:ergo/conversions/Codec" {
 		t.Fatal(local, imported)
 	}
 	if projection := r.ProjectDeclaration(imported); !projection.Complete {
@@ -139,7 +139,7 @@ func TestBundledTemplateInspectionRespectsQualifiedBindings(t *testing.T) {
 
 func TestBundledUnusedImportsAddNoExecutableOrInitializationRoots(t *testing.T) {
 	baseline := CompileFor(`effect fn main() -> string { "unused" }`, "go")
-	unused := CompileFor(`import Fns "effra/functions" import Convert "effra/conversions" effect fn main() -> string { "unused" }`, "go")
+	unused := CompileFor(`import Fns "ergo/functions" import Convert "ergo/conversions" effect fn main() -> string { "unused" }`, "go")
 	if !baseline.Checked || !unused.Checked || len(unused.Program.BundledFunctions) != 0 || len(unused.Program.BundledTemplates) != 0 || len(unused.BundledBindings) != 0 || len(unused.BundledInterfaces) != 0 {
 		t.Fatal(unused.Diagnostics)
 	}

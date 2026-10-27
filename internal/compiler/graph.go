@@ -273,7 +273,7 @@ func (r *Result) walkDependencyFacts(sink dependencyFactSink) {
 }
 
 // legacyGraphSink is the compatibility serialization of the dependency facts:
-// the schema-9 `ef graph` result with its whole-file node, edge and
+// the schema-9 `ergo graph` result with its whole-file node, edge and
 // compatibility-metadata budgets charged in traversal order.
 type legacyGraphSink struct {
 	r             *Result

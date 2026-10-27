@@ -1,6 +1,6 @@
 package check
 
-import "effra.local/prototype/internal/sketch/syntax"
+import "ergo.local/prototype/internal/sketch/syntax"
 
 // declKinds holds the solved kinds of the unconstrained bracket parameters
 // of the package's generic type declarations.
