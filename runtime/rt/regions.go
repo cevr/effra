@@ -4,9 +4,13 @@ package rt
 type region uint8
 
 const (
-	// interruptible is a restore (Mask.Interruptible) whose enclosing state
-	// is unmasked. An empty stack is interruptible too.
+	// interruptible is a restore (Mask.Interruptible) whose outside state is
+	// unmasked. An empty stack is interruptible too.
 	interruptible region = iota
+	// restoreMasked is a restore whose outside state is masked: the owner stays
+	// masked, so an inner restore never unmasks an outer region (I2). Like
+	// every restore it is its own kind, never a copy of the outside kind.
+	restoreMasked
 	// protecting is a release, a defer body (Task.Mask) or a GoMasked body.
 	// It masks the task, and a child started under it is shielded from the
 	// owner's ambient stop.
@@ -66,8 +70,9 @@ func (s *regionStack) truncate(n int) {
 
 // shields reports whether a child started now is shielded. The walk goes down
 // from the top and skips acquiring entries: the nearest protecting entry
-// shields, the nearest interruptible (restore) entry does not, and an empty
-// walk does not. An acquisition masks only its own registration window; it is
+// shields, any restore entry stops the walk and does not shield, whatever its
+// outside mask state, and an empty walk does not. A restore is an explicit
+// opt-in to interruption, so a child started in it is cancellable. An acquisition masks only its own registration window; it is
 // not a cleanup region, so it neither shields a child nor hides the cleanup
 // region around it.
 func (s *regionStack) shields() bool {
@@ -75,7 +80,7 @@ func (s *regionStack) shields() bool {
 		switch s.at(i) {
 		case protecting:
 			return true
-		case interruptible:
+		case interruptible, restoreMasked:
 			return false
 		}
 	}
@@ -107,17 +112,19 @@ func (m Mask) Unmask() {
 
 // Interruptible runs f under a restore of this region: the poll pattern of
 // Cats Effect, the restore of ZIO and Effect's uninterruptibleMask. The restore
-// entry takes the state outside the region: interruptible when the region is
-// outermost, so f can be stopped, and the enclosing region's kind otherwise,
-// so an inner restore never unmasks an outer region. A release that f enters
-// pushes its own protecting entry. The entry is popped on every exit of f,
-// panics included.
+// entry is its own kind and records one bit of the state outside the region:
+// whether it is masked. Unmasked outside, f can be stopped; masked outside
+// (an enclosing mask or acquisition), the owner stays masked. Either way a
+// child that f starts is cancellable: the shield walk stops at a restore. A
+// release that f enters pushes its own protecting entry and shields its
+// helpers. A child keeps the admission mode it started with after f returns.
+// The entry is popped on every exit of f, panics included.
 func (m Mask) Interruptible(f func()) {
-	outside := interruptible
-	if m.index > 0 {
-		outside = m.t.regions.at(m.index - 1)
+	entry := interruptible
+	if m.index > 0 && m.t.regions.at(m.index-1) != interruptible {
+		entry = restoreMasked
 	}
-	n := m.t.regions.push(outside)
+	n := m.t.regions.push(entry)
 	defer m.t.regions.truncate(n)
 	f()
 }

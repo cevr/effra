@@ -36,14 +36,16 @@
 //     [Scope.End] apply stop-wins: a stop the task can observe beats success.
 //   - Mask regions are an explicit owner-local stack of kinds: protecting
 //     (a release, a defer body, a GoMasked body), acquiring (Acquire's
-//     registration step) and the restores between them. A child is shielded
-//     when a walk down the stack that skips acquiring entries meets a
-//     protecting entry before a restore: the ambient stop cascade does not
-//     reach it, so the release completes (Trio shielded cancel scopes,
-//     Effect uninterruptible finalizers, Go context.WithoutCancel). An
-//     acquisition masks only its own registration window; it is not a
-//     cleanup region and does not hide one. The stack has no depth limit.
-//     Its handle's Stop, a timeout and its scope's drain still stop it.
+//     registration step) and restores, which are their own kind and record
+//     only whether their outside is masked. A child is shielded when a walk
+//     down the stack that skips acquiring entries meets a protecting entry
+//     before any restore; a restore-born child stays cancellable after the
+//     restore returns. The ambient stop cascade does not reach a shielded
+//     child, so the release completes (Trio shielded cancel scopes, Effect
+//     uninterruptible finalizers, Go context.WithoutCancel); its handle's
+//     Stop, a timeout and its scope's drain still stop it. An acquisition
+//     masks only its own registration window; it is not a cleanup region
+//     and does not hide one. The stack has no depth limit.
 //   - A finished task drops its atomic parent link, so ancestry retention is
 //     bounded (G2); a defect keeps its chain as at most 32 copied frames.
 //   - An exit crosses code with no error row only inside the package's own

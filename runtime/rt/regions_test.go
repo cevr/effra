@@ -137,6 +137,9 @@ func TestRegionKinds(t *testing.T) {
 			if root.Stopped() {
 				t.Error("an inner restore unmasked its enclosing protecting region")
 			}
+			if root.regions.shields() {
+				t.Error("a restore under an outer mask must not shield: it is its own kind, not a copy")
+			}
 		})
 		nested.Unmask()
 		if root.regions.n != 2 {
@@ -186,10 +189,10 @@ func TestDeepRegionNesting(t *testing.T) {
 	}
 	inner := masks[len(masks)-1]
 	inner.Interruptible(func() {
-		// The restore of a protecting region nested in another one takes the
-		// outer protecting state: still masked, and shielding again.
-		if root.Stopped() || !root.regions.shields() {
-			t.Error("a deep restore took the wrong outside state")
+		// A restore of a region nested under an acquisition keeps the owner
+		// masked, but it is its own kind: a child started in it is cancellable.
+		if root.Stopped() || root.regions.shields() || root.regions.top != restoreMasked {
+			t.Error("a deep restore must keep the owner masked and must not shield")
 		}
 	})
 	if root.regions.top != acquiring {
