@@ -230,8 +230,34 @@ func TestOutputBound(t *testing.T) {
 	if exact, err := SourceBounded(src, len(out)); err != nil || exact != out {
 		t.Fatalf("bound equal to the output: %v", err)
 	}
+	// Review r2 M1: empty cells (inferred var types) never inherit a long
+	// cell's width, in mixed and wholly inferred neighbourhoods, for every
+	// aligned column: var groups, struct fields with trailing comments,
+	// keyed literals.
+	long := strings.Repeat("L", 4096)
+	for _, g := range []struct{ name, src string }{
+		{"typed long then inferred then typed", "package p\n\nvar (\n\ta " + long + " = " + long + "{}\n\tb = 2\n" + strings.Repeat("\tc int = 3\n", 2000) + ")\n"},
+		{"inferred run after a long type", "package p\n\nvar (\n\ta " + long + " = " + long + "{}\n" + strings.Repeat("\tb = 2\n", 2000) + ")\n"},
+		{"inferred run before a long type", "package p\n\nvar (\n" + strings.Repeat("\tb = 2\n", 2000) + "\ta " + long + " = " + long + "{}\n)\n"},
+		{"wholly inferred with a long name", "package p\n\nvar (\n\t" + long + " = 1\n" + strings.Repeat("\tb = 2\n", 2000) + ")\n"},
+		{"trailing comments after a long field", "package p\n\ntype T struct {\n\t" + long + " int // c\n" + strings.Repeat("\tx int // c\n", 2000) + "}\n"},
+		{"keyed literal with a long key", "package p\n\nvar m = M{\n\t" + long + ": 1,\n" + strings.Repeat("\tb: 2,\n", 2000) + "}\n"},
+	} {
+		out, err := Source(g.src)
+		if err != nil {
+			t.Fatalf("%s: %v", g.name, err)
+		}
+		if len(out) > len(g.src)+len(g.src)/10 {
+			t.Errorf("%s: output %d bytes for a %d-byte input", g.name, len(out), len(g.src))
+		}
+	}
+	// gofmt's alignment of a mixed group of narrow cells stays.
+	got, _ := Source("package p\n\nvar (\n\ta int = 1\n\tb = 2\n\tccccc string = \"x\"\n)\n")
+	if want := "package p\n\nvar (\n\ta     int    = 1\n\tb            = 2\n\tccccc string = \"x\"\n)\n"; got != want {
+		t.Fatalf("mixed group alignment\n%s", got)
+	}
 	// Aligned columns of similar widths still align (gofmt).
-	got, _ := Source("package p\n\ntype T struct {\n\tshort int\n\tsomewhatLongerName string\n}\n")
+	got, _ = Source("package p\n\ntype T struct {\n\tshort int\n\tsomewhatLongerName string\n}\n")
 	if want := "package p\n\ntype T struct {\n\tshort              int\n\tsomewhatLongerName string\n}\n"; got != want {
 		t.Fatalf("alignment\n%s", got)
 	}
@@ -326,7 +352,16 @@ func TestLayout(t *testing.T) {
 		{
 			"grouped names keep their line breaks",
 			"package p\nfunc f(a,\nb int) {}\n\ntype T struct {\n\tx,\n\ty int\n}\n",
-			"package p\nfunc f(a,\n\tb int) {}\n\ntype T struct {\n\tx,\n\t\ty int\n}\n",
+			"package p\nfunc f(a,\n\tb int) {}\n\ntype T struct {\n\tx,\n\ty int\n}\n",
+		},
+		{
+			// Review r2 m1: grouped names take the enclosing list's or
+			// block's continuation level, and one of their own only where
+			// none exists; gofmt's layouts (gofmt also adds a blank line
+			// after the package clause and opens empty bodies).
+			"grouped names take one continuation level",
+			"package p\nfunc f(a,\nb int,\nc,\nd string) {}\nfunc g(\na,\nb int,\nc,\nd string,\n) {}\nfunc h() (a,\nb int,\nc,\nd string) {}\nvar (\nx,\ny int\nz string\n)\nvar u,\nv int\nfunc k() {\n\tvar p,\n\tq int\n}\n",
+			"package p\nfunc f(a,\n\tb int,\n\tc,\n\td string) {}\nfunc g(\n\ta,\n\tb int,\n\tc,\n\td string,\n) {}\nfunc h() (a,\n\tb int,\n\tc,\n\td string) {}\nvar (\n\tx,\n\ty int\n\tz string\n)\nvar u,\n\tv int\nfunc k() {\n\tvar p,\n\t\tq int\n}\n",
 		},
 		{
 			// Review M9: the explicit empty statement keeps the label; the

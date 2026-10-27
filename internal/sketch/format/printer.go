@@ -38,6 +38,10 @@ type printer struct {
 	lastTok syntax.Pos // end of the last printed source token
 
 	walked map[*syntax.BinaryExpr]walkResult // walkBinary, memoised
+
+	// listBroken reports that the innermost list being printed breaks
+	// across lines, so its items already have a continuation level.
+	listBroken bool
 }
 
 type walkResult struct {
@@ -411,11 +415,21 @@ func (e *LimitError) Error() string {
 	return fmt.Sprintf("formatted source exceeds the %d-byte output limit", e.Limit)
 }
 
-// Alignment sections follow go/printer's exprList heuristic: a cell whose
-// width differs from the geometric mean of its section's widths by a
-// factor of alignRatio or more starts a new section, unless both it and
-// the previous cell are at most alignSmall wide. One long name therefore
-// does not pad every short neighbour to its width.
+// Alignment sections follow go/printer's exprList heuristic on every
+// column: a cell whose width differs from the geometric mean of its
+// section's non-empty widths by a factor of alignRatio or more starts a new
+// section, unless both it and the previous non-empty cell are at most
+// alignSmall wide. One long name therefore does not pad every short
+// neighbour to its width.
+//
+// An empty cell (the type of `b = 2` in a var group) is padded to its
+// section's width, so it may share a section only while that width is at
+// most alignSmall: gofmt's `b            = 2` under typed neighbours stays,
+// and a run of empty cells never inherits a long cell's width. A section
+// that holds an empty cell ends before a cell wider than alignSmall.
+// Padding is therefore bounded by the line's own section, never by an
+// arbitrary long cell elsewhere (go/printer breaks its sections at zero
+// sizes for the same reason).
 const (
 	alignRatio = 2.5
 	alignSmall = 40
@@ -430,23 +444,33 @@ func (p *printer) align(lines []outLine, widths [][]int, from, to, column int) {
 		j := i + 1
 		size := func(k int) int { return utf8.RuneCountInString(lines[k].cells[column]) }
 		prev := size(i)
+		widest, hasEmpty := prev, prev == 0
 		lnsum, count := 0.0, 0
 		if prev > 0 {
 			lnsum, count = math.Log(float64(prev)), 1
 		}
 		for j < to && len(lines[j].cells) > column+1 && lines[j].indent == lines[i].indent {
 			s := size(j)
-			if s > 0 && prev > 0 && (s > alignSmall || prev > alignSmall) && count > 0 {
+			if s == 0 {
+				if widest > alignSmall {
+					break
+				}
+				hasEmpty = true
+				j++
+				continue
+			}
+			if hasEmpty && s > alignSmall {
+				break
+			}
+			if count > 0 && (s > alignSmall || prev > alignSmall) {
 				ratio := float64(s) / math.Exp(lnsum/float64(count))
 				if ratio*alignRatio <= 1 || ratio >= alignRatio {
 					break
 				}
 			}
-			if s > 0 {
-				lnsum += math.Log(float64(s))
-				count++
-			}
-			prev = s
+			lnsum += math.Log(float64(s))
+			count++
+			prev, widest = s, max(widest, s)
 			j++
 		}
 		width := 0

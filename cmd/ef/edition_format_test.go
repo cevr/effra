@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,4 +112,42 @@ func TestFmtFormatsEachFileWithItsEditionsFormatter(t *testing.T) {
 	if stdout, _, code := runSmokeCLI(t, editionDeadline, binary, root, sketchUnformatted, "fmt", "--stdin"); code != 2 || len(stdout) != 0 {
 		t.Fatalf("ef fmt --stdin of 2026 text: exit %d, stdout %q", code, stdout)
 	}
+}
+
+// TestFmtFormatsAMixedVarGroupUnderTheDefaultBound (review r2 M1): a var
+// group whose long type is followed by an inferred declaration and 2,000
+// short typed ones formats under the default 4 MiB bound. Before the fix
+// the empty type cell carried the long type's width to every short line,
+// and the 39,225-byte file needed 8,232,442 bytes of output.
+func TestFmtFormatsAMixedVarGroupUnderTheDefaultBound(t *testing.T) {
+	binary := buildTestCLI(t)
+	root := editionWorkspace(t)
+	long := strings.Repeat("L", 4096)
+	var b strings.Builder
+	b.WriteString("package p\ntype " + long + " struct{}\nvar (\na " + long + " = " + long + "{}\nb = 2\n")
+	for i := range 2000 {
+		fmt.Fprintf(&b, "c%d int = 3\n", i)
+	}
+	b.WriteString(")\n")
+	source := b.String()
+	editionWrite(t, filepath.Join(root, "new", "effra.json"), `{"edition":"2026"}`)
+	editionWrite(t, filepath.Join(root, "new", "alignment-empty.ef"), source)
+	stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "--json", "new/alignment-empty.ef")
+	if code != 0 {
+		t.Fatalf("ef fmt: exit %d\n%s\n%s", code, firstLines(stdout), stderr)
+	}
+	after, err := os.ReadFile(filepath.Join(root, "new", "alignment-empty.ef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) > len(source)+len(source)/5 {
+		t.Fatalf("a %d-byte source formatted to %d bytes", len(source), len(after))
+	}
+}
+
+func firstLines(b []byte) string {
+	if len(b) > 400 {
+		return string(b[:400]) + "…"
+	}
+	return string(b)
 }

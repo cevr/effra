@@ -142,7 +142,7 @@ func (p *printer) varDecl(d *syntax.VarDecl) {
 // varSpec prints `names [Type] [= values]`; in a group the names, types and
 // `=` align in columns.
 func (p *printer) varSpec(s *syntax.VarSpec, aligned, typeColumn bool) {
-	p.identList(s.Names)
+	p.identList(s.Names, !aligned)
 	if aligned && (typeColumn || s.Type != nil || len(s.Values) > 0) {
 		p.sep()
 	}
@@ -164,13 +164,16 @@ func (p *printer) varSpec(s *syntax.VarSpec, aligned, typeColumn bool) {
 }
 
 // identList prints grouped names; a line break after a comma follows the
-// source and indents the rest one level, as gofmt keeps it.
-func (p *printer) identList(list []*syntax.Ident) {
+// source. With indent, the names after the break take one continuation
+// level (an unparenthesised var spec, the first parameter of a list that
+// does not break, a switch binding); without it they take the level the
+// enclosing list or block gives, as go/printer's identList(…, indent).
+func (p *printer) identList(list []*syntax.Ident, indent bool) {
 	broken := false
 	for i, x := range list {
 		if i > 0 {
 			p.synth(",")
-			if p.gap(x.Pos(), true) && !broken {
+			if p.gap(x.Pos(), true) && !broken && indent {
 				broken = true
 				p.indent++
 			}
@@ -219,6 +222,8 @@ func (p *printer) list(openPos syntax.Pos, open string, items []syntax.Node, ite
 	if broken {
 		p.indent++
 	}
+	savedBroken := p.listBroken
+	p.listBroken = broken
 	for i := range items {
 		if i == 0 {
 			if p.gap(items[0].Pos(), false) {
@@ -230,6 +235,7 @@ func (p *printer) list(openPos syntax.Pos, open string, items []syntax.Node, ite
 		}
 		item(i)
 	}
+	p.listBroken = savedBroken
 	if broken {
 		if p.breakBefore(closePos) {
 			p.synth(",")
@@ -281,7 +287,7 @@ func nodes[T syntax.Node](list []T) []syntax.Node {
 func (p *printer) fieldList(l *syntax.FieldList, open, close string, trailingComma bool) {
 	p.list(l.Opening, open, nodes(l.List), func(i int) {
 		f := l.List[i]
-		p.identList(f.Names)
+		p.identList(f.Names, !p.listBroken)
 		if f.Type != nil {
 			if len(f.Names) > 0 {
 				p.space()
@@ -325,7 +331,7 @@ func (p *printer) typ(x syntax.Expr) { p.expr1(x, 1) }
 func (p *printer) structType(t *syntax.StructType) {
 	fl := t.Fields
 	field := func(f *syntax.Field, aligned bool) {
-		p.identList(f.Names)
+		p.identList(f.Names, false)
 		if aligned {
 			p.sep()
 		} else {
@@ -666,7 +672,7 @@ func (p *printer) stmt(s syntax.Stmt) {
 		p.token(s.Switch, "switch")
 		p.header(s.Init, func() {
 			if len(s.Binds) > 0 {
-				p.identList(s.Binds)
+				p.identList(s.Binds, true)
 				p.space()
 				p.token(s.Define, ":=")
 				p.space()
