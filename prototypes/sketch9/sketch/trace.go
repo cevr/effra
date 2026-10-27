@@ -508,17 +508,16 @@ func (x *traceIndex) checkLink(e *TraceEvent) error {
 	if !slices.Contains([]string{"call-exit", "handler", "body-exit", "observe", "panic"}, e.Kind) {
 		return fmt.Errorf("a %s event carries no link", e.Kind)
 	}
+	if e.Link >= e.ID {
+		return fmt.Errorf("%s (id %d) links occurrence %d, which was raised after it", e.Kind, e.ID, e.Link)
+	}
 	t := x.byID[e.Link]
 	if t == nil {
 		if !x.dropped {
 			return fmt.Errorf("%s links occurrence %d, which is not in the trace", e.Kind, e.Link)
 		}
 		x.omit = append(x.omit, TraceOmission{Kind: "unresolvedLink", Task: e.Task, Detail: fmt.Sprintf("the %s at seq %d links occurrence %d, which the recorder dropped", e.Kind, e.Seq, e.Link)})
-		e.Link = 0
 		return nil
-	}
-	if t.ID >= e.ID {
-		return fmt.Errorf("%s (id %d) links occurrence %d, which was raised after it", e.Kind, e.ID, t.ID)
 	}
 	ok := false
 	switch e.Kind {
@@ -718,7 +717,7 @@ func (x *traceIndex) causeTrace(root *TraceTask) []string {
 				d, _ := x.m.Def(f.Def)
 				c.say(2, "task #%d %s at %s", f.Task, f.Def, d.Site)
 			}
-			if exit.Link != 0 && x.byID[exit.Link].Kind == "panic" {
+			if l := x.byID[exit.Link]; exit.Link != 0 && (l == nil || l.Kind == "panic") {
 				c.origin(exit.Link, 2, "carried ")
 			}
 		case "interrupted":
@@ -766,9 +765,14 @@ func (c *causeWriter) carried(e *TraceEvent, def string, depth int) {
 }
 
 // origin explains occurrence id, which a recorded link named.
+// origin explains occurrence id, which a recorded link named.
 func (c *causeWriter) origin(id uint64, depth int, verb string) {
 	x := c.x
 	e := x.byID[id]
+	if e == nil {
+		c.say(depth, "%soccurrence %d, which the recorder dropped (see omissions)", verb, id)
+		return
+	}
 	if c.seen[id] {
 		c.say(depth, "%s%s seq %d, explained above", verb, e.Kind, e.Seq)
 		return
@@ -776,9 +780,12 @@ func (c *causeWriter) origin(id uint64, depth int, verb string) {
 	c.seen[id] = true
 	switch e.Kind {
 	case "call-exit":
-		call := x.byID[e.Link]
 		d, _ := x.m.Def(e.Def)
-		c.say(depth, "%sthe %s of call %s at %s in %s, whose row is error[%s] (call seq %d, call-exit seq %d)", verb, outcome(e), e.Def, e.Site, e.In, strings.Join(d.Errors, " | "), call.Seq, e.Seq)
+		callSeq := "dropped"
+		if call := x.byID[e.Link]; call != nil {
+			callSeq = fmt.Sprint(call.Seq)
+		}
+		c.say(depth, "%sthe %s of call %s at %s in %s, whose row is error[%s] (call seq %s, call-exit seq %d)", verb, outcome(e), e.Def, e.Site, e.In, strings.Join(d.Errors, " | "), callSeq, e.Seq)
 	case "deadline":
 		d, _ := x.m.Def(e.Def)
 		c.say(depth, "%sthe deadline of task #%d %s (seq %d): the %s %s at %s in %s, row error[%s]", verb, e.Task, e.Def, e.Seq, d.Kind, d.Spelling, d.Site, d.In, strings.Join(d.Errors, " | "))

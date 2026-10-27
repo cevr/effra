@@ -147,7 +147,10 @@ type taskLinks struct {
 	// pending is the task's latest failure, interruption or defect
 	// occurrence that no handler has consumed. A failure travels from where
 	// it is raised to a handler or to the body exit by return, inside one
-	// task, so the latest unconsumed one is the one in flight.
+	// task, so the latest unconsumed one is the one in flight. That holds
+	// for emitted code, which handles or returns every failure it receives.
+	// Hand-written Go that drops a failure leaves it pending, and a later
+	// handler in the same task would link it.
 	pending uint64
 	// exit is the task's body-exit occurrence, and failed whether that exit
 	// was an error, for the owner's observation.

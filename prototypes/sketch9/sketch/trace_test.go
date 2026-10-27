@@ -169,6 +169,21 @@ func TestQueryTraceAcceptsValidOrders(t *testing.T) {
 	if !slices.ContainsFunc(ev.Omissions, func(o TraceOmission) bool { return o.Kind == "ancestryUnavailable" && o.Task == 2 }) {
 		t.Errorf("omissions %+v; want ancestryUnavailable for task #2", ev.Omissions)
 	}
+	// A link to a dropped occurrence is named, not followed and not guessed.
+	ev, err = QueryTrace(m, Revision(src), recorded(src, 2,
+		task(1, 0, "start", 1, 0),
+		point(5, 3, "handler", 1, 0, "latency.OrderNotFound", "timeout.sketch:71:2"),
+		task(6, 0, "body-exit", 1, 0),
+	))
+	if err != nil {
+		t.Fatalf("a trace with a dropped link target was refused: %v", err)
+	}
+	if want := "    caught occurrence 3, which the recorder dropped (see omissions)"; !slices.Contains(ev.CauseTrace, want) {
+		t.Errorf("cause trace %q lacks %q", ev.CauseTrace, want)
+	}
+	if !slices.ContainsFunc(ev.Omissions, func(o TraceOmission) bool { return o.Kind == "unresolvedLink" }) {
+		t.Errorf("omissions %+v; want unresolvedLink", ev.Omissions)
+	}
 }
 
 // The query refuses what it cannot check rather than guess, and says why.
@@ -208,7 +223,7 @@ func TestQueryTraceRefuses(t *testing.T) {
 		{"exit parent differs from start", "has parent #1 here but #0 at its start", recorded(src, 0, start, task(2, 0, "body-exit", 1, 1, notFound))},
 		{"task event under another definition", "started as", recorded(src, 0, start, TraceEvent{ID: 2, Kind: "body-exit", Task: 1, Def: blockID, Site: blockSite})},
 		{"call-exit without its call", "links no call", recorded(src, 0, start, point(2, 0, "call-exit", 1, 0, findID, findSite))},
-		{"link to a missing occurrence", "not in the trace", recorded(src, 0, start, call, failed, point(4, 99, "handler", 1, 0, "latency.OrderNotFound", "timeout.sketch:71:2"))},
+		{"link to a missing occurrence", "not in the trace", recorded(src, 0, start, call, failed, point(50, 30, "handler", 1, 0, "latency.OrderNotFound", "timeout.sketch:71:2"))},
 		{"link to a later occurrence", "raised after it", recorded(src, 0, start, call, point(3, 4, "call-exit", 1, 0, findID, findSite, notFound), point(4, 0, "call", 1, 0, findID, findSite))},
 		{"handler of another type", "cannot refer to", recorded(src, 0, start, call, failed, point(4, 3, "handler", 1, 0, "latency.GatewayDown", "timeout.sketch:73:2"))},
 		{"handler of an ok call", "cannot refer to", recorded(src, 0, start, call, point(3, 2, "call-exit", 1, 0, findID, findSite), point(4, 3, "handler", 1, 0, "latency.OrderNotFound", "timeout.sketch:71:2"))},
