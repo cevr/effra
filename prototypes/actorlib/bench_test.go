@@ -15,7 +15,8 @@ import (
 // request and context cancellation (the Tokio "handle + mpsc + oneshot"
 // pattern). The baseline gives less: a send after stop blocks until the
 // sender's own context ends instead of failing Stopped, queued requests are
-// not answered on stop, and a dropped reply hangs the caller.
+// not answered on stop, and a dropped reply hangs the caller. The matched
+// baselines with the library's contract are in bench_matched_test.go.
 
 const benchCapacity = 128
 
@@ -247,7 +248,7 @@ func BenchmarkAgentCall(b *testing.B) {
 	addr := ag.Address()
 	b.ReportAllocs()
 	for b.Loop() {
-		n, err := actorlib.Call(root, addr, func(n int64) (int64, int64, error) { return n, n, nil })
+		n, err := actorlib.Call(root, addr, func(_ *rt.Task, n *int64) (int64, error) { return *n, nil })
 		if err != nil {
 			b.Fatal(err)
 		}

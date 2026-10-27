@@ -50,8 +50,8 @@ func (m probe) Close() {
 // replyTo builds a request on c's control by hand, as Ask does, so a test can
 // admit it without waiting for the answer.
 func replyTo[M any](a Address[M]) (Reply[int, Never], chan outcome[int, Never]) {
-	slot := make(chan outcome[int, Never], 1)
-	return Reply[int, Never]{slot: slot, from: &a.c.control}, slot
+	sl := newSlot[int, Never](&a.c.control)
+	return Reply[int, Never]{sl}, sl.ch
 }
 
 func waitQueued[M any](t *testing.T, a Address[M], n int) {
@@ -371,45 +371,141 @@ func TestEndReleasesStateAndRefusesLaterSends(t *testing.T) {
 	}
 }
 
+// get lowers `func(n *int) int { return *n }`.
+func get(_ *rt.Task, n *int) (int, error) { return *n, nil }
+
 func TestAgentCallsAreOrderedAndQueuedCallsStop(t *testing.T) {
 	within(t, func(task *rt.Task, s *rt.Scope) error {
 		ag := StartAgent(s, "agent", 0, 8)
 		addr := ag.Address()
 		for i := range 100 {
-			v, err := Call(task, addr, func(n int) (int, int, error) { return n + 1, n, nil })
+			v, err := Call(task, addr, func(_ *rt.Task, n *int) (int, error) { old := *n; *n++; return old, nil })
 			if err != nil || v != i {
 				t.Fatalf("call %d: got %d, %v", i, v, err)
 			}
 		}
-		if _, err := Call(task, addr, func(n int) (int, int, error) { return n + 100, 0, boom{} }); !failureIs[boom](err) {
+		full := func(_ *rt.Task, n *int) (int, error) {
+			if *n >= 100 {
+				return 0, boom{} // fails before it changes the state
+			}
+			*n++
+			return *n, nil
+		}
+		if _, err := Call(task, addr, full); !failureIs[boom](err) {
 			t.Errorf("failing call: got %v, want boom", err)
 		}
-		if v, _ := Call(task, addr, func(n int) (int, int, error) { return n, n, nil }); v != 100 {
-			t.Errorf("a failing call changed the state: got %d, want 100", v)
+		if v, _ := Call(task, addr, get); v != 100 {
+			t.Errorf("state after the failing call: got %d, want 100", v)
 		}
-		gate, holding := make(chan struct{}), make(chan struct{})
+		holding := make(chan struct{})
 		blocker := rt.Go(s, "blocker", func(ct *rt.Task) (int, error) {
-			return Call(ct, addr, func(n int) (int, int, error) { holding <- struct{}{}; <-gate; return n, n, nil })
+			return Call(ct, addr, func(at *rt.Task, n *int) (int, error) {
+				close(holding)
+				<-at.Done() // a wait of the callback observes the agent's stop (I1)
+				return 0, rt.Interrupted
+			})
 		})
 		<-holding
-		queued := rt.Go(s, "queued", func(ct *rt.Task) (int, error) {
-			return Call(ct, addr, func(n int) (int, int, error) { return n, n, nil })
-		})
+		queued := rt.Go(s, "queued", func(ct *rt.Task) (int, error) { return Call(ct, addr, get) })
 		waitQueued(t, addr, 1)
-		go func() { time.Sleep(10 * time.Millisecond); close(gate) }()
 		if err := ag.Stop(); err != nil {
 			t.Errorf("Stop: %v", err)
 		}
-		if v, err := blocker.Wait(); err != nil || v != 100 {
-			t.Errorf("in-flight call: got %d, %v; want 100, nil", v, err)
+		if _, err := blocker.Wait(); !failureIs[Stopped](err) {
+			t.Errorf("in-flight call interrupted by the stop: got %v, want Stopped", err)
 		}
 		if _, err := queued.Wait(); !failureIs[Stopped](err) {
 			t.Errorf("queued call: got %v, want Stopped", err)
 		}
-		if _, err := Call(task, addr, func(n int) (int, int, error) { return n, n, nil }); !failureIs[Stopped](err) {
+		if _, err := Call(task, addr, get); !failureIs[Stopped](err) {
 			t.Errorf("Call after Stop: got %v, want Stopped", err)
 		}
 		return nil
+	})
+}
+
+// A defect in a callback is a defect of the agent, not a refusal: the caller
+// gets NoReply, a queued caller gets Stopped, and Stop returns the defect.
+func TestAgentCallbackDefectIsADefect(t *testing.T) {
+	within(t, func(task *rt.Task, s *rt.Scope) error {
+		ag := StartAgent(s, "agent-defect", 0, 8)
+		addr := ag.Address()
+		gate, holding := make(chan struct{}), make(chan struct{})
+		first := rt.Go(s, "first", func(ct *rt.Task) (int, error) {
+			return Call(ct, addr, func(_ *rt.Task, n *int) (int, error) {
+				close(holding)
+				<-gate
+				panic("callback bug")
+			})
+		})
+		<-holding
+		second := rt.Go(s, "second", func(ct *rt.Task) (int, error) { return Call(ct, addr, get) })
+		waitQueued(t, addr, 1)
+		close(gate)
+		if _, err := first.Wait(); !failureIs[NoReply](err) {
+			t.Errorf("caller of a panicking callback: got %v, want NoReply", err)
+		}
+		if _, err := second.Wait(); !failureIs[Stopped](err) {
+			t.Errorf("queued caller after a defect: got %v, want Stopped", err)
+		}
+		err := ag.Stop()
+		var c *rt.Cause
+		if !errors.As(err, &c) || len(c.Reasons) != 1 || c.Reasons[0].Kind != rt.KindDefect {
+			t.Errorf("Stop after a callback defect: got %v, want the defect alone", err)
+		}
+		return nil
+	})
+}
+
+// item carries a slice: a value with mutable storage that crosses the actor
+// boundary.
+type item struct {
+	tags  []string
+	reply Reply[[]string, Never]
+}
+
+func (m item) Close() { m.reply.Close() }
+
+// TestBoundaryCopiesMessagesAndReplies checks the copy rule at each crossing:
+// a message the sender changes after Send, a reply the asker changes, and an
+// agent result the caller changes never reach the actor's state.
+func TestBoundaryCopiesMessagesAndReplies(t *testing.T) {
+	within(t, func(task *rt.Task, s *rt.Scope) error {
+		a := Start(s, "copies", []string(nil), 4, func(_ *rt.Task, st []string, m item) (Next[[]string], error) {
+			defer m.Close()
+			st = append(st, m.tags...)
+			m.reply.Send(st)
+			return Continue(st), nil
+		})
+		tags := []string{"a"}
+		got, err := Ask(task, a.Address(), func(r Reply[[]string, Never]) item { return item{tags: tags, reply: r} })
+		if err != nil {
+			return err
+		}
+		tags[0] = "sender changed"
+		got[0] = "asker changed"
+		again, err := Ask(task, a.Address(), func(r Reply[[]string, Never]) item { return item{reply: r} })
+		if err != nil {
+			return err
+		}
+		if len(again) != 1 || again[0] != "a" {
+			t.Errorf("actor state after the caller changed its copies: got %q, want [a]", again)
+		}
+		if err := a.Stop(); err != nil {
+			return err
+		}
+
+		ag := StartAgent(s, "agent-copies", []string{"x"}, 4)
+		names := func(_ *rt.Task, st *[]string) ([]string, error) { return *st, nil }
+		out, err := Call(task, ag.Address(), names)
+		if err != nil {
+			return err
+		}
+		out[0] = "caller changed"
+		if out, _ := Call(task, ag.Address(), names); out[0] != "x" {
+			t.Errorf("agent state after the caller changed the result: got %q, want [x]", out)
+		}
+		return ag.Stop()
 	})
 }
 
