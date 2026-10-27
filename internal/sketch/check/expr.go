@@ -73,6 +73,26 @@ func (c *checker) record(x syntax.Expr, op operand) {
 // comparison to neither, since its result type does not depend on them).
 // A constant operation keeps its operands untyped, as in Go: they are
 // never materialized. An untyped target updates without finalizing.
+//
+// It is the one finalization path (round-8 class B). The context sites
+// where an untyped operand meets a type, and the function each one runs
+// through, with a row each in TestContextSites:
+//   - assignment, var and := with a written type, return, a call argument
+//     (plain, explicit or inferred once bound), a composite-literal
+//     element, field and key, a map index, a slice or array index and a
+//     slice bound, a channel send, a range key, a block's value, and the
+//     arguments of append, make and delete: assign → convertUntyped;
+//   - := and var without a type, an empty-interface target and a switch
+//     tag: defaultOf, or convertUntyped's default branch;
+//   - a conversion T(x): convertedArg;
+//   - a binary operation with one typed operand, a comparison, an
+//     assignment operation and a switch case value against its tag:
+//     matchTypes and untypedTo;
+//   - min and max: every argument takes the result's type (builtin);
+//   - len and cap of a constant keep it untyped, as in go/types.
+//
+// A shift by a non-constant count of an untyped constant is S108 (class
+// A), so no shift defers its type to the context.
 func (c *checker) updateExprType(x syntax.Expr, t Type) {
 	if c.silent != 0 || x == nil || t == nil || isInvalid(t) {
 		return

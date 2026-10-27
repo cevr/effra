@@ -28,6 +28,7 @@ func Two[T any](a T, b T) T { return a }
 		{"inferred with a typed argument", `func F(n uint, v int8) int8 { return Two(1 << n, v) }`, true},
 		{"inferred reversed", `func F(n uint, v int8) int8 { return Two(v, 1 << n) }`, true},
 		{"rune", `func F(n uint) int32 { return 'a' << n }`, true},
+		{"typed left", `func F(n uint) int8 { return int8(1) << n }`, false},
 		{"typed variable", `func F(n uint, x int8) int8 { return x << n }`, false},
 		{"constant shift", `func F() int8 { return 1 << 3 }`, false},
 		{"constant shift inferred", `func F() int { return Id(1 << 3) }`, false},

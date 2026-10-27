@@ -500,7 +500,18 @@ func (c *checker) lhs(x syntax.Expr) operand {
 				return bad(x)
 			}
 			c.recordUse(id, v)
-			return operand{mode: modeValue, typ: v.Type, addressable: true, expr: x}
+			op := operand{mode: modeValue, typ: v.Type, addressable: true, expr: x}
+			// Info records the assigned variable's type, as go/types
+			// records an assignment's left side (D1).
+			for e := x; ; {
+				c.record(e, op)
+				p, ok := e.(*syntax.ParenExpr)
+				if !ok {
+					break
+				}
+				e = p.X
+			}
+			return op
 		}
 	}
 	op := c.valueExpr(x, nil)

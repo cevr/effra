@@ -477,6 +477,7 @@ func (c *checker) conversion(x *syntax.CallExpr, t Type) operand {
 			case isString(tb) && isString(ob):
 				okConv = true
 			case isString(tb) && isInteger(ob):
+				c.convertedArg(x.Args[0], op, t)
 				return operand{mode: modeValue, typ: t}
 			case isBoolean(tb) && isBoolean(ob):
 				okConv = true
@@ -495,14 +496,35 @@ func (c *checker) conversion(x *syntax.CallExpr, t Type) operand {
 			if !c.representable(&res, tb) {
 				return bad(x)
 			}
+			c.convertedArg(x.Args[0], op, t)
 			return res
 		}
 	}
 	if c.convertible(op.typ, t) {
+		c.convertedArg(x.Args[0], op, t)
 		return operand{mode: modeValue, typ: t}
 	}
 	c.errorf(x, CodeType, "cannot convert %s to %s", op.typ, t)
 	return bad(x)
+}
+
+// convertedArg finalizes an untyped conversion argument, as go/types
+// conversion does (a context site of updateExprType): the argument takes
+// the conversion's type, except that a conversion to an interface or to a
+// type without constants gives it its default type, and an integer
+// constant converted to a string keeps its untyped kind.
+func (c *checker) convertedArg(arg syntax.Expr, op operand, t Type) {
+	if !isUntyped(op.typ) {
+		return
+	}
+	final := t
+	switch b, isBasic := under(t).(*Basic); {
+	case asInterface(t) != nil || (op.mode == modeConst && !isBasic):
+		final = defaultType(op.typ)
+	case op.mode == modeConst && isInteger(op.typ) && isBasic && isString(b):
+		final = op.typ
+	}
+	c.updateExprType(arg, final)
 }
 
 func (c *checker) convertible(v, t Type) bool {
