@@ -1,0 +1,13 @@
+=== RUN   TestChecksAgreeWithBig
+--- PASS: TestChecksAgreeWithBig (0.01s)
+=== RUN   TestCheckedOperatorsReportOverflow
+--- PASS: TestCheckedOperatorsReportOverflow (0.00s)
+=== RUN   TestAccountingSumAgrees
+--- PASS: TestAccountingSumAgrees (0.00s)
+=== RUN   TestAccountingSumOverflowControl
+--- PASS: TestAccountingSumOverflowControl (0.00s)
+=== RUN   TestHashMixPolicy
+--- PASS: TestHashMixPolicy (0.00s)
+=== RUN   TestOperatorKernelsAgree
+--- PASS: TestOperatorKernelsAgree (0.00s)
+PASS

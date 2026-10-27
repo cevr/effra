@@ -46,11 +46,18 @@ func main() {
 	rounds := flag.Int("rounds", 10, "interleaved rounds, one sample per benchmark each")
 	benchtime := flag.String("benchtime", "1s", "benchtime per sample")
 	count := flag.Int("count", 10, "samples per benchmark in the contiguous run (0 skips it)")
+	summarize := flag.Bool("summarize", false, "only rewrite summary.md from the receipts already in -out")
 	flag.Parse()
 	if *out == "" {
 		*out = filepath.Join("docs/research/overflow-bench/results", time.Now().UTC().Format("20060102T150405Z"))
 	}
-	if err := run(*out, *rounds, *count, *benchtime); err != nil {
+	var err error
+	if *summarize {
+		err = writeSummary(*out, *count)
+	} else {
+		err = run(*out, *rounds, *count, *benchtime)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		os.Exit(1)
 	}
@@ -390,9 +397,11 @@ func writeSummary(out string, count int) error {
 	env, _ := os.ReadFile(filepath.Join(out, "env.txt"))
 	fmt.Fprintf(&b, "# #108 overflow-bench run %s\n\n```\n%s```\n\n", filepath.Base(out), env)
 	b.WriteString(loadSummary(filepath.Join(out, "loads.tsv")))
+	var canonical []string
 	if raw, err := os.ReadFile(filepath.Join(out, "count10.txt")); err == nil {
 		fmt.Fprintf(&b, "\n## Contiguous run (-count %d)\n\n", count)
-		b.WriteString(table(parseBench(raw), nil))
+		canonical = benchNames(raw)
+		b.WriteString(table(parseBench(raw), nil, canonical))
 	}
 	raw, err := os.ReadFile(filepath.Join(out, "interleaved.txt"))
 	if err != nil {
@@ -403,7 +412,7 @@ func writeSummary(out string, count int) error {
 		return err
 	}
 	b.WriteString("\n## Interleaved run (one process per sample, shuffled each round)\n\n")
-	b.WriteString(table(parseBench(raw), pairedRatios(tsv)))
+	b.WriteString(table(parseBench(raw), pairedRatios(tsv), canonical))
 	return os.WriteFile(filepath.Join(out, "summary.md"), []byte(b.String()), 0o644)
 }
 
@@ -451,7 +460,9 @@ func baseline(name string) string {
 	return name[:i] + "/wrap"
 }
 
-func table(samples []sample, paired map[string][]float64) string {
+// table orders rows by canonical when it names them (the contiguous run is
+// in declaration order), else by first appearance.
+func table(samples []sample, paired map[string][]float64, canonical []string) string {
 	cells := map[string]*cell{}
 	var order []string
 	for _, s := range samples {
@@ -464,6 +475,13 @@ func table(samples []sample, paired map[string][]float64) string {
 		c.ns = append(c.ns, s.ns)
 		c.bytes, c.allocs = s.bytes, s.allocs
 	}
+	rank := func(name string) int {
+		if i := slices.Index(canonical, name); i >= 0 {
+			return i
+		}
+		return len(canonical) + slices.Index(order, name)
+	}
+	slices.SortStableFunc(order, func(a, b string) int { return rank(a) - rank(b) })
 	var b strings.Builder
 	b.WriteString("| Benchmark | n | Median ns/op | Min | Max | Median vs wrap |")
 	if paired != nil {

@@ -89,3 +89,239 @@ This keeps **explicit contracts**: no pure operator gains a hidden failure row a
 ## Elixir and MoonBit comparison
 
 MoonBit fixes widths and wraps. `Int` (32-bit) and `Int64` addition, subtraction and multiplication follow two's complement, so `2147483647 + 1` is `-2147483648` (core `builtin/intrinsics.mbt:L227-L287`, `builtin/int64.mbt:L199-L269` at `e96ede8b`). Division by zero panics for `Int` and `Int64`, while `Int` `%` by zero is documented as undefined (`intrinsics.mbt:L290-L337`, `int64.mbt:L282-L310`). This corroborates Effra's explicit wrapping profile; the panic and the undefined remainder are the implicit division policies that the divisor proof above rejects. Elixir's `div/2` and `/` raise `ArithmeticError` on zero, and `/` always returns a float (`lib/elixir/lib/kernel.ex:L483-L511`, `L1600-L1625` at `91ee75bb`). Elixir integers are BEAM integers, whose arithmetic is arbitrary precision and raises rather than wraps when it finally overflows at several megabits (`system/doc/design_principles/secure_coding.md:L131-L134` at OTP `516126e9`); OTP's memory guide distinguishes small from large integers (`system/doc/efficiency_guide/memory.md:L40-L51` at OTP `516126e9`). Arbitrary precision stays rejected for `i64` because it would diverge from Go `int64`. Pins are in [PRIOR_ART](../../PRIOR_ART.md#standing-comparison-languages-elixir-with-erlangotp-and-moonbit-2026-10-09).
+
+## Cost of checked overflow in emitted Go (#108, 2026-10-27)
+
+Status: measurement record and decision input for [#81](https://github.com/cevr/effra/issues/81). It changes no compiler behaviour. The benchmark-last rule (#48, #62) applies: these numbers are decision evidence on one loaded host, not a performance claim.
+
+### Question and hypothesis
+
+#108 asks what an overflow-checked `+`, `-` and `*` costs against wrap in direct-Go output, and whether "checked by default" is affordable, as Tov claims for its release builds. The hypothesis was that a compare-based or `math/bits` check costs at most 10% on a tight arithmetic kernel. **The hypothesis is refuted for tight kernels.** The cheapest checked accounting sum runs at about 2.1 to 2.3 times the wrap time. The cheapest check for one operator costs 1.24 to 1.75 times wrap for `+` and `-` and about 2.0 to 2.7 times wrap for `*`. The second half of the hypothesis, "nothing elsewhere", was not measured: application code where arithmetic is a small share of the time is outside this spike.
+
+### Method
+
+The package [`overflow-bench`](overflow-bench/) holds hand-emitted Go. Each kernel has three policy variants. **wrap** uses the plain `int64` operators, the signed-64 wrap profile of the sketch ([types](../spec/types.md#basic-types), rule 2). **defect** checks and then panics, as the prototype emitter lowers a failure in a frame that cannot fail. **fail** checks and then returns a typed failure: a function with `error[Overflow]` lowers to a Go `(T, error)` result, the error type is a value struct with a value-receiver `Error` method, and each fallible call is followed by `if err != nil { return 0, err }` ([rows](../spec/rows.md); `internal/sketch/proto/emit.go`, `signature` and `fail`).
+
+Each checked variant comes in check families that differ only in how the test is spelled:
+
+| Family | `+` and `-` | `*` |
+| --- | --- | --- |
+| cmp | compare before the operation (CERT INT32-C): `b > 0 && a > MaxInt64-b \|\| b < 0 && a < MinInt64-b` | multiply, then divide back (`p/a != b`, plus the `-1 * MinInt64` case) |
+| post | compare the wrapped result with an operand: `(s < a) != (b < 0)` | `bits.Mul64` |
+| xor | test the sign bits of the wrapped result: `(s^a)&(s^b) < 0` | `bits.Mul64` |
+| bits | `bits.Add64`/`bits.Sub64`; signed overflow is the carry out of bit 63 xor the carry into it | `bits.Mul64`; the signed high word must be the sign extension of the low word |
+| range | as xor | plain `IMULQ` when both operands fit in 32 bits (one biased unsigned compare), else `bits.Mul64` |
+
+The kernels are:
+
+1. **Accounting sum (the cost measurement).** `total += qty*price - discount` over 1,024 lines, one `*`, one `-` and one `+` per line. Quantity is at most 1,000, price at most 1e9 and the discount at most a tenth of the line, so no input overflows. `TestAccountingSumAgrees` requires every variant to return the `math/big` total with no failure, on the benchmark input and three other sizes, before the runner records any timing. `TestAccountingSumOverflowControl` gives one input that overflows at `*`, one at `-` and one at `+`; every checked variant must refuse each one and wrap must return the wrapped total, so no check is dead.
+2. **Hash mix that relies on wrap (a policy comparison).** `h = h*31 + b` over a key, the polynomial string hash. It is excluded from the agreement check. With lowercase letters, `h*31` first leaves the `int64` range at byte index 12, so a key of at most 12 bytes never overflows and a longer key always does (`TestHashMixPolicy` checks every prefix up to 40 bytes against `math/big`, and the all-`a` and all-`z` keys as bounds). The timed input is 256 keys of 12 bytes, where all variants agree, plus one 4,096-byte key for the wrap variants only.
+3. **Operator kernels (attribution).** One checked operator per loop, defect style, over 1,024 values in [-1e9, 1e9], to attribute the accounting cost to an operator and a family.
+
+`TestChecksAgreeWithBig` compares every check function with `math/big` on all pairs of 64 operands: the boundaries (`MinInt64`, `MaxInt64`, `±3037000500`, `±2^32` and others) and pseudo-random values of every magnitude. Six hand mutants (a flipped sign test, a dropped high-word correction, a dropped `-1 * MinInt64` case, a one-sided post test, a removed `+` check in `SumDefectXor`, a removed `-` check in `SumFailBits`) each fail a test. A mutant that removes the `+` check from `HashFailBits` survives, because the hash overflows only at `*`.
+
+The runner `go run ./docs/research/overflow-bench/run` builds the test binary once, runs the tests (a failure stops the run), then takes two series. The contiguous series is `go test -bench . -benchmem -count 10 -benchtime 1s`. The interleaved series runs one process per sample, each round in a fresh shuffled order, 10 rounds, and divides each sample by the wrap sample of the same round (the paired ratio). It samples `/proc/loadavg` every 10 seconds and writes `go build -gcflags=-S` and `-gcflags=-m` output. Every kernel is `//go:noinline`, so each has its own loop in the listing and pays the same call. Results are written to [`results/20261027T150404Z`](overflow-bench/results/20261027T150404Z/summary.md).
+
+### Host
+
+AMD EPYC 9554P (16 logical CPUs, a shared workbox), Linux 6.12.93 x86_64, `go version go1.27.0 linux/amd64`, `GOAMD64=v1`, head `eb2a3761`. The receipt records `package clean: false` because the untracked C listing file [`c/accounting.c`](overflow-bench/c/accounting.c) was in the package directory; the Go build ignores it. The one-minute load average was 19.68 at the start. During the contiguous series it had a median of 4.68 (range 3.30 to 19.68, 41 samples); during the interleaved series it had a median of 5.02 (range 3.63 to 18.89, 41 samples). Other sessions shared the host, so the ranges below are wide and only the ratios carry the decision.
+
+### Results
+
+All variants allocate nothing: 0 B/op and 0 allocs/op in every row of both series.
+
+Accounting sum, ns/op for 1,024 lines:
+
+| Variant | Contiguous median [min, max] | vs wrap | Interleaved median [min, max] | Paired ratio median [min, max] |
+| --- | ---: | ---: | ---: | ---: |
+| wrap | 802 [704, 958] | 1.00x | 779 [649, 1296] | 1.00x |
+| defect-cmp | 4008 [3530, 4187] | 5.00x | 3796 [3189, 6269] | 4.85x [3.43, 7.12] |
+| defect-post | 2384 [2084, 2641] | 2.97x | 2535 [2192, 3387] | 3.45x [2.24, 4.28] |
+| defect-xor | 2233 [2084, 2489] | 2.79x | 2328 [1945, 2720] | 2.72x [1.89, 3.59] |
+| defect-bits | 2809 [2666, 3305] | 3.50x | 3068 [2634, 4854] | 3.86x [3.19, 5.37] |
+| **defect-range** | 1714 [1581, 1895] | **2.14x** | 1801 [1498, 2030] | **2.23x [1.48, 2.68]** |
+| fail-cmp | 4108 [3584, 4515] | 5.12x | 4066 [3524, 6160] | 4.82x [3.91, 8.20] |
+| fail-post | 2940 [2566, 4145] | 3.67x | 2871 [2539, 4025] | 3.51x [3.08, 4.57] |
+| fail-xor | 2298 [2245, 2855] | 2.87x | 2632 [2269, 3062] | 3.20x [2.13, 3.98] |
+| fail-bits | 3376 [3179, 3797] | 4.21x | 3428 [3028, 3825] | 4.32x [2.44, 4.88] |
+| **fail-range** | 2078 [1785, 2643] | **2.59x** | 2174 [1898, 2636] | **2.67x [2.03, 3.53]** |
+
+Operator kernels, ns/op for 1,024 operations:
+
+| Operator | wrap | cmp | post | xor | bits | range |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `+` contiguous | 356 | 1742 (4.90x) | 669 (1.88x) | **622 (1.75x)** | 995 (2.80x) | - |
+| `+` interleaved, paired | 396 | 4.47x [4.16, 6.18] | 1.91x [1.24, 2.21] | **1.66x [1.12, 2.34]** | 2.64x [1.69, 3.20] | - |
+| `-` contiguous | 398 | 1692 (4.25x) | 693 (1.74x) | **526 (1.32x)** | 983 (2.47x) | - |
+| `-` interleaved, paired | 415 | 4.18x [3.21, 4.89] | 1.81x [1.40, 2.18] | **1.24x [1.02, 1.57]** | 2.52x [1.84, 3.15] | - |
+| `*` contiguous | 537 | 2304 (4.29x) | - | - | 1358 (2.53x) | **1097 (2.04x)** |
+| `*` interleaved, paired | 488 | 4.96x [4.15, 6.34] | - | - | 2.69x [2.40, 5.63] | **2.42x [2.09, 3.08]** |
+
+Hash mix, ns/op:
+
+| Input | wrap | explicit-wrap | defect-cmp | defect-bits | fail-cmp | fail-bits |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 256 keys of 12 bytes, contiguous | 2250 | 2304 (1.02x) | 4450 (1.98x) | 5028 (2.24x) | 6274 (2.79x) | 5128 (2.28x) |
+| 256 keys of 12 bytes, interleaved, paired | 2394 | 0.99x [0.82, 1.16] | 1.92x [1.57, 2.90] | 2.34x [1.94, 2.84] | 2.46x [1.99, 3.14] | 2.32x [2.05, 3.39] |
+| one key of 4,096 bytes, contiguous | 3577 | 3493 (0.98x) | panics | panics | `Overflow` | `Overflow` |
+| one key of 4,096 bytes, interleaved, paired | 3573 | 1.00x [0.81, 1.05] | - | - | - | - |
+
+Raw ns/op samples of the contiguous series, in run order (the interleaved samples are in the [summary](overflow-bench/results/20261027T150404Z/summary.md) and `samples.tsv`, with the load before each sample):
+
+```
+AccountingSum/wrap: 785 745 704 761 773 894 842 958 818 849
+AccountingSum/defect-cmp: 3857 3828 4135 3530 4069 4084 3815 3948 4187 4129
+AccountingSum/defect-post: 2399 2368 2188 2455 2084 2641 2329 2347 2480 2537
+AccountingSum/defect-xor: 2094 2283 2252 2084 2214 2417 2489 2375 2117 2204
+AccountingSum/defect-bits: 3272 3305 2957 2989 2831 2679 2704 2787 2724 2666
+AccountingSum/defect-range: 1739 1581 1718 1895 1710 1660 1671 1733 1667 1816
+AccountingSum/fail-cmp: 3584 4515 4416 4291 3633 3746 4161 4056 3923 4209
+AccountingSum/fail-post: 2734 2873 2785 2566 3159 3315 4145 3097 3006 2611
+AccountingSum/fail-xor: 2312 2245 2285 2486 2540 2273 2268 2462 2252 2855
+AccountingSum/fail-bits: 3797 3638 3179 3390 3239 3517 3356 3441 3362 3225
+AccountingSum/fail-range: 1785 2000 2148 2602 2643 1920 2010 2031 2125 2271
+HashMix/short/wrap: 2294 2260 2215 2437 2253 2193 2246 2510 2185 2203
+HashMix/short/explicit-wrap: 2300 2016 2235 2573 2083 2307 2422 2448 2369 2056
+HashMix/short/defect-cmp: 4196 4553 4316 3988 4348 4881 4920 4623 4097 4642
+HashMix/short/defect-bits: 5105 4952 5165 5226 4937 4745 4822 4838 5454 5975
+HashMix/short/fail-cmp: 6493 6152 6448 6407 7227 6237 6193 6312 5499 5486
+HashMix/short/fail-bits: 5197 5889 6598 4890 4904 4752 5218 5081 5176 4996
+HashMix/long/wrap: 3533 3819 3513 3571 3611 3593 3545 3583 3561 3717
+HashMix/long/explicit-wrap: 4072 3628 3531 3432 3493 3432 3493 3585 3469 3487
+Op/add/wrap: 335 352 334 349 359 367 370 337 428 448
+Op/add/cmp: 2031 1747 1735 1537 1563 1856 1671 1768 1736 1775
+Op/add/post: 687 665 650 656 670 694 784 668 660 700
+Op/add/xor: 667 592 633 612 592 631 649 612 604 638
+Op/add/bits: 994 996 1063 955 997 976 960 986 1065 1029
+Op/sub/wrap: 422 449 347 512 373 360 367 422 423 369
+Op/sub/cmp: 1675 2130 1658 1642 1541 1708 1809 1762 1460 1794
+Op/sub/post: 748 814 777 702 671 704 676 644 678 684
+Op/sub/xor: 576 561 541 480 587 511 562 486 474 464
+Op/sub/bits: 1050 921 940 998 1030 1108 969 960 1022 938
+Op/mul/wrap: 472 532 500 505 528 561 548 542 596 557
+Op/mul/cmp: 2845 2815 2497 2357 2187 2367 2162 2217 2251 2238
+Op/mul/bits: 1441 1317 1357 1360 1376 1452 1494 1306 1328 1239
+Op/mul/range: 1021 1013 1173 1132 1125 1069 1131 1133 1041 998
+```
+
+Losing variants stay in the record. **cmp** loses everywhere: its pre-check compiles to two data-dependent branches and two 64-bit immediates per `+` (4.2 to 4.9 times wrap), and its `*` pays an `IDIVQ` on every product. **bits** loses for `+` and `-`: `bits.Add64` gives the unsigned carry through `SETCS`, and the signed overflow needs six more instructions (`MOVBLZX`, three `XORQ`, `SHRQ`, `BTL`). **post** is close to xor for `+` but loses for `-`. A smoke run (not part of the receipt, load about 2 to 5) of a range helper that called `mulBits` inline measured 2,722 and 2,969 ns/op against 1,329 and 1,427 for bits: wrapped in a defect helper, the check exceeds Go's inlining budget and every product becomes a `CALL`. Outlining the slow path did not help, because the call itself costs most of the budget. The kept range kernels therefore emit the fast path inline, as an emitter writes code at the operation.
+
+### What the Go compiler emits
+
+From `results/20261027T150404Z/asm.txt` (`go build -gcflags=-S`, offsets and `kernels.go` lines kept, `XCHGL`/`NOP` inline marks dropped). The wrap loop is 9 instructions per line:
+
+```
+(kernels.go:201)  MOVQ   (AX)(SI*8), DI
+(kernels.go:201)  MOVQ   8(AX)(SI*8), R8
+(kernels.go:201)  IMULQ  R8, DI
+(kernels.go:201)  SUBQ   16(AX)(SI*8), DI
+(kernels.go:201)  ADDQ   DI, CX
+```
+
+The defect-xor loop is 36 instructions per line, 9 of them register-to-register moves. `bits.Mul64` becomes `MULQ`, which takes its operand in `AX` and writes `DX:AX`, so the slice base and the index are moved out of `AX` and `DX` and back on every iteration. The signed high-word correction adds six instructions. The `-` and `+` checks are `XORQ`, `XORQ`, `TESTQ` and a sign branch:
+
+```
+00060 (kernels.go:233)  MOVQ   AX, R9          // save slice base: MULQ needs AX
+00063 (kernels.go:124)  MOVQ   DI, AX
+00066 (kernels.go:233)  MOVQ   DX, R10         // save index: MULQ writes DX
+00069 (kernels.go:124)  MULQ   R8
+00075 (kernels.go:125)  SARQ   $63, DI         // signed high word = hi - (a>>63)&b - (b>>63)&a
+00079 (kernels.go:125)  ANDQ   R8, DI
+00082 (kernels.go:125)  SUBQ   DI, DX
+00098 (kernels.go:126)  SARQ   $63, AX
+00103 (kernels.go:126)  CMPQ   AX, DX
+00106 (kernels.go:687)  JNE    199             // -> runtime.gopanic
+00116 (kernels.go:104)  SUBQ   DX, DI          // net = line - discount
+00119 (kernels.go:105)  XORQ   SI, DX
+00122 (kernels.go:105)  XORQ   DI, SI
+00128 (kernels.go:105)  TESTQ  SI, DX
+00131 (kernels.go:663)  JLT    180             // -> runtime.gopanic
+```
+
+The range kernel guards a plain `IMULQ` with one biased unsigned compare, but materialises `$4294967296` in a register on every iteration and keeps the `MULQ` register shuffle on the fast path:
+
+```
+(kernels.go:149)  MOVL   $2147483648, R9
+(kernels.go:149)  LEAQ   (R9)(DI*1), R10
+(kernels.go:149)  LEAQ   (R9)(R8*1), R11
+(kernels.go:149)  ORQ    R11, R10
+(kernels.go:149)  MOVQ   $4294967296, R11
+(kernels.go:149)  CMPQ   R11, R10
+(kernels.go:263)  JLS    113             // -> MULQ slow path
+(kernels.go:264)  IMULQ  R8, DI
+```
+
+The typed failure costs more than the defect because Go materialises the `(itab, data)` error pair and then tests it, rather than branching straight to the return:
+
+```
+(kernels.go:745)  JGE    157
+(kernels.go:745)  LEAQ   go:itab.ob.Overflow,error(SB), AX
+(kernels.go:745)  XORL   R8, R8
+(kernels.go:745)  LEAQ   runtime.zerobase(SB), DX
+(kernels.go:325)  JMP    161
+(kernels.go:325)  XORL   AX, AX     // 157: no error
+(kernels.go:325)  XORL   DX, DX
+(kernels.go:326)  TESTQ  AX, AX     // 161
+(kernels.go:326)  JNE    222
+```
+
+`bits.Add64` keeps the carry in a flag only long enough to copy it out (`ADDQ SI, CX; SETCS R8B; MOVBLZX R8B, R8`). A constant multiplier is the one case Go handles well: `h > MaxInt64/31 || h < MinInt64/31` folds into a single biased compare (`LEAQ (CX)(SI*1), DI; CMPQ R9, DI; JCS`), and the prove pass drops the negative half of the `+` check because the byte operand is known non-negative.
+
+Go 1.27 offers user code no overflow-flag operation. The listing contains no `JOS`, `JOC`, `SETOS` or `SETOC` (`grep -c` gives 0), and `GOAMD64=v3` emits no `MULX` for `bits.Mul64` (also 0). For comparison, gcc 13.3 at `-O2` compiles the same kernel with `__builtin_*_overflow`, the builtins Tov emits, to 13 instructions per line with one `jo` per operation ([`c/accounting.c`](overflow-bench/c/accounting.c), compiled for its listing only, not timed):
+
+```
+.L17:
+	movq	(%rdi), %rax
+	imulq	8(%rdi), %rax
+	jo	.L14
+	subq	16(%rdi), %rax
+	jo	.L14
+	addq	%rdx, %rax
+	movq	%rax, %rdx
+	jo	.L14
+	addq	$1, %rcx
+	addq	$24, %rdi
+	cmpq	%rcx, %rsi
+	jne	.L17
+```
+
+That is the whole difference. A C or LLVM backend reads the overflow flag that `IMUL`, `SUB` and `ADD` already set. Direct-Go output must recompute the condition with ordinary instructions, and for `*` it must route through `MULQ` and its fixed registers.
+
+### Policy comparison: code that relies on wrap
+
+Under wrap, the hash returns the same value as an independent `uint64` computation for every key. Under either checked policy, every key of 13 bytes or more fails at byte index 12: the defect variants panic with the overflow defect and the failure variants return `Overflow`. Keys of 12 bytes or fewer pass. A test suite with short keys would pass, and production input with longer keys would fail. Under a checked default, such code must be rewritten with explicit wrapping operations. `HashExplicitWrap` uses named `wrapAdd` and `wrapMul` functions, which inline to the plain operators, and costs the same as wrap (0.98x and 1.02x contiguous, paired 0.99x and 1.00x). The rewrite is free at run time. Its cost is the review of every hash, checksum, PRNG and fixed-point routine.
+
+### Prior art: how other languages lower the check
+
+| Source | Default policy and spelling | Lowering observed or documented | Bearing on Effra |
+| --- | --- | --- | --- |
+| Tov `ae0f67f5`: `docs/spec.md` L23 (`int` is a "64-bit signed integer (overflow traps)"), L140 (overflow is a trap, not an error); README L185; `crates/tov/src/codegen/mod.rs` L1873-L1881 | Checked by default in release builds; `--unchecked` (`TOV_UNCHECKED`) wraps. | `TV_ADD`, `TV_SUB` and `TV_MUL` are `__builtin_add_overflow`, `__builtin_sub_overflow` and `__builtin_mul_overflow` under `__builtin_expect`, then `tv_trap`. A C compiler turns each into the operation plus one `jo` (the gcc listing above). | Tov's "affordable" claim rests on the flag-based check that a C backend reaches. Direct-Go output cannot reach it, so the claim does not transfer. |
+| Goose `670fc91a`: `src/runtime/runtime.h` L440-L455, L563-L593, L594 (release macros); `docs/implementation.md` L4313-L4315 and L3966-L3968; translation guide L824 | Aborts in debug builds and wraps in release builds; unsigned always wraps. | The debug `gs_add_i64` and `gs_sub_i64` use the sign-xor test, and `gs_mul_i64` divides back: the xor and cmp families measured here. Its bounds-check pass proves `len - 1`, `i + 1` and `len + len` free of overflow from a length cap. Its optimiser regroups an associative chain only under an explicit licence (§6.2), because regrouping moves where a debug build detects an overflow. | Corroborates xor as the portable check for `+` and `-`. The range proof is the lowering path that removes a check where facts allow it. |
+| Rust (documentation, no pinned checkout: [Reference, integer overflow](https://doc.rust-lang.org/reference/behavior-not-considered-unsafe.html#integer-overflow); [Cargo `overflow-checks`](https://doc.rust-lang.org/cargo/reference/profiles.html#overflow-checks); [`i64` methods](https://doc.rust-lang.org/std/primitive.i64.html)) | Panics when `overflow-checks` is on (the dev profile) and wraps in release. Explicit `checked_add` (returns `None` on overflow), `overflowing_add`, `wrapping_add`, `saturating_add`, `strict_add` (always panics; stable since 1.91.0) and `Wrapping<T>`. | LLVM overflow intrinsics (`llvm.sadd.with.overflow` and others), selected to the operation plus `jo` on x86-64. | The named-method family is the explicit spelling for a wrap-default language. The debug/release split makes behaviour depend on the build, which one Effra source meaning rules out. |
+| Swift (documentation: [Advanced Operators, overflow operators](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/advancedoperators/#Overflow-Operators)) | Traps by default in optimised builds; `&+`, `&-` and `&*` wrap; `addingReportingOverflow` returns the value and a flag; `-Ounchecked` removes the checks. | LLVM overflow intrinsics: the operation, `jo` and a trap. | Checked by default is affordable where the backend has the flag. The `&` operators are the wrapping spelling of a checked-default language. |
+| Zig (documentation: [language reference, integer overflow](https://ziglang.org/documentation/master/#Integer-Overflow)) | `+`, `-` and `*` are safety-checked illegal behaviour: a panic in Debug and ReleaseSafe, undefined behaviour in ReleaseFast and ReleaseSmall. `+%` wraps, `+\|` saturates, `@addWithOverflow` returns a tuple. | LLVM overflow intrinsics in the safe modes. | The wrapping and saturating operators are the explicit forms. Undefined behaviour in a fast build is not an Effra outcome. |
+| Go ([specification, integer overflow](https://go.dev/ref/spec#Integer_overflow); proposals [#19624](https://github.com/golang/go/issues/19624), [#30209](https://github.com/golang/go/issues/30209), [#30613](https://github.com/golang/go/issues/30613); [go-panikint](https://github.com/trailofbits/go-panikint)) | Wraps silently. #19624 (panic on overflow, which estimated a cost "similar to bounds-checking") was withdrawn in favour of #30209 (checked and wrapping integer types); neither is in the language. | No overflow-flag operation for user code (listings above). go-panikint, a modified compiler, inserts sign tests during SSA construction and calls `runtime.panicoverflow`: the xor family again. | The target fixes the cost: each checked operation in emitted Go is several instructions, not one. |
+| Elixir and Erlang/OTP (see the comparison above) | Arbitrary-precision integers; no overflow. | Small integers are tagged words; the VM promotes to a bignum. | Removes the question at the price of a variable-size integer, which is not Go `int64`. |
+| MoonBit core `e96ede8` (`builtin/int64.mbt` L200-L269) | `Int64` `+`, `-` and `*` wrap. | Plain two's-complement operations. | Corroborates wrap as the default of a typed language with a native backend. |
+| Gleam, ReScript | Gleam on Erlang uses bignums; ReScript `int` is a 32-bit integer that wraps. | Host operations. | Neither checks by default. |
+
+Dan Luu's [integer overflow measurement](https://danluu.com/integer-overflow/) (clang and gcc) is consistent: even with `jo`, a checked summing loop ran 4 to 6 times slower because the checks stopped vectorisation, while bzip2 slowed by 28% for compression and 9% for decompression. Go does not vectorise these loops, so that loss does not apply here. The loss measured here is scalar instruction count.
+
+### Decision input for #81
+
+Scored against the north-star pillars:
+
+- **Performance (pillar 7)** decides it. Every construct must lower to code no slower than hand-written Go, and hand-written Go uses wrapping `+`. A checked default makes every `+`, `-` and `*` slower than the Go a programmer would write: by 2.1 to 2.3 times on the accounting kernel with the best lowering, and by 1.24 to 1.75 times for a lone `+` or `-`. The cost cannot fall to Tov's level while Effra emits Go, because Go exposes no overflow flag.
+- **Laws and proofs (pillar 4)** favour wrap as the default. Wrapping `+`, `-` and `*` form the ring of integers modulo 2^64: associative, commutative and distributive, so a law suite (#125) can state them and a compiler can regroup. Checked arithmetic is partial: `(MaxInt64 + 1) - 1` fails while `MaxInt64 + (1 - 1)` succeeds. Goose needs an explicit licence in its specification to regroup a checked chain.
+- **Error tracking and Effect guarantees (pillars 2 and 5)** favour a checked form that returns a typed failure in the row, not a defect. It costs 0.3 to 0.45 times wrap more than the defect form (fail-range 2.59x against defect-range 2.14x contiguous; 2.67x against 2.23x paired). The divide-by-zero decision above already rejected untyped panics from arithmetic.
+- **Go simplicity and agent interpretability (pillars 3 and 6)**: wrap is Go's own semantics, and a checked call is visible at the operation where a reader or agent looks for it.
+
+Recommendation for #81:
+
+1. **Keep wrap as the default** for `+`, `-` and `*` on `int64` and on the new Go integer widths. This evidence does not reopen the signed-64 wrap profile under the "Reconsidering a prior" tiebreak; it confirms it for the Go target.
+2. **Spell checked arithmetic as named functions, Rust style, not operators.** Swift's `&+` and Zig's `+%` are the wrapping spellings of checked-default languages. In a wrap-default language the explicit form is the checked one, and `checked_add`, `strict_add` and the Go proposal #30209 are the precedents. The functions are ordinary library with honest rows, for example a checked add returning `(int64, error[Overflow])`. They need no compiler knowledge, so the "primitive function plus library" tiebreak applies and no new syntax is needed. A defect form adds nothing that the typed failure lacks.
+3. **Lower each checked operation with the measured winners**: the sign-xor test for `+` and `-`; for `*`, a 32-bit range fast path in front of `bits.Mul64`. Do not use the CERT pre-check or divide-back. Emit the check at the operation, or keep each helper inside Go's inlining budget: the range helper fell out of the budget and became a call per product.
+4. **Use proofs to remove checks**, the same route the divisor proof takes for `/`. When the compiler knows the operand ranges (a narrower width from #81 widened to `int64`, a constant, a Goose-style length cap), the checked operation lowers to the bare operator. That is where Effra can beat hand-written Go, which writes the check or omits it. A constant multiplier already costs only one compare.
+5. **Revisit** only if Go gains an overflow-flag intrinsic, or if an application-level measurement shows the share of arithmetic in real Effra programs is small enough that a checked default is affordable there. This spike measured neither.
+
+This record replaces, for the Go target, the provisional numbers on the unmerged 2026-10-11 branch `wf10/spike-ovf` (which measured 2.5 to 3.1 times wrap for its Go defect variants and also covered the removed JavaScript target).
