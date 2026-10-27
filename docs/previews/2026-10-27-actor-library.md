@@ -53,7 +53,7 @@ The protocol is `Room`'s methods with a `*Room` receiver. `actor.Call` lends the
 
 ## Not claimed
 
-- No checker accepts these snippets. The rules they rely on are spec Gaps 35 to 46, for #196 and #197.
-- No actor syntax is proposed. The note's route-2 sketches exist only to measure size: route 1 costs 2.65x to 3.38x the tokens for handler actors and 1.06x for a machine.
+- No checker accepts these snippets. The rules they rely on are spec Gaps 35 to 47, for #196 and #197.
+- No actor syntax is proposed. The note's route-2 sketches exist only to measure size: route 1 costs 1.66x the tokens for an agent used inline (1.54x with #214), 2.65x to 3.38x for message-union handler actors and 1.06x for a machine.
 - No performance parity: `Ask` and start/stop cost more than the hand-written Go actor (the note's Q8 table).
 - No supervision, durable addresses or byte budgets.
