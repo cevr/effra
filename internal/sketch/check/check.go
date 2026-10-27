@@ -73,7 +73,10 @@ type checker struct {
 	instance map[string]*Named
 	kinds    declKinds // solved bracket kinds of the package's generic types
 	init     initDeps  // references of each package-level body (initialization order)
-	mono     monoState // the instantiation graph (instantiation cycles)
+	// totalitySteps records the solver steps of each type switch reported
+	// (not silent), in check order: the deterministic cost the tests bound.
+	totalitySteps []int
+	mono          monoState // the instantiation graph (instantiation cycles)
 
 	errorTypes map[*Named]syntax.Pos // origin error types named in an error row of this package
 	funcs      []*Func               // every package function and method, in source order

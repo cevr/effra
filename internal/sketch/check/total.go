@@ -57,6 +57,9 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 	}
 	var matrix [][]int
 	solver := newMatrixSolver(sizes)
+	if c.silent == 0 {
+		defer func() { c.totalitySteps = append(c.totalitySteps, solver.steps) }()
+	}
 	hasDefault := false
 	patternsOK := valid
 	for _, cl := range s.Clauses {
@@ -205,7 +208,8 @@ func (c *checker) caseVariant(e syntax.Expr, u *Union, subj Type) int {
 // cases"), never accepted unproven. The budget is deterministic: steps,
 // not time. Every switch over at most 6 subjects of at most 3 variants
 // stays far below it (at most 3^6 = 729 residual matrices), and the odd
-// cycles of 41 subjects in any column order stay below it (measured).
+// cycles of 41 subjects take 47 558 steps in every column order (measured;
+// TestTotalityPermutations holds 31 subjects under an eighth of it).
 //
 // Prior art: rustc's pattern_complexity_limit, GHC's -fmax-pmcheck-models.
 const totalityBudget = 200_000

@@ -3,6 +3,7 @@ package check_test
 import (
 	"fmt"
 	"math/rand"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -392,25 +393,23 @@ func columnOrders(n int, rng *rand.Rand) map[string][]int {
 }
 
 // TestTotalityPermutations: the odd-cycle family in every column order is
-// proved total or refused for its size (S103 "too many cases"), within 50
-// ms at up to 31 subjects; an even cycle is never accepted (round-2 M3;
-// D16 as amended in round 3).
+// proved total or refused for its size (S103 "too many cases"); an even
+// cycle is never accepted (round-2 M3; D16 as amended in round 3). The
+// bound is the solver's deterministic step count, not the host's clock:
+// every column order of one size takes the same steps (the memo ignores
+// column order), and 31 subjects stay under an eighth of the budget. With
+// ERGO_TIMING=1 the test also holds the wall-clock bound of decision 1,
+// under 50 ms at 31 subjects, best of 3, for a receipt on a quiet host.
 func TestTotalityPermutations(t *testing.T) {
+	timing := os.Getenv("ERGO_TIMING") == "1"
 	rng := rand.New(rand.NewSource(1964))
 	for _, n := range []int{5, 7, 11, 15, 19, 25, 29, 31} {
+		first := -1
 		for name, order := range columnOrders(n, rng) {
 			src := cycleSwitch(n, order)
-			best := time.Duration(1 << 62)
-			var diags []check.Diagnostic
-			for i := 0; i < 3; i++ {
-				start := time.Now()
-				_, diags = check.CheckSource(src)
-				if e := time.Since(start); e < best {
-					best = e
-				}
-			}
-			if best > 50*time.Millisecond {
-				t.Errorf("n=%d %s: %s, want under 50ms", n, name, best)
+			steps, diags := check.TotalitySteps(src)
+			if len(steps) != 1 {
+				t.Fatalf("n=%d %s: want one switch, got steps %v", n, name, steps)
 			}
 			switch {
 			case len(diags) == 0:
@@ -420,6 +419,28 @@ func TestTotalityPermutations(t *testing.T) {
 				}
 			default:
 				t.Errorf("n=%d %s: want total or refused, got %s", n, name, describe(diags))
+			}
+			if steps[0] > check.TotalityBudget/8 {
+				t.Errorf("n=%d %s: %d solver steps, want at most %d", n, name, steps[0], check.TotalityBudget/8)
+			}
+			if first < 0 {
+				first = steps[0]
+			} else if steps[0] != first {
+				t.Errorf("n=%d %s: %d solver steps, another order took %d: the proof depends on column order", n, name, steps[0], first)
+			}
+			if timing {
+				best := time.Duration(1 << 62)
+				for i := 0; i < 3; i++ {
+					start := time.Now()
+					check.CheckSource(src)
+					if e := time.Since(start); e < best {
+						best = e
+					}
+				}
+				t.Logf("n=%d %s: best %s, %d steps", n, name, best, steps[0])
+				if best > 50*time.Millisecond {
+					t.Errorf("n=%d %s: %s, want under 50ms", n, name, best)
+				}
 			}
 			even := cycleSwitch(n+1, append(append([]int(nil), order...), n))
 			_, ediags := check.CheckSource(even)
@@ -547,10 +568,16 @@ func TestTotalityBudget(t *testing.T) {
 	refused := 0
 	for k := 0; k < 4; k++ {
 		src, _ := cnfSwitch(rng, 60, 60*43/10)
-		start := time.Now()
-		_, diags := checkWithin(t, src, 5*time.Second)
-		if e := time.Since(start); e > 2*time.Second {
-			t.Errorf("60 subjects, instance %d: %s, want under 2s", k, e)
+		steps, diags := check.TotalitySteps(src)
+		if len(steps) != 1 || steps[0] > check.TotalityBudget+60*43/10*4 {
+			t.Errorf("60 subjects, instance %d: solver steps %v, want at most the budget %d and one matrix", k, steps, check.TotalityBudget)
+		}
+		if os.Getenv("ERGO_TIMING") == "1" {
+			start := time.Now()
+			check.CheckSource(src)
+			if e := time.Since(start); e > 2*time.Second {
+				t.Errorf("60 subjects, instance %d: %s, want under 2s", k, e)
+			}
 		}
 		if totalityVerdict(diags) == "refused" {
 			refused++
