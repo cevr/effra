@@ -1,63 +1,143 @@
-# Effra
+# Effra glossary
 
-Effra describes application programs, for servers and front-ends, using explicit, inspectable effect contracts.
+Effra is "Effect for Go": a Go-shaped language whose compiler checks Effect's guarantees (typed failures, explicit dependencies, structured concurrency, completed cleanup) and emits Go. Go is the only target (owner, 2026-10-26). The normative rules are in [`docs/spec/`](docs/spec/README.md). Every domain term is defined only here; the spec files state rules and link to these definitions.
+
+The sections are:
+- **Language**: the Go-shaped language of `docs/spec/`.
+- **Constructs, contracts and laws**: how constructs are admitted, and the vocabulary of laws and evidence.
+- **Runtime and providers**: tasks, interruption, exits and lawful providers.
+- **Earlier `.ef` language**: terms of the language that `internal/compiler` implements today. They stay in force for that compiler until [#205](https://github.com/cevr/effra/issues/205) retires it.
+- **Tooling and testing**.
+
+A status in parentheses applies to the term's support: *implemented in prototype* (`prototypes/sketch9`), *designed* (decided, not implemented), or, in the earlier-language section, the earlier labels.
 
 ## Language
 
-**Record**: A nominal data type with declared fields. Construction checks every required field and its type.
+**Package**: One unit of compilation, declared by `package name`, lowered to one Go package. The prototype compiles one file as the whole program.
 
-**Closed enum**: A nominal set of alternatives, each with its own declared payload.
+**Capability** (implemented in prototype): An interface with method signatures that names replaceable behaviour, such as `Orders` or `Clock`. Code reaches it only by calling its methods, and every call charges the capability to the caller's capability row. It is not a value. See [rows](docs/spec/rows.md#capability-rows).
 
-**Absence**: An explicitly selected closed alternative describing a missing value, distinct from an uninitialized field or a bare nil/null value.
+**Provider** (implemented in prototype for literals): A value whose type implements a capability's methods, bound to that capability by a `wire`. A provider may fail less than its capability, never more.
 
-**Void**: The no-value type, spelled `void`, describing successful completion without an information-bearing result. Its explicit expression is `void`. It is distinct from absence and from a computation that does not complete successfully.
+**Constructor** (designed): An ordinary function named as a `wire` entry, such as `Orders = OpenPostgres`. Its requirements are satisfied from the same wire, and its failures become startup failures of the `with` that builds it.
 
-**Option** (specified): A generic closed enum with `None` and `Some(T)` alternatives. `Some` contains an admitted value of `T`, never an unchecked nil host reference.
+**Captured provider** (designed): A provider that holds the capabilities its constructor used. Its methods use them without a `uses` clause of their own.
 
-**Exhaustive match**: An interpretation that covers each declared alternative exactly once and executes only its selected arm.
+**Prelude**: The names in scope in every package without an import: `Option`, `Task`, `Decision`, `Clock`, `Scheduler`, `Random` and `Console`.
 
-**Signed-64 wrap** (specified): The portable `i64` arithmetic rule: each admitted `+`, `-`, `*`, `/` and unary `-` result is reduced to its two's-complement signed 64-bit residue, so `MIN / -1` is `MIN`. Division and remainder truncate toward zero.
+**Host package** (designed): A reviewed standard-library package, such as `os`, `fs`, `net` or `sql`, that calls Go. Only host packages and `import go` reach the host, so every effect appears in some footprint.
 
-**Divisor proof** (specified): Checked evidence that an `i64` divisor is not zero: a nonzero integer literal, or a local binding inside an `if` branch whose comparison of that binding with an integer literal excludes zero. `/` and `%` are admitted only with one, so division by zero is not representable in checked source.
+**Error type** (implemented in prototype): A struct type named in some error row. Returning a value of an error type is a failure, never an ordinary result.
 
-**Failure payload**: The declared data carried by a named failure, separate from an ordinary success value.
+**Error row** (implemented in prototype): The set of error types a function may fail with, written `error[A | B]` in its result. Order and repetition carry no meaning.
 
-**Entry failure report**: The deterministic stderr text and exit status a program entry produces when `main` fails. It lists each cause reason in order, as a named failure with its payload, a defect message or an interruption. Payloads are rendered from the checked types of `main`'s failure row, so the report is deterministic for every failure in that row, including built-in, codec and HTTP listener failures. The one exception is an unclassified HTTP listener failure, which keeps the host's text.
+**Capability row** (implemented in prototype): The set of capabilities a caller must supply, written `uses A, B` after a signature. Also called the `uses` row or requirement row.
 
-**Effect contract**: The success value, named failures, and required services of a deferred Effra program.
+**Row**: An error row or a capability row. Rows are checked and then erased from the emitted Go.
 
-**Semantic equivalence baseline** (acceptance term): A matched Effra and
-explicit Go program pair that performs the same validation and observable work
-while preserving the same failure/service rows, ownership, cancellation and
-completed-cleanup behavior. The Go member is an optimized idiomatic Go control
-with the same contract. The baseline makes an abstraction's generated and
-runtime costs attributable rather than inferred from unequal examples. Until
-2026-10-26 the baseline also had a TypeScript/Effect member; it went with the
-JavaScript target.
+**Fallible expression** (implemented in prototype): An expression that can fail with a non-empty error row and whose failure is not yet handled. It must be tried, caught or returned.
 
-**Zero-cost abstraction obligation** (destination, not current support): A
-candidate abstraction must make the illegal states and invalid operations
-covered by its checked contract unrepresentable in checked Effra source, while
-foreign and trusted behavior remains explicitly qualified, and then erase or
-directly lower without an abstraction-induced executable size/runtime penalty
-against a semantic equivalence baseline. Retained allocation, dispatch, module,
-byte and residual-check costs must be visible in matched receipts. Native output
-targets parity with or better performance than the optimized idiomatic Go
-member, and Go lowering pursues every material measured lowering or
-specialization opportunity, including match dispatch and generated
-effect-runtime paths, while preserving the userland runtime contract. This obligation
-never removes a required guardrail and does not promise universally zero
-overhead or a fixed speedup multiplier.
+**Escape** (implemented in prototype): The passage of a failure from an expression to its failure target, through `try`, a fallible `return`, a returned error value or the rest of a partial catch.
 
-**Failure row**: The unordered set of nominal failures admitted by an effect contract.
+**Failure target** (implemented in prototype): Where an escaping failure goes: the enclosing function, or the innermost `timeout.After` block. A `with` block is not a failure target.
 
-**Requirement row**: The unordered set of nominal services needed to execute an effect.
+**Try** (implemented in prototype): The keyword form `try e`, which yields `e`'s success value and escapes `e`'s failures.
 
-**Callable value**: A named function carried as a value with explicit parameter, result, failure and requirement contracts. Pure functions and functions constructing deferred effects have distinct callable kinds.
+**Catch** (implemented in prototype): The keyword form `e catch { case T: … }`, which handles named error types of a fallible expression. It covers typed failures only; interruption and defects pass through it.
 
-**Row parameter**: A declaration-qualified variable representing a finite failure or requirement row. Ordinary function application obtains its least bound from direct callback argument rows.
+**Total catch** (implemented in prototype): A `catch` without `try`. It must handle every error type of the caught row.
 
-**Callback-result relation**: Retained evidence relating a callback invocation's returned handles to its resolved named callee and input ownership. It is separate from ownership of the callable value; an unresolved relation remains potential ownership.
+**Partial catch** (implemented in prototype): `try e catch { … }`. It handles the named types, and `try` escapes the rest.
+
+**Discharge** (implemented in prototype): Removing a capability from the row a block charges to its enclosing function, because an enclosing `with` binds it.
+
+**Wire** (implemented in prototype for provider literals): A declaration `wire Name { Cap = provider … }`, or an inline `wire{ … }` literal, that binds capabilities to providers or constructors. It is Effra's form of an Effect layer.
+
+**Inline wire** (implemented in prototype): A `wire{ … }` literal given directly to `with`. Its provider expressions are evaluated in, and charged to, the enclosing function.
+
+**Named wire** (implemented in prototype): A top-level `wire Name { … }`. It is built by its own function at each `with` that names it.
+
+**Closed wire** (prototype limit): A named wire whose providers need no capability from the caller and let no failure escape. The prototype admits only closed named wires.
+
+**Build** (designed): One execution of a wire at one `with`: constructors run once per shared node, and the build owns their releases until the `with` block ends. Each `with` is a new build.
+
+**With** (implemented in prototype for one wire): The compiler-known form `with(W) { block }`, spelled as a predeclared identifier. It discharges the capabilities `W` binds for the block and yields the block's last expression. It also takes context values (designed).
+
+**Context value** (designed): An immutable value, such as a span or a log annotation, that `with` scopes to a block and that every task started inside inherits.
+
+**Footprint** (designed): Every capability a function's body exercises, including the ones its own `with` provides, plus `go`. The compiler infers it; it is never written.
+
+**Pure function** (designed): A function whose footprint is empty. An empty capability row does not make a function pure, and a call through an unknown function value counts as impure.
+
+**Union** (implemented in prototype): A closed set of struct types, written `interface{ A | B }`. It has no zero value.
+
+**Variant** (implemented in prototype): One struct type listed in a union. A variant value is assignable to every union that lists it.
+
+**Defaultable type**: A type with a valid zero value: a basic type, or a struct whose fields are all defaultable. Unions, capabilities, function types, tasks, resources and borrows are not defaultable.
+
+**Definite initialisation** (designed): The rule that a variable of a non-defaultable type has a value before it is used.
+
+**Type switch** (implemented in prototype for one subject): `switch v := u.(type) { case A: … }` over a union value, narrowing `v` to the case's variant.
+
+**Totality**: The property of a type switch, a `catch` or a machine step that covers every alternative. A total form needs no default for its declared alternatives.
+
+**Block**: A braced statement list. As the body of `with`, `timeout.After` or a trailing block, it yields its last expression, and `return` cannot leave it.
+
+**Trailing block** (implemented in prototype for `with` and `timeout.After`): A block written after a call's parentheses as its final, function-typed argument. It cannot escape the call.
+
+**Non-escaping parameter** (designed): A function-typed parameter that the callee may call, or hand to a task the call consumes, but may not store, return or send.
+
+**Concurrent parameter** (designed): A function parameter that the callee hands to `go`, directly or through another call. The compiler infers the fact and records it in the interface summary. An argument to it may not assign captured locals.
+
+**Replayable parameter** (designed): A function parameter that may run more than once, such as a transaction body. It may not assign captured locals, use channels or consume a resource, and its footprint holds only `sync.Tx`.
+
+**Borrow** (designed): A `*T` parameter or receiver. It is never nil, stored, returned, sent or captured by `go`, and two mutable borrows of one value must not overlap.
+
+**Resource** (designed): A value whose type has a `Close()` method, or a struct with a resource field. A task and an actor handle are resources. Its owner scope releases it. See [resources](docs/spec/resources.md).
+
+**Owner scope** (designed): The block that owns a resource: the block that acquired it, or the scope it moved to. A loop body is its own owner scope for each iteration.
+
+**Release** (designed): Closing a resource at the end of its owner scope, in reverse acquisition order, on every exit. A release is infallible and runs masked.
+
+**Move** (designed): A transfer of a resource's ownership: by `return`, into a provider field, into a `go` task, by a channel send, by building a struct that holds it, or by assignment. The source cannot be used after a move.
+
+**Lend** (designed): Passing a resource as an argument. The caller keeps ownership; the callee may not store, return, send or capture it, so a lend needs no lifetime annotation.
+
+**Consume** (designed): Ending a resource early by calling `Close()`, or a task's `Wait()` or `Stop()`. Nothing runs for it at scope end, and a later use is an error.
+
+**Generated Close** (designed): The `Close` the compiler gives a struct with resource fields. It closes those fields in reverse declaration order.
+
+**Task** (designed in source; the task tree is implemented in prototype): A unit of concurrent work started by `go`, of type `Task[T, E]`. It is a resource; `Wait` returns its result and `Stop` interrupts it and waits for it.
+
+**Task tree** (implemented in prototype): The parent and child relation of tasks. Stopping a task stops every task below it.
+
+**Set** (designed): `tasks.Set(policy)`, a resource that owns an unbounded number of tasks and applies a fail-fast, log or restart policy (G4).
+
+**Interruption** (implemented in prototype): A request that a task stop. It is cooperative and is not a typed error: no error row names it.
+
+**Interruption point** (implemented in prototype before capability calls): A place where a task checks for interruption: a capability call, a channel operation, `Wait`, `Sleep` or a loop back-edge in a function with a footprint (I1).
+
+**Mask** (designed): A region that interruption cannot enter: releases, `Close`, `defer` bodies, wire cleanup and the step between acquisition and its registration (I2).
+
+**Exit cause**: How a task ended when it did not succeed: one or more typed failures, defects and interruptions, all kept.
+
+**Defect**: A failure outside every row, such as a Go panic in Effra code or a crash in `Close`. It re-raises in the parent at the join.
+
+**Span** (designed): A named trace region, scoped by `with(trace.Span(…))`, keyed to a checked definition identity.
+
+**Machine** (designed): A declaration `type X machine[S, E] { initial v; step f }` of a state machine over the unions `S` and `E`. Its meaning is a plan any lawful provider can run. In the earlier language (specified), a machine is a checked definition of state and event types, transition policies and state-owned behavior.
+
+**Decision** (designed): The value a machine step returns: `Enter{next}`, `Stay{next}`, `Ignore{}`, `Reject{}` or `Done{output}`. Its type is the prelude `Decision[S, O]`.
+
+**Actor** (designed): A machine run by `actor.Start` as one task with a bounded mailbox, behind a resource handle with `Send`, `Ask`, `State` and `Stop`. In the earlier language (specified), an actor is an owned, addressable instance of behavior with typed messages and replies and an explicit admission and concurrency policy; an effect without a message interface remains a fiber.
+
+**Duration literal** (implemented in prototype): An integer with a unit suffix (`ns`, `us`, `ms`, `s`, `m`, `h`), of type `duration`.
+
+**Codec** (designed): The pair a type's wire form is found by: `ParseX` decodes and `x.Wire()` encodes. A derived codec's rows are the union of its fields' rows. In the earlier language (implemented for structural JSON), a codec is a checked witness relating a wire type and a domain type through separately contracted decoding and encoding operations.
+
+**Go import** (designed): `import go "path"`, which imports a Go package. Every call charges the predeclared `go.Foreign` capability.
+
+## Constructs, contracts and laws
 
 **Construct admission** (owner rule, 2026-10-07; the 2026-10-12 tests and checks are direction, a recorded synthesis and elaboration of owner direction, not owner words): The rule that a language construct, meaning syntax or a checker rule, exists only to make bad code unrepresentable where a library cannot. Since 2026-10-12 a construct must also pass the guardrail test, the portability test and the composability checks.
 
@@ -71,29 +151,107 @@ overhead or a fixed speedup multiplier.
 
 **Notation exception**: A syntax form admitted without an unrepresentability argument because it desugars one-to-one, at parse time, into ordinary calls and adds no checking, typing, evaluation order or runtime behavior.
 
-**Compiler-known construct**: A form whose meaning the compiler must know for checking, inference, plan facts, inspection or special lowering. By owner direction (2026-10-09) it is spelled as syntax or a predeclared language identifier.
+**Compiler-known construct**: A form whose meaning the compiler must know for checking, inference, plan facts, inspection or special lowering. By owner direction (2026-10-09) it is spelled as syntax or a predeclared language identifier. In the Go-shaped language: `try`, `catch`, `uses`, `wire`, `machine`, `go`, `with` and `timeout.After`.
 
-**Predeclared language identifier**: A name the language specification defines in every module without an import or library declaration, such as `Fiber` or `Timeout`, following Go's predeclared `len` and `error`. Capability services are not predeclared language identifiers, even when the compiler currently declares them.
-
-**Postfix construct**: A compiler-known construct written after a receiver with `.`, such as `.catch<E>(h)`, `.provide<S>(p)` or `.timeout(ms)`. The parser claims its word after any receiver. Declaring that word as a member name is proposed to become a diagnostic, but it is not one yet. The 2026-10-12 construct bar no longer admits this spelling for constructs; #134 decides, per form, a keyword or block construct or ordinary library.
+**Predeclared language identifier**: A name the language specification defines in every package without an import or library declaration, following Go's predeclared `len` and `error`, such as `with`, `duration` and the prelude types. Capability services are not predeclared language identifiers, even when the compiler declares them.
 
 **Special-cased library item** (rejected pattern): A bundled, prelude or library declaration that the compiler recognises by identity or name to produce a semantic fact about it (a diagnostic, checked type, row or ownership fact), also called a lang item. An item stops being one only by losing every such branch or by becoming syntax. Backend retention or emission keyed on the item does not by itself make it one.
 
-**Library intrinsic**: A target implementation the compiler substitutes for an ordinary declared library signature. The signature remains the only source of diagnostics, checked types, rows and ownership. The intrinsic may add backend facts such as retained runtime modules. The implementation of a syntax construct is part of that construct, not a library intrinsic.
+**Library intrinsic**: A target implementation the compiler substitutes for an ordinary declared library signature. The signature, together with any declared contract written only in the inferred contract vocabulary, is the only source of diagnostics, checked types, rows and ownership, provided that the declared contract is consumed by the same path as an inferred one and no checker, emitter or reachability branch is keyed on the item's identity beyond backend selection (amended for [#130](https://github.com/cevr/effra/issues/130)). The intrinsic may add backend facts such as retained runtime modules. The implementation of a syntax construct is part of that construct, not a library intrinsic.
 
-**Language protocol**: A nominal row label whose charging or discharge a construct's own checking rule defines, such as `Foreign` for calls through `import go`. It is predeclared. An ordinary capability service, whose label enters a row only through declared operations or requirements, is not a language protocol.
+**Declared contract** ([#130](https://github.com/cevr/effra/issues/130)): A library primitive's statement of what its body does with its parameters, written only in the vocabulary that inference produces, for a primitive that has no reference body to infer from. It is consumed exactly as an inferred contract is, so it grants no meaning that inference could not.
+
+**Recipe-parameter contract** ([#130](https://github.com/cevr/effra/issues/130)): The inferred summary of what a function's body does with each function-typed parameter: calls it, hands it to a task, stores it or replays it. A caller substitutes its actual argument. In the Go-shaped language it carries the non-escaping, concurrent and replayable facts and travels in the interface summary.
+
+**Language protocol**: A nominal row label whose charging or discharge a construct's own checking rule defines, such as `go.Foreign` for calls through `import go`, or `sync.Tx` inside `sync.Atomically`. It is predeclared. An ordinary capability, whose label enters a row only through declared operations or requirements, is not a language protocol.
+
+**Constraint** ([#141](https://github.com/cevr/effra/issues/141); was "Where clause"): A requirement on a generic type parameter that its type provides a method or belongs to a named interface such as `comparable` or `cmp.Ordered`. The spelling is provisional until [#135](https://github.com/cevr/effra/issues/135).
+
+**Owner package** ([#141](https://github.com/cevr/effra/issues/141); was "Owner module"): The package that declares a type. Methods are declared only there, as in Go, so a constraint on a type has one answer: the owner's method. A function type, a row or a resource handle without such a method satisfies no method constraint.
+
+**Method argument** ([#141](https://github.com/cevr/effra/issues/141)): The method value the compiler passes for a satisfied constraint in the lowered code. It is the same function value a caller could pass by hand, and Go generics carry it in their dictionaries.
+
+**Law** (designed): A named behavioral obligation that types cannot state, written as a function `LawX(…) bool` and checked like a fuzz target. A refuted law refuses the build. Laws are one general construct with many clients: codecs, providers, schedules, machines and composition algebra ([#125](https://github.com/cevr/effra/issues/125)).
+
+**Provider law** (designed): A law with a `uses` clause. It is checked against every provider wired for that capability.
+
+**Contract** ([#170](https://github.com/cevr/effra/issues/170)): An interface used as a constraint together with the laws stated over its methods. A type satisfies the contract when it has the methods and its laws hold.
+
+**Provider protocol** ([#170](https://github.com/cevr/effra/issues/170)): A capability together with its provider laws. A provider is admitted for the capability by passing them, whatever its implementation.
+
+**Satisfaction** ([#170](https://github.com/cevr/effra/issues/170)): The relation between one type or provider and one contract or provider protocol, with each law's evidence status: tested, refuted, trusted or unresolved.
+
+**Admission** ([#170](https://github.com/cevr/effra/issues/170)): The build's decision to accept a satisfaction. A refuted law refuses the build; a trusted law needs a written reason; an unresolved law is allowed with a visible note unless evidence rests on it.
+
+**Evidence kind** ([#170](https://github.com/cevr/effra/issues/170)): A nominal wrapper type, such as `SortedBy[S, compare]`, whose values carry the proof that a law-backed check has run on the carrier. Only the checking function mints it.
+
+**Law receipt** ([#170](https://github.com/cevr/effra/issues/170)): The recorded outcome of running a law suite for one revision, seed and target: the status of each law, its case count and any counterexample. The build reads only the canonical receipt.
+
+**Zero-cost abstraction obligation** (destination, not current support): A candidate abstraction must make the illegal states and invalid operations covered by its checked contract unrepresentable in checked source, while foreign and trusted behavior remains explicitly qualified, and then erase or directly lower without an abstraction-induced executable size or runtime penalty against a semantic equivalence baseline. Retained allocation, dispatch, module, byte and residual-check costs must be visible in matched receipts. Native output targets parity with or better performance than the optimized idiomatic Go member, and Go lowering pursues every material measured lowering or specialization opportunity while preserving the userland runtime contract. This obligation never removes a required guardrail and does not promise universally zero overhead or a fixed speedup multiplier.
+
+**Semantic equivalence baseline** (acceptance term): A matched Effra and explicit Go program pair that performs the same validation and observable work while preserving the same rows, ownership, cancellation and completed-cleanup behavior. The Go member is an optimized idiomatic Go control with the same contract. The baseline makes an abstraction's generated and runtime costs attributable rather than inferred from unequal examples. Until 2026-10-26 the baseline also had a TypeScript/Effect member; it went with the JavaScript target.
+
+## Runtime and providers
+
+**Effect runtime provider** (direction): An implementation of the lawful runtime contract that executes Effra effects on a target. `runtime/effra` is the native Go provider of the earlier language, and the prototype's `rt` package is the first provider of the Go-shaped language. Pinned Effect as the JavaScript provider went with the JavaScript target on 2026-10-26.
+
+**Lawful runtime contract** (specified research): The host operations and laws an effect runtime provider must satisfy, with each obligation's evidence classified as nominally checked, trusted decision, tested law, refuted or unresolved/unavailable.
+
+**Uninterruptible host wait** (designed): A blocking Go call with no cancel hook. It is recorded in the footprint and listed by `ef inspect` (G8).
+
+**Exit accumulator** (designed): The runtime record that combines a body's outcome with release defects and interruption into one exit cause, so a release never hides a failure.
+
+## Earlier `.ef` language
+
+These terms describe the `.ef` language that `internal/compiler` and `runtime/effra` implement today, with its `effect fn`, `run`, `raises` and `service` forms. The Go-shaped language replaces it; where a term has a counterpart above, the entry says so.
+
+**Record**: A nominal data type with declared fields. Construction checks every required field and its type. Counterpart: struct.
+
+**Closed enum**: A nominal set of alternatives, each with its own declared payload. Counterpart: union.
+
+**Absence**: An explicitly selected closed alternative describing a missing value, distinct from an uninitialized field or a bare nil/null value.
+
+**Void**: The no-value type, spelled `void`, describing successful completion without an information-bearing result. Its explicit expression is `void`. It is distinct from absence and from a computation that does not complete successfully.
+
+**Option** (specified): A generic closed enum with `None` and `Some(T)` alternatives. `Some` contains an admitted value of `T`, never an unchecked nil host reference.
+
+**Exhaustive match**: An interpretation that covers each declared alternative exactly once and executes only its selected arm. Counterpart: totality.
+
+**Signed-64 wrap** (specified): The portable `i64` arithmetic rule: each admitted `+`, `-`, `*`, `/` and unary `-` result is reduced to its two's-complement signed 64-bit residue, so `MIN / -1` is `MIN`. Division and remainder truncate toward zero.
+
+**Divisor proof** (specified): Checked evidence that an `i64` divisor is not zero: a nonzero integer literal, or a local binding inside an `if` branch whose comparison of that binding with an integer literal excludes zero. `/` and `%` are admitted only with one, so division by zero is not representable in checked source.
+
+**Failure payload**: The declared data carried by a named failure, separate from an ordinary success value.
+
+**Entry failure report**: The deterministic stderr text and exit status a program entry produces when `main` fails. It lists each cause reason in order, as a named failure with its payload, a defect message or an interruption. Payloads are rendered from the checked types of `main`'s failure row, so the report is deterministic for every failure in that row, including built-in, codec and HTTP listener failures. The one exception is an unclassified HTTP listener failure, which keeps the host's text.
+
+**Effect contract**: The success value, named failures, and required services of a deferred Effra program.
+
+**Failure row**: The unordered set of nominal failures admitted by an effect contract. Counterpart: error row.
+
+**Requirement row**: The unordered set of nominal services needed to execute an effect. Counterpart: capability row.
+
+**Callable value**: A named function carried as a value with explicit parameter, result, failure and requirement contracts. Pure functions and functions constructing deferred effects have distinct callable kinds.
+
+**Row parameter**: A declaration-qualified variable representing a finite failure or requirement row. Ordinary function application obtains its least bound from direct callback argument rows.
+
+**Callback-result relation**: Retained evidence relating a callback invocation's returned handles to its resolved named callee and input ownership. It is separate from ownership of the callable value; an unresolved relation remains potential ownership.
+
+**Postfix construct**: A compiler-known construct written after a receiver with `.`, such as `.catch<E>(h)`, `.provide<S>(p)` or `.timeout(ms)`. The parser claims its word after any receiver. The 2026-10-12 construct bar no longer admits this spelling for constructs; the Go-shaped language replaces these forms with `catch`, `with` and `timeout.After`.
 
 **Pipe** (implemented): The notation `x |> f(args)`, which is the ordinary call `f(x, args)`.
 
 **Receiver method** (admitted, not implemented): A function declared with an explicit receiver in its type's owner module, such as `fn (u: User) display()`. The call `u.display()` is exactly `User.display(u)`.
 
+**Where clause** (earlier spelling): A requirement that each type argument's owner module declares a method with a given name and signature. Counterpart: constraint.
+
+**Owner module**: The module that declares a type and its receiver methods. Counterpart: owner package.
+
 **Constant parameter default** (admitted, not implemented): A literal or named constant declared for a parameter and inserted at the call site when the argument is omitted.
 
-**Visibility** (admitted, not implemented): Whether another module may name a declaration. Declarations are private by default and exported with `pub`; the case of a name carries no meaning.
+**Visibility** (admitted, not implemented): Whether another module may name a declaration. Declarations are private by default and exported with `pub`; the case of a name carries no meaning. The Go-shaped language has not settled visibility ([spec README, Gap 8](docs/spec/README.md#gaps)).
 
 **Construction authority** (admitted, not implemented): The right to construct values of a nominal type. A `pub readonly` type lets other modules read and match its values while only its owner module constructs them.
-
-**Law** (admitted, not implemented): A named behavioral obligation that types cannot state, declared in a service, contract or other declaration and checked by a law suite. A refuted law refuses the build. Laws are a general construct; #125 decides their shape.
 
 **JSX pragma** (admitted, not implemented): A user-defined selection of the factory, fragment and result types to which JSX notation desugars.
 
@@ -105,15 +263,13 @@ overhead or a fixed speedup multiplier.
 
 **Materialized provider value**: An already constructed service implementation that can be explicitly reused without reexecuting its recipe.
 
-**Captured provider**: A provider value bound to the service values supplied during its construction. Its operations belong to the caller's current owning scope.
-
-**Layer** (specified): A lazy checked acquisition plan selecting implementations and composing their construction dependencies. Its contract records exposed services, construction failures and unsatisfied inputs.
+**Layer** (specified): A lazy checked acquisition plan selecting implementations and composing their construction dependencies. Its contract records exposed services, construction failures and unsatisfied inputs. Counterpart: wire.
 
 **Layer binding** (specified): A nominal service selection at a declaration site, distinct from its implementation's type and from an acquired provider instance.
 
 **Shared acquisition node** (specified): One identified construction selection reused within a graph build under compatible input identities; concurrent consumers await the same acquisition.
 
-**Graph build** (specified): One scope-owned execution of a layer plan, with its own acquisition table and completed startup or rollback outcome. Separate builds are independent.
+**Graph build** (specified): One scope-owned execution of a layer plan, with its own acquisition table and completed startup or rollback outcome. Separate builds are independent. Counterpart: build.
 
 **Layer replacement** (specified): A checked pre-acquisition substitution of one binding throughout a composed graph, followed by reconstruction of its effective construction edges and contract.
 
@@ -123,9 +279,9 @@ overhead or a fixed speedup multiplier.
 
 **Semantic revision**: The identity of the checked snapshot described by inspection or diagnostics, including imported declaration data and behavior contracts when present.
 
-**Managed fiber**: An execution of an Effra effect with an owner and a completion result. Its cancellation request and completed shutdown are distinct states.
+**Managed fiber**: An execution of an Effra effect with an owner and a completion result. Its cancellation request and completed shutdown are distinct states. Counterpart: task.
 
-**Owning scope**: The lifetime that owns managed fibers and resource releases. Its closure establishes their completed shutdown and cleanup.
+**Owning scope**: The lifetime that owns managed fibers and resource releases. Its closure establishes their completed shutdown and cleanup. Counterpart: owner scope.
 
 **Host declaration**: A Go declaration supplying the native shape and identity of an imported value or callable.
 
@@ -139,11 +295,11 @@ overhead or a fixed speedup multiplier.
 
 **Native descriptor** (specified): An OS-specific handle whose validity follows a native resource lifetime; it is distinct from the resource object and its interfaces.
 
-**Codec** (implemented for structural JSON): A checked witness relating a wire type and a domain type through separately contracted decoding and encoding operations.
+**Binding contract**: Supplemental behavioral facts attached to a host declaration, including its cancellation, failure, resource, and trust policy.
 
 **Structural derivation** (implemented for the first JSON profile): Generating a codec's structural rules from canonical checked data declarations and an explicit representation policy.
 
-**Codec plan** (implemented): The bounded, shared structural DAG one derivation checks for a domain type under a profile. Both targets' engines execute the same plan; an application retains it only through an executed direction.
+**Codec plan** (implemented): The bounded, shared structural DAG one derivation checks for a domain type under a profile. An application retains it only through an executed direction.
 
 **Codec transformation** (implemented): A checked conversion in a codec's decoding or encoding direction, carrying its own expected failures and required services. The two directions need not be mathematical inverses. A witness states one with `decode:` and `encode:` functions over a structurally derived representation.
 
@@ -155,23 +311,15 @@ overhead or a fixed speedup multiplier.
 
 **Transformed witness** (implemented): A codec witness that states a codec transformation. A parent witness composes transformed witnesses only by listing them in its `with` clause; each applies wherever its domain type occurs in the parent's representation.
 
-**Machine** (specified): A checked definition of state and event types, transition policies and state-owned behavior.
-
 **Machine plan** (specified): The finite, source-revisioned provider-independent facts lowered from a checked machine declaration, including nominal state/event/outcome/output identities, callable rows, transition edges, entry/work identity rules and inspection data.
 
 **Machine provider** (specified): An ordinary typed library, function or service implementation that consumes a machine plan and owns its execution, admission, scopes, cleanup and runtime observation without changing the plan's identities or public rows.
 
 **Provider conformance** (specified): Evidence that independently authored machine providers execute the same checked plans on the same target with unchanged declarations/compiler selection while preserving the declared observable contracts and recording their separate runtime obligations.
 
-**Effect runtime provider** (direction): An implementation of the lawful runtime contract that executes Effra effects on a target. `runtime/effra` is the native Go provider, Effra's first. Pinned Effect as the JavaScript provider went with the JavaScript target on 2026-10-26.
-
-**Lawful runtime contract** (specified research): The host operations and laws an effect runtime provider must satisfy, with each obligation's evidence classified as nominally checked, trusted decision, tested law, refuted or unresolved/unavailable.
-
-**Actor** (specified): An owned, addressable instance of behavior with typed messages/replies and explicit admission/concurrency policy. Ordinary handlers or receive loops can supply behavior; an effect without a message interface remains a fiber.
-
 **Machine-backed actor** (specified): An actor whose behavior follows a checked machine plan, adding transitions and state-entry lifetimes to ordinary actor ownership and messaging.
 
-**Supervisor** (proposed): An owner that observes completed child exits and applies an explicit restart, stop or escalation policy using fresh child factories and an explicit restart budget: a finite restart intensity, or `unbounded` flagged by the `no-unbounded-restart` justifier rule.
+**Supervisor** (proposed): An owner that observes completed child exits and applies an explicit restart, stop or escalation policy using fresh child factories and an explicit restart budget: a finite restart intensity, or `unbounded` flagged by the `no-unbounded-restart` justifier rule. Counterpart: set.
 
 **Actor address** (proposed): A typed identity used to route to an actor independently of its current running instance; an address alone promises neither persistence nor delivery.
 
@@ -189,15 +337,13 @@ overhead or a fixed speedup multiplier.
 
 **Entry epoch** (specified): An identity distinguishing a state entry from prior entries so obsolete work cannot update a later entry.
 
-**Transition decision** (implemented syntax): The value a machine step produces for one admitted event: `enter` (re-enter), `stay` (keep the entry, same tag), `ignore`, `reject` (observable, state unchanged) or `done` (terminal output). Its type is the predeclared `decision<S, O>`.
+**Transition decision** (implemented syntax): The value a machine step produces for one admitted event: `enter`, `stay`, `ignore`, `reject` or `done`. Its type is the predeclared `decision<S, O>`. Counterpart: decision.
 
 **Region** (proposed): A payload field of one state variant, bound by the machine declaration to a separately declared child machine whose state it holds. Several regions on a variant are orthogonal; one region is a nested (hierarchical) child.
 
 **Region entry** (proposed): The state entry of one active region, nested in its parent's entry with its own epoch, so re-entering one region leaves its siblings' work untouched.
 
 **Machine history** (proposed pattern): A remembered child state kept as ordinary data in an inactive variant and restored by a later `enter`; deep history restores the value, shallow history keeps only its top-level variant. Restoring always starts fresh entries.
-
-**Binding contract**: Supplemental behavioral facts attached to a host declaration, including its cancellation, failure, resource, and trust policy.
 
 **Request scope**: A fresh owning scope for one HTTP request, linked to connection and server cancellation. Completed shutdown includes its handler cleanup.
 
@@ -212,6 +358,10 @@ overhead or a fixed speedup multiplier.
 **Lint cost receipt**: Raw per-run wall-clock measurements of one lint analysis. Frontend checking, fact extraction, each rule pack's fact serialization and process phases, and the merge are kept separate. A receipt carries no aggregate and supports no performance claim on its own.
 
 **Expression anchor**: A source location identifying the expression described by a diagnostic or local type query.
+
+**Diagnostic code**: The stable identifier of one checker rule, such as `S102` in the prototype or an `EF` code in the main compiler's registry. [docs/spec/diagnostics.md](docs/spec/diagnostics.md) maps each prototype code to its rule and a fixture.
+
+**Inlay hint** (designed): Text the language server shows in the editor without changing the source, such as `closes: out, in` at a block end that releases resources.
 
 **Dependency graph**: A revision-scoped view of program contracts and the relationships between functions, services and providers. Incoming relationships identify dependents.
 
@@ -228,6 +378,8 @@ overhead or a fixed speedup multiplier.
 **Unmatched floor** (size conformance): A control program that does less than the fixture it accompanies, such as printing a result without the entry's cancellation and scope. It is recorded only as a lower bound and is never compared as a member of a semantic equivalence baseline.
 
 **Program time**: The time authority under which managed sleeps and deadlines execute. Test program time can advance independently of the watchdog's wall clock.
+
+**Virtual clock** (designed): `testing.VirtualClock`, a provider of `Clock` and `Scheduler` whose time jumps to the next timer when every task in the test is blocked.
 
 **Quiescence**: The scheduler state in which no managed fiber is running or runnable. A wake in flight is not idle: a fiber that has been signalled, fired or cancelled but has not run again is runnable. At quiescence, every pending timer that managed work can register without outside input is registered. `Scheduler.awaitRegistration()` returns at quiescence, and `Scheduler.advance` selects each deadline only at quiescence. When several fibers wait for quiescence at once, the order in which they are released is unspecified. Interrupting a waiter is an ordinary interruption. Unmanaged goroutines, host promises and foreign blocking calls are outside it.
 
