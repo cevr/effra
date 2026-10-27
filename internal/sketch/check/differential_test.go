@@ -498,10 +498,17 @@ func diffCheck(src string, cycleOnly bool) []string {
 	return d
 }
 
-// isRefusal reports whether d is the inferred subset's refusal (D6 as
-// amended in round 7): S108 "cannot infer T; write the type arguments".
+// isRefusal reports whether d is one of Ergo's documented refusals of a
+// Go-valid program: the inferred subset's S108 "cannot infer T; write the
+// type arguments" (D6 as amended in round 7), or the S108 for a shift by a
+// non-constant count of an untyped constant (types.md, Operators 1; round
+// 9 class A).
 func isRefusal(d string) bool {
-	return strings.Contains(d, "S108") && strings.Contains(d, "cannot infer") && strings.Contains(d, "write the type arguments")
+	if !strings.Contains(d, "S108") {
+		return false
+	}
+	return strings.Contains(d, "cannot infer") && strings.Contains(d, "write the type arguments") ||
+		strings.Contains(d, "the left operand of a shift by a non-constant count needs a type")
 }
 
 // diffCount is diffCheck that also reports a refusal: Go accepts and every

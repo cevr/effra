@@ -410,13 +410,22 @@ func (c *checker) shift(x *syntax.BinaryExpr, hint Type) operand {
 	lt := l.typ
 	if l.mode == modeConst && isUntyped(lt) {
 		if r.mode != modeConst {
-			lt = defaultType(lt)
-			if hint != nil && isInteger(hint) {
-				lt = hint
+			// A shift by a non-constant count needs a typed left operand
+			// (types.md, Operators 1; round-8 class A). Go types it from
+			// the context it would have without the shift, a known trap
+			// (float64(1 << n) is invalid); Zig requires a fixed-width
+			// left operand. Ergo refuses a subset of Go here, so the
+			// checker never defers a shift's type.
+			left := l.val.ExactString()
+			if lit, ok := x.X.(*syntax.BasicLit); ok {
+				left = lit.Value
 			}
-			// The left operand of a non-constant shift takes the
-			// shift's type (go/types updateExprType; round-7 M1).
-			c.updateExprType(x.X, lt)
+			count := exprText(x.Y)
+			if count == "this expression" {
+				count = "n"
+			}
+			c.errorf(x.X, CodeType, "the left operand of a shift by a non-constant count needs a type; write int(%s) %s %s", left, x.Op, count)
+			return bad(x)
 		} else if constant.ToInt(l.val).Kind() != constant.Int {
 			c.errorf(x.X, CodeType, "cannot shift %s", l.val.ExactString())
 			return bad(x)

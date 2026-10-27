@@ -44,7 +44,6 @@ func Take(v int8) {}
 		`func F() { var a [2]int; _ = a }`,
 		`func F(n int8) int8 { return n + 1 }`,
 		`func F(n int8) bool { return n < 1 + 2 }`,
-		`func F(n uint) int { return 1 << n }`,
 		`func F() { f := func(v int) int { return v + 1 }; _ = f }`,
 		`func Fix(f func(int) int) {}
 
