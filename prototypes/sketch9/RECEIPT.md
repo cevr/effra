@@ -242,3 +242,23 @@ Host: shared exe workbox, AMD EPYC 9554P, 16 vCPU, load average 6–13; go1.27.0
 | `testdata/trace/failure.sketch` | `no such order` | 9 | 1,297 | 3.13 / 2.95 | 2,644,650 / 2,582,278 / 2,544,050 |
 
 The "without" binary is the same emitted program with the trace switch removed by a scratch script, to measure the switch alone: about 62 KB. A first writer that used `encoding/json` made the switch cost 1.48 MB.
+
+## Round 2: recorded occurrences and a validating query
+
+| Command (from the worktree root) | Exit |
+| --- | --- |
+| `bash /home/exedev/.cache/baton/wf10/trace-188/accept.sh` | 0 (`ACCEPT OK`, `accept-r2.log`) |
+| `./scripts/gate.sh` | 0 (`gate-r2.log`) |
+| `cd prototypes/sketch9 && go vet ./... && go test -count=1 ./...` | 0 |
+
+- The emitter brackets each capability call with `c__N := t__.TraceCall(def, site)` and `t__.TraceCallExit(c__N, def, site, err)`; `Scheduler.Sleep` is a traced call whose outcome is ok or interrupted. The runtime links each handler to the occurrence it caught.
+- `sketch/trace.go` validates the trace before it explains it (`validateTrace`, `checkTasks`, `checkLink`, `checkFrames`) and states a cause only along a recorded link; without one it prints "origin not recorded" and labels candidates. It lists each call with its outcome and span.
+- `cmd/sketchc` reads the trace through a limit of `TraceByteBudget+1` bytes: a 24 MiB file is refused after 8,487,040 bytes of allocation (`TestTraceByteBudgetBeforeRead`).
+- `testdata/trace/two-calls` and `two-timeouts` are the round-1 reviewer probes, each with a recorded trace (`.jsonl`). `TestQueryTraceStatesOnlyRecordedLinks` checks their full cause traces against the recordings; `TestKernelProbeTraces` builds and runs them and checks the handler and caught lines.
+- Default mode: the round-1 and round-2 `sketchc` emit byte-identical `main.go` for 46 programs (`testdata/checkout.sketch`, the probes and the trace examples).
+
+| Example (`examples-r2.txt`) | Events | Trace bytes | Wall median off / on (ms) | Binary, kernel with switch / without / embedded (bytes) |
+| --- | --- | --- | --- | --- |
+| `testdata/trace/checkout.sketch` | 12 | 1,768 | 3.00 / 2.73 | 2,674,231 / 2,611,499 / 2,548,840 |
+| `testdata/trace/timeout.sketch` | 16 | 2,400 | 106.61 / 108.23 | 2,675,381 / 2,612,177 / 2,549,215 |
+| `testdata/trace/failure.sketch` | 11 | 1,716 | 3.27 / 2.91 | 2,669,014 / 2,610,594 / 2,544,058 |

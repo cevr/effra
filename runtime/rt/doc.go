@@ -59,11 +59,16 @@
 //     it inherits the [Tracer]. The runtime raises the task events of #124's
 //     vocabulary (start, body-exit, cancel-request, observe, deadline,
 //     release, panic) keyed by the task's span, and emitted code raises call,
-//     interrupt, construct and handler events at its own sites through
-//     [Task.Trace]. Events carry IDs, sites and error types, never values.
-//     With no tracer each emission point is one load and compare, the poll
-//     has none, and the off path allocates nothing; the recorder and the
-//     JSON Lines writer live in package rttrace.
+//     call-exit, interrupt, construct and handler events at its own sites
+//     through [Task.TraceCall], [Task.TraceCallExit] and [Task.Trace]. Each
+//     event has an occurrence ID, and the runtime records the links between
+//     occurrences (a handler to the failure it caught, an exit to what it
+//     carries), so a reader never infers them. An [Event] holds the exit's
+//     error and the panic value, and a [Tracer] receives them; the rttrace
+//     writer serializes only IDs, sites and type names, never values. With
+//     no tracer each emission point is one load and compare, the poll has
+//     none, and the off path allocates nothing; the recorder and the JSON
+//     Lines writer live in package rttrace.
 //   - [Clock] and [Scheduler] are the time capabilities, with a [Live] and a
 //     deterministic [Virtual] implementation. [After] is the timeout, written
 //     as an ordinary library function over [Go]-style tasks and a [Scheduler].

@@ -211,11 +211,15 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Source revision** (designed): The SHA-256 digest of a source file, the revision that qualifies its definition IDs. A trace header carries it once, and a trace query refuses a trace whose revision differs from the file.
 
-**Trace event** (designed): One record of a run. It has a kind from the runtime-law vocabulary (#124) or the two additions `call` and `interrupt`, a task and its parent, a definition ID and a source site. It names failures and defects by type and never records argument or result values.
+**Trace event** (designed): One record of a run. It has an occurrence ID, a kind from the runtime-law vocabulary (#124) or the three additions `call`, `call-exit` and `interrupt`, a task and its parent, a definition ID and a source site, and it may carry an occurrence link. Its serialized form names failures and defects by type and never carries argument or result values.
 
-**Point event** (designed): A trace event that emitted code raises at its own source site: a capability `call`, an `interrupt` at an interruption point, a wire `construct` or a catch `handler`. The runtime raises the other kinds for a task, keyed by the task's definition ID.
+**Occurrence ID** (designed): The number the runtime gives a trace event when it raises it, unique within one traced task tree and taken from one counter, so an event that happens before another has the smaller ID. A capability call's occurrence ID joins its `call` and `call-exit` events.
 
-**Trace evidence** (designed): The answer of a trace query (`sketchc trace`, later `ef trace` and MCP `code.trace`): the `trace-evidence-1` envelope with the fields of the review evidence schema (#156), then the tasks, the resolved events and the cause trace.
+**Occurrence link** (designed): The occurrence ID that one trace event records for another, set by the runtime and never inferred by a reader: a `handler` links the failure, deadline or child exit it caught; a `body-exit` the occurrence its exit carries; a `call-exit` its call; an `observe` the child's `body-exit`; a `panic` the capability call it left. A trace query states a cause only along these links and labels anything else a candidate.
+
+**Point event** (designed): A trace event that emitted code raises at its own source site: a capability `call` and its `call-exit` with the outcome (ok, a failure, a defect or interrupted), an `interrupt` at an interruption point, a wire `construct` or a catch `handler`. The runtime raises the other kinds for a task, keyed by the task's definition ID.
+
+**Trace evidence** (designed): The answer of a trace query (`sketchc trace`, later `ef trace` and MCP `code.trace`): the `trace-evidence-1` envelope with the fields of the review evidence schema (#156), then the tasks, the capability calls with their spans, the resolved events and the cause trace. The query validates the trace before it answers and refuses a malformed one with the reason.
 
 ## Earlier `.ef` language
 
