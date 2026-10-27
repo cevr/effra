@@ -7,28 +7,29 @@ import (
 	"time"
 )
 
-// Reviewer probe (round 5, M1): a child started inside a restore is
-// cancellable by the parent's stop, whatever the restore's outside state, so a
-// masked owner waiting on it cannot deadlock. The owner's mask follows the
-// outside state. Round 6 decision: a restore is its own kind and stops the
-// shield walk, so the reviewer's "acquisition inside outer cleanup" case is
-// not shielded either; a release entered inside the restore still is
-// (TestReleaseShieldAcrossRestoreAndAcquire).
+// Reviewer probe (round 5, M1): a restore returns to the state of the region
+// enclosing the restored one (Effect and ZIO restore semantics). A child
+// started in a restore under an ordinary Acquire is cancellable, so its masked
+// owner cannot deadlock waiting on it; a child started in a restore whose
+// enclosing region is a cleanup keeps that cleanup's shield. Both stop
+// timings; the whole run sits inside a deadlock watchdog.
 func TestRestoreChildCancellation(t *testing.T) {
 	cases := []struct {
 		name                                string
 		inAcquire, outerCleanup, wantMasked bool
+		wantShield                          bool
 	}{
-		{"outermost cleanup restore", false, false, false},
-		{"ordinary acquisition", true, false, true},
-		{"acquisition inside outer cleanup", true, true, true},
+		{"outermost cleanup restore", false, false, false, false},
+		{"ordinary acquisition", true, false, true, false},
+		{"acquisition inside outer cleanup", true, true, true, true},
 	}
 	for _, tc := range cases {
 		for _, timing := range []string{"stop before child start", "stop after child start"} {
 			t.Run(tc.name+"/"+timing, func(t *testing.T) {
 				root := Root("main")
 				started := make(chan *Task, 1)
-				var childStarted, sawMasked atomic.Bool
+				allow := make(chan struct{})
+				var reached, sawMasked atomic.Bool
 				operation := func(task *Task) (int, error) {
 					m := task.Mask()
 					defer m.Unmask()
@@ -41,8 +42,12 @@ func TestRestoreChildCancellation(t *testing.T) {
 							}
 							h := Go(local, "restored helper", func(child *Task) (int, error) {
 								started <- child
-								<-child.Done() // ends only when a stop reaches it
-								return 0, Interrupted
+								select {
+								case <-child.Done():
+									return 0, Interrupted
+								case <-allow: // only a shielded child is let go
+									return 7, nil
+								}
 							})
 							return h.Wait()
 						})
@@ -50,9 +55,9 @@ func TestRestoreChildCancellation(t *testing.T) {
 					return 0, err
 				}
 				var err error
-				// No rescue: if the stop does not reach the child, the owner
-				// waits forever and the watchdog fails the test.
 				controlDone := make(chan struct{})
+				// No rescue for a cancellable child: if the stop does not reach
+				// it, its masked owner waits forever and the watchdog fails.
 				within(t, 10*time.Second, "the masked owner's Wait on its restored child (no deadlock)", func() {
 					go func() {
 						defer close(controlDone)
@@ -60,8 +65,10 @@ func TestRestoreChildCancellation(t *testing.T) {
 						if timing == "stop after child start" {
 							root.Interrupt()
 						}
-						_ = child
-						childStarted.Store(true)
+						reached.Store(child.StopRequested())
+						if tc.wantShield {
+							close(allow)
+						}
 					}()
 					_, err = Run(root, func(task *Task) (int, error) {
 						if !tc.inAcquire {
@@ -86,8 +93,8 @@ func TestRestoreChildCancellation(t *testing.T) {
 					})
 				})
 				<-controlDone
-				if !childStarted.Load() {
-					t.Fatal("the child never started")
+				if reached.Load() == tc.wantShield {
+					t.Fatalf("the ambient stop reached the restored child = %v, want shielded = %v", reached.Load(), tc.wantShield)
 				}
 				if !errors.Is(err, Interrupted) || root.Masked() {
 					t.Fatalf("exit %v, mask leaked %v", err, root.Masked())

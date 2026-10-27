@@ -36,12 +36,17 @@
 //     [Scope.End] apply stop-wins: a stop the task can observe beats success.
 //   - Mask regions are an explicit owner-local stack of kinds: protecting
 //     (a release, a defer body, a GoMasked body), acquiring (Acquire's
-//     registration step) and restores, which are their own kind and record
-//     only whether their outside is masked. A child is shielded when a walk
-//     down the stack that skips acquiring entries meets a protecting entry
-//     before any restore; a restore-born child stays cancellable after the
-//     restore returns. The ambient stop cascade does not reach a shielded
-//     child, so the release completes (Trio shielded cancel scopes, Effect
+//     registration step) and restores. A restore is its own kind and returns
+//     to the state of the region enclosing the restored one (ZIO and Effect
+//     restore): it records, when pushed, whether that outside is masked and
+//     whether it shields. A walk down the stack skips acquiring entries; a
+//     child is shielded when the first other entry is protecting, or is a
+//     restore whose outside shields. An empty stack does not shield. So a
+//     restore under an ordinary Acquire starts cancellable children, and a
+//     restore under an Acquire inside a cleanup keeps the cleanup's shield,
+//     since a finalizer's enclosing state is uninterruptible. The ambient
+//     stop cascade does not reach a shielded child, so the release
+//     completes (Trio shielded cancel scopes, Effect
 //     uninterruptible finalizers, Go context.WithoutCancel); its handle's
 //     Stop, a timeout and its scope's drain still stop it. An acquisition
 //     masks only its own registration window; it is not a cleanup region
