@@ -43,27 +43,6 @@ func describe(diags []check.Diagnostic) string {
 	return strings.Join(parts, "\n\t")
 }
 
-// deviations are the acceptance fixtures whose expected outcome contradicts
-// a normative text or an orchestrator answer; the checker follows the text,
-// and the round request names each one with its evidence. The value is the
-// outcome the checker gives, as CODE@LINE separated by blanks.
-var deviations = map[string]string{
-	// types.md Error types 1: "A type named in any error row is an error
-	// type." Fault is in no error row, so returning it is an ordinary value.
-	// The prototype probe error-as-value has `func fallible() error[Fault]`;
-	// the restatement dropped it.
-	"negative/error-as-value-exported": "",
-	// Orchestrator answer Q1: `wire X uses` stays S109 (README Gap 33).
-	"negative/wire-exposure-hides-entry": "S109@9",
-	"positive/wire-exposure":             "S109@9",
-}
-
-// parityDeviations are the prototype fixtures in the same position.
-var parityDeviations = map[string]string{
-	// D2 and Q5: Go's typing; `n := 1` is an int, and f takes an int64.
-	"probes/integer-local.sketch": "S108",
-}
-
 // TestFixtures checks the mirror of the acceptance fixtures (negative,
 // positive and the spec-example programs): the diagnostics are exactly the
 // `// want` markers, one per marked line, and no cascade (spec D3).
@@ -82,9 +61,6 @@ func TestFixtures(t *testing.T) {
 				}
 				_, diags := check.CheckSource(string(data))
 				want, have := expected(string(data)), got(diags)
-				if d, ok := deviations[name]; ok {
-					want = strings.Fields(d)
-				}
 				if strings.Join(want, " ") != strings.Join(have, " ") {
 					t.Errorf("want %v, got %v\n\t%s", want, have, describe(diags))
 				}
@@ -137,9 +113,6 @@ func TestParity(t *testing.T) {
 				expect = m[1]
 			}
 			if o, ok := overrides[rel]; ok {
-				expect = o
-			}
-			if o, ok := parityDeviations[rel]; ok {
 				expect = o
 			}
 			if expect == "skip" {

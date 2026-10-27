@@ -46,6 +46,7 @@ var negativeSpans = map[string][2]string{
 	"duplicate-wire-entry":               {"S111", "Store"},
 	"equality-mismatch":                  {"S108", "\"a\" == 1"},
 	"error-method-on-error-type":         {"S108", "Error"},
+	"error-as-value-exported":            {"S101", "v"},
 	"error-row-non-struct":               {"S104", "Store"},
 	"export-guard-machine-step":          {"S101", "try probe()"},
 	"fallible-function-value":            {"S108", "boom"},
@@ -102,6 +103,7 @@ var negativeSpans = map[string][2]string{
 	"wire-constructor-is-37":             {"S109", "open"},
 	"wire-cycle":                         {"S108", "W"},
 	"wire-entry-non-capability":          {"S104", "Order"},
+	"wire-exposure-hides-entry":          {"S109", "uses Account"},
 	"wire-literal-outside-with":          {"S108", "wire{ Store = Mem{} }"},
 }
 
