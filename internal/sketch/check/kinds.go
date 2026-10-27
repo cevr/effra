@@ -78,6 +78,34 @@ func (c *checker) solveDeclKinds() {
 		}
 		return out
 	}
+	// index resolves an index expression's head: a local generic
+	// declaration links each bare parameter argument to the head's
+	// parameter; any other generic type gives its resolved kinds.
+	linkHead := func(w *typeWalker, self func(syntax.Expr) (kindVar, bool)) func(*syntax.IndexExpr) bool {
+		return func(ix *syntax.IndexExpr) bool {
+			htn, hn := c.namedHead(ix.X)
+			if hn == nil || htn.Pkg != c.pkg || htn.Decl == nil || htn.Decl.TypeParams == nil {
+				return false
+			}
+			w.walk(ix.X, KindType)
+			for i, a := range ix.Indices {
+				slot := kindVar{htn, i}
+				if _, ok := parent[slot]; !ok {
+					w.walk(a, KindType)
+					continue
+				}
+				args := orLeaves(a)
+				for _, arg := range args {
+					if v, ok := self(arg); ok {
+						union(v, slot)
+					} else if len(args) == 1 {
+						w.walk(arg, KindType)
+					}
+				}
+			}
+			return true
+		}
+	}
 	var decls []*TypeName
 	for _, tn := range c.pkg.Types {
 		if tn.Decl == nil || tn.Decl.TypeParams == nil {
@@ -121,37 +149,64 @@ func (c *checker) solveDeclKinds() {
 				observe(kindVar{tn, i}, k)
 			}
 		}
-		// index resolves an index expression's head: a local generic
-		// declaration links each bare parameter argument to the head's
-		// parameter; any other generic type gives its resolved kinds.
-		w.index = func(ix *syntax.IndexExpr) bool {
-			htn, hn := c.namedHead(ix.X)
-			if hn == nil || htn.Pkg != c.pkg || htn.Decl == nil || htn.Decl.TypeParams == nil {
-				return false
-			}
-			w.walk(ix.X, KindType)
-			for i, a := range ix.Indices {
-				slot := kindVar{htn, i}
-				if _, ok := parent[slot]; !ok {
-					w.walk(a, KindType)
-					continue
-				}
-				args := []syntax.Expr{a}
-				if b, ok := unparen(a).(*syntax.BinaryExpr); ok && b.Op == syntax.OR {
-					args = []syntax.Expr{b.X, b.Y}
-				}
-				for _, arg := range args {
-					if v, ok := self(arg); ok {
-						union(v, slot)
-					} else if len(args) == 1 {
-						w.walk(arg, KindType)
-					}
-				}
-			}
-			return true
-		}
+		w.index = linkHead(&w, self)
 		w.slots = c.slotKinds
 		w.walk(tn.Decl.Spec, KindType)
+		c.cur = saved
+	}
+	// A method binds its receiver's parameters by position, and its
+	// signature constrains them like the declaration's body does (D6:
+	// "body and methods"; round-3 M3): `func (Job[E]) Run() error[E]`
+	// makes Job's parameter an error row.
+	isDecl := map[*TypeName]bool{}
+	for _, tn := range decls {
+		isDecl[tn] = true
+	}
+	for _, f := range c.funcs {
+		d := f.Decl
+		if d == nil || d.Recv == nil || len(d.Recv.List) == 0 || d.Type == nil {
+			continue
+		}
+		rt := unparen(d.Recv.List[0].Type)
+		if st, ok := rt.(*syntax.StarExpr); ok {
+			rt = unparen(st.X)
+		}
+		ix, ok := rt.(*syntax.IndexExpr)
+		if !ok {
+			continue
+		}
+		htn, _ := c.namedHead(ix.X)
+		if htn == nil || !isDecl[htn] {
+			continue
+		}
+		index := map[string]int{}
+		for i, a := range ix.Indices {
+			if id, ok := unparen(a).(*syntax.Ident); ok && id.Name != "_" {
+				index[id.Name] = i
+			}
+		}
+		saved := c.cur
+		c.cur = f.file
+		self := func(x syntax.Expr) (kindVar, bool) {
+			id, ok := unparen(x).(*syntax.Ident)
+			if !ok {
+				return kindVar{}, false
+			}
+			i, ok := index[id.Name]
+			if _, known := parent[kindVar{htn, i}]; !ok || !known {
+				return kindVar{}, false
+			}
+			return kindVar{htn, i}, true
+		}
+		var w typeWalker
+		w.f = func(id *syntax.Ident, k Kind) {
+			if v, ok := self(id); ok {
+				observe(v, k)
+			}
+		}
+		w.index = linkHead(&w, self)
+		w.slots = c.slotKinds
+		w.walk(d.Type, KindType)
 		c.cur = saved
 	}
 	c.kinds = declKinds{kinds: map[*TypeName][]Kind{}, conflicts: map[*TypeName]map[string]bool{}}
@@ -176,4 +231,13 @@ func (c *checker) solveDeclKinds() {
 		}
 		c.kinds.kinds[tn] = ks
 	}
+}
+
+// orLeaves returns the operands of a row argument written as a union,
+// E | F | G, at any nesting; any other expression is its own leaf.
+func orLeaves(x syntax.Expr) []syntax.Expr {
+	if b, ok := unparen(x).(*syntax.BinaryExpr); ok && b.Op == syntax.OR {
+		return append(orLeaves(b.X), orLeaves(b.Y)...)
+	}
+	return []syntax.Expr{x}
 }

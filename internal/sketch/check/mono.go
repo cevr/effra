@@ -141,6 +141,14 @@ func occurs(q *TypeParam, t Type) bool {
 					return true
 				}
 			}
+		case *Interface:
+			for _, m := range t.Methods {
+				if m.Sig != nil && walk(m.Sig) {
+					return true
+				}
+			}
+		case *MachineType:
+			return walk(t.State) || walk(t.Signal)
 		case *RowArg:
 			for _, e := range t.Row.Elems() {
 				if walk(e) {

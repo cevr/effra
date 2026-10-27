@@ -15,10 +15,10 @@ type initDeps struct {
 	owner any                  // *Func or *pkgVar being checked
 	deps  map[any]map[any]bool // owner → referenced *Func or *pkgVar
 	byVar map[*Var]*pkgVar
-	// tentative: a cyclic component's first, silent pass records its
-	// references too, at its own silence level only (a nested peek is
-	// checked again at that level), so its cycles are known before its
-	// reporting pass, which records them again.
+	// tentative: discoverInit's silent pass records references too, at
+	// its own silence level only (a nested peek is checked again at that
+	// level), so the cycles are known before the reporting pass, which
+	// records them again.
 	tentative bool
 }
 
@@ -77,35 +77,13 @@ func (c *checker) pkgVarOf(v *Var) *pkgVar {
 // ("initialization cycle"): a var's initializer would need its own value
 // (round-2 M2). A cycle through functions alone is recursion, legal.
 //
-// The check runs twice. checkComponentInit runs as soon as a component of
-// the body graph has its reporting pass, before any caller of the component
-// is checked: the cycle's vars become invalid, so their rows never reach a
-// caller and no capability or error diagnostic follows from them (D3;
-// round-2 M2 and the orchestrator's decision 2). checkInitCycles runs once
-// all bodies are checked, for the cycles that pass through a method or a
-// declared-row function, which the body graph does not join into one
-// component; it reports only cycles no earlier report covers.
-
-// checkComponentInit reports the initialization cycles inside one
-// component of the body graph.
-func (c *checker) checkComponentInit(scc []*bodyNode) {
-	hasVar := false
-	in := make(map[any]bool, len(scc))
-	var nodes []any
-	for _, n := range scc {
-		if n.v != nil {
-			hasVar = true
-			in[n.v] = true
-			nodes = append(nodes, n.v)
-		} else {
-			in[n.fn] = true
-			nodes = append(nodes, n.fn)
-		}
-	}
-	if hasVar {
-		c.reportInitCycles(nodes, func(n any) bool { return in[n] })
-	}
-}
+// discoverInit (rows.go) records the resolved references of every var
+// initializer and of the functions and methods they reach before any body
+// is checked with diagnostics, and checkInitCycles reports the cycles then:
+// the cycle's vars become invalid, so their rows never reach a caller and
+// no capability or error diagnostic follows from them (D3). It runs once
+// more after the reporting pass, which records the references again, for
+// anything left; a cycle already reported is not reported twice.
 
 // checkInitCycles reports the initialization cycles of the whole package
 // that no component-level report covers.

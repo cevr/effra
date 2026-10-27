@@ -551,6 +551,22 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 	}
 	inst := c.subst(sig, in.m).(*Signature)
 	inst.TParams = nil
+	inst.NBracket = 0
+	// The callee and its parentheses record the instantiated signature, as
+	// go/types records it, not the generic one recorded while they were
+	// checked (D1; round-3 M4). An explicit instantiation Id[int] records
+	// it on the index expression too.
+	for f := x.Fun; f != nil; {
+		c.record(f, operand{mode: modeValue, typ: inst})
+		switch p := f.(type) {
+		case *syntax.ParenExpr:
+			f = p.X
+			continue
+		case *syntax.IndexExpr:
+			c.record(p.X, operand{mode: modeValue, typ: inst})
+		}
+		break
+	}
 	for i := 0; i < n; i++ {
 		pt := paramType(inst, i, spread)
 		if lits[i] != nil {

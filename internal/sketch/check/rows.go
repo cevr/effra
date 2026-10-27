@@ -127,19 +127,16 @@ type bodyNode struct {
 // inclusion), silently, then the component is checked once more with
 // diagnostics. An acyclic graph is linear: each body is checked once.
 //
-// The graph holds every reference that Go's initialization order counts
-// (go/types initorder.go): to a function, to a package var and, through a
-// selector, to a method. A selector is not resolved here, so it reaches
-// every method of that name: the graph over-approximates, which orders
-// more strictly and merges components but changes no fixpoint. With every
-// initialization dependency inside the graph, an initialization cycle lies
-// inside one component and is found before the component's reporting
-// pass, so its rows never reach a caller (round-2 M2).
+// The graph's edges are the references that row inference needs: to a
+// function whose rows are inferred and to a package var. A method or a
+// function that spells its rows is read by its signature, so it adds no
+// edge: one edge per referenced name, never one per same-named method
+// (round-3 M5). Initialization cycles are found before, by discoverInit
+// over resolved references.
 func (c *checker) checkBodies() {
 	var nodes []*bodyNode
 	byFunc := map[*Func]*bodyNode{}
 	byVar := map[*Var]*bodyNode{}
-	byMethod := map[string][]*bodyNode{}
 	for _, f := range c.funcs {
 		if f.Decl.Body == nil || f.Sig == nil {
 			continue
@@ -147,15 +144,13 @@ func (c *checker) checkBodies() {
 		n := &bodyNode{fn: f, index: -1}
 		nodes = append(nodes, n)
 		byFunc[f] = n
-		if f.Recv != nil {
-			byMethod[f.Name] = append(byMethod[f.Name], n)
-		}
 	}
 	for _, v := range c.vars {
 		n := &bodyNode{v: v, index: -1}
 		nodes = append(nodes, n)
 		byVar[v.obj] = n
 	}
+	c.bodyEdges = 0
 	for _, n := range nodes {
 		var root syntax.Node
 		if n.fn != nil {
@@ -176,22 +171,22 @@ func (c *checker) checkBodies() {
 			if to != nil && !seen[to] {
 				seen[to] = true
 				n.edges = append(n.edges, to)
+				c.bodyEdges++
 			}
 		}
 		syntax.Inspect(root, func(x syntax.Node) bool {
 			switch x := x.(type) {
 			case *syntax.SelectorExpr:
 				skip[x.Sel] = true
-				for _, m := range byMethod[x.Sel.Name] {
-					edge(m)
-				}
 			case *syntax.Ident:
 				if skip[x] {
 					return true
 				}
 				switch o := c.pkg.Scope.names[x.Name].(type) {
 				case *Func:
-					edge(byFunc[o])
+					if o.inferErrors || o.inferUses {
+						edge(byFunc[o])
+					}
 				case *Var:
 					edge(byVar[o])
 				}
@@ -199,8 +194,62 @@ func (c *checker) checkBodies() {
 			return true
 		})
 	}
+	c.discoverInit()
 	for _, scc := range tarjan(nodes) {
 		c.checkComponent(scc)
+	}
+	// Instantiation cycles through methods alone close outside any cyclic
+	// component (methods add no edge); the reporting pass recorded them.
+	c.checkInstantiationCycles()
+	c.checkInitCycles()
+}
+
+// discoverInit finds the package's initialization cycles before any body
+// is checked with diagnostics (round-2 M2, round-3 M5). It checks, silently,
+// each package var's initializer and every function and method those reach
+// through resolved references (a call, a value, a method value or
+// expression), each once: the dependency closure of Go's initialization
+// order, linear in its size. A cycle through a var is S108 and its vars
+// become invalid, so no row diagnostic follows from them. The silent checks
+// leave no row behind: the inferred rows restart empty.
+func (c *checker) discoverInit() {
+	if len(c.vars) == 0 {
+		return
+	}
+	c.silent++
+	c.init.tentative = true
+	visited := map[*Func]bool{}
+	var queue []*Func
+	enqueue := func(owner any) {
+		for _, d := range sortedDeps(c.init.deps[owner]) {
+			if f, ok := d.(*Func); ok && !visited[f] && f.Decl != nil && f.Decl.Body != nil && f.Sig != nil {
+				visited[f] = true
+				queue = append(queue, f)
+			}
+		}
+	}
+	for _, pv := range c.vars {
+		c.checkPkgVar(pv)
+		enqueue(pv)
+	}
+	for len(queue) > 0 {
+		f := queue[0]
+		queue = queue[1:]
+		c.checkFuncBody(f)
+		enqueue(f)
+	}
+	c.init.tentative = false
+	c.silent--
+	for _, f := range c.funcs {
+		if f.Sig == nil {
+			continue
+		}
+		if f.inferErrors {
+			f.Sig.Errors = newRow()
+		}
+		if f.inferUses {
+			f.Sig.Uses = newRow()
+		}
 	}
 	c.checkInitCycles()
 }
@@ -221,22 +270,16 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 		}
 	}
 	if cyclic {
-		// One silent pass records the component's instantiations and its
-		// references, so an expanding cycle (round-2 M1) and an
-		// initialization cycle (round-2 M2) are rejected before the rows
-		// iterate and before any diagnostic depends on them.
+		// One silent pass records the component's instantiations, so an
+		// expanding cycle is rejected before the rows iterate (round-2 M1).
 		c.silent++
-		c.init.tentative = true
 		for _, n := range scc {
 			c.checkNode(n)
 		}
-		c.init.tentative = false
 		c.silent--
 		c.checkInstantiationCycles()
-		c.checkComponentInit(scc)
-		// The fixpoint starts from empty rows: the silent pass saw the
-		// vars of an initialization cycle as valid, and rows it inferred
-		// through them would otherwise hold themselves up (least fixpoint).
+		// The fixpoint starts from empty rows (least fixpoint): the silent
+		// pass ran before the cycle's instantiations were rejected.
 		for _, n := range scc {
 			if n.fn == nil || n.fn.Sig == nil {
 				continue
@@ -407,7 +450,14 @@ type branch struct {
 
 func (c *checker) checkFuncBody(f *Func) bool {
 	defer c.beginDeps(f)()
-	defer c.monoOwner(f.Sig.TParams)()
+	// A method's receiver binds its type's parameters, which its body
+	// instantiates like its own: they own its instantiations too, as
+	// go/types canonicalizes receiver parameters (round-3 M1).
+	owner := f.Sig.TParams
+	if f.Recv != nil && len(f.Recv.TParams) > 0 {
+		owner = append(append([]*TypeParam(nil), f.Recv.TParams...), f.Sig.TParams...)
+	}
+	defer c.monoOwner(owner)()
 	saved := c.cur
 	c.cur = f.file
 	defer func() { c.cur = saved }()

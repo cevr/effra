@@ -16,10 +16,11 @@
 // lazily with cycle colouring; resolve signatures; reject instantiation
 // cycles on the instantiation graph (mono.go); check bodies one strongly
 // connected component of the reference graph at a time, so the inferred
-// rows of a callee are final before its callers (inside a cyclic component,
-// a silent pass finds the component's instantiation and initialization
-// cycles, then a worklist joins the rows to a fixpoint from empty rows
-// before any is published; initorder.go); then the
+// rows of a callee are final before its callers (initialization cycles are
+// found first, over the resolved references of the var initializers and
+// what they reach, discoverInit; inside a cyclic component a silent pass
+// finds the instantiation cycles, then a worklist joins the rows to a
+// fixpoint from empty rows before any is published); then the
 // rules that read inferred rows (machine declarations, named wires, wire
 // cycles), Error methods and unused imports. An invalid operand or type suppresses every diagnostic that
 // would follow from it: one mistake, one diagnostic.
@@ -41,7 +42,9 @@
 //     matrix, never the product of the subjects, with Parmatch's pruning:
 //     subsumed rows dropped, a wildcard row answering at once, equal
 //     submatrices answered once. The column to split is chosen by
-//     Maranget's necessity heuristic, the memo key ignores column order,
+//     Maranget's necessity heuristic over columns put first in a structural
+//     order (colour refinement, McKay's nauty; canon.go), so the search
+//     does not depend on the order of the subjects or the cases,
 //     and a fixed step budget bounds the proof, as rustc's
 //     pattern_complexity_limit and GHC's max-pmcheck-models do: over
 //     budget, the switch is refused (S103), never accepted unproven.

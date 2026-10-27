@@ -408,17 +408,20 @@ func (c *checker) unionType(n *Named, spec *syntax.InterfaceType, ctx *typeCtx) 
 	for _, x := range spec.Union {
 		t := c.typExpr(x, ctx)
 		if isInvalid(t) {
+			u.Bad = true
 			continue
 		}
 		vn, ok := t.(*Named)
 		if !ok || vn.origin().Obj.Pkg != c.pkg {
 			c.errorf(x, CodeType, "a union variant must be a struct type declared in this package, not %s", t)
+			u.Bad = true
 			continue
 		}
 		// The variant's kind comes from its declaration, so a variant that is
 		// still resolving (a struct whose field is this union) is accepted.
 		if _, isStruct := vn.origin().Obj.Decl.Spec.(*syntax.StructType); !isStruct {
 			c.errorf(x, CodeType, "a union variant must be a struct type, not %s", t)
+			u.Bad = true
 			continue
 		}
 		key := typeKey(t)
