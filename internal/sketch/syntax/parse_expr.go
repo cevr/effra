@@ -45,30 +45,33 @@ func (p *parser) parseBinary(prec int) Expr {
 	}
 }
 
+// parseUnary parses a unary expression. A prefix operator opens its level
+// before it is consumed, so past the limit the S001 is at the operator.
 func (p *parser) parseUnary() Expr {
 	switch p.tok.tok {
 	case ADD, SUB, NOT, XOR, AND:
 		pos, op := p.tok.pos, p.tok.tok
-		p.next()
 		p.enter()
+		p.next()
 		x := p.parseUnary()
 		p.leave()
 		return &UnaryExpr{OpPos: pos, Op: op, X: x}
 	case ARROW:
 		pos := p.tok.pos
-		p.next()
-		if p.tok.tok == CHAN {
+		if p.peek(1).tok == CHAN {
+			p.next()
 			p.next()
 			return &ChanType{Begin: pos, Arrow: pos, Dir: ChanRecv, Value: p.parseType(false)}
 		}
 		p.enter()
+		p.next()
 		x := p.parseUnary()
 		p.leave()
 		return &UnaryExpr{OpPos: pos, Op: ARROW, X: x}
 	case MUL:
 		pos := p.tok.pos
-		p.next()
 		p.enter()
+		p.next()
 		x := p.parseUnary()
 		p.leave()
 		return &StarExpr{Star: pos, X: x}
@@ -77,12 +80,12 @@ func (p *parser) parseUnary() Expr {
 		// so it binds looser than every binary operator in operand position
 		// too (grammar.md D8).
 		pos := p.tok.pos
+		p.enter()
 		p.next()
 		switch p.tok.tok {
 		case SEMICOLON, RBRACE, RPAREN, RBRACK, COMMA, COLON, EOF, CATCH:
 			p.errorAt(pos, 3, "try needs an operand")
 		}
-		p.enter()
 		x := p.parseBinary(1)
 		if p.tok.tok == CATCH {
 			x = p.parseCatch(x)
@@ -144,6 +147,12 @@ func (p *parser) parsePrimaryExpr() Expr {
 			h = max(h, p.height(inner)) + 1
 			p.leave()
 		}
+		if p.tok.tok == LBRACE && !p.isLiteralType(x) {
+			// The brace opens a body (a control clause header, a block
+			// after a statement): it is a sibling, never a link, and the
+			// statement parser charges it as a block.
+			return x
+		}
 		switch p.tok.tok {
 		case PERIOD, LBRACK, LPAREN, LBRACE:
 			if o+h+1 > MaxNesting {
@@ -179,9 +188,6 @@ func (p *parser) parsePrimaryExpr() Expr {
 		case LPAREN:
 			x = p.parseCall(x)
 		case LBRACE:
-			if !p.isLiteralType(x) {
-				return x
-			}
 			x = p.parseCompositeLit(x)
 		default:
 			return x

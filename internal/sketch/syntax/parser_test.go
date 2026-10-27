@@ -339,6 +339,36 @@ func TestNestingLimitBoundsTheTree(t *testing.T) {
 	}
 }
 
+// TestNestingLimitAtHeadersAndOperators (review r3 M2, m2): the body brace
+// of a control clause is a sibling of its header, never a link of the
+// header's chain; a prefix operator past the limit is the S001's token.
+func TestNestingLimitAtHeadersAndOperators(t *testing.T) {
+	// The block, the statement and the header expression are 3 levels, so
+	// 997 links are exactly the limit and the 998th link is past it.
+	for _, keyword := range []string{"if", "switch", "for"} {
+		prefix := "package p\nfunc f() { " + keyword + " a"
+		for _, links := range []int{996, 997} {
+			if at := nestingAt(t, prefix+strings.Repeat(".a", links)+" {} }\n"); at != -1 {
+				t.Errorf("%s with %d links: S001 at %d", keyword, links, at)
+			}
+		}
+		if at, want := nestingAt(t, prefix+strings.Repeat(".a", 998)+" {} }\n"), len(prefix)+2*997; at != want {
+			t.Errorf("%s with 998 links: S001 at %d, want %d (the 998th link)", keyword, at, want)
+		}
+	}
+	// `var x = E` opens 1 level and each prefix operator 1, so the 1000th
+	// operator is past the limit.
+	prefix := "package p\nvar x = "
+	for _, op := range []string{"! ", "- ", "+ ", "^ ", "* ", "& ", "<- ", "try "} {
+		if at := nestingAt(t, prefix+strings.Repeat(op, 999)+"a\n"); at != -1 {
+			t.Errorf("%q × 999: S001 at %d", op, at)
+		}
+		if at, want := nestingAt(t, prefix+strings.Repeat(op, 1000)+"a\n"), len(prefix)+len(op)*999; at != want {
+			t.Errorf("%q × 1000: S001 at %d, want %d (the 1000th operator)", op, at, want)
+		}
+	}
+}
+
 // genNested renders a random expression of postfix links, binary and unary
 // operators and parentheses, and returns its height in levels: a link,
 // operator or unary operator is one level, parentheses are two, and an
@@ -400,25 +430,37 @@ func genNestedAt(r *rand.Rand, budget, limit int) (string, int, int, int) {
 func TestNestingLimitOnCompositions(t *testing.T) {
 	r := rand.New(rand.NewPCG(195, 3))
 	exact, over := 0, 0
-	for range 400 {
+	// Each composition is a declaration's value (1 level above it) or a
+	// control clause header (block, statement and header: 3 levels).
+	contexts := []struct {
+		open, close string
+		above       int
+	}{
+		{"package p\nvar x = ", "\n", 1},
+		{"package p\nfunc f() { if ", " {} }\n", 3},
+		{"package p\nfunc f() { switch ", " {} }\n", 3},
+		{"package p\nfunc f() { for ", " {} }\n", 3},
+	}
+	for i := range 400 {
+		ctx := contexts[i%len(contexts)]
 		s, h, c := genNested(r, 600+r.IntN(4400))
 		if c > 0 {
 			s, h = "("+s+")", h+2
 		}
-		// `var x = E` opens one level; k more links reach the limit.
-		prefix := "package p\nvar x = " + s
-		if 1+h > MaxNesting {
-			if nestingAt(t, prefix+"\n") == -1 {
-				t.Fatalf("%d levels parsed: %.80s…", 1+h, s)
+		// k more links reach the limit.
+		prefix := ctx.open + s
+		if ctx.above+h > MaxNesting {
+			if nestingAt(t, prefix+ctx.close) == -1 {
+				t.Fatalf("%d levels parsed: %.80s…", ctx.above+h, s)
 			}
 			over++
 			continue
 		}
-		k := MaxNesting - 1 - h
-		if at := nestingAt(t, prefix+strings.Repeat(".a", k)+"\n"); at != -1 {
+		k := MaxNesting - ctx.above - h
+		if at := nestingAt(t, prefix+strings.Repeat(".a", k)+ctx.close); at != -1 {
 			t.Fatalf("%d levels: S001 at %d in %.80s…", MaxNesting, at, s)
 		}
-		if at, want := nestingAt(t, prefix+strings.Repeat(".a", k+1)+"\n"), len(prefix)+2*k; at != want {
+		if at, want := nestingAt(t, prefix+strings.Repeat(".a", k+1)+ctx.close), len(prefix)+2*k; at != want {
 			t.Fatalf("%d levels: S001 at %d, want %d (the link past the limit) in %.80s…", MaxNesting+1, at, want, s)
 		}
 		exact++
