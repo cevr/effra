@@ -1,0 +1,189 @@
+package rt
+
+import (
+	"sync"
+	"sync/atomic"
+)
+
+// maxChain bounds the ancestry a defect records (G2, rule 3).
+const maxChain = 32
+
+var nextID atomic.Uint64
+
+// Task is one unit of work in the task tree. A body receives its *Task and
+// polls it at interruption points. The task's own goroutine is the only one
+// that masks it, reads its context values or starts children from it; any
+// goroutine may interrupt it.
+type Task struct {
+	// stopped is the stop flag, set by Interrupt from any goroutine. mask is the
+	// mask depth; only the owner goroutine reads or writes it, so masking costs
+	// no atomic read-modify-write.
+	stopped atomic.Bool
+	mask    uint32
+	base    uint32 // mask depth inherited at start; a stop is never observable under it
+	id      uint64
+	span    string
+	parent  *Task
+	values  *values // G1 context; owner goroutine only
+
+	mu    sync.Mutex
+	stop  chan struct{} // made by Done on first use, closed by Interrupt
+	first *Task         // first child, guarded by mu
+
+	prev, next *Task // siblings, guarded by parent.mu
+}
+
+// Root returns a task with no parent: the task that runs main. span names it
+// in defect chains.
+func Root(span string) *Task {
+	return &Task{id: nextID.Add(1), span: span}
+}
+
+// init links t as a child of parent. A child of a stopped parent starts
+// stopped; a child started inside a masked region starts masked (it inherits
+// the region, as a ZIO or Effect fiber inherits its parent's interruptibility),
+// so a release that starts a task still runs to completion.
+func (t *Task) init(parent *Task, span string) {
+	t.id = nextID.Add(1)
+	t.span = span
+	t.parent = parent
+	t.values = parent.values
+	if parent.mask != 0 {
+		t.mask, t.base = 1, 1
+	}
+	parent.mu.Lock()
+	if parent.stopped.Load() {
+		t.stopped.Store(true)
+	}
+	t.next = parent.first
+	if t.next != nil {
+		t.next.prev = t
+	}
+	parent.first = t
+	parent.mu.Unlock()
+}
+
+// detach unlinks a finished child from its parent (runtime.md Tasks, rule 1).
+func (t *Task) detach() {
+	p := t.parent
+	p.mu.Lock()
+	if t.prev != nil {
+		t.prev.next = t.next
+	} else {
+		p.first = t.next
+	}
+	if t.next != nil {
+		t.next.prev = t.prev
+	}
+	t.prev, t.next = nil, nil
+	p.mu.Unlock()
+}
+
+// ID is the task's number, unique in the process.
+func (t *Task) ID() uint64 { return t.id }
+
+// Span is the span or definition ID the task was started under (G2).
+func (t *Task) Span() string { return t.span }
+
+// Parent is the task that started t, or nil for a root.
+func (t *Task) Parent() *Task { return t.parent }
+
+// Chain lists t and its ancestors, from t to the root, bounded at 32 frames.
+func (t *Task) Chain() []Frame {
+	var frames []Frame
+	for x := t; x != nil && len(frames) < maxChain; x = x.parent {
+		frames = append(frames, Frame{Task: x.id, Span: x.span})
+	}
+	return frames
+}
+
+// Interrupt requests that t and every task below it stop. It does not wait.
+// Each task observes the request at its next interruption point outside a
+// mask. Interrupt is idempotent and safe from any goroutine.
+func (t *Task) Interrupt() {
+	t.mu.Lock()
+	if !t.stopped.Load() {
+		t.stopped.Store(true)
+		if t.stop != nil {
+			close(t.stop)
+		}
+		// Locks are taken ancestor first; detach takes only the parent's
+		// lock, so the walk cannot deadlock with a finishing child.
+		for c := t.first; c != nil; c = c.next {
+			c.Interrupt()
+		}
+	}
+	t.mu.Unlock()
+}
+
+// Stopped is the interruption point (I1): it reports whether t was asked to
+// stop and is not masked. While no stop is requested it costs one atomic load;
+// the mask depth it reads after that is owner-local.
+func (t *Task) Stopped() bool { return t.stopped.Load() && t.mask == 0 }
+
+// StopRequested reports whether a stop was requested, masked or not.
+func (t *Task) StopRequested() bool { return t.stopped.Load() }
+
+// Masked reports whether t is inside a masked region. Call it from the task's
+// own goroutine.
+func (t *Task) Masked() bool { return t.mask != 0 }
+
+// Check is the interruption point for code with no error row: it panics with
+// Interrupted when Stopped would return true. The task boundary recovers it.
+func (t *Task) Check() {
+	if t.stopped.Load() && t.mask == 0 {
+		panic(Interrupted)
+	}
+}
+
+// Done returns a channel that is closed when a stop is requested, for a
+// blocking wait that must also wake on a stop (I1, rule 5). Inside a masked
+// region it returns nil, so the wait is uninterruptible (I2). Call it from the
+// task's own goroutine.
+func (t *Task) Done() <-chan struct{} {
+	if t.mask != 0 {
+		return nil
+	}
+	t.mu.Lock()
+	if t.stop == nil {
+		t.stop = make(chan struct{})
+		if t.stopped.Load() {
+			close(t.stop)
+		}
+	}
+	ch := t.stop
+	t.mu.Unlock()
+	return ch
+}
+
+// Mask is an open masked region of one task (I2).
+type Mask struct {
+	t     *Task
+	outer uint32 // mask depth outside this region
+}
+
+// Mask opens a masked region. Close it with Unmask on every path. Regions
+// nest: closing an inner one restores the outer depth, never an unmasked one.
+func (t *Task) Mask() Mask {
+	t.mask++
+	return Mask{t: t, outer: t.mask - 1}
+}
+
+// Unmask closes the region. A stop requested while it was open is observed at
+// the next poll, unless an outer region is still open.
+func (m Mask) Unmask() {
+	if m.t.mask == 0 {
+		panic("rt: Unmask without Mask")
+	}
+	m.t.mask--
+}
+
+// Interruptible runs f with the mask depth this region had outside it: the
+// poll pattern of Cats Effect, the restore of Effect's uninterruptibleMask. If
+// the region is nested in another open region, f stays masked.
+func (m Mask) Interruptible(f func()) {
+	inner := m.t.mask
+	m.t.mask = m.outer
+	defer func() { m.t.mask = inner }()
+	f()
+}
