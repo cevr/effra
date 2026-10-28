@@ -119,11 +119,12 @@ func (c *checker) wireLit(w *syntax.WireLit) (binds *Row, known bool) {
 // unknown (reported).
 func (c *checker) wireBody(body *syntax.WireBody) (*Row, bool) {
 	known := true
-	// The named wire whose body this is (checkWires): its own entries that
-	// come back through a reported cycle are no second entry (embeddedBinds).
-	// An inline wire inside it is not it.
+	// The named wire whose body this is (checkWires): what an embedding on
+	// its own reported cycle brings (cycle) is no second entry
+	// (embeddedBinds). An inline wire inside it is not it.
 	self := c.building
 	selfSeen := false
+	cycle := newRow()
 	c.building = nil
 	type collision struct {
 		cap Type
@@ -148,9 +149,13 @@ func (c *checker) wireBody(body *syntax.WireBody) (*Row, bool) {
 		if c.fn != nil && c.fn.reach != nil {
 			c.fn.reach.wires = append(c.fn.reach.wires, inner)
 		}
-		reach, innerKnown := c.embeddedBinds(inner, self, &selfSeen)
+		reach, innerKnown, onCycle := c.embeddedBinds(inner, self, &selfSeen)
 		if !innerKnown {
 			known = false
+		}
+		if onCycle {
+			cycle = cycle.union(c.types, reach)
+			continue
 		}
 		for _, cap := range reach.Elems() {
 			if embedded.has(c.types, cap) {
@@ -160,6 +165,7 @@ func (c *checker) wireBody(body *syntax.WireBody) (*Row, bool) {
 		}
 	}
 	binds := embedded
+	embedded = embedded.union(c.types, cycle) // a replace may name it
 	replaced := newRow()
 	var build *target
 	if c.fn != nil && c.fn.t != nil && c.fn.t.wire {
@@ -192,7 +198,7 @@ func (c *checker) wireBody(body *syntax.WireBody) (*Row, bool) {
 			c.errorf(k.at, CodeDuplicateCap, "%s is bound by two embedded wires; replace one entry (rows.md, Wire 7)", k.cap)
 		}
 	}
-	return binds, known
+	return binds.union(c.types, cycle), known
 }
 
 // wireDeps records, for a named wire's entries, the capabilities of the
@@ -469,7 +475,6 @@ func (c *checker) wireSummaries() {
 				break
 			}
 		}
-		comp.cyclic = len(members) > 1
 		unknown := false
 		for _, m := range members {
 			comp.binds = comp.binds.union(c.types, m.own)
@@ -479,8 +484,6 @@ func (c *checker) wireSummaries() {
 				if d := c.wireComp[e]; d != comp {
 					comp.binds = comp.binds.union(c.types, d.binds)
 					unknown = unknown || d.unknown
-				} else {
-					comp.cyclic = true // a wire that embeds itself
 				}
 			}
 		}
@@ -497,38 +500,34 @@ func (c *checker) wireSummaries() {
 }
 
 // A wireComp is a strongly connected component of the embedding graph and
-// its binding summary.
+// its binding summary. Two wires of one component lie on an embedding
+// cycle, and so does a wire that embeds itself.
 type wireComp struct {
 	binds   *Row
 	unknown bool
-	cyclic  bool
 }
 
 // embeddedBinds returns what the embedding of inner contributes to the
-// body of the named wire self (nil for an inline wire), and whether every
-// wire it reaches exists. An embedding inside self's own component, on a
-// reported cycle, contributes the component's summary without self's own
-// entries, once per body: the entries that come back to self through the
-// cycle are no second entry (D3; round 16 m3). seen records that self's
-// component has contributed.
-func (c *checker) embeddedBinds(inner, self *Wire, seen *bool) (*Row, bool) {
+// body of the named wire self (nil for an inline wire), whether every wire
+// it reaches exists, and whether inner is on self's own embedding cycle.
+// Such an embedding, on a reported cycle (S108, Wire 5), contributes the
+// component's summary once per body, and wireBody counts none of it as a
+// second entry, against the wire's own entries or its other embeddings:
+// what it brings depends on how the cycle is fixed (D3; round 16 m3, round
+// 18). A replace may still name it. seen records that self's component has
+// contributed.
+func (c *checker) embeddedBinds(inner, self *Wire, seen *bool) (binds *Row, known, onCycle bool) {
 	c.wireSummaries()
 	c.wireOps++
 	comp := c.wireComp[inner]
 	if self == nil || comp != c.wireComp[self] {
-		return inner.binds, !inner.unknown
+		return inner.binds, !inner.unknown, false
 	}
 	if *seen {
-		return newRow(), !comp.unknown
+		return newRow(), !comp.unknown, true
 	}
 	*seen = true
-	out := newRow()
-	for _, t := range comp.binds.Elems() {
-		if !self.own.has(c.types, t) {
-			out = out.with(c.types, t)
-		}
-	}
-	return out, !comp.unknown
+	return comp.binds, !comp.unknown, true
 }
 
 // checkWires checks the named wires: their entries, in a closed build

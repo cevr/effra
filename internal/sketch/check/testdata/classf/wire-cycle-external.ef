@@ -1,0 +1,15 @@
+package p
+type A interface{ M() }
+type P struct{}
+func (P) M() {}
+wire X {
+	A = P{}
+}
+wire W1 { // want S108
+	X
+	W2
+}
+wire W2 { // want S108
+	W1
+}
+func F() { with(W1) { A.M() } }
