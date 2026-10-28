@@ -319,7 +319,9 @@ func locateArtifact(path string) (receipt.Location, error) {
 // runEntryProcess runs a built program as `ergo run`'s child. SIGINT and
 // SIGTERM are forwarded to the program, and the program's exit status
 // passes through without an extra message: the program reports its own
-// failure.
+// failure. A program that a forwarded signal ended exits 128 plus the
+// signal number, as a shell reports it (130 for SIGINT, 143 for SIGTERM),
+// which is also the interruption status of docs/spec/runtime.md rule 6.
 func runEntryProcess(child *exec.Cmd) error {
 	signals := make(chan os.Signal, 2)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
@@ -329,16 +331,35 @@ func runEntryProcess(child *exec.Cmd) error {
 	}
 	done := make(chan error, 1)
 	go func() { done <- child.Wait() }()
+	forwarded := map[syscall.Signal]bool{}
 	for {
 		select {
 		case received := <-signals:
+			if number, ok := received.(syscall.Signal); ok {
+				forwarded[number] = true
+			}
 			_ = child.Process.Signal(received)
 		case err := <-done:
 			var exited *exec.ExitError
-			if errors.As(err, &exited) && exited.ExitCode() > 0 {
+			if !errors.As(err, &exited) {
+				return err
+			}
+			if exited.ExitCode() > 0 {
 				return exitStatusError{code: exited.ExitCode(), handled: true}
+			}
+			if number, ok := signalOf(exited); ok && forwarded[number] {
+				return exitStatusError{code: 128 + int(number), handled: true}
 			}
 			return err
 		}
 	}
+}
+
+// signalOf is the signal that ended a program, when one did.
+func signalOf(exited *exec.ExitError) (syscall.Signal, bool) {
+	status, ok := exited.Sys().(syscall.WaitStatus)
+	if !ok || !status.Signaled() {
+		return 0, false
+	}
+	return status.Signal(), true
 }

@@ -33,17 +33,19 @@ func main() needs Console {
 
 // TestRunForwardsSignalsToTheProgram: `ergo run` forwards SIGINT and
 // SIGTERM to the program it runs. The program installs no handler, so the
-// signal ends it at once, long before its sleep would, and `ergo run`
-// reports how it ended.
+// signal ends it at once, long before its sleep would, and `ergo run` exits
+// 128 plus the signal number with no message of its own: 130 for SIGINT,
+// the interruption status of docs/spec/runtime.md rule 6, and 143 for
+// SIGTERM.
 func TestRunForwardsSignalsToTheProgram(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := smokeDir(t)
 	file := smokeWrite(t, root, "wait.ef", sketchWaitSource)
-	for _, signal := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
+	for signal, want := range map[syscall.Signal]int{syscall.SIGINT: 130, syscall.SIGTERM: 143} {
 		start := time.Now()
 		stdout, stderr, code := runInterruptedEntry(t, binary, root, file, signal)
-		if stdout != "ready\n" || code != 1 || !strings.Contains(stderr, "signal: "+signal.String()) || time.Since(start) > 50*time.Second {
-			t.Errorf("%v: code=%d stdout=%q stderr=%q after %v; want the program ended by the forwarded signal", signal, code, stdout, stderr, time.Since(start))
+		if stdout != "ready\n" || code != want || stderr != "" || time.Since(start) > 50*time.Second {
+			t.Errorf("%v: code=%d stdout=%q stderr=%q after %v; want exit %d, the program ended by the forwarded signal", signal, code, stdout, stderr, time.Since(start), want)
 		}
 	}
 }
