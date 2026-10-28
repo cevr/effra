@@ -777,6 +777,24 @@ func (c *checker) checkFuncBody(f *Func) bool {
 			frame.insert(v.Name, v)
 		}
 	}
+	if d.Recv != nil && f.Recv == nil {
+		// An invalid receiver (collectMethods) leaves an empty signature.
+		// The receiver and the parameters still bind their names, as
+		// invalid vars, so a use of one is no reference to a package name
+		// and nothing follows from it (D3).
+		for _, list := range []*syntax.FieldList{d.Recv, d.Type.Params} {
+			if list == nil {
+				continue
+			}
+			for _, field := range list.List {
+				for _, n := range field.Names {
+					if n.Name != "_" {
+						frame.insert(n.Name, &Var{Name: n.Name, Type: invalid, Pos: n.Pos(), param: true, used: true})
+					}
+				}
+			}
+		}
+	}
 	for _, p := range sig.Params {
 		if p.Name == "_" {
 			continue

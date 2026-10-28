@@ -1,0 +1,5 @@
+package p
+func A()
+func s() int
+func (A) M(s int) int { return s + 1 } // want S108
+func F() int { return s() }
