@@ -53,9 +53,9 @@ type refWalker struct {
 	callees map[syntax.Node]bool // callees of calls: identifiers and function literals
 	// Test builds only (refTrace set): the resolution of each walked
 	// identifier (a package object or nil), the identifiers in type
-	// positions and every node visited.
+	// and wire positions (not value references) and every node visited.
 	idents     map[*syntax.Ident]any
-	typeIdents map[*syntax.Ident]bool
+	nameIdents map[*syntax.Ident]bool
 	visited    map[syntax.Node]bool
 }
 
@@ -130,7 +130,7 @@ func (c *checker) newRefWalker() *refWalker {
 	w := &refWalker{c: c, refs: map[any]bool{}, values: map[*Func][2]bool{}, callees: map[syntax.Node]bool{}}
 	if refTrace != nil {
 		w.idents = map[*syntax.Ident]any{}
-		w.typeIdents = map[*syntax.Ident]bool{}
+		w.nameIdents = map[*syntax.Ident]bool{}
 		w.visited = map[syntax.Node]bool{}
 	}
 	return w
@@ -256,12 +256,22 @@ func (w *refWalker) typ(n syntax.Node) {
 		return
 	}
 	syntax.Inspect(n, func(x syntax.Node) bool {
-		w.visit(x)
-		if id, ok := x.(*syntax.Ident); ok && w.typeIdents != nil {
-			w.typeIdents[id] = true
+		if id, ok := x.(*syntax.Ident); ok {
+			w.name(id)
+		} else {
+			w.visit(x)
 		}
 		return true
 	})
+}
+
+// name visits an identifier in a type or wire position: not a value
+// reference.
+func (w *refWalker) name(id *syntax.Ident) {
+	w.visit(id)
+	if w.nameIdents != nil {
+		w.nameIdents[id] = true
+	}
 }
 
 func (w *refWalker) exprs(list []syntax.Expr) {
@@ -320,18 +330,20 @@ func (w *refWalker) expr(x syntax.Expr) {
 			// named wire (wire.go withArg), never a value reference.
 			w.visit(id)
 			for i, a := range x.Args {
-				if i > 0 {
+				if i > 0 || x.Trailing == nil {
+					// Without a block it is an error, and the arguments are
+					// checked as values (wire.go with, silentArgs).
 					w.expr(a)
 					continue
 				}
 				if wid, ok := syntax.Expr(a).(*syntax.Ident); ok {
-					w.visit(wid)
+					w.name(wid)
 					continue
 				}
 				if p, ok := a.(*syntax.ParenExpr); ok {
 					if wid, ok := p.X.(*syntax.Ident); ok {
 						w.visit(p)
-						w.visit(wid)
+						w.name(wid)
 						continue
 					}
 				}

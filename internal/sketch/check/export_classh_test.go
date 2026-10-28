@@ -15,7 +15,7 @@ import (
 // resolves a walked identifier to a package function or var exactly when
 // the walk does, and to the same object. An identifier typing resolves to
 // a package function that the walk skipped is reported too, unless the walk
-// saw it in a type position and the checker reports an error there (a
+// saw it in a type or wire position and the checker reports an error there (a
 // function used as a type); a skipped composite-literal key that typing
 // resolves to a package var is a map key (refs.go), not an edge.
 func RefWalkProblems(src string) []string {
@@ -79,8 +79,8 @@ func RefWalkProblems(src string) []string {
 			if !ok {
 				continue
 			}
-			if wk.w.typeIdents[id] && diagnosedAt(c.diags, int(id.Pos())) {
-				// A function in a type position (`A{}` with A a function) is
+			if wk.w.nameIdents[id] && diagnosedAt(c.diags, int(id.Pos())) {
+				// A function in a type or wire position (`A{}`, `with(A)`) is
 				// an error there: not a value reference, no edge.
 				continue
 			}
