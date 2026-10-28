@@ -3,7 +3,7 @@
     {
       "assignees": [],
       "blockedBy": [],
-      "bodySha256": "34bcc4d94d47f81933f66336e3c132c396fdda4464199bb1c57b7e2f9052e939",
+      "bodySha256": "9b7264f2466cc28d00c7d13f253e76ccddf93a47c861bd4902077aedab977a68",
       "labels": [
         "wayfinder:map"
       ],
@@ -12,7 +12,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Ergo: Effect's guarantees, checked by the compiler, in plain Go",
-      "updatedAt": "2026-10-27T16:24:51Z",
+      "updatedAt": "2026-10-28T16:44:38Z",
       "url": "https://github.com/cevr/ergo/issues/1"
     },
     {
@@ -29,10 +29,10 @@
       ],
       "number": 2,
       "parent": 1,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Machine runtime and statecharts: virtual runtime, regions, lifetimes, law fixtures, guide",
-      "updatedAt": "2026-10-27T17:19:09Z",
+      "updatedAt": "2026-10-28T16:42:03Z",
       "url": "https://github.com/cevr/ergo/issues/2"
     },
     {
@@ -48,10 +48,10 @@
       ],
       "number": 3,
       "parent": 2,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Sketch `machine`: checker, plan value, direct step lowering",
-      "updatedAt": "2026-10-26T23:20:38Z",
+      "updatedAt": "2026-10-28T16:41:23Z",
       "url": "https://github.com/cevr/ergo/issues/3"
     },
     {
@@ -655,10 +655,10 @@
       ],
       "number": 37,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "`wire` and `with`: graph, effectful constructors, parameters, concurrent build and rollback",
-      "updatedAt": "2026-10-27T17:19:13Z",
+      "updatedAt": "2026-10-28T16:41:26Z",
       "url": "https://github.com/cevr/ergo/issues/37"
     },
     {
@@ -863,10 +863,10 @@
       ],
       "number": 48,
       "parent": 62,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Measurement ledger against hand-written Go",
-      "updatedAt": "2026-10-27T17:19:18Z",
+      "updatedAt": "2026-10-28T16:42:17Z",
       "url": "https://github.com/cevr/ergo/issues/48"
     },
     {
@@ -887,8 +887,8 @@
       "parent": 206,
       "state": "open",
       "stateReason": null,
-      "title": "std: `json` and codecs (wire forms by name, limits, round-trip laws)",
-      "updatedAt": "2026-10-26T23:20:04Z",
+      "title": "std: codecs and I/O (`json`, `http`, `rpc`, host `os`/`fs`/`net`/`sql`, `html`)",
+      "updatedAt": "2026-10-28T16:43:22Z",
       "url": "https://github.com/cevr/ergo/issues/49"
     },
     {
@@ -905,10 +905,10 @@
       ],
       "number": 50,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Direct-Go lowering of the sketch in the main compiler",
-      "updatedAt": "2026-10-26T23:19:30Z",
+      "updatedAt": "2026-10-28T16:41:34Z",
       "url": "https://github.com/cevr/ergo/issues/50"
     },
     {
@@ -927,10 +927,10 @@
       ],
       "number": 51,
       "parent": 206,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "std: `http` and `rpc` (handlers, routes, client, limits, typed unary RPC)",
-      "updatedAt": "2026-10-27T17:19:19Z",
+      "updatedAt": "2026-10-28T16:43:12Z",
       "url": "https://github.com/cevr/ergo/issues/51"
     },
     {
@@ -1040,10 +1040,10 @@
       ],
       "number": 57,
       "parent": 206,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "std: `actor` package (protocol, mailbox runtime, inspection and examples)",
-      "updatedAt": "2026-10-27T17:19:08Z",
+      "updatedAt": "2026-10-28T16:43:00Z",
       "url": "https://github.com/cevr/ergo/issues/57"
     },
     {
@@ -1134,10 +1134,10 @@
       ],
       "number": 62,
       "parent": 1,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Matched server performance against optimized Go",
-      "updatedAt": "2026-10-26T23:12:35Z",
+      "updatedAt": "2026-10-28T16:42:20Z",
       "url": "https://github.com/cevr/ergo/issues/62"
     },
     {
@@ -1155,10 +1155,10 @@
       ],
       "number": 64,
       "parent": 206,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "std: channels, queues, pubsub and streams",
-      "updatedAt": "2026-10-26T23:12:58Z",
+      "updatedAt": "2026-10-28T16:42:57Z",
       "url": "https://github.com/cevr/ergo/issues/64"
     },
     {
@@ -1181,10 +1181,10 @@
       ],
       "number": 65,
       "parent": 206,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "std: scope and resources (`build.Scope`, linear resources, finalizer causes)",
-      "updatedAt": "2026-10-27T00:34:31Z",
+      "updatedAt": "2026-10-28T16:41:40Z",
       "url": "https://github.com/cevr/ergo/issues/65"
     },
     {
@@ -1221,10 +1221,10 @@
       ],
       "number": 67,
       "parent": 206,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "std: `config` and `Redacted`",
-      "updatedAt": "2026-10-26T23:13:02Z",
+      "updatedAt": "2026-10-28T16:42:48Z",
       "url": "https://github.com/cevr/ergo/issues/67"
     },
     {
@@ -1242,19 +1242,18 @@
       ],
       "number": 68,
       "parent": 206,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "std: `batch`, cache and pool",
-      "updatedAt": "2026-10-26T23:13:04Z",
+      "updatedAt": "2026-10-28T16:43:07Z",
       "url": "https://github.com/cevr/ergo/issues/68"
     },
     {
       "assignees": [],
       "blockedBy": [
-        64,
-        67,
-        68,
-        200
+        199,
+        207,
+        211
       ],
       "bodySha256": "a0e3a6396a66dd0ade9f530910f7d6db37fa940aa3f443d297e097dd0c133100",
       "labels": [
@@ -1475,10 +1474,10 @@
       ],
       "number": 81,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Go numeric types in the sketch checker, including `time.Duration` literals",
-      "updatedAt": "2026-10-27T17:19:30Z",
+      "updatedAt": "2026-10-28T16:41:17Z",
       "url": "https://github.com/cevr/ergo/issues/81"
     },
     {
@@ -1494,7 +1493,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Gate: compiler edit to green in under 10 s, and gate-tool reliability",
-      "updatedAt": "2026-10-27T17:19:16Z",
+      "updatedAt": "2026-10-27T19:07:14Z",
       "url": "https://github.com/cevr/ergo/issues/82"
     },
     {
@@ -1575,10 +1574,10 @@
       ],
       "number": 87,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "`rt` split: programs without tasks or timers do not link the scheduler",
-      "updatedAt": "2026-10-26T23:15:04Z",
+      "updatedAt": "2026-10-28T16:41:56Z",
       "url": "https://github.com/cevr/ergo/issues/87"
     },
     {
@@ -1893,10 +1892,10 @@
       ],
       "number": 107,
       "parent": 1,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Spike: classified repair applicability and a safe-fix closure test",
-      "updatedAt": "2026-10-11T16:44:59Z",
+      "updatedAt": "2026-10-27T19:53:31Z",
       "url": "https://github.com/cevr/ergo/issues/107"
     },
     {
@@ -2003,10 +2002,10 @@
       ],
       "number": 114,
       "parent": 62,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Spike: scope-tied memory reclamation on the Go target",
-      "updatedAt": "2026-10-26T01:29:12Z",
+      "updatedAt": "2026-10-28T16:41:44Z",
       "url": "https://github.com/cevr/ergo/issues/114"
     },
     {
@@ -2124,10 +2123,10 @@
       ],
       "number": 122,
       "parent": 1,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Interface satisfaction is linear in method count (both checkers)",
-      "updatedAt": "2026-10-26T23:15:12Z",
+      "updatedAt": "2026-10-28T16:41:20Z",
       "url": "https://github.com/cevr/ergo/issues/122"
     },
     {
@@ -2161,10 +2160,10 @@
       ],
       "number": 124,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Runtime laws R1-R15 for the sketch runtime and the virtual test runtime",
-      "updatedAt": "2026-10-27T05:54:23Z",
+      "updatedAt": "2026-10-28T16:41:59Z",
       "url": "https://github.com/cevr/ergo/issues/124"
     },
     {
@@ -2719,10 +2718,10 @@
       ],
       "number": 156,
       "parent": 1,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Spike: classifier-ready review evidence from the checker (ef evidence / code.evidence)",
-      "updatedAt": "2026-10-26T00:20:40Z",
+      "updatedAt": "2026-10-28T16:42:38Z",
       "url": "https://github.com/cevr/ergo/issues/156"
     },
     {
@@ -2835,8 +2834,8 @@
       "parent": 1,
       "state": "open",
       "stateReason": null,
-      "title": "Laws L1+L2: `func LawX` discovery, law check, runner, generators, shrinker, receipts, docs",
-      "updatedAt": "2026-10-27T17:19:10Z",
+      "title": "Laws and proofs: discovery, runner, provider laws, evidence types, proof tier",
+      "updatedAt": "2026-10-28T16:42:41Z",
       "url": "https://github.com/cevr/ergo/issues/162"
     },
     {
@@ -2873,10 +2872,10 @@
       ],
       "number": 164,
       "parent": 1,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Laws L3+L7: provider laws through `needs` and wire, satisfaction per instantiation, construct composition laws",
-      "updatedAt": "2026-10-27T17:19:12Z",
+      "updatedAt": "2026-10-28T16:42:26Z",
       "url": "https://github.com/cevr/ergo/issues/164"
     },
     {
@@ -2893,10 +2892,10 @@
       ],
       "number": 165,
       "parent": 1,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Laws L4: evidence as named types with private construction",
-      "updatedAt": "2026-10-26T23:16:49Z",
+      "updatedAt": "2026-10-28T16:42:29Z",
       "url": "https://github.com/cevr/ergo/issues/165"
     },
     {
@@ -3149,10 +3148,10 @@
       ],
       "number": 179,
       "parent": 206,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "std: `schedule`, `retry` and `timeout`",
-      "updatedAt": "2026-10-26T23:17:38Z",
+      "updatedAt": "2026-10-28T16:43:04Z",
       "url": "https://github.com/cevr/ergo/issues/179"
     },
     {
@@ -3320,10 +3319,10 @@
       ],
       "number": 189,
       "parent": 1,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Spike: proof tier on the capture-checking basis",
-      "updatedAt": "2026-10-26T23:17:36Z",
+      "updatedAt": "2026-10-28T16:42:32Z",
       "url": "https://github.com/cevr/ergo/issues/189"
     },
     {
@@ -3338,8 +3337,8 @@
       "parent": 1,
       "state": "open",
       "stateReason": null,
-      "title": "Lowering: zero-cost hot paths (fuse effects, value enums, specialized plans, contification, hot-path profile)",
-      "updatedAt": "2026-10-27T17:19:26Z",
+      "title": "Performance: lowering levers, PGO, value semantics and measured parity with hand-written Go",
+      "updatedAt": "2026-10-28T16:42:23Z",
       "url": "https://github.com/cevr/ergo/issues/190"
     },
     {
@@ -3439,7 +3438,7 @@
         135,
         195
       ],
-      "bodySha256": "d9bb29b2656f3e97f090b2f8ec94c1fa52388cbf17eac1b3fdc4d4ad0744cce7",
+      "bodySha256": "4ec28707c164f99146b9dedf12d1984848eaf29f6c631eacb845d2c0674e2c08",
       "labels": [
         "implementation:task",
         "track:compiler",
@@ -3449,8 +3448,8 @@
       "parent": 192,
       "state": "open",
       "stateReason": null,
-      "title": "Sketch checker: types, implicit generics, error and uses rows",
-      "updatedAt": "2026-10-27T15:28:57Z",
+      "title": "The Ergo language v1: decided syntax, checker and lowering (this week)",
+      "updatedAt": "2026-10-28T16:43:31Z",
       "url": "https://github.com/cevr/ergo/issues/196"
     },
     {
@@ -3468,8 +3467,8 @@
       "parent": 192,
       "state": "open",
       "stateReason": null,
-      "title": "Sketch checker: linearity, borrows and captures",
-      "updatedAt": "2026-10-27T02:39:49Z",
+      "title": "Resources, linearity, borrows and captures",
+      "updatedAt": "2026-10-28T16:41:46Z",
       "url": "https://github.com/cevr/ergo/issues/197"
     },
     {
@@ -3494,7 +3493,7 @@
     {
       "assignees": [],
       "blockedBy": [
-        50,
+        196,
         198
       ],
       "bodySha256": "05aef84e472c97c89b5b90063bfc33d535dcebaaace126b8b5be3dc019f2fb64",
@@ -3507,8 +3506,8 @@
       "parent": 192,
       "state": "open",
       "stateReason": null,
-      "title": "I1 interruption points and I2 automatic masks in lowering",
-      "updatedAt": "2026-10-26T23:06:14Z",
+      "title": "Runtime semantics in lowering: interruption, masks, task context, defects, task tree, runtime laws",
+      "updatedAt": "2026-10-28T16:42:06Z",
       "url": "https://github.com/cevr/ergo/issues/199"
     },
     {
@@ -3525,10 +3524,10 @@
       ],
       "number": 200,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "G1 task-local context through `with`, and G2 fork-tree defects",
-      "updatedAt": "2026-10-26T23:06:15Z",
+      "updatedAt": "2026-10-28T16:41:49Z",
       "url": "https://github.com/cevr/ergo/issues/200"
     },
     {
@@ -3545,16 +3544,15 @@
       ],
       "number": 201,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "G3 `ef ps`: live task tree over a debug endpoint",
-      "updatedAt": "2026-10-26T23:06:17Z",
+      "updatedAt": "2026-10-28T16:41:53Z",
       "url": "https://github.com/cevr/ergo/issues/201"
     },
     {
       "assignees": [],
       "blockedBy": [
-        50,
         196
       ],
       "bodySha256": "80dac911a35a027e368543a8c2002ae20b2b8add806e06b7945dc7d942849e8e",
@@ -3625,10 +3623,10 @@
       ],
       "number": 205,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Migrate examples, corpus and docs to the sketch, then retire the `.ef` front-end",
-      "updatedAt": "2026-10-27T17:19:25Z",
+      "updatedAt": "2026-10-28T16:41:29Z",
       "url": "https://github.com/cevr/ergo/issues/205"
     },
     {
@@ -3644,13 +3642,12 @@
       "state": "open",
       "stateReason": null,
       "title": "Standard library: Effect for Go (epic)",
-      "updatedAt": "2026-10-27T00:34:32Z",
+      "updatedAt": "2026-10-28T16:32:27Z",
       "url": "https://github.com/cevr/ergo/issues/206"
     },
     {
       "assignees": [],
       "blockedBy": [
-        179,
         197,
         198,
         199
@@ -3667,8 +3664,8 @@
       "parent": 206,
       "state": "open",
       "stateReason": null,
-      "title": "std: `tasks` and supervision",
-      "updatedAt": "2026-10-26T23:21:03Z",
+      "title": "std: concurrency (`tasks`, supervision, `sync`, STM, channels, queues, streams, `actor`, `schedule`, `retry`, `timeout`, batch, cache, pool)",
+      "updatedAt": "2026-10-28T16:43:09Z",
       "url": "https://github.com/cevr/ergo/issues/207"
     },
     {
@@ -3687,10 +3684,10 @@
       ],
       "number": 208,
       "parent": 206,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "std: `sync` and STM",
-      "updatedAt": "2026-10-26T23:06:26Z",
+      "updatedAt": "2026-10-28T16:42:54Z",
       "url": "https://github.com/cevr/ergo/issues/208"
     },
     {
@@ -3709,10 +3706,10 @@
       ],
       "number": 209,
       "parent": 206,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Prelude `Clock`, `Random`, `Console`, and the `testing` package",
-      "updatedAt": "2026-10-27T17:19:21Z",
+      "updatedAt": "2026-10-28T16:42:44Z",
       "url": "https://github.com/cevr/ergo/issues/209"
     },
     {
@@ -3731,10 +3728,10 @@
       ],
       "number": 210,
       "parent": 206,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "std: host packages `os`, `fs`, `net` and `sql`",
-      "updatedAt": "2026-10-26T23:19:13Z",
+      "updatedAt": "2026-10-28T16:43:16Z",
       "url": "https://github.com/cevr/ergo/issues/210"
     },
     {
@@ -3755,8 +3752,8 @@
       "parent": 206,
       "state": "open",
       "stateReason": null,
-      "title": "std: core data (`Option` and Option-returning lookups, `slices`, `maps`, `strings`, `cmp`, `math`)",
-      "updatedAt": "2026-10-27T17:19:22Z",
+      "title": "std: core data and prelude (`Option`, `slices`, `maps`, `strings`, `Clock`, `Random`, `Console`, `testing`, `config`, `Redacted`)",
+      "updatedAt": "2026-10-28T16:42:51Z",
       "url": "https://github.com/cevr/ergo/issues/211"
     },
     {
@@ -3773,10 +3770,10 @@
       ],
       "number": 212,
       "parent": 206,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "std: `html` rendering functions",
-      "updatedAt": "2026-10-26T23:27:57Z",
+      "updatedAt": "2026-10-28T16:43:20Z",
       "url": "https://github.com/cevr/ergo/issues/212"
     },
     {
@@ -3808,10 +3805,10 @@
       ],
       "number": 214,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Sketch checker: infer function-literal parameter types from the expected type",
-      "updatedAt": "2026-10-27T13:12:35Z",
+      "updatedAt": "2026-10-28T16:41:10Z",
       "url": "https://github.com/cevr/ergo/issues/214"
     },
     {
@@ -3825,17 +3822,17 @@
       ],
       "number": 215,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "not_planned",
       "title": "Sketch parser and formatter limits: early-error scan, deep indentation, corpus fences",
-      "updatedAt": "2026-10-27T14:44:13Z",
+      "updatedAt": "2026-10-28T16:41:13Z",
       "url": "https://github.com/cevr/ergo/issues/215"
     },
     {
       "assignees": [],
       "blockedBy": [
         31,
-        50,
+        196,
         202
       ],
       "bodySha256": "a2fcae2ce6b3777c603b28e8e4664852b6250599c844c78842bd4fe6c86b3b41",
@@ -3862,10 +3859,10 @@
       ],
       "number": 217,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Rename `uses` to `needs`; add `provides` on wires",
-      "updatedAt": "2026-10-27T17:11:39Z",
+      "updatedAt": "2026-10-27T17:46:11Z",
       "url": "https://github.com/cevr/ergo/issues/217"
     },
     {
@@ -3879,10 +3876,10 @@
       ],
       "number": 218,
       "parent": 192,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Rename the language from Effra to Ergo",
-      "updatedAt": "2026-10-27T15:32:32Z",
+      "updatedAt": "2026-10-27T19:37:42Z",
       "url": "https://github.com/cevr/ergo/issues/218"
     },
     {
@@ -3899,6 +3896,88 @@
       "title": "Research: a hot-path profile for renderers, TUIs and games",
       "updatedAt": "2026-10-27T17:20:47Z",
       "url": "https://github.com/cevr/ergo/issues/219"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "7d2037a57100d09b8b603088997d623f52d8f4551565ad3bd09b8135e79a8e8a",
+      "labels": [
+        "implementation:task",
+        "track:compiler",
+        "wayfinder:task"
+      ],
+      "number": 220,
+      "parent": 192,
+      "state": "open",
+      "stateReason": null,
+      "title": "Agent mistakes: corpus and eval, recognising diagnostics with safe fixes, the Ergo skill, a Go cheatsheet",
+      "updatedAt": "2026-10-28T04:20:30Z",
+      "url": "https://github.com/cevr/ergo/issues/220"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "8e8ad705a458255bc9a956cacf13bc446c9c9d3fe6f0419223ae559b40c5ebb0",
+      "labels": [
+        "implementation:task",
+        "track:compiler",
+        "wayfinder:task"
+      ],
+      "number": 221,
+      "parent": 192,
+      "state": "closed",
+      "stateReason": "not_planned",
+      "title": "Rename the source extension from .ef to .ergo",
+      "updatedAt": "2026-10-28T16:41:06Z",
+      "url": "https://github.com/cevr/ergo/issues/221"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "ebf51a0b8944aa311342bbacc805b76b76e470531163321b1e6d2653ca3acd97",
+      "labels": [
+        "track:compiler",
+        "wayfinder:task"
+      ],
+      "number": 222,
+      "parent": 192,
+      "state": "closed",
+      "stateReason": "not_planned",
+      "title": "Spike: a surface language without pointers (measure value-semantics lowering)",
+      "updatedAt": "2026-10-28T16:42:14Z",
+      "url": "https://github.com/cevr/ergo/issues/222"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "38212ff43e35c2c1d5167c5026f58752938e223f4d1144ba7f36940bd5b6ae9d",
+      "labels": [
+        "track:compiler",
+        "wayfinder:task"
+      ],
+      "number": 223,
+      "parent": 1,
+      "state": "closed",
+      "stateReason": "not_planned",
+      "title": "PGO: build with profiles from Ergo traces",
+      "updatedAt": "2026-10-28T16:42:10Z",
+      "url": "https://github.com/cevr/ergo/issues/223"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "5fdcccc0e2568f97dc936400933819385ca58e3f70ad28a397055587302e55ae",
+      "labels": [
+        "track:compiler",
+        "wayfinder:task"
+      ],
+      "number": 224,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "ergo build: emitted Go as an internal cached step",
+      "updatedAt": "2026-10-28T16:32:08Z",
+      "url": "https://github.com/cevr/ergo/issues/224"
     }
   ],
   "map": 1,
@@ -3922,6 +4001,7 @@
     90,
     94,
     192,
+    196,
     206
   ],
   "repository": "cevr/ergo",
