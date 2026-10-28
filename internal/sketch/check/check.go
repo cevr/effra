@@ -100,12 +100,16 @@ type checker struct {
 	// building is the named wire whose body checkWires is about to check
 	// (wireBody reads and clears it).
 	building *Wire
-	// walkOps and wireOps count the reference walk's literal elements and
-	// the wire summaries' steps: operation counts for the linear-growth
-	// tests (round 17 M1, M2).
-	walkOps, wireOps int
+	// walkOps counts the reference walk's literal elements, an operation
+	// count for the linear-growth tests (round 17 M2).
+	walkOps int
+	// wires meters the wire summaries' work against the package's budget
+	// (wiresum.go; nil until the first summary).
+	wires *wireMeter
 	// wireComp maps each named wire to its embedding component (wireSummaries).
 	wireComp map[*Wire]*wireComp
+	// wireBodies holds each wire body's summary, decided once (bodySummary).
+	wireBodies map[*syntax.WireBody]*bodySum
 	// foreignCaps holds another package's wire summaries keyed by this
 	// check's type table (localCaps).
 	foreignCaps map[*capSet]*capSet

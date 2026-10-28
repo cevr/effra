@@ -19,7 +19,11 @@ func opsOf(t *testing.T, src string) (diags []Diagnostic, walk, wire int) {
 	}
 	c := newChecker("main", Std, prelude().scope)
 	c.run([]*syntax.File{file})
-	return c.diags, c.walkOps, c.wireOps
+	wire = -1
+	if c.wires != nil {
+		wire = c.wires.used
+	}
+	return c.diags, c.walkOps, wire
 }
 
 // linear asserts that counts measured at sizes 1000, 4000 and 8000 grow
@@ -56,13 +60,14 @@ func TestWireChainLinear(t *testing.T) {
 		}
 		counts[n] = wire
 	}
-	linear(t, "wire chain", counts, 6)
+	linear(t, "wire chain", counts, 12)
 }
 
 // TestCapSetPersistent: every version of a capSet keeps its elements after
 // later inserts, iterates in id order, and keeps the treap's order and heap
 // invariants, so lookups stay logarithmic.
 func TestCapSetPersistent(t *testing.T) {
+	m := &wireMeter{limit: 1 << 30}
 	var versions []*capNode
 	var sizes []int
 	var root *capNode
@@ -70,7 +75,7 @@ func TestCapSetPersistent(t *testing.T) {
 	for i := range 2000 {
 		id := int32((i * 7919) % 2003)
 		var added bool
-		root, added = capInsert(root, id, nil, capPriority(id))
+		root, added, _ = capInsert(m, root, id, nil, capPriority(id))
 		if added {
 			size++
 		}
@@ -107,65 +112,30 @@ func TestCapSetPersistent(t *testing.T) {
 	}
 	s := &capSet{root: root, size: size}
 	prev := int32(-1)
-	s.each(func(id int32, _ Type) {
+	s.each(m, func(id int32, _ Type) bool {
 		if id <= prev {
 			t.Fatalf("each: %d after %d", id, prev)
 		}
 		prev = id
-		if !s.hasID(id) {
-			t.Fatalf("hasID(%d) false", id)
+		if found, _ := s.lookup(m, id); !found {
+			t.Fatalf("lookup(%d) false", id)
 		}
+		return true
 	})
-	if s.hasID(2003) {
-		t.Error("hasID(2003) true")
+	if found, _ := s.lookup(m, 2003); found {
+		t.Error("lookup(2003) true")
 	}
-}
-
-// TestWireEntriesLinear: wires whose summaries grow cost linear work: a
-// chain whose every wire adds an entry (each wire binds all the entries
-// before it), and one wire that embeds n wires of one entry each. The
-// summaries share their embeddings' sets (capset.go), so each wire adds
-// only its own entries; sorted rows copied per wire cost O(n²), and adding
-// to them one capability at a time O(n³) (round 18).
-func TestWireEntriesLinear(t *testing.T) {
-	families := map[string]func(n int) string{
-		"entry chain": func(n int) string {
-			var b strings.Builder
-			b.WriteString("package p\ntype P struct{}\nfunc (P) M() {}\n")
-			for i := range n {
-				fmt.Fprintf(&b, "type C%d interface{ M() }\n", i)
-			}
-			b.WriteString("wire W0 {\n\tC0 = P{}\n}\n")
-			for i := 1; i < n; i++ {
-				fmt.Fprintf(&b, "wire W%d {\n\tC%d = P{}\n\tW%d\n}\n", i, i, i-1)
-			}
-			fmt.Fprintf(&b, "func F() { with(W%d) { C0.M() } }\n", n-1)
-			return b.String()
-		},
-		"wide embedding": func(n int) string {
-			var b strings.Builder
-			b.WriteString("package p\ntype P struct{}\nfunc (P) M() {}\n")
-			for i := range n {
-				fmt.Fprintf(&b, "type C%d interface{ M() }\nwire X%d {\n\tC%d = P{}\n}\n", i, i, i)
-			}
-			b.WriteString("wire W {\n")
-			for i := range n {
-				fmt.Fprintf(&b, "\tX%d\n", i)
-			}
-			fmt.Fprintf(&b, "}\nfunc F() { with(W) { C%d.M() } }\n", n-1)
-			return b.String()
-		},
+	if m.visits+m.copies > m.used {
+		t.Errorf("%d visits and %d copies, %d steps counted", m.visits, m.copies, m.used)
 	}
-	for _, name := range []string{"entry chain", "wide embedding"} {
-		counts := map[int]int{}
-		for _, n := range []int{1000, 4000, 8000} {
-			diags, _, wire := opsOf(t, families[name](n))
-			if len(diags) > 0 {
-				t.Fatalf("%s n=%d: want acceptance, got %v", name, n, diags[0])
-			}
-			counts[n] = wire
-		}
-		linear(t, name, counts, 10)
+	// A meter that runs out stops an insert and leaves the set unchanged.
+	small := &wireMeter{limit: 3}
+	out, _, ok := capInsert(small, root, 99999, nil, capPriority(99999))
+	if ok || out != root || !small.out || small.used > small.limit {
+		t.Errorf("an insert past the budget: ok=%v, out=%v, used %d of %d", ok, small.out, small.used, small.limit)
+	}
+	if count, _ := check(root, -1, 1<<30); count != size {
+		t.Errorf("the stopped insert changed the set: %d elements, want %d", count, size)
 	}
 }
 

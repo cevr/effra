@@ -90,8 +90,8 @@ func (c *checker) withArg(arg syntax.Expr) (*capSet, bool) {
 					return nil, false
 				}
 				if w := pn.Pkg.Wires[a.Sel.Name]; w != nil && isExported(a.Sel.Name) {
-					binds := c.localCaps(c.wireBinds(w))
-					return binds, !w.unknown
+					binds, ok := c.localCaps(c.wireBinds(w))
+					return binds, ok && !w.unknown
 				}
 				c.errorf(a.Sel, CodeUnknown, "%s.%s is not an exported wire of package %s", id.Name, a.Sel.Name, pn.Pkg.Path)
 				return nil, false
@@ -106,107 +106,26 @@ func (c *checker) withArg(arg syntax.Expr) (*capSet, bool) {
 }
 
 // wireLit checks an inline wire's entries and returns what it binds; known
-// is false when it embeds an unknown wire (reported).
+// is false when it embeds an unknown wire (reported) or its summary was
+// refused (wiresum.go).
 func (c *checker) wireLit(w *syntax.WireLit) (binds *capSet, known bool) {
-	return c.wireBody(w.Body)
+	return c.wireBody(w.Body, w)
 }
 
-// wireBody checks the body of a named or an inline wire and returns what it
-// binds: the embedded wires' capabilities, then the entries. Two embedded
-// wires that bind one capability collide (S111) unless a replace entry of
-// this body overrides it (rows.md, Wire 7), so collisions are reported
-// only after the entries (M13). known is false when an embedded wire is
-// unknown (reported).
-func (c *checker) wireBody(body *syntax.WireBody) (*capSet, bool) {
-	known := true
-	// The named wire whose body this is (checkWires): what an embedding on
-	// its own reported cycle brings (cycle) is no second entry
-	// (embeddedBinds). An inline wire inside it is not it.
+// wireBody checks the body of a named or an inline wire (at names it) and
+// returns what it binds. The duplicate and replace rules are decided once
+// per body by its summary (bodySummary), whose findings are reported on
+// every pass; the embedded names, the keys and the providers are checked
+// here, on every pass.
+func (c *checker) wireBody(body *syntax.WireBody, at syntax.Node) (*capSet, bool) {
+	// The named wire whose body this is (checkWires); an inline wire
+	// inside it is not it.
 	self := c.building
-	var cycle *capSet
 	c.building = nil
-	type collision struct {
-		cap Type
-		at  syntax.Expr
+	sum := c.bodySummary(body, self, at)
+	for _, f := range sum.findings {
+		c.errorf(f.at, f.code, "%s", f.msg)
 	}
-	var reaches []*capSet
-	var keys []syntax.Expr
-	for _, e := range body.Entries {
-		if e.Kind != syntax.WireEmbed {
-			continue
-		}
-		id, ok := e.Key.(*syntax.Ident)
-		var inner *Wire
-		if ok {
-			inner = c.pkg.Wires[id.Name]
-		}
-		if inner == nil {
-			c.errorf(e.Key, CodeUnknown, "unknown wire %s", exprText(e.Key))
-			known = false
-			continue
-		}
-		if c.fn != nil && c.fn.reach != nil {
-			c.fn.reach.wires = append(c.fn.reach.wires, inner)
-		}
-		reach, innerKnown, onCycle := c.embeddedBinds(inner, self)
-		if !innerKnown {
-			known = false
-		}
-		if onCycle {
-			cycle = reach // the same summary for every such embedding
-			continue
-		}
-		reaches = append(reaches, reach)
-		keys = append(keys, e.Key)
-	}
-	// The embeddings' summaries are joined into the largest, which is
-	// shared, not copied: the work is the other summaries' sizes. A
-	// capability in two of them collides at the later embedding.
-	largest := -1
-	for i, r := range reaches {
-		if largest < 0 || r.size > reaches[largest].size {
-			largest = i
-		}
-	}
-	embedded := &capSet{}
-	if largest >= 0 {
-		embedded = reaches[largest]
-	}
-	var collisions []collision
-	seen := map[int32]bool{} // ids of the other embeddings so far
-	var early []Type         // their capabilities before the largest
-	for j, r := range reaches {
-		if j == largest {
-			var hits []Type
-			for _, t := range early {
-				if r.has(c.types, t) {
-					hits = append(hits, t)
-				}
-			}
-			sort.Slice(hits, func(a, b int) bool { return c.types.id(hits[a]) < c.types.id(hits[b]) })
-			for _, t := range hits {
-				collisions = append(collisions, collision{t, keys[j]})
-			}
-			continue
-		}
-		r.each(func(id int32, t Type) {
-			c.wireOps++
-			if seen[id] || j > largest && reaches[largest].hasID(id) {
-				collisions = append(collisions, collision{t, keys[j]})
-			}
-			if !seen[id] {
-				seen[id] = true
-				if j < largest {
-					early = append(early, t)
-				}
-			}
-			embedded = embedded.with(c.types, t)
-		})
-	}
-	binds := embedded
-	// A replace may name what an embedding on the wire's own cycle brings.
-	embeddedHas := func(t Type) bool { return embedded.has(c.types, t) || cycle.has(c.types, t) }
-	replaced := map[int32]bool{}
 	var build *target
 	if c.fn != nil && c.fn.t != nil && c.fn.t.wire {
 		build = c.fn.t
@@ -214,18 +133,18 @@ func (c *checker) wireBody(body *syntax.WireBody) (*capSet, bool) {
 	deps := &wireDeps{tab: c.types, needs: map[int32]*Row{}, at: map[int32]syntax.Expr{}}
 	for _, e := range body.Entries {
 		if e.Kind == syntax.WireEmbed {
+			inner := c.embeddedWire(e)
+			if inner == nil {
+				c.errorf(e.Key, CodeUnknown, "unknown wire %s", exprText(e.Key))
+			} else if c.fn != nil && c.fn.reach != nil {
+				c.fn.reach.wires = append(c.fn.reach.wires, inner)
+			}
 			continue
 		}
 		if build != nil {
 			build.charged = newRow()
 		}
-		var caps []Type
-		binds, caps = c.wireEntry(e, binds, embeddedHas)
-		if e.Kind == syntax.WireReplace {
-			for _, cap := range caps {
-				replaced[c.types.id(cap)] = true
-			}
-		}
+		caps := c.wireEntry(e)
 		if build != nil {
 			deps.add(caps, build.charged, e.Key)
 		}
@@ -233,14 +152,15 @@ func (c *checker) wireBody(body *syntax.WireBody) (*capSet, bool) {
 	if build != nil {
 		c.checkEntryCycles(build.name, deps)
 	}
-	for _, k := range collisions {
-		if !replaced[c.types.id(k.cap)] {
-			c.errorf(k.at, CodeDuplicateCap, "%s is bound by two embedded wires; replace one entry (rows.md, Wire 7)", k.cap)
-		}
+	return sum.binds, sum.known
+}
+
+// embeddedWire is the named wire an embedding entry names, or nil.
+func (c *checker) embeddedWire(e *syntax.WireEntry) *Wire {
+	if id, ok := e.Key.(*syntax.Ident); ok {
+		return c.pkg.Wires[id.Name]
 	}
-	out, work := capUnion(c.types, []*capSet{binds, cycle})
-	c.wireOps += work
-	return out, known
+	return nil
 }
 
 // wireDeps records, for a named wire's entries, the capabilities of the
@@ -324,40 +244,25 @@ func (c *checker) checkEntryCycles(name string, d *wireDeps) {
 	}
 }
 
-// wireEntry checks one `Cap = provider` or `replace Cap = provider` entry.
-// The provider must implement each capability by method-row compatibility
-// (S106); a second entry for one capability without replace is S111 (README
-// Gap 28); one value may serve several capabilities (README Gap 34). A
-// constructor entry is #37's (S109). It returns the binds and the
+// wireEntry checks the provider of one `Cap = provider` or `replace Cap =
+// provider` entry: it must implement each capability by method-row
+// compatibility (S106); one value may serve several capabilities (README
+// Gap 28 and 34). A constructor entry is #37's (S109). The second-entry
+// and replace rules are the body summary's (wiresum.go). It returns the
 // capabilities the entry names.
-func (c *checker) wireEntry(e *syntax.WireEntry, binds *capSet, embedded func(Type) bool) (*capSet, []Type) {
-	keys := append([]syntax.Expr{e.Key}, e.Keys...)
+func (c *checker) wireEntry(e *syntax.WireEntry) []Type {
 	var caps []Type
-	var capKeys []syntax.Expr
-	for _, k := range keys {
-		t := c.wireKey(k)
-		if t != nil {
+	for _, k := range append([]syntax.Expr{e.Key}, e.Keys...) {
+		if t := c.wireKey(k); t != nil {
 			caps = append(caps, t)
-			capKeys = append(capKeys, k)
 		}
 	}
 	if c.isConstructor(e.Value) {
 		c.errorf(e.Value, CodeOutside, "a constructor entry is #37's (wire constructors); write a provider value, not a function")
-		for _, cap := range caps {
-			binds = binds.with(c.types, cap)
-		}
-		return binds, caps
+		return caps
 	}
 	op := c.valueExpr(e.Value, nil)
-	for i, cap := range caps {
-		k := capKeys[i]
-		switch {
-		case e.Kind == syntax.WireReplace && !embedded(cap):
-			c.errorf(k, CodeType, "replace %s names no entry of an embedded wire (rows.md, Wire 7)", cap)
-		case e.Kind != syntax.WireReplace && binds.has(c.types, cap):
-			c.errorf(k, CodeDuplicateCap, "%s has a second entry in this wire; only replace overrides an embedded entry (rows.md, Wire 1; README Gap 28)", cap)
-		}
-		binds = binds.with(c.types, cap)
+	for _, cap := range caps {
 		if op.invalid() {
 			continue
 		}
@@ -378,7 +283,7 @@ func (c *checker) wireEntry(e *syntax.WireEntry, binds *capSet, embedded func(Ty
 			c.providers[cn] = append(c.providers[cn], pn)
 		}
 	}
-	return binds, caps
+	return caps
 }
 
 // isConstructor reports whether a provider expression names a function
@@ -412,184 +317,6 @@ func (c *checker) wireKey(k syntax.Expr) Type {
 	return t
 }
 
-// wireBinds returns the capabilities a named wire binds: its entries and
-// those of every wire its embeddings reach (wireSummaries).
-func (c *checker) wireBinds(w *Wire) *capSet {
-	c.wireSummaries()
-	return w.binds
-}
-
-// wireSummaries computes, once, every named wire's binding summary over
-// the embedding graph: the strongly connected components (Tarjan, linear)
-// in reverse topological order, each component's summary the union of its
-// members' own entries and its successors' summaries, shared by every
-// member. Every root and every embedding reuses it, so the work is linear
-// in the wires, the embeddings and the summaries' sizes, and the result
-// does not depend on which wire is asked first (round 17 M1; an embedding
-// cycle is reported by checkWireCycles). Prior art: go/types orders
-// package initialization over its dependency graph once (initorder.go);
-// rustc caches a query's result per item.
-func (c *checker) wireSummaries() {
-	if c.wireComp != nil {
-		return
-	}
-	c.wireComp = map[*Wire]*wireComp{}
-	wires := make([]*Wire, 0, len(c.pkg.Wires))
-	for _, w := range c.pkg.Wires {
-		wires = append(wires, w)
-	}
-	sort.Slice(wires, func(i, j int) bool {
-		if wires[i].file.index != wires[j].file.index {
-			return wires[i].file.index < wires[j].file.index
-		}
-		return wires[i].Pos < wires[j].Pos
-	})
-	type node struct {
-		index, low int
-		onStack    bool
-		embeds     []*Wire
-	}
-	nodes := make(map[*Wire]*node, len(wires))
-	for _, w := range wires {
-		n := &node{index: -1}
-		saved := c.cur
-		c.cur = w.file
-		c.silent++
-		own, known := &capSet{}, true
-		for _, e := range w.Decl.Body.Entries {
-			c.wireOps++
-			if e.Kind == syntax.WireEmbed {
-				var inner *Wire
-				if id, ok := e.Key.(*syntax.Ident); ok {
-					inner = w.pkg.Wires[id.Name]
-				}
-				if inner == nil {
-					known = false
-					continue
-				}
-				n.embeds = append(n.embeds, inner)
-				continue
-			}
-			for _, k := range append([]syntax.Expr{e.Key}, e.Keys...) {
-				if t := c.rowElem(k, KindUses, nil); t != nil {
-					if _, isParam := t.(*TypeParam); !isParam {
-						own = own.with(c.types, t)
-					}
-				}
-			}
-		}
-		c.silent--
-		c.cur = saved
-		w.own, w.unknown = own, !known
-		nodes[w] = n
-	}
-	index := 0
-	var stack []*Wire
-	var connect func(w *Wire)
-	connect = func(w *Wire) {
-		n := nodes[w]
-		n.index, n.low = index, index
-		index++
-		stack = append(stack, w)
-		n.onStack = true
-		for _, e := range n.embeds {
-			c.wireOps++
-			m := nodes[e]
-			if m.index < 0 {
-				connect(e)
-				n.low = min(n.low, m.low)
-			} else if m.onStack {
-				n.low = min(n.low, m.index)
-			}
-		}
-		if n.low != n.index {
-			return
-		}
-		comp := &wireComp{}
-		var members []*Wire
-		for {
-			m := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-			nodes[m].onStack = false
-			c.wireComp[m] = comp
-			members = append(members, m)
-			if m == w {
-				break
-			}
-		}
-		// The summary joins the members' entries and each successor
-		// component's summary once, into the largest of them (capUnion).
-		unknown := false
-		var sets []*capSet
-		succ := map[*wireComp]bool{}
-		for _, m := range members {
-			sets = append(sets, m.own)
-			unknown = unknown || m.unknown
-			for _, e := range nodes[m].embeds {
-				c.wireOps++
-				if d := c.wireComp[e]; d != comp && !succ[d] {
-					succ[d] = true
-					sets = append(sets, d.binds)
-					unknown = unknown || d.unknown
-				}
-			}
-		}
-		var work int
-		comp.binds, work = capUnion(c.types, sets)
-		c.wireOps += work
-		comp.unknown = unknown
-		for _, m := range members {
-			m.binds, m.unknown = comp.binds, unknown
-		}
-	}
-	for _, w := range wires {
-		if nodes[w].index < 0 {
-			connect(w)
-		}
-	}
-}
-
-// A wireComp is a strongly connected component of the embedding graph and
-// its binding summary. Two wires of one component lie on an embedding
-// cycle, and so does a wire that embeds itself.
-type wireComp struct {
-	binds   *capSet
-	unknown bool
-}
-
-// embeddedBinds returns what the embedding of inner contributes to the
-// body of the named wire self (nil for an inline wire), whether every wire
-// it reaches exists, and whether inner is on self's own embedding cycle.
-// Such an embedding, on a reported cycle (S108, Wire 5), contributes the
-// component's summary, and wireBody counts none of it as a second entry,
-// against the wire's own entries or its other embeddings: what it brings
-// depends on how the cycle is fixed (D3; round 16 m3, round 18). A replace
-// may still name it.
-func (c *checker) embeddedBinds(inner, self *Wire) (binds *capSet, known, onCycle bool) {
-	c.wireSummaries()
-	c.wireOps++
-	comp := c.wireComp[inner]
-	return comp.binds, !comp.unknown, self != nil && comp == c.wireComp[self]
-}
-
-// localCaps returns s keyed by this check's type table: a wire summary of
-// another package is converted once.
-func (c *checker) localCaps(s *capSet) *capSet {
-	if s == nil || s.size == 0 || s.tab == c.types {
-		return s
-	}
-	if out, ok := c.foreignCaps[s]; ok {
-		return out
-	}
-	out := &capSet{}
-	s.each(func(_ int32, t Type) { out = out.with(c.types, t) })
-	if c.foreignCaps == nil {
-		c.foreignCaps = map[*capSet]*capSet{}
-	}
-	c.foreignCaps[s] = out
-	return out
-}
-
 // checkWires checks the named wires: their entries, in a closed build
 // context (README Gap 6: a named wire requires nothing from the with site
 // and lets no failure escape).
@@ -618,9 +345,17 @@ func (c *checker) checkWires() {
 		t := &target{name: "wire " + w.Name, declErrors: newRow(), declUses: newRow(), wire: true}
 		// The wire's providers may use what the wire binds (Wire 4).
 		t.internal = c.wireBinds(w)
+		if w.budget {
+			c.errorf(d.Name, CodeDuplicateCap, "%s", wireBudgetMessage)
+		}
+		if t.internal == nil {
+			// Its summary was refused (wiresum.go): nothing it charges is
+			// reported (D3).
+			t.withs = []*capSet{nil}
+		}
 		c.fn = &funcCtx{t: t, scope: newScope(c.pkg.Scope), reach: c.reachOf(w)}
 		c.building = w
-		c.wireBody(d.Body)
+		c.wireBody(d.Body, d.Name)
 		c.fn = nil
 	}
 }

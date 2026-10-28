@@ -107,7 +107,10 @@ type Wire struct {
 	// not exist (reported at the embedding): what it binds is unknown, so
 	// a with of it discharges everything (D3; M18).
 	unknown bool
-	pkg     *Package
+	// budget marks the wire whose summary passed the package's wire budget
+	// (wiresum.go): it gets the budget S111.
+	budget bool
+	pkg    *Package
 }
 
 func (o *TypeName) name() string { return o.Name }
