@@ -87,15 +87,18 @@ type checker struct {
 	// Class G (rows.go pinGroup): group holds the functions of the
 	// component being checked and callee the function expression of the
 	// call being checked. groupValue is the first value use, in source
-	// order, of each member with an inferred row; such a member's inferred
-	// rows are pinned empty, and grew records which of them its body
-	// exceeds (by kind: errors, capabilities).
+	// order, of each row (errors, capabilities) of each member with an
+	// inferred row; such a row is pinned empty, and grew records which of
+	// them its body exceeds.
 	// refs collects, while resolveBodies runs, the resolved package
 	// functions and vars each body refers to: the body graph's edges.
 	refs       map[any]map[any]bool
 	group      map[*Func]bool
 	callee     syntax.Expr
-	groupValue map[*Func]valueUse
+	groupValue map[*Func][2]valueUse
+	lits       []*litFrame    // the literal frames being checked, innermost last
+	discardGo  *syntax.GoExpr // a go expression statement: its task is not a value
+	inertGroup bool           // checking a var on an initialization cycle: no value use
 	grew       map[*Func][2]bool
 	// untyped holds the expressions Info records with an untyped type, and
 	// whether each was a constant, until a context converts them

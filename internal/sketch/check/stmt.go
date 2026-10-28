@@ -146,6 +146,9 @@ func (c *checker) condition(x syntax.Expr) {
 // with or go, as in Go (S110 otherwise). A fallible statement is S105.
 func (c *checker) exprStmt(s *syntax.ExprStmt) {
 	x := unparen(s.X)
+	if g, ok := x.(*syntax.GoExpr); ok {
+		c.discardGo = g
+	}
 	var op operand
 	switch e := x.(type) {
 	case *syntax.CatchExpr:

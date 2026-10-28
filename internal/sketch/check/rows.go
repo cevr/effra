@@ -2,6 +2,7 @@ package check
 
 import (
 	"fmt"
+	"slices"
 
 	"ergo.local/prototype/internal/sketch/syntax"
 )
@@ -293,7 +294,7 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 			c.group[n.fn] = true
 		}
 	}
-	c.groupValue, c.grew = map[*Func]valueUse{}, map[*Func][2]bool{}
+	c.groupValue, c.grew = map[*Func][2]valueUse{}, map[*Func][2]bool{}
 	defer func() { c.group, c.groupValue, c.grew = nil, nil, nil }()
 	cyclic := len(scc) > 1
 	if !cyclic {
@@ -349,21 +350,107 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 	c.finalComponent(scc)
 }
 
-// valueUse is a use of a function that is not a call, with the index of its
-// file, so the first one in source order is well defined.
+// valueUse is a value use of a group member: an identifier that is not a
+// call, or a function literal or go expression that refers to the member
+// and is itself a value. file is the index of its file, so the first one in
+// source order is well defined.
 type valueUse struct {
 	file int
-	x    *syntax.Ident
+	at   syntax.Node
+}
+
+// A litMode says, for one row kind, how a function literal, trailing block
+// or go expression passes on the rows of the group members it refers to.
+type litMode int
+
+const (
+	// litPass: the rows flow into the enclosing body, as for a call (a
+	// literal called on the spot, the capabilities of a go expression).
+	litPass litMode = iota
+	// litValue: the rows become part of a value's type (the literal's
+	// inferred row, a task's error row): a value use of each member.
+	litValue
+	// litStop: the row is written or comes from the expected function
+	// type, so it depends on no member's row.
+	litStop
+)
+
+// litModeOf is a literal row's mode: litStop when the row is declared
+// (written, or from the expected function type), else the given mode.
+func litModeOf(declared *Row, value litMode) litMode {
+	if declared != nil {
+		return litStop
+	}
+	return value
+}
+
+// litFrame is a function literal, trailing block or go expression being
+// checked: the group members it refers to, per row kind, while it is a
+// value (class G, round 14 O1).
+type litFrame struct {
+	at   syntax.Node
+	mode [2]litMode
+	refs [2][]*Func
+}
+
+// pushLit starts a literal frame; endLit ends it.
+func (c *checker) pushLit(at syntax.Node, errors, uses litMode) *litFrame {
+	l := &litFrame{at: at, mode: [2]litMode{errors, uses}}
+	c.lits = append(c.lits, l)
+	return l
+}
+
+// endLit ends the innermost literal frame, l: each member it refers to
+// through a value row has a value use at l. It reports whether the literal
+// is refused (the first value use of a member whose pinned row its body
+// exceeds).
+func (c *checker) endLit(l *litFrame) bool {
+	c.lits = c.lits[:len(c.lits)-1]
+	var members []*Func
+	seen := map[*Func]bool{}
+	for k := range 2 {
+		for _, f := range l.refs[k] {
+			c.noteValueUse(f, k, l.at)
+			if !seen[f] {
+				seen[f] = true
+				members = append(members, f)
+			}
+		}
+	}
+	refused := false
+	for _, f := range members {
+		if c.groupRefused(f, l.at) {
+			refused = true
+		}
+	}
+	return refused
+}
+
+// noteValueUse records at as a value use of f's row of kind k (0 errors,
+// 1 capabilities) when it is the first in source order.
+func (c *checker) noteValueUse(f *Func, k int, at syntax.Node) {
+	file := -1
+	if c.cur != nil {
+		file = c.cur.index
+	}
+	uses := c.groupValue[f]
+	first := uses[k]
+	if first.at == nil || file < first.file || file == first.file && at.Pos() < first.at.Pos() {
+		uses[k] = valueUse{file, at}
+		c.groupValue[f] = uses
+	}
 }
 
 // pinGroup applies class G to a cyclic component after its silent pass has
 // recorded the value uses (rows.md, Capability rows 6): a member used as a
 // value inside its own group has the rows it writes, and each row it does
-// not write is pinned empty, as for an exported function. So no type in
-// the group depends on a row still being inferred, call admission does not
+// not write is pinned empty, as for an exported function. A function
+// literal or go expression that is a value and refers to a member pins the
+// member's rows that its own inferred rows would carry. So no type in the
+// group depends on a row still being inferred, call admission does not
 // depend on the rows, and the rows grow monotonically to their least
-// fixpoint. When the body of a pinned member needs more than the empty row,
-// its first value use is S108 (groupValueUse), never a chosen fixpoint.
+// fixpoint. When the body of a pinned member needs more than the empty
+// row, its first value use is S108 (groupRefused), never a chosen fixpoint.
 //
 // Prior art: OCaml's let rec is monomorphic inside its group; Haskell needs
 // a signature for polymorphic recursion; TypeScript reports a name
@@ -373,11 +460,12 @@ type valueUse struct {
 func (c *checker) pinGroup(scc []*bodyNode) {
 	var pin []*RowVar
 	for _, n := range scc {
-		if n.fn == nil || c.groupValue[n.fn].x == nil {
+		if n.fn == nil {
 			continue
 		}
-		for _, v := range []*RowVar{n.fn.errVar, n.fn.useVar} {
-			if v != nil && !v.final {
+		uses := c.groupValue[n.fn]
+		for k, v := range []*RowVar{n.fn.errVar, n.fn.useVar} {
+			if v != nil && !v.final && uses[k].at != nil {
 				pin = append(pin, v)
 			}
 		}
@@ -388,35 +476,90 @@ func (c *checker) pinGroup(scc []*bodyNode) {
 	}
 }
 
-// groupValueUse handles a use of f that is not a call while f's component
-// is checked (class G). It records the first such use in source order, and
-// at that use reports a pinned row that f's body exceeds. It reports
-// whether the use is refused.
-func (c *checker) groupValueUse(f *Func, x *syntax.Ident) bool {
+// groupRef handles a reference x to f while f's component is checked
+// (class G): every enclosing literal frame that is a value takes f, up to
+// the first frame whose row of that kind is written, and a use that is not
+// a call (value) is a value use of both of f's rows. It reports whether
+// the reference is refused: in the reporting pass, every reference to a
+// member whose pinned row its body exceeds is invalid, so nothing cascades
+// from it (D3), and the member's first value use carries the S108.
+func (c *checker) groupRef(f *Func, x *syntax.Ident, value bool) bool {
 	if !c.group[f] || !f.inferErrors && !f.inferUses {
 		return false
 	}
-	file := -1
-	if c.cur != nil {
-		file = c.cur.index
+	if c.inertGroup {
+		_, exceeded := c.exceeded(f)
+		return c.silent == 0 && exceeded
 	}
-	first, ok := c.groupValue[f]
-	if !ok || file < first.file || file == first.file && x.Pos() < first.x.Pos() {
-		c.groupValue[f] = valueUse{file, x}
-		first = c.groupValue[f]
+	for k := range 2 {
+		for i := len(c.lits) - 1; i >= 0; i-- {
+			l := c.lits[i]
+			if l.mode[k] == litStop {
+				break
+			}
+			if l.mode[k] == litValue && !slices.Contains(l.refs[k], f) {
+				l.refs[k] = append(l.refs[k], f)
+			}
+		}
 	}
-	grew := c.grew[f]
-	if c.silent > 0 || first.x != x || !grew[0] && !grew[1] {
+	if value {
+		c.noteValueUse(f, 0, x)
+		c.noteValueUse(f, 1, x)
+	}
+	if c.groupRefused(f, x) {
+		return true
+	}
+	_, exceeded := c.exceeded(f)
+	return c.silent == 0 && exceeded
+}
+
+// exceeded returns the first value use of f among its pinned rows that its
+// body exceeds, and whether there is one. The fixpoint decides it; only
+// the reporting pass reads it.
+func (c *checker) exceeded(f *Func) (valueUse, bool) {
+	grew, uses := c.grew[f], c.groupValue[f]
+	var first valueUse
+	found := false
+	for k := range 2 {
+		u := uses[k]
+		if !grew[k] || u.at == nil {
+			continue
+		}
+		if !found || u.file < first.file || u.file == first.file && u.at.Pos() < first.at.Pos() {
+			first, found = u, true
+		}
+	}
+	return first, found
+}
+
+// groupRefused reports the S108 of f at at when at is f's first value use
+// among the pinned rows its body exceeds, in the reporting pass.
+func (c *checker) groupRefused(f *Func, at syntax.Node) bool {
+	if c.silent > 0 {
 		return false
 	}
-	const used = "%s is used as a value inside its own recursive group; "
+	first, ok := c.exceeded(f)
+	if !ok || first.at != at {
+		return false
+	}
+	grew, uses := c.grew[f], c.groupValue[f]
+	errs, caps := grew[0] && uses[0].at != nil, grew[1] && uses[1].at != nil
+	var row string
 	switch {
-	case grew[0] && grew[1]:
-		c.errorf(x, CodeType, used+"write its error row and capability row: func %s() error[…] needs …", f.Name, f.Name)
-	case grew[0]:
-		c.errorf(x, CodeType, used+"write its error row: func %s() error[…]", f.Name, f.Name)
+	case errs && caps:
+		row = fmt.Sprintf("write its error row and capability row: func %s() error[…] needs …", f.Name)
+	case errs:
+		row = fmt.Sprintf("write its error row: func %s() error[…]", f.Name)
 	default:
-		c.errorf(x, CodeType, used+"write its capability row: func %s() needs …", f.Name, f.Name)
+		row = fmt.Sprintf("write its capability row: func %s() needs …", f.Name)
+	}
+	switch at.(type) {
+	case *syntax.Ident:
+		c.errorf(at, CodeType, "%s is used as a value inside its own recursive group; %s", f.Name, row)
+	case *syntax.GoExpr:
+		c.errorf(at, CodeType, "%s is called by this go expression, whose task is a value inside %s's own recursive group; %s", f.Name, f.Name, row)
+	default:
+		c.errorf(at, CodeType, "%s is referred to by this function literal, a value inside %s's own recursive group; %s", f.Name, f.Name, row)
 	}
 	return true
 }
@@ -861,6 +1004,13 @@ func (c *checker) checkPkgVar(pv *pkgVar) {
 	pv.checking = true
 	defer func() { pv.checking = false }()
 	defer c.beginDeps(pv)()
+	// A var on an initialization cycle is invalid: no class G value use
+	// follows from its initializer (D3).
+	if pv.initCycle {
+		prev := c.inertGroup
+		c.inertGroup = true
+		defer func() { c.inertGroup = prev }()
+	}
 	// A silent check (a fixpoint round) does not count: the reporting
 	// pass checks the initializer again against converged rows.
 	if c.silent == 0 {

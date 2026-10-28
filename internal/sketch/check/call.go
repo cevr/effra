@@ -190,7 +190,7 @@ func (c *checker) callSig(x *syntax.CallExpr, sig *Signature, fun operand) opera
 		if !ok {
 			c.errorf(args.trailing, CodeType, "a trailing block is a function-literal argument, but the final parameter has type %s", pt)
 		} else {
-			lit := c.blockLit(args.trailing, ps, nil)
+			lit := c.blockLit(args.trailing, ps, nil, true)
 			if ok, why := c.assignable(lit, pt); !ok {
 				c.errorf(args.trailing, CodeType, "this block cannot be %s: %s", pt, why)
 			}
@@ -494,7 +494,11 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 			op := c.funcLit(lit, expected, in)
 			op.expr = lit
 			c.record(lit, op)
-			lt := op.typ.(*Signature)
+			lt, isSig := op.typ.(*Signature)
+			if !isSig { // refused (class G): invalid, nothing cascades
+				failed = true
+				continue
+			}
 			lits[i] = lt
 			if containsInvalid(lt) {
 				failed = true // see the invalid-operand rule below
@@ -607,7 +611,7 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 			c.errorf(args.trailing, CodeType, "a trailing block is a function-literal argument, but the final parameter has type %s", pt)
 			return bad(x)
 		}
-		lt := c.blockLit(args.trailing, expected, in)
+		lt := c.blockLit(args.trailing, expected, in, true)
 		lits[i] = lt
 		_ = in.unify(pt, lt, unifyAssign) // a block's mismatch is the assignment's error below
 	}
@@ -786,6 +790,14 @@ func (c *checker) funcLit(x *syntax.FuncLit, expected *Signature, in *inferer) o
 	default:
 		t.uses = newRow()
 	}
+	// Class G (round 14 O1): a literal that is a value carries the rows
+	// of the group members it refers to through its inferred rows; called
+	// on the spot, those rows flow into the enclosing body.
+	value := litValue
+	if c.callee == syntax.Expr(x) {
+		value = litPass
+	}
+	frame := c.pushLit(x, litModeOf(t.declErrors, value), litModeOf(t.declUses, value))
 	c.body(t, x.Type, sig.Params, func() {
 		c.stmtList(x.Body.List, false)
 		if len(sig.Results) > 0 && !c.terminatesList(x.Body.List) {
@@ -799,6 +811,9 @@ func (c *checker) funcLit(x *syntax.FuncLit, expected *Signature, in *inferer) o
 	}
 	if c.silent == 0 {
 		c.pkg.Info.Literals[x] = sig
+	}
+	if c.endLit(frame) {
+		return bad(x)
 	}
 	return operand{mode: modeValue, typ: sig}
 }
@@ -834,7 +849,7 @@ func (c *checker) body(t *target, ft *syntax.FuncType, params []*Var, check func
 // no parameters (grammar.md, Expressions 3): f(a) { body } is
 // f(a, func() T { return body }). The block's last expression is its result;
 // return, break and continue may not leave it (grammar.md, Statements 5).
-func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer) *Signature {
+func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer, value bool) *Signature {
 	sig := &Signature{Errors: newRow(), Uses: newRow()}
 	t := &target{name: "this block"}
 	resultFree := expected == nil || (in != nil && func() bool {
@@ -863,6 +878,11 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 	if !resultFree {
 		t.results, t.resultKnown = expected.Results, true
 	}
+	// A trailing block is a function-literal argument: a value (class G).
+	var frame *litFrame
+	if value {
+		frame = c.pushLit(b, litModeOf(t.declErrors, litValue), litModeOf(t.declUses, litValue))
+	}
 	c.body(t, nil, nil, func() {
 		res := c.yieldingBlock(b, b.List, t.results, t.resultKnown, func(op *operand) { c.escape(op.expr, op.errs) })
 		if resultFree {
@@ -876,6 +896,9 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 	sig.Errors = t.row(t.declErrors, t.errors)
 	sig.Uses = t.row(t.declUses, t.uses)
 	sig.Fallible = !sig.Errors.Empty() || expected != nil && expected.Fallible
+	if frame != nil {
+		c.endLit(frame)
+	}
 	if c.silent == 0 {
 		c.pkg.Info.Literals[b] = sig
 	}

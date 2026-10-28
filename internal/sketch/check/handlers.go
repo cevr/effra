@@ -221,6 +221,16 @@ func (c *checker) catchArm(arm *syntax.CatchArm, valueType Type, hasValue, yield
 func (c *checker) goExpr(x *syntax.GoExpr) operand {
 	var value Type = NoValue
 	errs := newRow()
+	// Class G (round 14 O1): the task's type carries the error row of what
+	// it runs, so a go expression whose task is a value is a value use of
+	// the error rows of the group members it calls; its capabilities are
+	// charged to the enclosing body, as for a call. A go statement
+	// discards its task.
+	if c.discardGo != x {
+		frame := c.pushLit(x, litValue, litPass)
+		defer func() { c.endLit(frame) }()
+	}
+	c.discardGo = nil
 	if x.Call != nil {
 		op := c.expr(x.Call, nil)
 		if op.invalid() {
@@ -231,7 +241,7 @@ func (c *checker) goExpr(x *syntax.GoExpr) operand {
 		}
 		errs = op.errs
 	} else {
-		sig := c.blockLit(x.Block, nil, nil)
+		sig := c.blockLit(x.Block, nil, nil, false)
 		c.chargeRow(x, c.types.resolve(sig.Uses))
 		if len(sig.Results) == 1 {
 			value = sig.Results[0]
