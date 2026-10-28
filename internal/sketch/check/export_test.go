@@ -71,6 +71,19 @@ func VariantOps(src string) (int, []Diagnostic) {
 	return c.variantOps, diags
 }
 
+// LookupWork checks src and returns the switches' variant operations (all
+// charged to their step counters) and the identity work done inside case
+// lookups: the type nodes the table built while a lookup ran, each one hash
+// lookup of the node's own fields (class E). No recursive key is built in a
+// lookup: typeString is for printing only (TestTypeStringOnlyPrints).
+func LookupWork(src string) (ops, builds int, d []Diagnostic) {
+	c, diags := checkFor(src)
+	if c == nil {
+		return -1, -1, diags
+	}
+	return c.variantOps, c.types.lookupBuilds, diags
+}
+
 // InstancesMade checks src and returns the generic instances it created
 // (round-6 M5: linear in the source for a default-only switch over
 // distinct instantiations of a generic union), with the diagnostics.
