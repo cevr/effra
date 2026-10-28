@@ -106,6 +106,9 @@ type checker struct {
 	walkOps, wireOps int
 	// wireComp maps each named wire to its embedding component (wireSummaries).
 	wireComp map[*Wire]*wireComp
+	// foreignCaps holds another package's wire summaries keyed by this
+	// check's type table (localCaps).
+	foreignCaps map[*capSet]*capSet
 	// nodeCheck replaces checkNode in converge for the synthetic oscillation
 	// test (nil otherwise); convergeChecks counts converge's checks.
 	nodeCheck      func(*bodyNode) bool

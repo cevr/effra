@@ -17,7 +17,7 @@ type target struct {
 	// (rows-and-constraints §7 amendment 1).
 	declErrors, declUses *Row
 	errors, uses         *Row // what escapes or is charged (inferred rows)
-	withs                []*Row
+	withs                []*capSet
 	// results are the value results a return gives; resultKnown is false
 	// for a block whose result is its last expression's type.
 	results     []Type
@@ -28,7 +28,8 @@ type target struct {
 	// internal is what a named wire binds itself: its providers may use it
 	// (rows.md, Wire 4); charged collects the internal capabilities the
 	// entry being checked uses, for the wire's entry-cycle check (M14).
-	internal, charged *Row
+	internal *capSet
+	charged  *Row
 }
 
 func (t *target) row(declared, inferred *Row) *Row {

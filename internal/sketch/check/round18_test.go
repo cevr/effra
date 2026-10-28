@@ -59,6 +59,116 @@ func TestWireChainLinear(t *testing.T) {
 	linear(t, "wire chain", counts, 6)
 }
 
+// TestCapSetPersistent: every version of a capSet keeps its elements after
+// later inserts, iterates in id order, and keeps the treap's order and heap
+// invariants, so lookups stay logarithmic.
+func TestCapSetPersistent(t *testing.T) {
+	var versions []*capNode
+	var sizes []int
+	var root *capNode
+	size := 0
+	for i := range 2000 {
+		id := int32((i * 7919) % 2003)
+		var added bool
+		root, added = capInsert(root, id, nil, capPriority(id))
+		if added {
+			size++
+		}
+		if i%97 == 0 {
+			versions = append(versions, root)
+			sizes = append(sizes, size)
+		}
+	}
+	var check func(n *capNode, lo, hi int32) (count, depth int)
+	check = func(n *capNode, lo, hi int32) (int, int) {
+		if n == nil {
+			return 0, 0
+		}
+		if n.id <= lo || n.id >= hi {
+			t.Fatalf("id %d outside (%d, %d)", n.id, lo, hi)
+		}
+		for _, ch := range []*capNode{n.left, n.right} {
+			if ch != nil && ch.pri > n.pri {
+				t.Fatalf("heap order broken at %d", n.id)
+			}
+		}
+		lc, ld := check(n.left, lo, n.id)
+		rc, rd := check(n.right, n.id, hi)
+		return lc + rc + 1, max(ld, rd) + 1
+	}
+	for i, v := range versions {
+		count, depth := check(v, -1, 1<<30)
+		if count != sizes[i] {
+			t.Errorf("version %d: %d elements, want %d", i, count, sizes[i])
+		}
+		if depth > 60 {
+			t.Errorf("version %d: depth %d for %d elements", i, depth, count)
+		}
+	}
+	s := &capSet{root: root, size: size}
+	prev := int32(-1)
+	s.each(func(id int32, _ Type) {
+		if id <= prev {
+			t.Fatalf("each: %d after %d", id, prev)
+		}
+		prev = id
+		if !s.hasID(id) {
+			t.Fatalf("hasID(%d) false", id)
+		}
+	})
+	if s.hasID(2003) {
+		t.Error("hasID(2003) true")
+	}
+}
+
+// TestWireEntriesLinear: wires whose summaries grow cost linear work: a
+// chain whose every wire adds an entry (each wire binds all the entries
+// before it), and one wire that embeds n wires of one entry each. The
+// summaries share their embeddings' sets (capset.go), so each wire adds
+// only its own entries; sorted rows copied per wire cost O(n²), and adding
+// to them one capability at a time O(n³) (round 18).
+func TestWireEntriesLinear(t *testing.T) {
+	families := map[string]func(n int) string{
+		"entry chain": func(n int) string {
+			var b strings.Builder
+			b.WriteString("package p\ntype P struct{}\nfunc (P) M() {}\n")
+			for i := range n {
+				fmt.Fprintf(&b, "type C%d interface{ M() }\n", i)
+			}
+			b.WriteString("wire W0 {\n\tC0 = P{}\n}\n")
+			for i := 1; i < n; i++ {
+				fmt.Fprintf(&b, "wire W%d {\n\tC%d = P{}\n\tW%d\n}\n", i, i, i-1)
+			}
+			fmt.Fprintf(&b, "func F() { with(W%d) { C0.M() } }\n", n-1)
+			return b.String()
+		},
+		"wide embedding": func(n int) string {
+			var b strings.Builder
+			b.WriteString("package p\ntype P struct{}\nfunc (P) M() {}\n")
+			for i := range n {
+				fmt.Fprintf(&b, "type C%d interface{ M() }\nwire X%d {\n\tC%d = P{}\n}\n", i, i, i)
+			}
+			b.WriteString("wire W {\n")
+			for i := range n {
+				fmt.Fprintf(&b, "\tX%d\n", i)
+			}
+			fmt.Fprintf(&b, "}\nfunc F() { with(W) { C%d.M() } }\n", n-1)
+			return b.String()
+		},
+	}
+	for _, name := range []string{"entry chain", "wide embedding"} {
+		counts := map[int]int{}
+		for _, n := range []int{1000, 4000, 8000} {
+			diags, _, wire := opsOf(t, families[name](n))
+			if len(diags) > 0 {
+				t.Fatalf("%s n=%d: want acceptance, got %v", name, n, diags[0])
+			}
+			counts[n] = wire
+		}
+		linear(t, name, counts, 10)
+	}
+}
+
 // TestAnonymousStructLinear: keyed and positional anonymous struct literals
 // of n fields, each a slice literal with elided children, cost linear work
 // in the reference walk (round 17 M2: each element scanned the field list).

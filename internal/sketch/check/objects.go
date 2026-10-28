@@ -101,8 +101,8 @@ type Wire struct {
 	Pos   syntax.Pos
 	Decl  *syntax.WireDecl
 	file  *fileInfo
-	binds *Row // capabilities the wire binds; nil until resolved
-	own   *Row // the wire's own entries (wireSummaries)
+	binds *capSet // capabilities the wire binds; nil until resolved
+	own   *capSet // the wire's own entries (wireSummaries)
 	// unknown marks a wire that embeds, directly or not, a wire that does
 	// not exist (reported at the embedding): what it binds is unknown, so
 	// a with of it discharges everything (D3; M18).
