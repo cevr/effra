@@ -1,6 +1,7 @@
 import http
 import os
 import retry
+import scope
 import tasks
 import timeout
 

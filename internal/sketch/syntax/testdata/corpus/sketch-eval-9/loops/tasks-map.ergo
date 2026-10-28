@@ -1,10 +1,18 @@
+import options
+import queue
+import scope
+import task
+
 // Map is library code, not a construct. It keeps input order and runs at
 // most limit calls at once (limit must be at least 1). After the first window
 // fills, it waits for whichever task finishes first, so a failure is seen
 // when that task ends. Map then exits, and the exit stops and drains every
 // task still running.
 func Map[A, B, E, R](xs []A, limit int, f func(A) B fails E needs R) []B fails E needs R {
-	let mut slots = slice.Repeat[Option[B]](None{}, len(xs)) // Option is defaultable; B may not be
+	let mut slots = []Option[B]{} // one slot per input: B may have no zero value
+	for _ in xs {
+		slots = slots.Append(None{})
+	}
 	let mut running = Map[int, Task[B, E]]{}
 	let done = queue.New[int](len(xs))
 	for i, x in xs {

@@ -1,5 +1,6 @@
 import actor
 import schedule
+import scope
 import tasks
 
 // The CircuitBreaker machine, Breaker, Signal and breakerStep are the ones in

@@ -20,13 +20,13 @@ let Shared = wire {
 }
 
 let Accounts = wire {
-	Shared,
 	Account: AccountLive,
+	Shared,
 }
 
 let Invoices = wire {
-	Shared,
 	Invoice: InvoiceLive,
+	Shared,
 }
 
 let App = wire provides Account, Invoice { // exposes two; Store stays hidden, built once
@@ -35,8 +35,8 @@ let App = wire provides Account, Invoice { // exposes two; Store stays hidden, b
 }
 
 let Fixture = wire {
-	App,
 	replace Store: Memory{Text: "fixture"},
+	App,
 }
 
 func labels() string needs Account, Invoice {

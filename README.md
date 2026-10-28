@@ -111,9 +111,9 @@ let Store = wire provides Orders needs Config {
 }
 
 let Live = wire provides Orders, Payments {
-	Store,
 	Payments: Stripe{},
 	Config:   EnvConfig{}, // Store uses it; callers cannot see it
+	Store,
 }
 
 func main() fails NotFound | Declined | DialFailed needs Console {

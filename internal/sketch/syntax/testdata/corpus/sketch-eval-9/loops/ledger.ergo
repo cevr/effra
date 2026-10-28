@@ -39,7 +39,8 @@ func apply(accounts *[]Account, transfers []Transfer) int {
 	return rejected
 }
 
-// ef test checks a Law like a fuzz target; ef prove tries to prove it.
+// A decided law lives in an operation type, and move is a plain function:
+// until laws come (#162), this stays an ordinary function that no test runs.
 func LawMoveConservesMoney(from, to Account, amount int64) bool {
 	let total = from.Balance + to.Balance
 	move(&from, &to, amount) catch {

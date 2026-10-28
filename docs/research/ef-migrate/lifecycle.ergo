@@ -5,6 +5,7 @@
 
 import config
 import fs
+import task
 import timeout
 
 func worker() needs Clock {

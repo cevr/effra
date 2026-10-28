@@ -1,5 +1,6 @@
 import retry
 import sql
+import task
 import time
 
 type ConnectFailed { URL string }
@@ -36,7 +37,10 @@ func Close(p Postgres) fails CloseFailed {
 func OpenPostgres() Postgres fails ConnectFailed needs Config, Clock, Scheduler {
 	let url = Config.String("DATABASE_URL")
 	let pool = try retry.On[ConnectFailed](retry.Exponential(200ms).Times(5)) { sql.Open(url) }
-	return Postgres{pool, task.Go() { keepWarm(pool) }}
+	return Postgres{pool, task.Go() {
+		keepWarm(pool)
+		Unit
+	}}
 }
 
 func keepWarm(pool sql.Pool) needs Clock {

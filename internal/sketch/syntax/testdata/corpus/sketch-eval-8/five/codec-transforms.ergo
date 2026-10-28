@@ -154,12 +154,12 @@ let stored = `{"buyer":"u-7","member":{"handle":"ada","sponsor":"u-1"},"quantity
 test NominalRoundTrips {
 	let id = try json.Decode[UserId](`"u-42"`)
 	assert id.Wire() == "u-42"
-	assert try json.Encode(id) == `"u-42"`
+	assert (try json.Encode(id)) == `"u-42"`
 }
 
 test NormalizingCanonicalizes {
 	let legacy = try json.Decode[Status](`{"_tag":"Enabled"}`)
-	assert try json.Encode(legacy) == `{"_tag":"Active"}`
+	assert (try json.Encode(legacy)) == `{"_tag":"Active"}`
 	let suspended = try json.Decode[Status](try json.Encode(Suspended{}))
 	assert suspended == Suspended{}
 }
@@ -223,7 +223,7 @@ test EncodeRunsOnlyEncodeServices {
 
 test ConfigurationSharesTheWireForms {
 	let settings = try with wire { Env: StoredSettings{} } { loadSettings() }
-	assert try settingsJSON.Encode(settings) == `{"owner":"u-1","defaultStatus":{"_tag":"Active"}}`
+	assert (try settingsJSON.Encode(settings)) == `{"owner":"u-1","defaultStatus":{"_tag":"Active"}}`
 }
 
 func main() string fails json.DecodeFailed | json.EncodeFailed | InvalidQuantity | UnknownMember | DirectoryDown | AuditRefused {
