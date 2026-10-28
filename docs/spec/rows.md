@@ -1,6 +1,6 @@
 # Rows: errors, capabilities, `wire` and `with`
 
-Every function has two rows besides its result: an error row, `error[...]`, and a capability row, `needs`. The checker proves that each row is an upper bound on what the body can do. Rows are checked and then erased: the lowered Go has interfaces, structs, early returns and type switches. Definitions are in the [glossary](../../GLOSSARY.md).
+Every function has two rows besides its result: an error row, `fails …`, and a capability row, `needs`. The checker proves that each row is an upper bound on what the body can do. Rows are checked and then erased: the lowered Go has interfaces, structs, early returns and type switches. Definitions are in the [glossary](../../GLOSSARY.md).
 
 *Prior art:* Effect's `Effect<A, E, R>` tracks the same two rows as type parameters; Koka types effects as rows and checks that each is handled; OCaml 5 has effect handlers but does not track effects in types, so an unhandled effect is a run-time exception; Go tracks neither and threads `error` and `context.Context` by hand.
 
@@ -15,14 +15,14 @@ func pay(id string) string fails OrderNotFound | GatewayDown needs Orders, Gatew
 }
 ```
 
-1. **Spelling.** `error[A | B]` lists error types ([types.md](types.md#error-types)). The row is a set: order and repetition carry no meaning. A function with an error row and no value writes `error[A]` as its result; with a value, `(T, error[A])`.
+1. **Spelling.** `fails A | B` lists error types ([types.md](types.md#error-types)). The row is a set: order and repetition carry no meaning. A function with an error row and no value writes `fails A` after its parameters; with a value, `T fails A`.
 2. **Fallible expressions.** An expression is fallible when it can fail with a non-empty row:
    - a call to a function or capability method that declares an error row;
    - `timeout.After(d) { … }` ([runtime.md](runtime.md#timeouts));
-   - `with(W) { … }` whose last expression is fallible.
+   - `with W { … }` whose last expression is fallible.
 
    A `try` expression is not fallible: its failures have already escaped (rule 4).
-3. **Handling (S105).** A fallible expression must be tried, caught or returned. It is an error in every other position: a `:=` value, an expression statement, an operand, a selector's receiver, a call argument, a struct field value, an `if` condition, a switch subject, a `timeout.After` duration and a `catch` arm's value.
+3. **Handling (S105).** A fallible expression must be tried, caught or returned. It is an error in every other position: a `let` value, an expression statement, an operand, a selector's receiver, a call argument, a struct field value, an `if` condition, a `match` subject, a `timeout.After` duration and a `catch` arm's value.
 4. **Escapes.** A failure escapes to the enclosing failure target in exactly these ways:
    - `try e`, which escapes `e`'s whole row;
    - `return e` where `e` is fallible, which passes `e`'s success and its failures through;
@@ -58,7 +58,7 @@ case OrderNotFound:
 4. **Total catch (S103).** A `catch` without `try` must handle every error type in `e`'s row. *Prior art:* Rust and Gleam exhaustive `match` on an error enum; Swift propagates an error that no `catch` clause matches to the enclosing scope, and a non-throwing function must handle every error; Ergo's total catch is the same obligation stated per error type.
 5. **Partial catch.** `try e catch { … }` handles the named types and escapes the rest through `try`. The rest escapes to the enclosing failure target and is checked against its row (rules 4 and 5 of [Error rows](#error-rows); fixture `try … catch` in `sketch/sketch_test.go`, "partial catch under try still needs the rest declared", S101).
 6. **Typed failures only (README Gap 1).** A `catch` covers the typed row only. Interruption and defects are not in any row, and they always pass through a `catch`, total or partial. A total catch therefore has no default arm in source. Its lowering must still pass interruption and defects on; the prototype emits a default arm that re-panics with them.
-7. **Binding and statements (designed).** `catch e { case T: … }` binds the caught error, as `switch e := err.(type)` does; inside an arm with one type, `e` has that type. An arm may hold statements. When the `catch` is an expression, the arm's last statement is an expression that yields its value. `return` in an arm leaves the enclosing function, because an arm is not a block (README Gap 11).
+7. **Binding and statements (designed).** `case T as e:` binds the caught error with type `T`, and `case err:` binds the whole failure ([grammar.md](grammar.md#expressions), Expressions 1 and 6). An arm may hold statements. When the `catch` is an expression, the arm's last statement is an expression that yields its value. `return` in an arm leaves the enclosing function, because an arm is not a block (README Gap 11).
 8. **Lowering.** A catch becomes a type switch on the Go error value, inline, with no closure. *Prior art:* XGo lowers `expr!` and `expr?:default` through a generated closure; Ergo's catch stays inline.
 
 ## Capability rows
@@ -81,7 +81,7 @@ Status: **implemented in prototype**.
 Status: **designed, not yet implemented**.
 
 1. A function's footprint is every capability its body exercises, including those its own `with` provides, plus `go`. The compiler infers it and never asks for it. `ergo inspect` shows it.
-2. A function is pure when its footprint is empty, not when its `needs` row is empty. `with(wire{ Console = Stdout{} }) { Console.Println("x") }` has an empty row and a non-empty footprint.
+2. A function is pure when its footprint is empty, not when its `needs` row is empty. `with wire { Console: Stdout{} } { Console.Println("x") }` has an empty row and a non-empty footprint.
 3. A function type carries requirements only (README Gap 24). A call through an unknown function value counts as impure. A call is pure only when the compiler specialises it to a known function with an empty footprint.
 4. **Capability safety.** Only providers in host packages call Go. Ordinary code reaches the operating system only through a capability, so every effect appears in some footprint ([stdlib.md](stdlib.md#host-packages)).
 5. A function value whose row names a capability bound by `with` cannot escape that `with`. *Prior art:* Scala 3 capture checking and scoped capabilities; Effekt second-class blocks. A purity-carrying function type stays a candidate for [#189](https://github.com/cevr/ergo/issues/189).
@@ -105,8 +105,8 @@ let Live = wire {
 5. **Cycles.** A wire whose providers reach `with` of the same wire, directly or through called functions or provider methods, is an error (S109). The prototype follows every provider method of a called capability method's name, which over-approximates.
 6. **Constructors (designed).** An entry may name a constructor: `Orders = OpenPostgres`. A constructor is an ordinary function. Its `needs` row is satisfied from the same wire graph, and its error row joins the startup errors of every `with` that builds it. A constructor that returns a resource gives the wire its release ([resources.md](resources.md#wire)). *Prior art:* Effect `Layer.effect` and `Layer.scoped`; Google Wire's generated constructor with cleanups in reverse order.
 7. **Composition (designed).** A wire may embed another wire by name. `replace Cap = provider` overrides an embedded entry; a second entry for one capability without `replace` is an error (S111). A shared node is built once per build, and each `with` is a new build. *Prior art:* Effect `Layer.merge`, `Layer.provide` and `Layer.fresh` (README Gap 22).
-8. **Header (parsed; checking designed, [#196](https://github.com/cevr/ergo/issues/196)).** A named wire may state what it exposes and what it requires: `wire App provides Account, Invoice needs Config { … }`. Both clauses are optional, and `provides` comes first.
-   - `provides A, B` lists the capabilities a `with(App)` discharges. An entry the wire builds and does not list stays private to its build: `Store = MemoryStore{}` can serve `Account` and `Invoice` without reaching the `with` body. Without `provides`, every entry is exposed. `binds(W)` in [Composition laws](#composition-laws) is this list.
+8. **Header (parsed; checking designed, [#196](https://github.com/cevr/ergo/issues/196)).** A wire value may state what it exposes and what it requires: `let App = wire provides Account, Invoice needs Config { … }`. Both clauses are optional, and `provides` comes first.
+   - `provides A, B` lists the capabilities a `with App` discharges. An entry the wire builds and does not list stays private to its build: `Store: MemoryStore{}` can serve `Account` and `Invoice` without reaching the `with` body. Without `provides`, every entry is exposed. `binds(W)` in [Composition laws](#composition-laws) is this list.
    - `needs C, D` lists the capabilities its providers require from the `with` site. They join that site's row (`needs(W)` in [Composition laws](#composition-laws)).
    - The parser and formatter implement both; the bridge refuses them with S109 until #196 checks them. *Prior art:* Roc, where an app `provides` entry points to a platform that `requires` them; Effect's `Layer<ROut, E, RIn>`; OSGi's `Provide-Capability` and `Require-Capability`; Dagger's `@Provides` (README Gap 33).
 
@@ -119,7 +119,7 @@ let value = with Live { checkout(id) }
 let local = with wire { Orders: MemoryOrders{} } { report(id) }
 ```
 
-1. `with(W) { block }` takes one wire, named or inline, and a block (S108 otherwise). An unknown wire name is S104.
+1. `with W { block }` takes one wire, named or inline, and a block (S108 otherwise). An unknown wire name is S104.
 2. Inside the block, every capability that `W` binds is discharged: a charge of that capability does not reach the enclosing function's row.
 3. **Nested `with`.** A `with` inside another keeps both scopes:
    - the inner wire's provider expressions are evaluated in the outer scope, so they see the outer bindings;
@@ -137,10 +137,10 @@ let local = with wire { Orders: MemoryOrders{} } { report(id) }
    ```
 
    Flattening the two into one wire `wire{ Store = Holder{"inner"}; Box = Holder{read()} }` changes the program: `read()` would need `Store` from its own wire, which is S102 (fixture `wire-sibling`).
-4. `with(wire{})` binds nothing and keeps the enclosing bindings (fixture `empty-wire`).
+4. `with wire {}` binds nothing and keeps the enclosing bindings (fixture `empty-wire`).
 5. The block's value is its last expression, which must be an expression statement (S109). `return` cannot leave the block (S109). Locals declared in the block are scoped to it.
 6. A `with` expression is fallible when its last expression is fallible. A failure that a `try` in the block escapes goes to the enclosing function. Designed: the startup errors of the wire's constructors join the `with` expression's row.
-7. **Context values (designed, G1).** `with` also takes context values: `with(trace.Span("ingest"), log.Annotate("region", "eu")) { … }` ([runtime.md](runtime.md#g1-context-through-with)).
+7. **Context values (designed, G1).** `with` also takes context values: `with trace.Span("ingest"), log.Annotate("region", "eu") { … }` ([runtime.md](runtime.md#g1-context-through-with)).
 8. **Lowering.** `with` copies the environment and sets the wire's fields inline, with no closure. A named wire is its own Go function.
 
 *Prior art:* Effect `Effect.provide` with a layer; Go `context.WithValue`; Java `ScopedValue.where(…).run(…)`; Gleam has no provision construct, and dependencies are passed as arguments.
@@ -149,11 +149,11 @@ let local = with wire { Orders: MemoryOrders{} } { report(id) }
 
 Status: **partly implemented in prototype**.
 
-1. **Type switch.** `switch v := u.(type) { case A: … }` requires a union subject (S108). Each case type must be a variant of the union (S108) and appear once (S108). In a case with one type, `v` has that type; otherwise `v` has the union type. The binding must be read in at least one case (S110).
-2. **Totality rule (designed; README Gap 3).** A type switch must name every variant of its union or have a `default` arm. The prototype does not enforce this rule. *Prior art:* Gleam, Rust and Swift reject a non-exhaustive match; Go accepts one.
+1. **Type switch.** `match u { case A as v: … }` requires a union subject (S108). Each case type must be a variant of the union (S108) and appear once (S108). In a case with one type, `v` has that type; otherwise `v` has the union type. The prototype keeps one binding per `match`, so every `as` in it names the same binding (S109 otherwise), and the binding must be read in at least one case (S110).
+2. **Totality rule (designed; README Gap 3).** A `match` on a union must name every variant of its union or have a `case _:` arm. The prototype does not enforce this rule. *Prior art:* Gleam, Rust and Swift reject a non-exhaustive match; Go accepts one.
 3. **Missing return (S107).** A function with a result must not reach the end of its body. A body terminates when its last statement is a `return`; an `if` with an `else` whose branches both terminate; or a type switch whose cases all terminate and name every variant.
 4. **Total catch.** See [Catch](#catch), rule 4.
-5. **Multi-subject switch (designed; README Gap 12).** `switch s, e := s.(type), e.(type)` with tuple cases is total over the product of the two unions; `_` matches any variant.
+5. **Multi-subject switch (designed; README Gap 12).** `match (s, e)` with tuple cases is total over the product of the two unions; `_` matches any variant.
 
 ## Composition laws
 
@@ -165,13 +165,13 @@ Status: **designed**. These laws state the algebra of the row constructs. Law te
 | `try e` | escapes `rows(e)` | `needs(e)` |
 | `e catch { case T: h }` (total) | `rows(h)` | `needs(e) ∪ needs(h)` |
 | `try e catch { case T: h }` | `rows(e) − {T} ∪ rows(h)` | `needs(e) ∪ needs(h)` |
-| `with(W) { b }` | `rows(b) ∪ startup(W)` | `needs(b) − binds(W) ∪ needs(W)` |
+| `with W { b }` | `rows(b) ∪ startup(W)` | `needs(b) − binds(W) ∪ needs(W)` |
 | `timeout.After(d) { b }` | `rows(b) ∪ {timeout.Expired}` | `needs(b) ∪ {Scheduler}` |
 
 1. **Wrapping.** Moving a body into a function `f` and calling `f()` changes no row, provided `f` declares the body's rows. Ordinary functions wrap every construct losslessly.
-2. **Nesting keeps both scopes.** `with(W1) { with(W2) { b } }` is not, in general, one `with` of an overlaid wire: `W2`'s initializers see `W1`'s bindings, and `W1`'s providers keep their startup errors and releases ([With](#with), rule 3). The body `b` sees `W2`'s entries over `W1`'s.
-3. **Overlay is a law of wire declarations only.** `wire Test { Live; replace Orders = MemoryOrders{} }` is `Live` with the `Orders` entry replaced: the replaced constructor is never built, so its startup errors and release leave `Test`. *Prior art:* Effect's `Layer.provide` against `Layer.merge` keeps the same distinction between nesting and composition.
-4. **Capability rows of nesting.** In `with(W1) { with(W2) { b } }`, the body `b` has `binds(W1) ∪ binds(W2)` discharged. `W2`'s own needs are checked against `W1`'s bindings and the enclosing function, not against `W2`.
-5. **Row idempotence.** `with(W) { with(W) { b } }` has the rows of `with(W) { b }`. It still builds `W` twice, once per `with`.
-6. **Identity.** `with(wire{}) { b }` has the rows of `b`.
+2. **Nesting keeps both scopes.** `with W1 { with W2 { b } }` is not, in general, one `with` of an overlaid wire: `W2`'s initializers see `W1`'s bindings, and `W1`'s providers keep their startup errors and releases ([With](#with), rule 3). The body `b` sees `W2`'s entries over `W1`'s.
+3. **Overlay is a law of wire declarations only.** `let Test = wire { Live, replace Orders: MemoryOrders{} }` is `Live` with the `Orders` entry replaced: the replaced constructor is never built, so its startup errors and release leave `Test`. *Prior art:* Effect's `Layer.provide` against `Layer.merge` keeps the same distinction between nesting and composition.
+4. **Capability rows of nesting.** In `with W1 { with W2 { b } }`, the body `b` has `binds(W1) ∪ binds(W2)` discharged. `W2`'s own needs are checked against `W1`'s bindings and the enclosing function, not against `W2`.
+5. **Row idempotence.** `with W { with W { b } }` has the rows of `with W { b }`. It still builds `W` twice, once per `with`.
+6. **Identity.** `with wire {} { b }` has the rows of `b`.
 7. **Catch subtraction.** A partial catch that names every type of `rows(e)` has the rows of the total catch.

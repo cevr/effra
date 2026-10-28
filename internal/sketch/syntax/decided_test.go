@@ -397,10 +397,41 @@ func TestPreviewDecidedBlocksCanonical(t *testing.T) {
 	}
 }
 
-// TestGrammarFixtures: every production of the preview's decided sketch,
-// and PatternCore, has a grammar fixture named after it; each fixture
-// parses and is canonical.
-func TestGrammarFixtures(t *testing.T) {
+// TestGrammarStatesTheSketch: the syntactic productions of
+// docs/spec/grammar.md are the 62 of the preview's decided sketch plus
+// PatternCore (D1), so the specification and the sketch cannot drift.
+func TestGrammarStatesTheSketch(t *testing.T) {
+	data, err := os.ReadFile("../../../docs/spec/grammar.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ebnf := regexp.MustCompile("(?s)```ebnf\n(.*?)\n```")
+	production := regexp.MustCompile(`(?m)^([A-Z][A-Za-z]*) *=`)
+	spec := map[string]bool{}
+	for _, block := range ebnf.FindAllStringSubmatch(string(data), -1) {
+		for _, m := range production.FindAllStringSubmatch(block[1], -1) {
+			if spec[m[1]] {
+				t.Errorf("grammar.md states %s twice", m[1])
+			}
+			spec[m[1]] = true
+		}
+	}
+	sketch := append(sketchProductions(t), "PatternCore")
+	for _, name := range sketch {
+		if !spec[name] {
+			t.Errorf("grammar.md has no production %s", name)
+		}
+		delete(spec, name)
+	}
+	for name := range spec {
+		t.Errorf("grammar.md states %s, which the decided sketch does not have", name)
+	}
+}
+
+// sketchProductions returns the production names of the preview's decided
+// sketch, in order.
+func sketchProductions(t *testing.T) []string {
+	t.Helper()
 	data, err := os.ReadFile(previewPath)
 	if err != nil {
 		t.Fatal(err)
@@ -421,7 +452,14 @@ func TestGrammarFixtures(t *testing.T) {
 	if len(names) != 62 {
 		t.Fatalf("%d productions in the decided sketch, want 62", len(names))
 	}
-	names = append(names, "PatternCore")
+	return names
+}
+
+// TestGrammarFixtures: every production of the preview's decided sketch,
+// and PatternCore, has a grammar fixture named after it; each fixture
+// parses and is canonical.
+func TestGrammarFixtures(t *testing.T) {
+	names := append(sketchProductions(t), "PatternCore")
 	have := map[string]bool{}
 	for _, g := range sketchtest.GrammarFixtures {
 		have[g.Name] = true

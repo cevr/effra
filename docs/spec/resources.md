@@ -47,13 +47,13 @@ A move transfers ownership. After a move, the source binding is unusable, and us
 3. **R12. `go`.** A `go` task that captures a resource lends it when the structured-lend rule (R27) holds, and moves it into the task otherwise. A moved resource is closed by the task's scope when the task ends.
 4. **R13. Channel send.** In v0 a channel whose element type is a resource is an error, so no resource moves by a send ([Channels](#channels); README Gap 30).
 5. **R14. Aggregate construction (README Gap 15).** Building a struct value with a resource field moves the resource into the struct. The struct is a resource and has the same owner scope as the binding that receives it. Building a slice, array or map with resource elements moves them into the container ([Containers](#containers)).
-6. **R15. Assignment.** `q := r` moves `r` to `q`. There are no copies of a resource, so two releases of one acquisition cannot be scheduled. *Prior art:* Rust moves by default; Swift `~Copyable` types are moved and `consume`d.
+6. **R15. Assignment.** `let q = r` moves `r` to `q`. There are no copies of a resource, so two releases of one acquisition cannot be scheduled. *Prior art:* Rust moves by default; Swift `~Copyable` types are moved and `consume`d.
 
 ## Structured lend
 
 A task may use a resource that it does not own when the task is certain to be stopped and drained before the borrow of that resource ends.
 
-1. **R27. Borrow lifetime.** `go f(x)`, or a `go` block that captures `x`, **lends** `x` to the task, instead of moving it, when the resulting `Task` is guaranteed to be released (stopped and drained) before the borrow of `x` ends, on every exit. The borrow's end is fixed by the root owner of `x`:
+1. **R27. Borrow lifetime.** `task.Go() { f(x) }`, or any `task.Go` block that captures `x`, **lends** `x` to the task, instead of moving it, when the resulting `Task` is guaranteed to be released (stopped and drained) before the borrow of `x` ends, on every exit. The borrow's end is fixed by the root owner of `x`:
    - **Root owner.** The checker keeps, for every borrowed value, its root owner and that owner's release point. A local resource is its own root, owned by the scope that binds it. A value reached by indexing (R35), by a field of an owned aggregate, or by capture in a non-escaping closure (R30) inherits the root owner of the value it was reached from: `files[0]` has the root owner of `files`. A borrow ends at the root owner's release point, which is the lexical end of the root owner's scope (R5), or the release of the enclosing aggregate (R3, R37).
    - **Incoming borrows.** A parameter (R16), and a value reached from it, has a root owner outside the call, which outlives the call. As seen from the callee, its borrow ends when the function returns. Only incoming borrows take this bound. Inside a non-escaping closure, a captured borrow is an incoming borrow of the closure, bounded by the closure's return.
    - **Release before the end.** The `Task` must be owned by a scope or aggregate that is released before the borrow's end on every exit, including the automatic release edges of R5 and R3 on normal completion, `return`, failure, defect and interruption. Each of these satisfies the condition: the `Task` is bound after the root owner in the same owner scope, so reverse acquisition order (R5) stops and drains it first; the `Task` is owned by a scope nested inside the root owner's scope, which ends first; the `Task` is stored in a struct field declared after the root owner's field, so the generated `Close` (R3) stops and drains it first; or the `Task` is stored in a container or aggregate whose own owner satisfies one of these conditions. For an incoming borrow, every scope local to the function qualifies, because each one is released before the function returns.
@@ -207,7 +207,7 @@ func keys() Map[Key, string] {
 
 ## Partial moves
 
-1. **R39.** Moving a single field out of a struct is an error in v0; move the whole struct. `p := pg.pool` where `pool` is a resource field is an error; the field may be lent (`ping(pg.pool)`). *Prior art:* Rust allows partial moves and then forbids using the whole; Swift forbids consuming a stored property of a non-copyable value outside its `consuming` methods. v0 takes the stricter rule.
+1. **R39.** Moving a single field out of a struct is an error in v0; move the whole struct. `let p = pg.pool` where `pool` is a resource field is an error; the field may be lent (`ping(pg.pool)`). *Prior art:* Rust allows partial moves and then forbids using the whole; Swift forbids consuming a stored property of a non-copyable value outside its `consuming` methods. v0 takes the stricter rule.
 
 ## Early release
 
@@ -226,9 +226,9 @@ func keys() Map[Key, string] {
 2. **R25.** Provider release runs to completion under interruption (R9), and a release defect joins the exit cause beside the body's outcome.
 3. **R26.** A `Task` stored in a provider field is a provider resource. The provider's generated `Close` stops and drains it, as Effect's `forkScoped` does. `Wait` gives its result instead.
 
-## `defer`
+## `scope.OnExit`
 
-`defer` stays for statements that are not releases, such as `defer done <- i`. `defer r.Close()` on a resource the scope owns is an error, because the scope already releases `r`; consume it with `r.Close()` where it should end early. *Prior art:* Zig keeps explicit `defer` and `errdefer` to avoid hidden control flow; Ergo answers that cost with visibility (below).
+`scope.OnExit() { … }` is for cleanup that is not a release, such as `scope.OnExit() { done.Push(i) }`. `scope.OnExit() { r.Close() }` on a resource the scope owns is an error, because the scope already releases `r`; consume it with `r.Close()` where it should end early. *Prior art:* Zig keeps explicit `defer` and `errdefer` to avoid hidden control flow; Ergo answers that cost with visibility (below). Ergo has no `defer` statement; `defer` is a reserved word whose use names `scope.OnExit` ([grammar](grammar.md#reserved-words)).
 
 ## Visibility
 

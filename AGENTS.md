@@ -6,7 +6,7 @@ Read README.md, docs/design.md, and docs/wayfinder/README.md before changing the
 
 For language architecture, runtime/interop contracts, or terminology changes, read NORTH_STAR.md, PRIOR_ART.md, and GLOSSARY.md first. Direction and tiebreaks live in NORTH_STAR.md; source comparisons and open research live in PRIOR_ART.md; domain definitions live only in GLOSSARY.md. Loop setup and drafted owner questions are recorded in plans/architecture-loop-2026-10-05.md.
 
-- `.ef` source is authoritative. CLI and MCP share the compiler semantic model.
+- `.ergo` source is authoritative. CLI and MCP share the compiler semantic model.
 - Public effect contracts are explicit. Do not silently admit missing services or undeclared errors.
 - Keep unsupported syntax a diagnostic, never an unchecked passthrough to the host.
 - Build a small Go compiler. Go is the only target (owner, 2026-10-26); any other target is a diagnostic. Effect is prior art for the guarantees, not a runtime. Preserve the shared conformance corpus.

@@ -12,7 +12,7 @@ Status: **implemented in prototype** for `string`, `int64` and `bool`; **partly 
 2. `int64` is the only integer type with checked meaning in v0 (README Gap 9). Non-constant arithmetic wraps; constant overflow is an error.
 3. `bool` is the type of comparisons and `if` conditions.
 4. `duration` is the type of duration literals. It is a basic type, usable in every type position: parameters, results, fields and type arguments. Its name is predeclared. Prototype: `duration` as a type name is S104, and the name is reserved as a source name (S109).
-5. Designed, with [#81](https://github.com/cevr/ergo/issues/81) and [#211](https://github.com/cevr/ergo/issues/211): Go's other numeric types, `byte`, `rune`, floating point, slices `[]T`, maps `map[K]V`, channels `chan T`, function types and the prelude `Option[T]`.
+5. Designed, with [#81](https://github.com/cevr/ergo/issues/81) and [#211](https://github.com/cevr/ergo/issues/211): Go's other numeric types, `byte`, `rune`, floating point, slices `[]T`, maps `Map[K, V]`, queues `queue.Queue[T]` ([runtime](runtime.md#channels)), function types and the prelude `Option[T]`.
 
 ## Zero values and definite initialisation
 

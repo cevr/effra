@@ -33,7 +33,7 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Error type** (implemented in prototype): A struct type named in some error row. Returning a value of an error type is a failure, never an ordinary result.
 
-**Error row** (implemented in prototype): The set of error types a function may fail with, written `error[A | B]` in its result. Order and repetition carry no meaning.
+**Error row** (implemented in prototype): The set of error types a function may fail with, written `fails A | B` after the result type. Order and repetition carry no meaning.
 
 **Capability row** (implemented in prototype): The set of capabilities a caller must supply, written `needs A, B` after a signature. Also called the `needs` row or requirement row. Before 2026-10-27 it was spelled `uses` ([#217](https://github.com/cevr/ergo/issues/217)); `uses` is now an ordinary identifier.
 
@@ -55,13 +55,13 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Discharge** (implemented in prototype): Removing a capability from the row a block charges to its enclosing function, because an enclosing `with` binds it.
 
-**Wire** (implemented in prototype for provider literals): A declaration `wire Name { Cap = provider … }`, or an inline `wire{ … }` literal, that binds capabilities to providers or constructors. It is Ergo's form of an Effect layer.
+**Wire** (implemented in prototype for provider literals): A `wire { Cap: provider, … }` value that binds capabilities to providers or constructors. It is Ergo's form of an Effect layer.
 
 **Wire exposure** (parsed; checking designed, [#196](https://github.com/cevr/ergo/issues/196)): The `provides A, B` clause of a named wire header: the capabilities a `with` of that wire discharges. Entries the wire builds and does not list stay private to its build. A header may also state the wire's requirements, `wire App provides Account, Invoice needs Config { … }`, which join the `with` site's capability row.
 
 **Inline wire** (implemented in prototype): A `wire{ … }` literal given directly to `with`. Its provider expressions are evaluated in, and charged to, the enclosing function.
 
-**Named wire** (implemented in prototype): A top-level `wire Name { … }`. It is built by its own function at each `with` that names it.
+**Named wire** (implemented in prototype): A top-level `let Name = wire { … }`. It is built by its own function at each `with` that names it.
 
 **Closed wire** (prototype limit): A named wire whose providers need no capability from the caller and let no failure escape. The prototype admits only closed named wires.
 
@@ -83,7 +83,7 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Definite initialisation** (designed): The rule that a variable of a non-defaultable type has a value before it is used.
 
-**Type switch** (implemented in prototype for one subject): `switch v := u.(type) { case A: … }` over a union value, narrowing `v` to the case's variant.
+**Type switch** (implemented in prototype for one subject): `match u { case A as v: … }` over a union value, narrowing `v` to the case's variant.
 
 **Totality**: The property of a type switch, a `catch` or a machine step that covers every alternative. A total form needs no default for its declared alternatives.
 
@@ -125,7 +125,7 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Interruption point** (implemented in prototype before capability calls): A place where a task checks for interruption: a capability call, a channel operation, `Wait`, `Sleep` or a loop back-edge in a function with a footprint (I1).
 
-**Mask** (designed): A region that interruption cannot enter: releases, `Close`, `defer` bodies, wire cleanup and the step between acquisition and its registration (I2).
+**Mask** (designed): A region that interruption cannot enter: releases, `Close`, `scope.OnExit` bodies, wire cleanup and the step between acquisition and its registration (I2).
 
 **Exit cause**: How a task ended when it did not succeed: one or more typed failures, defects and interruptions, all kept.
 

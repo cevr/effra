@@ -6,6 +6,11 @@ Entries describe user-visible changes and are true at the commit that carries th
 
 ### Breaking changes
 
+- Sources use the decided syntax of [#196](https://github.com/cevr/ergo/issues/196) and end in `.ergo` ([#221](https://github.com/cevr/ergo/issues/221)). Every command refuses any other extension, `.ef` included, with `source file must have .ergo extension`. The grammar is [docs/spec/grammar.md](docs/spec/grammar.md). What stopped parsing:
+  - The Go spellings: the package clause, grouped and quoted imports, `:=`, `var`, `const`, `struct`, `interface`, receivers, `(T, error)` results, `switch` and type switches, `default:`, `go`, `defer`, channels, `select`, `map[K]V`, `++` and `--`, three-clause and `range` loops, variadic parameters, fixed arrays, labels, `goto` and `fallthrough`. Each is S001 with a message that names the Ergo form (`let`, `type Name { … }`, `T fails E`, `match`, `case _:`, `task.Go`, `scope.OnExit`, `Map[K, V]`, `for x in xs`, …).
+  - The old Ergo spellings: `error[…]` rows, `wire Name { A = x }`, `catch e { … }`, bodiless functions with `//ef:go`, `uses` and `try` in operand position. Each is the plain S001. Tests are `test Name { … }`, laws `law Name(…) { … }` and wires `let W = wire { A: x }`.
+  - Record members and wire entries are separated by commas, which a line break does not replace. `ergo fmt` writes `with (W) { … }` as `with W { … }`.
+  - `scripts/migrate196` translates one old-syntax file into the decided syntax. It is a one-off and goes after v1.
 - The earlier `.ef` language is retired ([#205](https://github.com/cevr/ergo/issues/205)). Every command reads a source as the one language that `internal/sketchfront` checks, formats and builds. What stopped working:
   - Editions and the manifest. `ergo.json` is no longer read; a stray one beside a source is ignored. `ergo edition` prints `ergo edition: removed in v1; there is one language and no editions (#205)`. EF144, EF145 and EF146 are retired. A source written in the earlier language now gets the parse diagnostics of the one language.
   - Semantic tooling. `ergo inspect`, `explain`, `query`, `type` and `graph` are removed until they return on the new front end ([#203](https://github.com/cevr/ergo/issues/203)). Each prints one line to stderr and exits 1, before it reads its arguments.

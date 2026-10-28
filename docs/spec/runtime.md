@@ -9,9 +9,9 @@ Status summary: the prototype's runtime (`prototypes/sketch9/sketch/rt`) impleme
 Status: the task tree is **implemented in prototype**; `go`, `Task`, `Wait` and `Stop` in source are **designed, not yet implemented**.
 
 1. **Tree.** Every task has a parent, except the task that runs `main`. Stopping a task stops every task below it. A child that finishes detaches from its parent.
-2. **Starting.** `go f(x)` and `go { … }` start a task and yield a `Task[T, E]`. `T` is the body's value and `E` its error row.
+2. **Starting.** `task.Go() { … }` starts a task and yields a `Task[T, E]`. `T` is the body's value and `E` its error row.
 3. **Resource.** A `Task` is a resource ([resources.md](resources.md)). Its owner scope stops and drains it at scope end if it was not consumed. A `Task` can move by `return`, into a provider field, into another task or into a container ([resources.md](resources.md#moves)). A channel of tasks is an error in v0 (README Gap 30).
-4. **Consuming.** `t.Wait()` waits for the task and returns `(T, error[E])`; a defect of the task re-raises in the waiter. `t.Stop()` interrupts the task and waits for it to finish, including its releases. Each consumes the task.
+4. **Consuming.** `t.Wait()` waits for the task and returns `T` or fails with `E`; a defect of the task re-raises in the waiter. `t.Stop()` interrupts the task and waits for it to finish, including its releases. Each consumes the task.
 5. **Containers.** Tasks may live in a slice or map; the container is then a resource ([resources.md](resources.md#containers)). Indexing lends a task, so `running[j].Wait()` is an error. `running.Take(j)` moves a task out of the map before its fallible `Wait`, so a drain cannot run it twice.
 6. **Captures.** A `go` block may not assign captured locals. Values copy into a task. A resource is lent to the task under the structured-lend rule, and moved into it otherwise ([resources.md](resources.md#structured-lend)). Only synchronised handles are shared: channels, `sync.Ref`, `sync.TxRef` and actor handles. *Prior art:* Swift `Sendable`; Go shares memory freely and relies on the race detector.
 
@@ -36,7 +36,7 @@ Status: **designed, not yet implemented**.
 These run uninterruptibly, to completion:
 
 1. a resource release and a generated or written `Close` ([resources.md](resources.md));
-2. a `defer` body;
+2. a `scope.OnExit` body;
 3. wire cleanup at the end of a `with`;
 4. the step between a successful acquisition and its registration for release.
 
@@ -88,7 +88,7 @@ Status: **designed, not yet implemented** ([#69](https://github.com/cevr/ergo/is
 
 ### G1. Context through `with`
 
-1. `with` takes context values as well as wires: `with(trace.Span("ingest"), log.Annotate("region", "eu")) { … }`.
+1. `with` takes context values as well as wires: `with trace.Span("ingest"), log.Annotate("region", "eu") { … }`.
 2. A context value is immutable. Every task started inside the block inherits it. A restarted task inherits the values its factory captured.
 3. *Prior art:* Java `ScopedValue`; Effect `References`; Go `context.WithValue`, which has to be threaded by hand.
 
@@ -125,11 +125,11 @@ Status: **designed, not yet implemented** ([#69](https://github.com/cevr/ergo/is
 
 Status: **designed, not yet implemented** ([#64](https://github.com/cevr/ergo/issues/64)).
 
-1. `chan T` is Go's channel. There are no nil channels and no direction types.
+1. A channel is the library type `queue.Queue[T]`: `queue.New[T](capacity)` makes one, `q.Push(v)` sends, `q.Pop()` receives, `for v in q.Values()` drains it and `q.Close()` closes it. `chan` is a reserved word, and there are no nil queues and no direction types.
 2. Values copy into a channel. A channel whose element type is a resource is an error in v0 ([resources.md](resources.md#channels); README Gap 30).
-3. Send and receive are interruption points.
+3. `Push` and `Pop` are interruption points.
 4. A send on a closed channel interrupts the sender instead of panicking. This is Ergo's own policy, not Effect parity: Effect's `Queue.offer` returns `false` after shutdown.
-5. `ch.Receive()` returns `Option[T]` when `T` is not defaultable ([types.md](types.md#zero-values-and-definite-initialisation)).
+5. `q.Pop()` returns `Option[T]` when `T` is not defaultable ([types.md](types.md#zero-values-and-definite-initialisation)).
 
 ## Machines and actors
 
@@ -162,14 +162,14 @@ type Breaker machine[State, Signal] {
 4. **Inspection.** `ergo inspect` draws the machine's graph from the step's cases. A helper the step calls is static in the graph only when its footprint is empty, not its row ([rows.md](rows.md#footprints)).
 5. **Protocol.** A machine is a plan that any lawful provider can run; the actor below is the standard library's provider. *Prior art:* XState machines with interpreters; Erlang `gen_statem`.
 6. **Actors are library code** (owner, 2026-10-27: "Let's see if we can make actor a library mechanism"; [#101](https://github.com/cevr/ergo/issues/101); [research note](../research/actor-library.md)). The `actor` package is ordinary code over generics, unions, function types with rows, resources and tasks. No compiler rule names it, and it has no syntax.
-   - `actor.Start(initial, capacity, handle)` runs `handle func(S, M) (actor.Next[S], error[E]) needs R` over a mailbox of `capacity` messages and returns an `actor.Actor[M, E]`. It charges `R`, which the actor captures. A handler failure ends the actor.
-   - A message that wants an answer carries an `actor.Reply[T, E]`. `actor.Ask(to, request)` builds the message around a fresh reply and returns `(T, error[E | actor.Stopped | actor.NoReply])`. `T` and `E` come from `request`'s parameter type, so a wrong reply type is a type error.
+   - `actor.Start(initial, capacity, handle)` runs `handle func(S, M) actor.Next[S] fails E needs R` over a mailbox of `capacity` messages and returns an `actor.Actor[M, E]`. It charges `R`, which the actor captures. A handler failure ends the actor.
+   - A message that wants an answer carries an `actor.Reply[T, E]`. `actor.Ask(to, request)` builds the message around a fresh reply and returns `T` or fails with `E | actor.Stopped | actor.NoReply`. `T` and `E` come from `request`'s parameter type, so a wrong reply type is a type error.
    - `Reply[T, E]` is a resource. `Send` and `Fail` consume it. Releasing it unanswered answers `NoReply` while the actor runs, and `Stopped` once its stop is requested. An answer nobody can receive, because the asker was stopped and detached, is released exactly once (README Gap 37); an answer or failure the library releases is released masked, by its kind, and a refusal releases nothing. A successful result discarded by stop-wins after the handoff (an answer taken just before the asker's task stops, a callback result discarded by a scope's stop) needs README Gap 47.
    - A message, a reply, an agent result and a state snapshot cross a task boundary, so each is a copy that shares no mutable storage with the sender's value (Tasks rule 6; README Gap 45). A resource moves.
    - `Send` waits only while the mailbox is full. Messages are handled in admission order.
    - `Stop` closes admission, then interrupts the actor and waits until it ends. After the stop is requested, no `Send` or `Ask` is admitted: each fails with `actor.Stopped`. Queued requests are answered `Stopped`, every queued message and then the state is released, and every release runs even when an earlier one panics. It returns the typed failure that ended the actor, if any, and every defect in order.
    - `actor.StartMachine(m, capacity)` runs a machine value `m Machine[S, E, O, F, R]` (README Gap 46) with `Send`, `Ask`, `State` and `Stop`. `Ask` returns the step's `Decision[S, O]` or the step's failure. `State` returns a snapshot, never a shared reference. A step failure goes to the asker; a step failure after a `Send` ends the actor, because it has no other observer.
-   - `actor.StartAgent(initial, capacity)` and `actor.Call(a, f)` serve calls on a state value. The protocol is the state's methods with a `*S` receiver. `f func(r *S) (T, error[E])` borrows the state for one call, and the borrow cannot escape ([types.md](types.md#borrows) Borrows rules 1 and 4; R17, R30, R33). `f` has an empty `needs` row, which is not purity: `f` runs on the actor's task, so a wait inside it is an interruption point (I1) that `Stop` interrupts. A typed failure of `f` is the caller's; an interruption or a defect ends the agent, and the agent releases its state.
+   - `actor.StartAgent(initial, capacity)` and `actor.Call(a, f)` serve calls on a state value. The protocol is the functions whose first parameter is `*S`. `f func(r *S) T fails E` borrows the state for one call, and the borrow cannot escape ([types.md](types.md#borrows) Borrows rules 1 and 4; R17, R30, R33). `f` has an empty `needs` row, which is not purity: `f` runs on the actor's task, so a wait inside it is an interruption point (I1) that `Stop` interrupts. A typed failure of `f` is the caller's; an interruption or a defect ends the agent, and the agent releases its state.
    - `actor.Run` runs a machine under a `tasks.Set` for supervision; a restart starts from `initial`.
 7. **Owner and address (resolved 2026-10-27).** `actor.Actor[M, E]` holds the actor's task, so it is a resource (R1, R14): its owner scope stops it at scope end, and `Stop` consumes it. `actor.Address[M]`, from `a.Address()`, holds only synchronised handles, so it copies into tasks and is not a resource. After the actor ends, `Send` and `Ask` on an address fail with `actor.Stopped`. The rules these items need from the checker and the linearity pass are README Gaps 35 to 47.
 
