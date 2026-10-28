@@ -10,6 +10,7 @@ package migrate196
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,8 +39,9 @@ func Translate(src string) (out string, notes []Note, err error) {
 	if err != nil {
 		return "", nil, err
 	}
-	t := &translator{src: src, file: file, parent: map[oldsyntax.Node]oldsyntax.Node{}}
+	t := &translator{src: src, file: file, parent: map[oldsyntax.Node]oldsyntax.Node{}, imports: map[string]bool{}}
 	t.run()
+	t.addImports()
 	text := t.apply()
 	sort.SliceStable(t.notes, func(i, j int) bool { return t.notes[i].Line < t.notes[j].Line })
 	formatted, ferr := format.Source(text)
@@ -71,6 +73,9 @@ type translator struct {
 	types   map[string]bool
 	ops     map[string]bool // operation names of the file's interfaces
 	fields  map[string]bool // field names of the file's structs
+	structs map[string]bool // struct type names of the file
+	fresh   map[string]bool // names the translator added (freshName)
+	imports map[string]bool // library packages the rewrites use (task, scope)
 }
 
 // ---------------------------------------------------------------- edits and notes
@@ -118,7 +123,7 @@ func (t *translator) apply() string {
 // ---------------------------------------------------------------- the walk
 
 func (t *translator) run() {
-	t.methods, t.types, t.ops, t.fields = map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
+	t.methods, t.types, t.ops, t.fields, t.structs = map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	var stack []oldsyntax.Node
 	oldsyntax.Inspect(t.file, func(n oldsyntax.Node) bool {
 		for len(stack) > 0 {
@@ -143,6 +148,7 @@ func (t *translator) run() {
 		case *oldsyntax.TypeDecl:
 			t.types[d.Name.Name] = true
 			if st, ok := d.Spec.(*oldsyntax.StructType); ok {
+				t.structs[d.Name.Name] = true
 				for _, f := range st.Fields.List {
 					for _, n := range f.Names {
 						t.fields[n.Name] = true
@@ -206,6 +212,106 @@ func (t *translator) importDecl(d *oldsyntax.ImportDecl) {
 		return
 	}
 	t.importSpec(d.Specs[0])
+}
+
+// addImports writes an import for each library package a rewrite uses
+// (task for task.Go, scope for scope.OnExit): they are not in the prelude
+// (round-1 decision 8). An import the file already has is kept.
+func (t *translator) addImports() {
+	var names []string
+	for name := range t.imports {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	type spec struct {
+		path string
+		end  oldsyntax.Pos // the end of the spec's line
+	}
+	var specs []spec
+	var first *oldsyntax.ImportDecl
+	for _, d := range t.file.Decls {
+		imp, ok := d.(*oldsyntax.ImportDecl)
+		if !ok {
+			continue
+		}
+		if first == nil {
+			first = imp
+		}
+		for _, s := range imp.Specs {
+			v, err := strconv.Unquote(s.Path.Value)
+			if err != nil {
+				continue
+			}
+			if s.Name == nil && t.imports[v] {
+				names = slices.DeleteFunc(names, func(n string) bool { return n == v })
+			}
+			end := s.End()
+			for int(end) < len(t.src) && t.src[end] != '\n' {
+				end++
+			}
+			specs = append(specs, spec{v, end})
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	if first != nil {
+		// Each import goes after the last import whose path sorts before
+		// it, or before the first import.
+		for _, name := range names {
+			var after *spec
+			for i := range specs {
+				if specs[i].path < name {
+					after = &specs[i]
+				}
+			}
+			if after != nil {
+				t.insert(after.end, "\nimport "+name)
+			} else {
+				t.insert(first.Import, "import "+name+"\n")
+			}
+		}
+		return
+	}
+	text := "import " + strings.Join(names, "\nimport ")
+	switch {
+	case t.file.Name != nil:
+		end := t.file.Name.End()
+		for int(end) < len(t.src) && t.src[end] != '\n' {
+			end++
+		}
+		if int(end) < len(t.src) {
+			end++
+		}
+		t.insert(end, text+"\n")
+	case len(t.file.Decls) > 0:
+		t.insert(0, text+"\n\n")
+	}
+}
+
+// stableCall reports whether a call that go or defer starts reads the same
+// callee and arguments later, in a block, as it reads at once: the callee
+// is a plain function name (not a local or package-level variable), and
+// each argument is a literal or a local that nothing in its function,
+// function literals included, writes (round-1 decisions 1 and 2).
+func (t *translator) stableCall(at oldsyntax.Node, c *oldsyntax.CallExpr) bool {
+	fun, ok := c.Fun.(*oldsyntax.Ident)
+	if !ok || c.Ellipsis.IsValid() || t.declaredBefore(at, fun.Name) || t.packageVar(fun.Name) {
+		return false
+	}
+	fn := t.outerFunc(at)
+	for _, a := range c.Args {
+		switch a := a.(type) {
+		case *oldsyntax.BasicLit:
+		case *oldsyntax.Ident:
+			if !t.declaredBefore(at, a.Name) || t.written(fn, a.Name) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (t *translator) importSpec(s *oldsyntax.ImportSpec) {
@@ -316,6 +422,32 @@ func (t *translator) enclosingFunc(n oldsyntax.Node) oldsyntax.Node {
 		}
 	}
 	return nil
+}
+
+// outerFunc is the outermost function around n: the declaration whose body
+// holds every function literal that may write a local n can see.
+func (t *translator) outerFunc(n oldsyntax.Node) oldsyntax.Node {
+	var out oldsyntax.Node
+	for f := t.enclosingFunc(n); f != nil; f = t.enclosingFunc(f) {
+		out = f
+	}
+	return out
+}
+
+// packageVar reports whether name is declared by a package-level var.
+func (t *translator) packageVar(name string) bool {
+	for _, d := range t.file.Decls {
+		if v, ok := d.(*oldsyntax.VarDecl); ok {
+			for _, s := range v.Specs {
+				for _, id := range s.Names {
+					if id.Name == name {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 // written reports whether name is assigned, incremented or has its address
@@ -514,6 +646,7 @@ func (t *translator) funcDecl(d *oldsyntax.FuncDecl) {
 	if strings.HasPrefix(d.Name.Name, "Test") && t.testDecl(d) {
 		return
 	}
+	t.lawDecl(d)
 	t.typeParams(d.TypeParams)
 	var implicit []string
 	if d.TypeParams == nil {
@@ -579,6 +712,42 @@ func (t *translator) externDecl(d *oldsyntax.FuncDecl) {
 	t.insert(d.Func, "extern go "+target+" ")
 }
 
+// grouping returns the parentheses an operand needs to stay one operand
+// next to a binary operator of precedence prec: a pair for a binary
+// expression that binds no tighter, and for a try or catch expression
+// (each covers everything to its right); none otherwise.
+func grouping(x oldsyntax.Expr, prec int) (string, string) {
+	switch x := x.(type) {
+	case *oldsyntax.BinaryExpr:
+		if x.Op.Precedence() <= prec {
+			return "(", ")"
+		}
+	case *oldsyntax.TryExpr, *oldsyntax.CatchExpr:
+		return "(", ")"
+	}
+	return "", ""
+}
+
+// lawDecl notes a law function, `func LawX(…) bool`: a decided law lives in
+// its operation type as `law X(…) { … }`, ends in a bool expression instead
+// of a return, and the prototype refuses laws until #162 (round-1 review,
+// M13). The move changes the declaration's home and its body, so it is a
+// hand edit.
+func (t *translator) lawDecl(d *oldsyntax.FuncDecl) {
+	name := d.Name.Name
+	if len(name) <= 3 || !strings.HasPrefix(name, "Law") || !unicode.IsUpper(rune(name[3])) || d.Recv != nil {
+		return
+	}
+	r := d.Type.Results
+	if r == nil || len(r.List) != 1 || len(r.List[0].Names) != 0 {
+		return
+	}
+	if id, ok := r.List[0].Type.(*oldsyntax.Ident); !ok || id.Name != "bool" {
+		return
+	}
+	t.note(d.Pos(), "a law function %s: move it into its operation type as law %s(…) { … } by hand (laws come with #162)", name, strings.TrimPrefix(name, "Law"))
+}
+
 // testDecl turns `func TestX() needs testing.T { … }` into `test X { … }`
 // when every use of T is T.Equal(a, b) or T.True(c).
 func (t *translator) testDecl(d *oldsyntax.FuncDecl) bool {
@@ -597,7 +766,11 @@ func (t *translator) testDecl(d *oldsyntax.FuncDecl) bool {
 			}
 			switch {
 			case sel.Sel.Name == "Equal" && len(n.Args) == 2:
-				edits = append(edits, edit{int(n.Pos()), int(n.Args[0].Pos()), "assert ", 0}, edit{int(n.Args[0].End()), int(n.Args[1].Pos()), " == ", 0}, edit{int(n.Rparen), int(n.Rparen) + 1, "", 0})
+				// Each operand keeps its own tree: `T.Equal(a, b || c)`
+				// is `assert a == (b || c)`, never `a == b || c` (M3).
+				o0, c0 := grouping(n.Args[0], oldsyntax.EQL.Precedence())
+				o1, c1 := grouping(n.Args[1], oldsyntax.EQL.Precedence())
+				edits = append(edits, edit{int(n.Pos()), int(n.Args[0].Pos()), "assert " + o0, 0}, edit{int(n.Args[0].End()), int(n.Args[1].Pos()), c0 + " == " + o1, 0}, edit{int(n.Rparen), int(n.Rparen) + 1, c1, 0})
 			case sel.Sel.Name == "True" && len(n.Args) == 1:
 				edits = append(edits, edit{int(n.Pos()), int(n.Args[0].Pos()), "assert ", 0}, edit{int(n.Rparen), int(n.Rparen) + 1, "", 0})
 			default:
@@ -694,15 +867,46 @@ func (t *translator) node(n oldsyntax.Node) {
 	case *oldsyntax.CatchExpr:
 		t.catch(n)
 	case *oldsyntax.GoExpr:
-		if n.Block != nil {
+		// `go { … }` and `task.Go() { … }` both run the block as a task.
+		// `go f(args)` evaluates the arguments at once and the block
+		// later, so the call is rewritten only when that cannot differ.
+		switch {
+		case n.Block != nil:
 			t.replace(n.Go, n.Block.Pos(), "task.Go() ")
-		} else {
+		case t.stableCall(n, n.Call):
 			t.replace(n.Go, n.Call.Pos(), "task.Go() { ")
 			t.insert(n.Call.End(), " }")
+		default:
+			t.note(n.Pos(), "go with arguments that may change before the task runs: start it with task.Go() { … } by hand")
+			return
 		}
+		t.imports["task"] = true
 	case *oldsyntax.DeferStmt:
+		// scope.OnExit at a function's top level runs when the function
+		// returns, last registered first, as Go's defer does; its block
+		// reads the arguments then, so they must not change before.
+		call, isCall := n.Stmt.(*oldsyntax.ExprStmt)
+		block, inBlock := t.parent[n].(*oldsyntax.BlockStmt)
+		top := false
+		if inBlock {
+			switch fn := t.parent[block].(type) {
+			case *oldsyntax.FuncDecl:
+				top = fn.Body == block
+			case *oldsyntax.FuncLit:
+				top = fn.Body == block
+			}
+		}
+		var c *oldsyntax.CallExpr
+		if isCall {
+			c, _ = call.X.(*oldsyntax.CallExpr)
+		}
+		if !top || c == nil || !t.stableCall(n, c) {
+			t.note(n.Pos(), "a defer that is not a call with stable arguments at a function's top level: register it with scope.OnExit() { … } by hand")
+			return
+		}
 		t.replace(n.Defer, n.Stmt.Pos(), "scope.OnExit() { ")
 		t.insert(n.Stmt.End(), " }")
+		t.imports["scope"] = true
 	case *oldsyntax.DeclStmt:
 		t.varDecl(n.Decl, false)
 	case *oldsyntax.AssignStmt:
@@ -718,7 +922,14 @@ func (t *translator) node(n oldsyntax.Node) {
 		}
 	case *oldsyntax.IfStmt:
 		if n.Init != nil {
-			t.hoistInit(n.If, n.Init, n.Cond.Pos())
+			if parent, ok := t.parent[n].(*oldsyntax.IfStmt); ok && parent.Else == oldsyntax.Stmt(n) {
+				// The init of an else-if runs only when the earlier
+				// conditions fail; a let before the chain would run it
+				// always (round-1 review, m1).
+				t.note(n.Init.Pos(), "an else-if with an init statement: nest the if inside the else by hand")
+			} else {
+				t.hoistInit(n.If, n.Init, n.Cond.Pos())
+			}
 		}
 	case *oldsyntax.ForStmt:
 		t.forStmt(n)
@@ -857,7 +1068,48 @@ func (t *translator) wireBody(b *oldsyntax.WireBody) {
 			t.replace(e.Assign, e.Assign+1, ":")
 		}
 	}
-	t.separate(b.Lbrace, b.Rbrace, nodesOf(b.Entries))
+	// A decided comma run of names ended by `:` is one entry's key list,
+	// whatever the layout (grammar.md, Parser rule 9), so an embed written
+	// just before an entry would join its keys. Entry order has no
+	// meaning: every embed that precedes an entry moves after the last
+	// entry (round-1 review, M11).
+	lastEntry := -1
+	for i, e := range b.Entries {
+		if e.Kind != oldsyntax.WireEmbed {
+			lastEntry = i
+		}
+	}
+	var kept []*oldsyntax.WireEntry
+	var moved []string
+	for i, e := range b.Entries {
+		if e.Kind != oldsyntax.WireEmbed || i > lastEntry {
+			kept = append(kept, e)
+			continue
+		}
+		next := b.Entries[i+1]
+		end := next.Pos()
+		if next.Doc != nil {
+			end = next.Doc.Pos()
+		}
+		if e.Doc != nil || strings.Contains(t.src[e.End():end], "/") {
+			t.note(e.Pos(), "an embed with a comment before an entry: move %s after the entries by hand", t.text(e.Key))
+			kept = append(kept, e)
+			continue
+		}
+		t.replace(e.Pos(), end, "")
+		moved = append(moved, t.text(e.Key))
+	}
+	t.separate(b.Lbrace, b.Rbrace, nodesOf(kept))
+	if len(moved) == 0 {
+		return
+	}
+	tail := t.src[b.Entries[len(b.Entries)-1].End():b.Rbrace]
+	if nl := strings.LastIndexByte(tail, '\n'); nl >= 0 {
+		at := b.Entries[len(b.Entries)-1].End() + oldsyntax.Pos(nl) + 1
+		t.insert(at, strings.Join(moved, ",\n")+",\n")
+	} else {
+		t.insert(b.Rbrace, ", "+strings.Join(moved, ", ")+" ")
+	}
 }
 
 // tryOperands moves a try in operand position to the start of the binary
@@ -917,10 +1169,8 @@ func (t *translator) reads(list []oldsyntax.Stmt, name string) bool {
 	found := false
 	for _, s := range list {
 		oldsyntax.Inspect(s, func(n oldsyntax.Node) bool {
-			if id, ok := n.(*oldsyntax.Ident); ok && id.Name == name {
-				if sel, ok := t.parent[id].(*oldsyntax.SelectorExpr); !ok || sel.X == oldsyntax.Expr(id) {
-					found = true
-				}
+			if id, ok := n.(*oldsyntax.Ident); ok && id.Name == name && t.identRole(id) != "field" {
+				found = true
 			}
 			return !found
 		})
@@ -928,6 +1178,122 @@ func (t *translator) reads(list []oldsyntax.Stmt, name string) bool {
 	return found
 }
 
+// identRole tells what an identifier is where it stands: "field" for a
+// selector's field or a key of a literal of a struct type the file
+// declares; "read" for a map or slice literal's key and any other use;
+// "ambiguous" for a key of a literal whose type the file does not show (an
+// elided type, an imported or a defined type), which may be a field or a
+// map key read.
+func (t *translator) identRole(id *oldsyntax.Ident) string {
+	switch p := t.parent[id].(type) {
+	case *oldsyntax.SelectorExpr:
+		if p.Sel == id {
+			return "field"
+		}
+	case *oldsyntax.KeyValueExpr:
+		lit, ok := t.parent[p].(*oldsyntax.CompositeLit)
+		if !ok || p.Key != oldsyntax.Expr(id) {
+			break
+		}
+		ty := lit.Type
+		if ix, ok := ty.(*oldsyntax.IndexExpr); ok {
+			ty = ix.X
+		}
+		switch ty := ty.(type) {
+		case *oldsyntax.MapType, *oldsyntax.ArrayType:
+			return "read"
+		case *oldsyntax.Ident:
+			if t.structs[ty.Name] {
+				return "field"
+			}
+		}
+		return "ambiguous"
+	}
+	return "read"
+}
+
+// renameReads makes the reads of a type-switch binding in a multi-type or
+// default arm read the subject instead (M7). It proves the two equal or
+// writes a note: the subject must be a local or parameter that nothing in
+// its function writes (the binding is a snapshot taken at the switch), the
+// arm must not declare either name (a read would resolve to the new one),
+// and no read may be a key of a literal whose type the file does not show.
+func (t *translator) renameReads(sw oldsyntax.Node, at oldsyntax.Pos, list []oldsyntax.Stmt, from, to string) {
+	if !t.declaredBefore(sw, to) || t.written(t.outerFunc(sw), to) {
+		t.note(at, "an arm with several types reads %s: bind the subject with let first", from)
+		return
+	}
+	for _, s := range list {
+		if t.written(s, from) || t.declares(s, from) || t.declares(s, to) {
+			t.note(at, "an arm with several types reads %s: bind the subject with let first", from)
+			return
+		}
+	}
+	var ids []*oldsyntax.Ident
+	for _, s := range list {
+		oldsyntax.Inspect(s, func(n oldsyntax.Node) bool {
+			if id, ok := n.(*oldsyntax.Ident); ok && id.Name == from {
+				ids = append(ids, id)
+			}
+			return true
+		})
+	}
+	for _, id := range ids {
+		if t.identRole(id) == "ambiguous" {
+			t.note(at, "an arm with several types reads %s: bind the subject with let first", from)
+			return
+		}
+	}
+	for _, id := range ids {
+		if t.identRole(id) == "read" {
+			t.replace(id.Pos(), id.End(), to)
+		}
+	}
+}
+
+// declares reports whether n declares name: a define, a var, a range
+// variable, a function literal's parameter or a nested switch binding.
+func (t *translator) declares(n oldsyntax.Node, name string) bool {
+	found := false
+	is := func(x oldsyntax.Expr) {
+		if id, ok := x.(*oldsyntax.Ident); ok && id.Name == name {
+			found = true
+		}
+	}
+	oldsyntax.Inspect(n, func(m oldsyntax.Node) bool {
+		switch m := m.(type) {
+		case *oldsyntax.AssignStmt:
+			if m.Tok == oldsyntax.DEFINE {
+				for _, l := range m.Lhs {
+					is(l)
+				}
+			}
+		case *oldsyntax.VarSpec:
+			for _, id := range m.Names {
+				is(id)
+			}
+		case *oldsyntax.RangeStmt:
+			is(m.Key)
+			is(m.Value)
+		case *oldsyntax.FuncLit:
+			for _, f := range m.Type.Params.List {
+				for _, id := range f.Names {
+					is(id)
+				}
+			}
+		case *oldsyntax.TypeSwitchStmt:
+			for _, id := range m.Binds {
+				is(id)
+			}
+		case *oldsyntax.CatchExpr:
+			if m.Bind != nil {
+				is(m.Bind)
+			}
+		}
+		return !found
+	})
+	return found
+}
 func (t *translator) branch(b *oldsyntax.BranchStmt) {
 	if b.Label != nil {
 		t.note(b.Pos(), "a labelled %s: Ergo has no labels", b.Tok)
@@ -1194,27 +1560,152 @@ func (t *translator) indentOf(pos oldsyntax.Pos) string {
 	return line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 }
 
-// forStmt rewrites `for i := a; i < b; i++` to `for i in a..b` when i has
-// no other write; any other three-clause for is a note.
+// forStmt rewrites a three-clause for (round-1 review, M5). Go evaluates
+// the condition before every iteration and runs the post statement after
+// every iteration, `continue` included.
+//
+//   - `for i := a; i < b; i++` becomes `for i in a..b` when a and b are
+//     literals or locals the body never writes, neither has a call, and
+//     the body never writes i: then the range has the same bounds on
+//     every iteration.
+//   - Any other `for i := a; cond; post` becomes `let mut i = a` before a
+//     `for cond { … post }` loop, when no `continue` targets the loop
+//     (Go would run the post statement on it) and no later code names i
+//     (the let now outlives the loop).
+//   - Everything else is a note.
 func (t *translator) forStmt(f *oldsyntax.ForStmt) {
 	if f.Init == nil && f.Post == nil {
 		return
 	}
-	init, ok1 := f.Init.(*oldsyntax.AssignStmt)
-	cond, ok2 := f.Cond.(*oldsyntax.BinaryExpr)
-	post, ok3 := f.Post.(*oldsyntax.IncDecStmt)
-	if ok1 && ok2 && ok3 && init.Tok == oldsyntax.DEFINE && len(init.Lhs) == 1 && len(init.Rhs) == 1 && cond.Op == oldsyntax.LSS && post.Tok == oldsyntax.INC {
-		id, _ := init.Lhs[0].(*oldsyntax.Ident)
+	init, ok := f.Init.(*oldsyntax.AssignStmt)
+	if !ok || init.Tok != oldsyntax.DEFINE || len(init.Lhs) != 1 || len(init.Rhs) != 1 || f.Cond == nil {
+		t.note(f.Pos(), "a three-clause for: write for i in a..b or a for cond loop")
+		return
+	}
+	id, _ := init.Lhs[0].(*oldsyntax.Ident)
+	if id == nil {
+		t.note(f.Pos(), "a three-clause for: write for i in a..b or a for cond loop")
+		return
+	}
+	// A bound is stable when it is an integer literal, or a local that
+	// neither the body nor a function literal (which the body may call)
+	// writes.
+	stable := func(x oldsyntax.Expr) bool {
+		switch x := x.(type) {
+		case *oldsyntax.BasicLit:
+			return x.Kind == oldsyntax.INT
+		case *oldsyntax.Ident:
+			return x.Name != id.Name && t.declaredBefore(f, x.Name) && !t.written(f.Body, x.Name) && !t.writtenByLiteral(t.outerFunc(f), x.Name)
+		}
+		return false
+	}
+	cond, _ := f.Cond.(*oldsyntax.BinaryExpr)
+	post, _ := f.Post.(*oldsyntax.IncDecStmt)
+	if cond != nil && post != nil && cond.Op == oldsyntax.LSS && post.Tok == oldsyntax.INC {
 		cx, _ := cond.X.(*oldsyntax.Ident)
 		px, _ := post.X.(*oldsyntax.Ident)
-		if id != nil && cx != nil && px != nil && cx.Name == id.Name && px.Name == id.Name && !t.written(f.Body, id.Name) {
+		if cx != nil && px != nil && cx.Name == id.Name && px.Name == id.Name && !t.written(f.Body, id.Name) && stable(init.Rhs[0]) && stable(cond.Y) {
 			t.replace(f.Init.Pos(), f.Body.Pos(), id.Name+" in "+t.text(init.Rhs[0])+".."+t.text(cond.Y)+" ")
 			t.skip(f.Init)
 			t.skip(f.Post)
 			return
 		}
 	}
-	t.note(f.Pos(), "a three-clause for: write for i in a..b or a for cond loop")
+	var step string
+	switch p := f.Post.(type) {
+	case *oldsyntax.IncDecStmt:
+		if x, ok := p.X.(*oldsyntax.Ident); ok && x.Name == id.Name {
+			step = map[oldsyntax.Token]string{oldsyntax.INC: " += 1", oldsyntax.DEC: " -= 1"}[p.Tok]
+			step = id.Name + step
+		}
+	case *oldsyntax.AssignStmt:
+		if x, ok := p.Lhs[0].(*oldsyntax.Ident); ok && len(p.Lhs) == 1 && len(p.Rhs) == 1 && x.Name == id.Name && p.Tok != oldsyntax.DEFINE {
+			step = t.text(p)
+		}
+	}
+	// Go gives each iteration its own i, so a function literal or a task
+	// in the body that names i sees that iteration's value; one `let mut`
+	// outside the loop would be shared by all of them.
+	if step == "" || t.continuesLoop(f) || t.usedAfter(f, id.Name) || t.declaredBefore(f, id.Name) || t.capturedIn(f.Body, id.Name) {
+		t.note(f.Pos(), "a three-clause for whose bounds may change, or with continue: write for i in a..b or a for cond loop by hand")
+		return
+	}
+	indent := t.indentOf(f.For)
+	t.insert(f.For, "let mut "+id.Name+" = "+t.text(init.Rhs[0])+"\n"+indent)
+	t.replace(f.Init.Pos(), f.Cond.Pos(), "")
+	t.replace(f.Cond.End(), f.Body.Pos(), " ")
+	if strings.Contains(t.src[f.Body.Lbrace:f.Body.Rbrace], "\n") {
+		t.insert(f.Body.Rbrace, "\t"+step+"\n"+indent)
+	} else {
+		t.insert(f.Body.Rbrace, "\n"+indent+"\t"+step+"\n"+indent)
+	}
+	t.skip(f.Init)
+	t.skip(f.Post)
+}
+
+// writtenByLiteral reports whether a function literal or a go block in fn
+// writes name.
+func (t *translator) writtenByLiteral(fn oldsyntax.Node, name string) bool {
+	found := false
+	oldsyntax.Inspect(fn, func(n oldsyntax.Node) bool {
+		switch n := n.(type) {
+		case *oldsyntax.FuncLit:
+			found = found || t.written(n, name)
+		case *oldsyntax.GoExpr:
+			found = found || t.written(n, name)
+		}
+		return !found
+	})
+	return found
+}
+
+// capturedIn reports whether a function literal, a go statement or a defer
+// in n names name.
+func (t *translator) capturedIn(n oldsyntax.Node, name string) bool {
+	found := false
+	names := func(m oldsyntax.Node) {
+		oldsyntax.Inspect(m, func(k oldsyntax.Node) bool {
+			if id, ok := k.(*oldsyntax.Ident); ok && id.Name == name {
+				found = true
+			}
+			return !found
+		})
+	}
+	oldsyntax.Inspect(n, func(m oldsyntax.Node) bool {
+		switch m.(type) {
+		case *oldsyntax.FuncLit, *oldsyntax.GoExpr, *oldsyntax.DeferStmt:
+			names(m)
+			return false
+		}
+		return !found
+	})
+	return found
+}
+
+// continuesLoop reports whether a continue in f's body targets f: one
+// outside every nested loop and function literal, or any labelled one.
+func (t *translator) continuesLoop(f *oldsyntax.ForStmt) bool {
+	found := false
+	var walk func(n oldsyntax.Node) bool
+	walk = func(n oldsyntax.Node) bool {
+		switch n := n.(type) {
+		case *oldsyntax.ForStmt, *oldsyntax.RangeStmt, *oldsyntax.FuncLit:
+			oldsyntax.Inspect(n, func(m oldsyntax.Node) bool {
+				if b, ok := m.(*oldsyntax.BranchStmt); ok && b.Tok == oldsyntax.CONTINUE && b.Label != nil {
+					found = true
+				}
+				return !found
+			})
+			return false
+		case *oldsyntax.BranchStmt:
+			found = found || n.Tok == oldsyntax.CONTINUE
+		}
+		return !found
+	}
+	for _, s := range f.Body.List {
+		oldsyntax.Inspect(s, walk)
+	}
+	return found
 }
 
 func (t *translator) rangeStmt(r *oldsyntax.RangeStmt) {
@@ -1229,17 +1720,26 @@ func (t *translator) rangeStmt(r *oldsyntax.RangeStmt) {
 			t.keywordName(id)
 		}
 	}
+	// Two variables need a slice, array, map or string, so their form is
+	// fixed; with one variable or none the meaning depends on the kind
+	// of r.X, which only syntax that proves it may decide (M4).
 	var head string
+	kind := t.rangeKind(r.X)
 	switch {
-	case r.Key == nil:
-		head = "_ in "
 	case r.Value != nil && key != nil && key.Name == "_":
 		head = t.text(r.Value) + " in "
 	case r.Value != nil:
 		head = t.text(r.Key) + ", " + t.text(r.Value) + " in "
-	case t.isCount(r.X):
+	case kind == "":
+		t.note(r.Pos(), "a range over %s: its kind (count, sequence or channel) is not written; choose the for form by hand", t.text(r.X))
+		return
+	case r.Key == nil && kind == "count":
+		head = "_ in 0.."
+	case r.Key == nil:
+		head = "_ in "
+	case kind == "count":
 		head = t.text(r.Key) + " in 0.."
-	case t.isSequence(r.X):
+	case kind == "chan":
 		head = t.text(r.Key) + " in "
 	default:
 		head = t.text(r.Key) + ", _ in "
@@ -1247,52 +1747,144 @@ func (t *translator) rangeStmt(r *oldsyntax.RangeStmt) {
 	t.replace(r.For+3, r.X.Pos(), " "+head)
 }
 
-// isCount reports whether a range expression is an integer: a literal, a
-// len call, or a parameter of an integer type.
-func (t *translator) isCount(x oldsyntax.Expr) bool {
+// rangeKind is what a range expression ranges over, as far as syntax
+// proves it (round-1 review, M4): "count" for an integer, "seq" for a
+// slice, array, map or string, "chan" for a channel, "" when the syntax
+// does not show it. A call never proves its result's kind, except len.
+func (t *translator) rangeKind(x oldsyntax.Expr) string {
 	switch x := x.(type) {
 	case *oldsyntax.BasicLit:
-		return x.Kind == oldsyntax.INT
+		switch x.Kind {
+		case oldsyntax.INT:
+			return "count"
+		case oldsyntax.STRING:
+			return "seq"
+		}
 	case *oldsyntax.CallExpr:
-		id, ok := x.Fun.(*oldsyntax.Ident)
-		return ok && id.Name == "len"
+		if id, ok := x.Fun.(*oldsyntax.Ident); ok && id.Name == "len" && !t.declaredBefore(x, "len") {
+			return "count"
+		}
+	case *oldsyntax.CompositeLit:
+		return typeKind(x.Type)
 	case *oldsyntax.Ident:
-		return t.paramType(x, func(ty oldsyntax.Expr) bool {
-			id, ok := ty.(*oldsyntax.Ident)
-			return ok && strings.HasPrefix(id.Name, "int")
-		})
+		if ty, ok := t.declaredType(x); ok {
+			return typeKind(ty)
+		}
 	}
-	return false
+	return ""
 }
 
-// isSequence reports whether a range expression yields elements with one
-// variable: a call (a stream or sequence) or a channel parameter.
-func (t *translator) isSequence(x oldsyntax.Expr) bool {
-	switch x := x.(type) {
-	case *oldsyntax.CallExpr, *oldsyntax.TryExpr:
-		return true
+// typeKind is the range kind of a written type.
+func typeKind(ty oldsyntax.Expr) string {
+	switch ty := ty.(type) {
 	case *oldsyntax.Ident:
-		return t.paramType(x, func(ty oldsyntax.Expr) bool {
-			_, ok := ty.(*oldsyntax.ChanType)
-			return ok
-		})
+		switch ty.Name {
+		case "string":
+			return "seq"
+		case "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "byte", "rune":
+			return "count"
+		}
+	case *oldsyntax.ArrayType, *oldsyntax.MapType:
+		return "seq"
+	case *oldsyntax.ChanType:
+		return "chan"
 	}
-	return false
+	return ""
 }
 
-func (t *translator) paramType(x *oldsyntax.Ident, test func(oldsyntax.Expr) bool) bool {
-	fn, ok := t.enclosingFunc(x).(*oldsyntax.FuncDecl)
-	if !ok {
+// inScope reports whether the declaration decl stands before x in a block
+// that holds x, so that x may resolve to it.
+func (t *translator) inScope(decl, x oldsyntax.Node) bool {
+	if decl.Pos() >= x.Pos() {
 		return false
 	}
-	for _, f := range fn.Type.Params.List {
-		for _, n := range f.Names {
-			if n.Name == x.Name {
-				return test(f.Type)
-			}
+	for p := t.parent[decl]; p != nil; p = t.parent[p] {
+		switch p.(type) {
+		case *oldsyntax.BlockStmt, *oldsyntax.CaseClause, *oldsyntax.CatchArm, *oldsyntax.IfStmt, *oldsyntax.ForStmt, *oldsyntax.SwitchStmt, *oldsyntax.TypeSwitchStmt:
+			return p.Pos() <= x.Pos() && x.End() <= p.End()
 		}
 	}
 	return false
+}
+
+// declaredType returns the written type of the local or parameter x: the
+// one declaration of its name in the enclosing function, when that
+// declaration writes a type (a parameter, `var x T`, or a composite
+// literal value). Several declarations of the name, or one without a
+// written type, prove nothing.
+func (t *translator) declaredType(x *oldsyntax.Ident) (oldsyntax.Expr, bool) {
+	var ft *oldsyntax.FuncType
+	var body oldsyntax.Node
+	switch fn := t.enclosingFunc(x).(type) {
+	case *oldsyntax.FuncDecl:
+		ft, body = fn.Type, fn.Body
+	case *oldsyntax.FuncLit:
+		ft, body = fn.Type, fn.Body
+	default:
+		return nil, false
+	}
+	var found []oldsyntax.Expr
+	for _, f := range ft.Params.List {
+		for _, n := range f.Names {
+			if n.Name == x.Name {
+				found = append(found, f.Type)
+			}
+		}
+	}
+	oldsyntax.Inspect(body, func(n oldsyntax.Node) bool {
+		switch n := n.(type) {
+		case *oldsyntax.AssignStmt:
+			if n.Tok != oldsyntax.DEFINE {
+				return true
+			}
+			for i, l := range n.Lhs {
+				if id, ok := l.(*oldsyntax.Ident); ok && id.Name == x.Name {
+					var ty oldsyntax.Expr
+					if len(n.Rhs) == len(n.Lhs) {
+						if lit, ok := n.Rhs[i].(*oldsyntax.CompositeLit); ok && t.inScope(n, x) {
+							ty = lit.Type
+						}
+					}
+					found = append(found, ty)
+				}
+			}
+		case *oldsyntax.VarSpec:
+			for i, id := range n.Names {
+				if id.Name != x.Name {
+					continue
+				}
+				ty := n.Type
+				if ty == nil && len(n.Values) == len(n.Names) {
+					if lit, ok := n.Values[i].(*oldsyntax.CompositeLit); ok {
+						ty = lit.Type
+					}
+				}
+				if !t.inScope(n, x) {
+					ty = nil
+				}
+				found = append(found, ty)
+			}
+		case *oldsyntax.RangeStmt:
+			for _, k := range []oldsyntax.Expr{n.Key, n.Value} {
+				if id, ok := k.(*oldsyntax.Ident); ok && id.Name == x.Name {
+					found = append(found, nil)
+				}
+			}
+		case *oldsyntax.FuncLit:
+			for _, f := range n.Type.Params.List {
+				for _, p := range f.Names {
+					if p.Name == x.Name {
+						found = append(found, nil)
+					}
+				}
+			}
+		}
+		return true
+	})
+	if len(found) != 1 || found[0] == nil {
+		return nil, false
+	}
+	return found[0], true
 }
 
 // switchStmt rewrites a value switch: all-literal cases become a match,
@@ -1343,6 +1935,18 @@ func (t *translator) switchStmt(s *oldsyntax.SwitchStmt) {
 		t.note(s.Pos(), "an empty switch")
 		return
 	}
+	if s.Clauses[0].List == nil {
+		t.note(s.Pos(), "a switch with only a default arm: write its statements without the switch")
+		return
+	}
+	// Go reads the tag once; an if chain reads it in every condition. A
+	// case expression with a call may change it in between, so then the
+	// chain reads a snapshot taken where the switch stood (M6).
+	if tag != "" && casesCall(s.Clauses) {
+		snap := t.freshName(tag + "Subject")
+		t.insert(s.Switch, "let "+snap+" = "+tag+"\n"+t.indentOf(s.Switch))
+		tag = snap
+	}
 	start := s.Switch
 	if s.Init != nil {
 		t.replace(s.Switch, s.Init.Pos(), "")
@@ -1351,7 +1955,13 @@ func (t *translator) switchStmt(s *oldsyntax.SwitchStmt) {
 			start = s.Tag.Pos()
 		}
 	}
-	t.replace(start, s.Lbrace+1, "")
+	// The header goes with the line break after it, so the chain starts
+	// where the switch stood.
+	end := s.Lbrace + 1
+	if first := s.Clauses[0].Case; strings.TrimSpace(t.src[end:first]) == "" {
+		end = first
+	}
+	t.replace(start, end, "")
 	for i, c := range s.Clauses {
 		var head string
 		switch {
@@ -1360,11 +1970,16 @@ func (t *translator) switchStmt(s *oldsyntax.SwitchStmt) {
 		default:
 			conds := make([]string, len(c.List))
 			for j, x := range c.List {
+				// Each case expression stays one operand (M6):
+				// `case a || b` is `tag == (a || b)`; in a tagless
+				// switch, `case a, b` is `a || b`.
 				conds[j] = t.text(x)
 				if tag != "" {
-					conds[j] = tag + " == " + conds[j]
+					op, cp := grouping(x, oldsyntax.EQL.Precedence())
+					conds[j] = tag + " == " + op + conds[j] + cp
 				} else if len(c.List) > 1 {
-					conds[j] = "(" + conds[j] + ")"
+					op, cp := grouping(x, oldsyntax.LOR.Precedence())
+					conds[j] = op + conds[j] + cp
 				}
 			}
 			head = "if " + strings.Join(conds, " || ") + " {"
@@ -1375,6 +1990,42 @@ func (t *translator) switchStmt(s *oldsyntax.SwitchStmt) {
 		t.replace(c.Case, c.Colon+1, head)
 		t.skipList(c.List)
 	}
+}
+
+// casesCall reports whether a case expression of clauses holds a call.
+func casesCall(clauses []*oldsyntax.CaseClause) bool {
+	found := false
+	for _, c := range clauses {
+		for _, x := range c.List {
+			oldsyntax.Inspect(x, func(n oldsyntax.Node) bool {
+				_, call := n.(*oldsyntax.CallExpr)
+				found = found || call
+				return !found
+			})
+		}
+	}
+	return found
+}
+
+// freshName returns base, or base with a number, that no identifier of the
+// file uses, so a name the translator adds never captures or shadows one.
+func (t *translator) freshName(base string) string {
+	used := map[string]bool{}
+	oldsyntax.Inspect(t.file, func(n oldsyntax.Node) bool {
+		if id, ok := n.(*oldsyntax.Ident); ok {
+			used[id.Name] = true
+		}
+		return true
+	})
+	name := base
+	for i := 2; used[name] || t.fresh[name] || syntax.IsKeyword(name); i++ {
+		name = fmt.Sprintf("%s%d", base, i)
+	}
+	if t.fresh == nil {
+		t.fresh = map[string]bool{}
+	}
+	t.fresh[name] = true
+	return name
 }
 
 func (t *translator) skipList(list []oldsyntax.Expr) {
@@ -1427,20 +2078,7 @@ func (t *translator) typeSwitch(s *oldsyntax.TypeSwitchStmt) {
 				t.note(c.Case, "an arm with several types reads %s: bind the subject with let first", b.Name)
 				continue
 			}
-			t.renameReads(c.Body, b.Name, subject.Name)
+			t.renameReads(s, c.Case, c.Body, b.Name, subject.Name)
 		}
-	}
-}
-
-func (t *translator) renameReads(list []oldsyntax.Stmt, from, to string) {
-	for _, s := range list {
-		oldsyntax.Inspect(s, func(n oldsyntax.Node) bool {
-			if id, ok := n.(*oldsyntax.Ident); ok && id.Name == from {
-				if sel, ok := t.parent[id].(*oldsyntax.SelectorExpr); !ok || sel.X == oldsyntax.Expr(id) {
-					t.replace(id.Pos(), id.End(), to)
-				}
-			}
-			return true
-		})
 	}
 }
