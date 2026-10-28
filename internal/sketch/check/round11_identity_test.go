@@ -1,9 +1,11 @@
 package check
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"sort"
@@ -35,6 +37,24 @@ func structural(a, b Type) bool {
 	case *RowArg:
 		b, ok := b.(*RowArg)
 		return ok && structuralRow(a.Row, b.Row)
+	case *RowVar:
+		// A use as a row element: one variable, identical bindings.
+		b, ok := b.(*RowVar)
+		if !ok || a.root() != b.root() {
+			return false
+		}
+		bind := func(v *RowVar, tp *TypeParam) Type {
+			if x, ok := v.m[tp]; ok {
+				return x
+			}
+			return tp
+		}
+		for _, tp := range a.root().Fn.Sig.TParams {
+			if !structural(bind(a, tp), bind(b, tp)) {
+				return false
+			}
+		}
+		return true
 	case *Slice:
 		b, ok := b.(*Slice)
 		return ok && structural(a.Elem, b.Elem)
@@ -104,14 +124,14 @@ func structural(a, b Type) bool {
 	return false
 }
 
-// structuralRow compares two rows as sets, element by element, a final row
-// variable read as its solution (class F) and an unbound one as itself.
+// structuralRow compares two rows as sets, element by element, a row
+// variable read as its solution with its use's substitution (class F).
 func structuralRow(a, b *Row) bool {
 	flat := func(r *Row) []Type {
 		var out []Type
 		for _, e := range r.Elems() {
-			if v, ok := e.(*RowVar); ok && v.final {
-				out = append(out, v.sol.Elems()...)
+			if v, ok := e.(*RowVar); ok {
+				out = append(out, v.Solution().Elems()...)
 				continue
 			}
 			out = append(out, e)
@@ -281,6 +301,9 @@ func TestIdentityMatchesStructure(t *testing.T) {
 		if name == "identity" && len(diags) > 0 {
 			t.Fatalf("identity source: %v", diags)
 		}
+		if len(c.widened) > 0 {
+			t.Errorf("%s: a reporting pass computed a row wider than the settled one for %v", name, c.widened)
+		}
 		types := collectTypes(c)
 		if len(types) > 400 {
 			types = types[:400]
@@ -302,6 +325,69 @@ func TestIdentityMatchesStructure(t *testing.T) {
 	if same == pairs {
 		t.Fatal("no distinct pair compared")
 	}
+}
+
+// genericInferred writes generic callees whose rows are inferred, each used
+// three ways (round 12 M1): a concrete call, an explicit instantiation and a
+// saved instantiated value (a capability-row parameter is implicit, so it
+// takes a call and a saved function value instead). Callee i passes on a row parameter's failure,
+// fails with an error type over its type parameter, or charges a
+// capability-row parameter; every caller writes the row it must get.
+func genericInferred(seed uint64) string {
+	rng := rand.New(rand.NewPCG(seed, seed^0x9e37))
+	var b strings.Builder
+	b.WriteString("package main\ntype Bang struct{}\ntype Fault[T any] struct{ V T }\ntype Cap interface{ M() }\n")
+	b.WriteString("func fail() error[Bang]\nfunc work() needs Cap\nfunc mark[T any]() error[Fault[T]]\n")
+	types := []string{"int", "string", "Bang", "[]int"}
+	for i := range 6 {
+		ty := types[rng.IntN(len(types))]
+		switch rng.IntN(3) {
+		case 0:
+			fmt.Fprintf(&b, "func pass%d[E error](f func() error[E]) { return f() }\n", i)
+			fmt.Fprintf(&b, "func C%d() error[Bang] { return pass%d(fail) }\n", i, i)
+			fmt.Fprintf(&b, "func X%d() error[Bang] { return pass%d[Bang](fail) }\n", i, i)
+			fmt.Fprintf(&b, "var saved%d = pass%d[Bang]\nfunc S%d() error[Bang] { return saved%d(fail) }\n", i, i, i, i)
+		case 1:
+			fmt.Fprintf(&b, "func raise%d[T any](x T) { return Fault{x} }\n", i)
+			fmt.Fprintf(&b, "func C%d(x %s) error[Fault[%s]] { return raise%d(x) }\n", i, ty, ty, i)
+			fmt.Fprintf(&b, "func X%d(x %s) error[Fault[%s]] { return raise%d[%s](x) }\n", i, ty, ty, i, ty)
+			fmt.Fprintf(&b, "var saved%d = raise%d[%s]\nfunc S%d(x %s) error[Fault[%s]] { return saved%d(x) }\n", i, i, ty, i, ty, ty, i)
+		default:
+			fmt.Fprintf(&b, "func run%d(f func() needs R) { f() }\n", i)
+			fmt.Fprintf(&b, "func C%d() needs Cap { run%d(work) }\n", i, i)
+			// An implicit capability-row parameter takes no explicit argument:
+			// the saved form is a function value passed on.
+			fmt.Fprintf(&b, "func S%d() needs Cap { g := work; run%d(g) }\n", i, i)
+		}
+	}
+	return b.String()
+}
+
+// TestIdentityGenericInferred: the generic-callee family is accepted, and
+// the interned ids agree with the structural oracle on every recorded type,
+// the variable uses read with their substitutions.
+func TestIdentityGenericInferred(t *testing.T) {
+	pairs := 0
+	for seed := range uint64(40) {
+		src := genericInferred(seed)
+		c, diags := checkFor(src)
+		if c == nil || len(diags) > 0 {
+			t.Fatalf("seed %d: %v\n%s", seed, diags, src)
+		}
+		if len(c.widened) > 0 {
+			t.Errorf("seed %d: wider reporting rows for %v", seed, c.widened)
+		}
+		types := collectTypes(c)
+		for i, x := range types {
+			for _, y := range types[i:] {
+				pairs++
+				if want, have := structural(x, y), c.identical(x, y); want != have {
+					t.Errorf("seed %d: %s and %s: structural %v, interned ids %v", seed, x, y, want, have)
+				}
+			}
+		}
+	}
+	t.Logf("40 sources, %d pairs", pairs)
 }
 
 // TestTypeStringOnlyPrints: typeString builds a whole type's text, so it is
