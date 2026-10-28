@@ -133,10 +133,6 @@ func (s *scanner) run() {
 		case c == ' ' || c == '\t' || c == '\r':
 			s.offset++
 		case c == '/' && start+1 < len(src) && (src[start+1] == '/' || src[start+1] == '*'):
-			if len(s.interp) > 0 {
-				s.fail(start, 2, "a comment cannot stand inside an interpolation")
-				return
-			}
 			s.comment(start)
 		case s.paths > 0 && pathStart(src, start):
 			s.pathWord(start)

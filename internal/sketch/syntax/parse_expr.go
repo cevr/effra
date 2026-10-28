@@ -227,6 +227,7 @@ func (p *parser) parseOperand() Expr {
 			p.exprLev--
 			return &ParenExpr{Lparen: lparen, X: x, Rparen: p.want(RPAREN)}
 		}
+		p.refuseSingleton()
 		t := &TupleExpr{Lparen: lparen, Elts: []Expr{x}}
 		for p.got(COMMA) && p.tok.tok != RPAREN {
 			t.Elts = append(t.Elts, p.parseExpr())
@@ -235,12 +236,33 @@ func (p *parser) parseOperand() Expr {
 		t.Rparen = p.want(RPAREN)
 		return t
 	case FUNC:
-		t := p.parseFuncType(ctxList)
-		if p.tok.tok == LBRACE {
-			p.funcLitParams(t.Params)
-			return &FuncLit{Type: t, Body: p.parseBlock()}
+		// A literal's own signature takes the declaration spelling,
+		// `func() needs A, B { … }`; the parenthesised `needs (A, B)` is
+		// for a function type inside a list (D1.11). Which one this is
+		// shows only at the `{`, so the literal is tried first.
+		start := p.i
+		var t *FuncType
+		literal := p.attempt(func() {
+			t = p.parseFuncType(ctxDecl)
+			if p.tok.tok != LBRACE {
+				p.errorf("not a function literal")
+			}
+		})
+		if !literal {
+			t = p.parseFuncType(ctxList)
+			if p.tok.tok != LBRACE {
+				return t
+			}
+			// A literal spelled with the list form: parse it again as a
+			// literal to report the declaration spelling's error.
+			p.backtrack(start)
+			t = p.parseFuncType(ctxDecl)
+			if p.tok.tok != LBRACE {
+				p.errorf("expected \"{\" after a function literal's signature, found %s", p.found())
+			}
 		}
-		return t
+		p.funcLitParams(t.Params)
+		return &FuncLit{Type: t, Body: p.parseBlock()}
 	case LBRACK, ESCAPING:
 		return p.parseType(ctxList)
 	case IF:
@@ -426,11 +448,20 @@ func (p *parser) parseHeader() Expr {
 }
 
 // noInit reports an init statement in an if or match header (Go's
-// `if x := f(); c`): Ergo writes the let on the line before.
+// `if x := f(); c`, `if x += 1; c`): Ergo writes the let on the line
+// before. Every assignment operator starts one.
 func (p *parser) noInit() {
-	if p.tok.tok == DEFINE || p.tok.tok == SEMICOLON && p.tok.lit == ";" || p.tok.tok == ASSIGN {
-		p.habit(p.tok.pos, int(p.tok.end-p.tok.pos), habitIfInit)
+	switch p.tok.tok {
+	case DEFINE, ASSIGN, ADD_ASSIGN, SUB_ASSIGN, MUL_ASSIGN, QUO_ASSIGN, REM_ASSIGN,
+		AND_ASSIGN, OR_ASSIGN, XOR_ASSIGN, SHL_ASSIGN, SHR_ASSIGN, AND_NOT_ASSIGN:
+	case SEMICOLON:
+		if p.tok.lit != ";" {
+			return
+		}
+	default:
+		return
 	}
+	p.habit(p.tok.pos, int(p.tok.end-p.tok.pos), habitIfInit)
 }
 
 // parseIf parses `if c { … } [else if … | else { … }]`.

@@ -321,6 +321,72 @@ func TestAdmittedForms(t *testing.T) {
 	}
 }
 
+// TestRoundTwoForms pins the round-1 review's parser findings (M9, M10,
+// M11, M14): each decided form parses to the tree it means.
+func TestRoundTwoForms(t *testing.T) {
+	parse := func(t *testing.T, src string) *File {
+		t.Helper()
+		f, err := Parse(src)
+		if err != nil {
+			t.Fatalf("%q: %v", src, err)
+		}
+		return f
+	}
+	t.Run("M9 grouped tuple field", func(t *testing.T) {
+		// A field group takes every decided Type, a tuple included.
+		fields := parse(t, "type S { X, Y (int64, int64) }\n").Decls[0].(*TypeDecl).Spec.(*StructType).Fields.List
+		if len(fields) != 1 || len(fields[0].Names) != 2 {
+			t.Fatalf("grouped tuple field %+v", fields)
+		}
+		if _, ok := fields[0].Type.(*TupleExpr); !ok {
+			t.Fatalf("grouped field type %T", fields[0].Type)
+		}
+	})
+	t.Run("M10 function literal needs", func(t *testing.T) {
+		// A literal's own row takes the declaration spelling.
+		lit := parse(t, "let f = func() needs A, B {\n\twork()\n}\n").Decls[0].(*VarDecl).Specs[0].Values[0].(*FuncLit)
+		if n := lit.Type.Needs; n == nil || len(n.Names) != 2 || n.Lparen.IsValid() {
+			t.Fatalf("literal needs %+v", n)
+		}
+		// A function type inside a list keeps the parenthesised row.
+		param := parse(t, "func g(h func() needs (A, B)) {}\n").Decls[0].(*FuncDecl).Type.Params.List[0].Type.(*FuncType)
+		if n := param.Needs; len(n.Names) != 2 || !n.Lparen.IsValid() {
+			t.Fatalf("parameter needs %+v", n)
+		}
+	})
+	t.Run("M11 wire keys without layout", func(t *testing.T) {
+		// A comma run of names ended by ":" is one entry on any layout;
+		// an embed after the entries stays an embed.
+		for _, src := range []string{
+			"let W = wire { A, B: p, C }\n",
+			"let W = wire {\n\tA,\n\tB: p,\n\tC,\n}\n",
+			"let W = wire { A,\n\tB: p, C }\n",
+		} {
+			var body *WireBody
+			switch d := parse(t, src).Decls[0].(type) {
+			case *WireDecl:
+				body = d.Body
+			case *VarDecl:
+				body = d.Specs[0].Values[0].(*WireLit).Body
+			}
+			es := body.Entries
+			if len(es) != 2 || len(es[0].Keys) != 1 || es[0].Kind == WireEmbed || es[1].Kind != WireEmbed {
+				t.Errorf("%q: entries %+v", src, es)
+			}
+		}
+	})
+	t.Run("M14 comment in interpolation", func(t *testing.T) {
+		// A block comment inside an interpolation is a comment.
+		f := parse(t, "let s = \"x \\(a /* note */ + b) y\"\n")
+		if is := f.Decls[0].(*VarDecl).Specs[0].Values[0].(*InterpolatedString); len(is.Exprs) != 1 {
+			t.Fatalf("interpolation %+v", is)
+		}
+		if len(f.Comments) != 1 || f.Comments[0].List[0].Text != "/* note */" {
+			t.Fatalf("comments %+v", f.Comments)
+		}
+	})
+}
+
 // TestNestingLimit: every recursive construct, and every chain that
 // deepens the tree (selectors, calls, indexes, binary operators, else if),
 // charges the nesting limit, so a tree deeper than MaxNesting is S001

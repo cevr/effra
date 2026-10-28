@@ -9,7 +9,7 @@ A Go form that this file does not admit is an error, never a passthrough to the 
 1. A source file ends in `.ergo`. Every surface refuses any other extension with one message, "source file must have .ergo extension", the same for `.ef` and for `.txt`. The directory names the package: a file has no `package` clause.
 2. A source file is UTF-8 text. A byte sequence that is not valid UTF-8 is an error in identifier position. Inside a string literal, the literal's decoded bytes are its value (see [Literals](#literals)).
 3. White space is space (U+0020), tab, carriage return and newline. Newlines are significant for semicolon insertion.
-4. A comment starts with `//` and runs to the end of the line. A block comment `/* … */` does not nest, as in Go; an unterminated block comment is S001. A block comment that spans lines counts as a newline for semicolon insertion. A comment inside an interpolation `\( … )` is S001.
+4. A comment starts with `//` and runs to the end of the line. A block comment `/* … */` does not nest, as in Go; an unterminated block comment is S001. A block comment that spans lines counts as a newline for semicolon insertion. Inside an interpolation `\( … )` a block comment on one line is a comment, as anywhere else: `"x \(a /* note */ + b)"`. A `//` comment there runs to the end of the line, and a block comment that spans lines puts a newline in the string, so both leave the string unterminated (S001).
 5. **Semicolon insertion.** The lexer inserts a semicolon at a newline, and at the end of the file, when the line's last token is:
    - an identifier that is not a keyword, or one of the keywords `return`, `break` and `continue`;
    - an integer, float, rune, duration or string literal, or the end of an interpolated string;
@@ -144,7 +144,7 @@ WireEntry      = [ "replace" ] TypeName { "," TypeName } ":" Expression | TypeNa
 6. **Machines.** `type Breaker machine[State, Signal] { initial: Closed{}, step: Step }` ([runtime.md](runtime.md#machines-and-actors)). The entries are `initial` and `step`, each once.
 7. **Results.** A function has at most one result type, which may be a tuple, then `fails`, then `needs`. A result tuple whose last element is `error`, and a bare `error[…]` result, are S001 with the `fails` message: cheap recognition of Go's `(T, error)` and of the old row.
 8. **No receivers.** `func Fee(o Order) int64` takes the receiver as its first parameter (196m). A method value is a call's business, not a selector's.
-9. **`needs` inside a list.** Inside a parameter or result list, `needs` takes one name, or a parenthesised list `needs (A, B)`, because a comma ends the parameter. A declaration's own `needs` clause is unparenthesised.
+9. **`needs` inside a list.** Inside a parameter or result list, `needs` takes one name, or a parenthesised list `needs (A, B)`, because a comma ends the parameter. A declaration's own `needs` clause, and a function literal's, is unparenthesised: `func() needs A, B { … }` (`needs (A, B)` on a literal is S001).
 10. **`let`.** `let x = e`, `let x T = e`, `let x T`, `let q, r = e` and `let Point{X: px} = p` bind names; `let mut` binds a name that may be reassigned (196v). A package-level `let` is immutable. `let Name = wire { … }` at package level is a named wire.
 11. **Tests and laws.** `test Name { … }` is an example; `test Name(x T) { … }` a property. `law Name(params) { body }` is a member of an operation type (196l).
 12. **Visibility.** See [Visibility](#visibility).
@@ -238,6 +238,8 @@ Status: **implemented** in `internal/sketch/syntax`. `syntax.Parse` returns one 
 6. **Paren-less trailing block.** A trailing block needs the call's parentheses: `task.Go() { … }`. `task.Go { … }` is S001, because without name resolution it cannot be told apart from the composite literal `task.Go{ f() }`.
 7. **Type assertions.** `x.(type)` and `x.(T)` are S001 with the `match` message.
 8. **`Map[K, V]`.** The bare name `Map` with two type arguments is the map type: a prelude name cannot be redeclared (eighth round), so the parser need not resolve it.
+9. **Wire keys.** In a wire body, a run of type names separated by commas and ended by `:` is the key list of one entry, whatever the layout: `{ A, B: p }` binds both `A` and `B` to `p`, on one line or several. An embedded wire therefore never stands just before an entry; write `{ B: p, A }`. Entry order has no meaning. *Prior art:* Go's `case a, b:` is one comma list ended by `:`, with no layout rule.
+10. **Tuples have two or more elements.** `(x,)` is S001 in expressions, types and patterns alike, so `(x)` and `(x,)` never denote different trees.
 
 ## Old spellings
 

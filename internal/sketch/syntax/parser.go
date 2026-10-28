@@ -317,11 +317,6 @@ func (p *parser) leadComment() *CommentGroup {
 	return g
 }
 
-func (p *parser) line(pos Pos) int {
-	l, _ := lineColumn(p.s.lines, int(pos))
-	return l
-}
-
 // ---------------------------------------------------------------- names
 
 // parseIdent parses a name. A keyword is never a name, and a reserved Go
@@ -410,19 +405,19 @@ func (p *parser) parseImportDecl() *ImportDecl {
 	switch p.tok.tok {
 	case LPAREN:
 		p.habit(p.tok.pos, 1, habitImportGroup)
-	case STRING:
-		p.habit(p.tok.pos, int(p.tok.end-p.tok.pos), habitImportQuoted)
 	}
 	s := &ImportSpec{Kind: ImportPlain, NamePos: NoPos}
 	if p.tok.tok == GO {
 		s.Kind, s.NamePos = ImportGo, p.tok.pos
 		p.next()
 	}
+	p.unquotedPath()
 	if p.tok.tok != PATH {
 		p.errorf("expected an import path, found %s", p.found())
 	}
 	first := p.tok
 	p.next()
+	p.unquotedPath()
 	if p.tok.tok == PATH {
 		if !isIdentifier(first.lit) {
 			p.errorAt(first.pos, int(first.end-first.pos), "an import alias is a name, found %q", first.lit)
@@ -437,6 +432,14 @@ func (p *parser) parseImportDecl() *ImportDecl {
 	s.Path = &BasicLit{ValuePos: first.pos, Kind: PATH, Value: first.lit, ValueEnd: first.end}
 	d.Specs = []*ImportSpec{s}
 	return d
+}
+
+// unquotedPath gives a quoted path where an import path may stand, after
+// `import`, `import go` or an alias, the habit message.
+func (p *parser) unquotedPath() {
+	if p.tok.tok == STRING {
+		p.habit(p.tok.pos, int(p.tok.end-p.tok.pos), habitImportQuoted)
+	}
 }
 
 // isIdentifier reports whether s is a name: a letter or `_`, then letters,
@@ -570,6 +573,15 @@ func (p *parser) parseMembers() *members {
 	return m
 }
 
+// refuseSingleton refuses `(x,)` at its comma: a tuple has two or more
+// elements in expressions, types and patterns alike, so the one-element
+// spelling has no tree of its own (D4).
+func (p *parser) refuseSingleton() {
+	if p.tok.tok == COMMA && p.peek(1).tok == RPAREN {
+		p.errorAt(p.tok.pos, 1, "a tuple has two or more elements; drop the comma")
+	}
+}
+
 // bracketsThenParen reports whether the brackets that open at the next
 // token close before a `(`, as in the operation `Get[T](k string) T`; a
 // field type such as `xs [n]int` closes before a type instead.
@@ -611,7 +623,7 @@ func (p *parser) parseFieldDecl() *Field {
 // field group: another name, or the group's type.
 func (p *parser) groupsName(t Token) bool {
 	switch t {
-	case COMMA, IDENT, LBRACK, MUL, FUNC, ESCAPING:
+	case COMMA, IDENT, LBRACK, MUL, FUNC, ESCAPING, LPAREN:
 		return true
 	case GO:
 		return true
@@ -1151,6 +1163,7 @@ func (p *parser) parseType(ctx typeCtx) Expr {
 			p.exprLev = saved
 			return &ParenExpr{Lparen: lparen, X: first, Rparen: p.want(RPAREN)}
 		}
+		p.refuseSingleton()
 		t := &TupleExpr{Lparen: lparen, Elts: []Expr{first}}
 		for p.got(COMMA) && p.tok.tok != RPAREN {
 			t.Elts = append(t.Elts, p.parseType(ctxList))
@@ -1285,11 +1298,12 @@ func (p *parser) parseWireBody() *WireBody {
 }
 
 // keysContinue reports whether the comma at the current token joins more
-// capability names to the entry: `, Name {, Name} :` on this line.
+// capability names to the entry: `, Name {, Name} :`. Layout plays no
+// part: a comma run of type names ended by `:` is one entry's key list
+// (grammar.md, Parser rule 9), as Go's `case a, b:` is one case.
 func (p *parser) keysContinue() bool {
-	line := p.line(p.tok.pos)
 	for i := 0; ; {
-		if p.peek(i).tok != COMMA || p.line(p.peek(i).pos) != line {
+		if p.peek(i).tok != COMMA {
 			return false
 		}
 		i++
@@ -1301,7 +1315,7 @@ func (p *parser) keysContinue() bool {
 			i += 2
 		}
 		if p.peek(i).tok == COLON {
-			return p.line(p.peek(i).pos) == line
+			return true
 		}
 	}
 }

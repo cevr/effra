@@ -213,6 +213,7 @@ func (p *parser) parsePatternCore() Expr {
 			p.exprLev = saved
 			return &ParenExpr{Lparen: lparen, X: first, Rparen: p.want(RPAREN)}
 		}
+		p.refuseSingleton()
 		t := &TupleExpr{Lparen: lparen, Elts: []Expr{first}}
 		for p.got(COMMA) && p.tok.tok != RPAREN {
 			t.Elts = append(t.Elts, p.parsePattern())
