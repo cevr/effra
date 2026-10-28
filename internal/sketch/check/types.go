@@ -789,10 +789,18 @@ func isCapability(t Type) bool {
 
 // isStructNamed reports whether t is a named struct type: a possible error
 // type and union variant.
+// isStructNamed reports whether t is a named struct type. A type still
+// being declared (on a cycle through the declaration that asks) has no
+// underlying type yet; its declaration decides, so the answer does not
+// depend on the order of the declarations.
 func isStructNamed(t Type) bool {
 	n, ok := t.(*Named)
 	if !ok {
 		return false
+	}
+	if o := n.origin(); o.state == 1 && o.Obj != nil && o.Obj.Decl != nil {
+		_, ok = o.Obj.Decl.Spec.(*syntax.StructType)
+		return ok
 	}
 	_, ok = n.underlying().(*Struct)
 	return ok
