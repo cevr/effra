@@ -112,6 +112,7 @@ The checker does not restrict `main`'s capability row; the build refuses what th
 | A type does not implement an interface, or its method's rows are wider (interface assignability) | `interface-missing-method`, `interface-wider-row` |
 | A keyed literal omits a field that has no zero value; `var x T` of a type with no zero value | `keyed-literal-nondefaultable`, `var-nondefaultable` |
 | A positional literal lists fewer values than the struct's fields | `positional-literal-short` |
+| A struct field's value is a composite literal with no type, keyed or positional: "missing type in composite literal; write S{h: 1}" (`S{…}` past 40 characters or across a line; Go elides a type only for elements and map keys) ([types: structs](types.md#structs) 3) | checker tests (`TestMissingLiteralType`), classf `generic-elided-struct` |
 | A type switch on a non-union; a case that is not a variant of its subject's union; a case already covered by the cases before it (unreachable) | `type-switch-non-union`, `case-not-variant` |
 | An operator on operands it is not defined for; `==` on values that are not comparable or of different types; an untyped constant as the left operand of a shift by a non-constant count, "the left operand of a shift by a non-constant count needs a type; write int(1) << n" ([types: operators](types.md) 1) | `equality-mismatch`, `plus-on-bool`; checker tests (`TestNonConstantShift`) |
 | An untyped integer where a `duration` is expected (only a duration literal is a duration) | `untyped-integer-as-duration` |

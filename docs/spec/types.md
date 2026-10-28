@@ -57,7 +57,7 @@ same := Order{"42", 1999}
 
 1. Field names in one struct are distinct (S108). A field and a method of the same type cannot share a name (S108).
 2. A composite literal is all keyed or all positional (S001). A positional literal lists every field in order (S108). A keyed literal sets each field at most once (S108) and names only declared fields (S104).
-3. Each field value must be assignable to the field's type (S108). A field value whose failure is not handled is S105.
+3. Each field value must be assignable to the field's type (S108). A field value whose failure is not handled is S105. A field value that is a composite literal writes its type, keyed or positional: `Wrap[S]{value: {h: 1}}` is S108 "missing type in composite literal; write S{h: 1}" (the literal's source is `{…}` past 40 characters or across a line). As in Go, a composite literal may elide its type only as an element of an array, slice or map literal or as a map literal's key (Go spec, "Composite literals"; #196 round 17 C1). *Prior art:* go/types reports "missing type in composite literal" there, and Ergo adds the fix; Rust and Gleam always name a record's constructor.
 4. A struct must not contain itself by value, directly or through other structs (S108). Recursion behind a union is allowed, because a union value is a reference in the lowered Go. *Prior art:* Swift's `indirect enum` boxes recursion; Go rejects an invalid recursive type.
 5. A struct with a resource field is itself a resource ([resources.md](resources.md#what-is-a-resource)).
 6. Designed: struct embedding is allowed only in `wire` and in interfaces. Value semantics hold: a copy is a snapshot, and move-on-last-use keeps it cheap.
