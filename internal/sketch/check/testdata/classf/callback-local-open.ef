@@ -1,0 +1,8 @@
+package p
+type Bang struct{}
+func mark() error[Bang]
+func a(input struct{ Run func(func()) }) {
+ var r struct{ Run func(func()) } = input
+ r.Run(func(){ try a(input) }) // want S101
+ try mark()
+}

@@ -208,15 +208,20 @@ func (w *refWalker) receiverType(f *Func, written syntax.Expr) Type {
 	return w.writtenType(written)
 }
 
-// writtenType resolves a written type name, possibly instantiated or
-// behind *, through the package scope and the imports, at the point it is
-// declared: nil for a type parameter, a name a local shadows there, or any
-// other form. An instance resolves to its generic type, whose members keep
-// their type parameters, so closedRows treats a row that mentions them as
-// open.
+// writtenType resolves a written type at the point it is declared: a type
+// name, possibly instantiated or behind *, through the package scope and
+// the imports, or a written struct type (`struct{ Run func(…) error[E] }`,
+// round 19 m1). It is nil for a type parameter, a name a local shadows
+// there, a struct type that mentions either or an implicit type parameter,
+// and any other form. An instance resolves to its generic type, whose
+// members keep their type parameters, so closedRows treats a row that
+// mentions them as open.
 func (w *refWalker) writtenType(t syntax.Expr) Type {
 	if s, ok := t.(*syntax.StarExpr); ok {
 		t = s.X
+	}
+	if st, ok := t.(*syntax.StructType); ok {
+		return w.structType(st)
 	}
 	if ix, ok := t.(*syntax.IndexExpr); ok {
 		t = ix.X
@@ -229,6 +234,35 @@ func (w *refWalker) writtenType(t syntax.Expr) Type {
 		return tn.Type
 	}
 	return nil
+}
+
+// structType resolves a written struct type before any body is typed, as
+// the declaration's signature would: silently, through the package scope
+// and the imports. Every name in it must be a declared type or package
+// that no local shadows, so the type does not depend on the body; a field
+// name a local shares makes it nil too, which is conservative.
+func (w *refWalker) structType(st *syntax.StructType) Type {
+	fixed := true
+	syntax.Inspect(st, func(n syntax.Node) bool {
+		id, ok := n.(*syntax.Ident)
+		if !ok || !fixed {
+			return fixed
+		}
+		if w.tparams[id.Name] || w.local(id.Name) || isParamName(id.Name) && w.c.typeObject(id.Name, w.c.cur) == nil {
+			fixed = false
+		}
+		return fixed
+	})
+	if !fixed {
+		return nil
+	}
+	w.c.silent++
+	rt := w.c.typExpr0(st, nil)
+	w.c.silent--
+	if isInvalid(rt) {
+		return nil
+	}
+	return rt
 }
 
 func (w *refWalker) push()            { w.scopes = append(w.scopes, map[string]*localBinding{}) }
