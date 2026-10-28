@@ -198,10 +198,34 @@ type RowVar struct {
 	Kind  Kind // KindErrors or KindUses
 	sol   *Row // the solution so far (final when final is set); no variable
 	final bool
+
+	// A use of a generic function's variable (a call, an explicit
+	// instantiation, a saved value) is the variable of with a delayed
+	// substitution m of the function's type parameters: its row is the
+	// solution with m applied (round 12 M1; rustc EarlyBinder). ctx is the
+	// check that made the use.
+	of  *RowVar
+	m   map[*TypeParam]Type
+	ctx *checker
 }
 
-// Solution returns the variable's solved row: final after the check.
-func (v *RowVar) Solution() *Row { return v.sol }
+// root is the variable itself, for a use.
+func (v *RowVar) root() *RowVar {
+	if v.of != nil {
+		return v.of
+	}
+	return v
+}
+
+// Solution returns the variable's solved row (final after the check), with
+// a use's substitution applied.
+func (v *RowVar) Solution() *Row {
+	if v.of != nil && v.ctx != nil {
+		r, _ := v.ctx.types.varRow(v)
+		return r
+	}
+	return v.root().sol
+}
 
 // RowArg is a row bound to a row-kinded type parameter: the type argument of
 // E in Task[T, E] or a row inferred for E or R.
@@ -344,10 +368,10 @@ func (t *Signature) String() string {
 }
 func (t *TypeParam) String() string { return t.Name }
 func (v *RowVar) String() string {
-	if v.sol != nil {
-		return v.sol.String()
+	if sol := v.Solution(); sol != nil {
+		return sol.String()
 	}
-	return "the inferred row of " + v.Fn.Name
+	return "the inferred row of " + v.root().Fn.Name
 }
 func (t *RowArg) String() string { return t.Row.String() }
 func (t *Tuple) String() string {
@@ -504,10 +528,10 @@ func (r *Row) list(sep string) string {
 	if r != nil && r.vars {
 		var flat []Type
 		for _, e := range elems {
-			if v, ok := e.(*RowVar); ok && v.sol != nil {
-				flat = append(flat, v.sol.Elems()...)
+			if v, ok := e.(*RowVar); ok && v.Solution() != nil {
+				flat = append(flat, v.Solution().Elems()...)
 				continue
-			} else if ok && v.final {
+			} else if ok && v.root().final {
 				continue
 			}
 			flat = append(flat, e)

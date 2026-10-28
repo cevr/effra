@@ -2,6 +2,8 @@ package check
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"ergo.local/prototype/internal/sketch/syntax"
 )
@@ -246,6 +248,7 @@ func (c *checker) discoverInit() {
 		}
 		f.resetRows()
 	}
+	c.newSolutions()
 	c.checkInitCycles()
 }
 
@@ -281,17 +284,68 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 			}
 			n.fn.resetRows()
 		}
+		c.newSolutions()
 	}
 	if cyclic && inferred {
 		c.converge(scc)
-		// The fixpoint is reached: the reporting pass below reads the
-		// component's rows as final (class F).
-		c.finalComponent(scc)
+		c.settle(scc)
 	}
 	for _, n := range scc {
 		c.checkNode(n)
 	}
+	for _, n := range scc {
+		if n.fn != nil {
+			delete(c.settled, n.fn)
+		}
+	}
 	c.finalComponent(scc)
+}
+
+// settle repeats full silent passes over a cyclic component until one pass
+// changes neither a row nor which calls are admitted (the diagnostics the
+// pass would report), so the solutions the reporting pass reads are the
+// fixpoint (round 12 M2). Types that hold the component's variables compare
+// by their current solutions meanwhile (intern.go). Past a bound
+// proportional to the component the rows are refused, not guessed (S108).
+func (c *checker) settle(scc []*bodyNode) {
+	bound := 2*len(scc) + 2
+	prev := "\x00"
+	for range bound {
+		c.silent++
+		saved := c.admission
+		c.admission = []string{}
+		changed := false
+		for _, n := range scc {
+			if c.checkNode(n) {
+				changed = true
+			}
+		}
+		sort.Strings(c.admission)
+		admitted := strings.Join(c.admission, "\n")
+		c.admission = saved
+		c.silent--
+		if !changed && admitted == prev {
+			for _, n := range scc {
+				if n.fn != nil {
+					c.settled[n.fn] = true
+				}
+			}
+			return
+		}
+		prev = admitted
+	}
+	for _, n := range scc {
+		f := n.fn
+		if f == nil || !f.inferErrors && !f.inferUses {
+			continue
+		}
+		which := "error row"
+		if !f.inferErrors {
+			which = "capability row"
+		}
+		c.errorf(f.Decl.Name, CodeType, "cannot infer the %s of %s; write it", which, f.Name)
+		c.settled[f] = true
+	}
 }
 
 // finalComponent binds the row variables of a component for good and
@@ -313,6 +367,13 @@ func (c *checker) finalComponent(scc []*bodyNode) {
 		return
 	}
 	c.types.final(vars)
+	c.newSolutions()
+}
+
+// newSolutions discards the inference context (intern.go newSolutions)
+// and the checker's instances and switch subjects in it.
+func (c *checker) newSolutions() {
+	c.types.newSolutions()
 	clear(c.inferInstances)
 	clear(c.inferSubjects)
 }
@@ -550,18 +611,29 @@ func (c *checker) checkFuncBody(f *Func) bool {
 	c.reportUnused(fc)
 	changed := false
 	// Inference writes the solved rows into the variables, never into the
-	// signature (class F); a final variable keeps its solution.
-	if v := f.errVar; v != nil && !v.final {
-		if !t.errors.equal(c.types, v.sol) {
-			changed = true
+	// signature (class F); a final variable keeps its solution. After a
+	// component settled, its reporting pass reads the same solutions and
+	// must compute no wider row (the invariant c.widened records).
+	for _, p := range []struct {
+		v   *RowVar
+		row *Row
+	}{{f.errVar, t.errors}, {f.useVar, t.uses}} {
+		v := p.v
+		if v == nil || v.final {
+			continue
 		}
-		v.sol = t.errors
-	}
-	if v := f.useVar; v != nil && !v.final {
-		if !t.uses.equal(c.types, v.sol) {
-			changed = true
+		if c.settled[f] && c.silent == 0 {
+			if !p.row.subsetOf(c.types, v.sol) {
+				c.widened = append(c.widened, f.Name)
+			}
+			continue
 		}
-		v.sol = t.uses
+		if !p.row.equal(c.types, v.sol) {
+			changed = true
+			v.sol = p.row
+			// Ids resolved through the old solution no longer hold.
+			c.newSolutions()
+		}
 	}
 	return changed
 }

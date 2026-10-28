@@ -78,6 +78,13 @@ type checker struct {
 	// component's inference context, discarded when it is final (class F).
 	inferInstances map[int32]*Named
 	inferSubjects  map[any]*switchUnion
+	// admission collects the diagnostics a settle pass suppresses; settled
+	// marks the functions of a component that settled, whose reporting
+	// pass reads the published solutions; widened records a reporting
+	// pass that computed a wider row (an invariant the tests assert).
+	admission []string
+	settled   map[*Func]bool
+	widened   []string
 	// untyped holds the expressions Info records with an untyped type, and
 	// whether each was a constant, until a context converts them
 	// (updateExprType; go/types check.untyped).
@@ -162,7 +169,7 @@ func newChecker(path string, imp Importer, universe *Scope) *checker {
 		Uses:     map[*syntax.Ident]Object{},
 		Literals: map[syntax.Node]*Signature{},
 	}}
-	return &checker{
+	c := &checker{
 		pkg:            pkg,
 		imp:            imp,
 		universe:       universe,
@@ -171,6 +178,7 @@ func newChecker(path string, imp Importer, universe *Scope) *checker {
 		types:          newTypeTable(),
 		inferInstances: map[int32]*Named{},
 		inferSubjects:  map[any]*switchUnion{},
+		settled:        map[*Func]bool{},
 		errorTypes:     map[*Named]syntax.Pos{},
 		guarded:        map[*Func]bool{},
 		reach:          map[any]*reachNode{},
@@ -178,6 +186,8 @@ func newChecker(path string, imp Importer, universe *Scope) *checker {
 
 		totalSwitch: map[*syntax.TypeSwitchStmt]bool{},
 	}
+	c.types.substRow = c.substRow
+	return c
 }
 
 // errorf reports a diagnostic at the node's span in the current file.
@@ -191,6 +201,15 @@ func (c *checker) errorf(n syntax.Node, code, format string, args ...any) {
 
 func (c *checker) errorAt(pos, end syntax.Pos, code, format string, args ...any) {
 	if c.silent > 0 {
+		if c.admission != nil {
+			// What a silent pass would report: which calls it admits
+			// (settle, rows.go).
+			file := -1
+			if c.cur != nil {
+				file = c.cur.index
+			}
+			c.admission = append(c.admission, fmt.Sprintf("%d:%d:%d:%s", file, pos, end, code))
+		}
 		return
 	}
 	d := Diagnostic{Code: code, Message: fmt.Sprintf(format, args...)}

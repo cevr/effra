@@ -37,6 +37,38 @@ func (c *checker) subst(t Type, m map[*TypeParam]Type) Type {
 		return c.instantiate(t.origin(), args)
 	case *RowArg:
 		return &RowArg{Row: c.substRow(t.Row, m)}
+	case *RowVar:
+		// A use of a generic function's inferred row: the substitution is
+		// recorded on the variable and applied to its solution when the row
+		// is read (round 12 M1), composed with one recorded before.
+		root := t.root()
+		var tps []*TypeParam
+		if root.Fn != nil && root.Fn.Sig != nil {
+			tps = root.Fn.Sig.TParams
+		}
+		var nm map[*TypeParam]Type
+		changed := false
+		for _, tp := range tps {
+			cur := Type(tp)
+			if b, ok := t.m[tp]; ok {
+				cur = b
+			}
+			nb := c.subst(cur, m)
+			changed = changed || nb != cur
+			if nb != Type(tp) {
+				if nm == nil {
+					nm = map[*TypeParam]Type{}
+				}
+				nm[tp] = nb
+			}
+		}
+		if !changed {
+			return t
+		}
+		if nm == nil {
+			return root
+		}
+		return &RowVar{of: root, m: nm, ctx: c}
 	case *Struct:
 		s := &Struct{Fields: make([]*Field, len(t.Fields))}
 		for i, f := range t.Fields {

@@ -47,8 +47,14 @@ type typeTable struct {
 
 	// The component's inference context: ids and rows that depend on an
 	// unbound variable. Cleared when a component is final.
-	scoped     map[Type]int32
-	scopedRows map[*Row]*Row
+	scoped        map[Type]int32
+	scopedRows    map[*Row]*Row
+	scopedVarRows map[*RowVar]*Row
+
+	// varRows holds the rows of final variable uses (varRow); substRow
+	// is the checker's substitution, which a use applies to a solution.
+	varRows  map[*RowVar]*Row
+	substRow func(*Row, map[*TypeParam]Type) *Row
 
 	// gen counts the finished components: an infer row built in an earlier
 	// generation has stale ids.
@@ -86,13 +92,15 @@ const maxSize = 1 << 30
 
 func newTypeTable() *typeTable {
 	return &typeTable{
-		of:         map[Type]int32{},
-		nodes:      map[nodeKey]int32{},
-		sizes:      []int32{0},
-		foreign:    map[*Row]*Row{},
-		resolved:   map[*Row]*Row{},
-		scoped:     map[Type]int32{},
-		scopedRows: map[*Row]*Row{},
+		of:            map[Type]int32{},
+		nodes:         map[nodeKey]int32{},
+		sizes:         []int32{0},
+		foreign:       map[*Row]*Row{},
+		resolved:      map[*Row]*Row{},
+		scoped:        map[Type]int32{},
+		scopedRows:    map[*Row]*Row{},
+		scopedVarRows: map[*RowVar]*Row{},
+		varRows:       map[*RowVar]*Row{},
 	}
 }
 
@@ -117,9 +125,38 @@ func (tab *typeTable) final(vars []*RowVar) {
 	for _, v := range vars {
 		v.final = true
 	}
+	tab.newSolutions()
+}
+
+// newSolutions discards the inference context: a solution changed, or a
+// component is final, so every id resolved through an unbound variable's
+// current solution may differ now (round 12 M2: inside a component, types
+// compare by current solutions, never cached past them).
+func (tab *typeTable) newSolutions() {
 	clear(tab.scoped)
 	clear(tab.scopedRows)
+	clear(tab.scopedVarRows)
 	tab.gen++
+}
+
+// varRow is the row a variable use stands for: the solution so far, with
+// the use's substitution applied. infer reports a variable that is not
+// final. A final variable's row is built once for the check.
+func (tab *typeTable) varRow(v *RowVar) (*Row, bool) {
+	root := v.root()
+	memo := tab.varRows
+	if !root.final {
+		memo = tab.scopedVarRows
+	}
+	if r, ok := memo[v]; ok {
+		return r, !root.final
+	}
+	r := root.sol
+	if len(v.m) > 0 && !r.Empty() && tab.substRow != nil {
+		r = tab.substRow(r, v.m)
+	}
+	memo[v] = r
+	return r, !root.final
 }
 
 // id returns t's identity. Identical types (typeops.go) have equal ids.
@@ -142,9 +179,21 @@ func (tab *typeTable) intern(t Type) (int32, bool) {
 	case *RowArg:
 		return tab.rowID(t.Row)
 	case *RowVar:
-		// The variable itself, bound or not: a row resolves a final one
-		// (rowID).
-		return tab.node(nodeKey{kind: vVar, ref: t}, 1), false
+		// A use as a row element: the variable and its substitution, the
+		// bindings of the function's type parameters in order. A row
+		// reads it as its solution (rowID, resolve).
+		root := t.root()
+		var kids []Type
+		if root.Fn != nil && root.Fn.Sig != nil {
+			for _, tp := range root.Fn.Sig.TParams {
+				if b, ok := t.m[tp]; ok {
+					kids = append(kids, b)
+				} else {
+					kids = append(kids, tp)
+				}
+			}
+		}
+		return tab.build(vVar, root, 0, "", kids)
 	}
 	if id, ok := tab.of[t]; ok {
 		return id, false
@@ -301,18 +350,19 @@ func (tab *typeTable) rowID(r *Row) (int32, bool) {
 		ids = make([]int32, 0, len(r.ids))
 		for i, e := range r.elems {
 			v, ok := e.(*RowVar)
-			switch {
-			case !ok:
+			if !ok {
 				ids = append(ids, r.ids[i])
-			case v.final:
-				sol := tab.local(v.sol)
-				if sol != nil {
-					ids = append(ids, sol.ids...)
-				}
-			default:
-				ids = append(ids, r.ids[i])
-				infer = true
+				continue
 			}
+			// A variable reads as its solution so far, with the use's
+			// substitution: final, or current inside its component (round
+			// 12 M2), then the id holds only in the inference context.
+			vr, inf := tab.varRow(v)
+			if vr = tab.local(vr); vr != nil {
+				ids = append(ids, vr.ids...)
+				infer = infer || vr.infer
+			}
+			infer = infer || inf
 		}
 		tab.sortIDs(ids)
 		ids = slices.Compact(ids)
@@ -403,8 +453,9 @@ func (tab *typeTable) resolve(r *Row) *Row {
 	final := true
 	for _, e := range r.elems {
 		if v, ok := e.(*RowVar); ok {
-			final = final && v.final
-			out = out.union(tab, v.sol)
+			vr, infer := tab.varRow(v)
+			final = final && !infer && (vr == nil || !vr.infer)
+			out = out.union(tab, vr)
 			continue
 		}
 		out = out.with(tab, e)
