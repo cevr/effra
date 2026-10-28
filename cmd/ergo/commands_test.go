@@ -79,17 +79,18 @@ func TestStubsAnswerBeforeReadingArguments(t *testing.T) {
 			}
 		}
 	}
+	// Each stub is "ergo NAME: " and the text the spec gives the command.
 	want := map[string]string{
-		"test":         "ergo test: not available yet; lowering adds it (#196)",
-		"edition":      "ergo edition: removed in v1; there is one language and no editions (#205)",
-		"lint receipt": "ergo lint receipt: removed in v1; linting returns on the new checker (#203)",
-		"graph":        "ergo graph: removed in v1; semantic tooling returns on the new front end (#203)",
-		"lsp":          "ergo lsp: unavailable until ported to the new front end (#203)",
-		"mcp":          "ergo mcp: unavailable until ported to the new front end (#203)",
+		"test":         "not available yet; lowering adds it (#196)",
+		"edition":      "removed in v1; there is one language and no editions (#205)",
+		"lint receipt": "removed in v1; linting returns on the new checker (#203)",
+		"graph":        "removed in v1; semantic tooling returns on the new front end (#203)",
+		"lsp":          "unavailable until ported to the new front end (#203)",
+		"mcp":          "unavailable until ported to the new front end (#203)",
 	}
-	for name, message := range want {
+	for name, text := range want {
 		row, _ := lookupCommand(strings.Fields(name))
-		if row.stubMessage() != message {
+		if message := "ergo " + name + ": " + text; row.stubMessage() != message {
 			t.Fatalf("%s: %q, want %q", name, row.stubMessage(), message)
 		}
 	}

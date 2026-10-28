@@ -1,5 +1,7 @@
 # Host interop proposal
 
+> **Status:** describes the retired `.ef` language, removed 2026-10-28 by [#205](https://github.com/cevr/ergo/issues/205); kept as design reference. The [retirement record](receipts/retire-ef.md) lists what was removed.
+
 Binding boilerplate is a central adoption risk. Ergo should consume existing host declarations automatically while making behavioral trust explicit. The wider host representation design remains open. The prototype imports Go package functions automatically, with canonical native host types, explicit absence adaptation and complete result tuples. Go is the only host: TypeScript imports were proposed until 2026-10-26, when the owner removed the JavaScript interop ("we're removing the js interop id say").
 
 The [Gleam, ReScript and TypeScript source comparison](research/host-language-compilation.md) records implementation lessons for target capabilities, host declarations, source maps and separate compilation; its TypeScript cases are a research record. It does not imply these wider facilities are already shipped.
@@ -77,10 +79,10 @@ The standard I/O methods follow their documented contracts. Go's interface satis
 
 Native `int` converts explicitly: `i64(n)` widens and is total; `int(x)` narrows an `i64` to `Option<int>`, `None` when the value does not fit the platform's int. A failed narrowing has no partial value to keep, so Option rather than a failure row; neither conversion is implicit.
 
-The module-root `ergo.bindings.json` attaches behavior assertions without restating a signature. A key is the go/types full name of the function or method declaration:
+The module-root [`ergo.bindings.json`](https://github.com/cevr/ergo/blob/dbf135bff09901e85385945593113f35b300199c/ergo.bindings.json) attaches behavior assertions without restating a signature. A key is the go/types full name of the function or method declaration:
 
 ```json
-{"ergo.local/prototype/examples/sdk.Lookup":{"context":"fiber","cancellation":"cooperative"},
+{"example.com/sdk.Lookup":{"context":"fiber","cancellation":"cooperative"},
  "(*example.com/sdk.Client).Lookup":{"context":"fiber","cancellation":"cooperative"}}
 ```
 
@@ -92,4 +94,4 @@ A declared Go import also initializes its package, following Go's ordering and o
 
 CLI and MCP inspect/check report used binding signatures, forwarding, cancellation, provenance and each native parameter/result with its adaptation (`direct`, `present`, `option`, `error`, `context`, `receiver`); a method binding is named by its receiver, such as `(*sdk.Client).Close`. That display name is presentation only: each binding also carries its `identity`, the package-path-qualified receiver type plus the selected method (`go:(*example.com/sdk.Client).Close`, or `go:` plus the full name of a function), so two receivers that display alike stay distinct bindings; host types appear in the shared canonical type table with kind `host`. The application plan roots every reachable host type and its declaring package, including a method receiver's package that source never imports. Imported export bytes and normalized contracts participate in semantic revisions, conservatively including dependency changes; there is no persistent Ergo import cache. `importMicros` exposes loader cost separately. Builds never start a TypeScript checker, and an unsupported target is refused (EF110) before Go tools run.
 
-`examples/imports.ef` uses standard-library declarations and a real compiled local SDK fixture; `examples/host-types.ef` exercises nominal, nullable, typed-nil error and tuple results, methods, `io.Copy` and `fs.ReadDir` dispatch, reads and a short write over `examples/hosttypes`. Tests prove partial-value retention, context forwarding, replaced module resolution, and rejection after an imported return type changes. This fixture does not establish adoption of a complex third-party SDK. Full host object representation remains the next interop question.
+[`examples/imports.ef`](https://github.com/cevr/ergo/blob/dbf135bff09901e85385945593113f35b300199c/examples/imports.ef) uses standard-library declarations and a real compiled local SDK fixture; [`examples/host-types.ef`](https://github.com/cevr/ergo/blob/dbf135bff09901e85385945593113f35b300199c/examples/host-types.ef) exercises nominal, nullable, typed-nil error and tuple results, methods, `io.Copy` and `fs.ReadDir` dispatch, reads and a short write over [`examples/hosttypes`](https://github.com/cevr/ergo/blob/dbf135bff09901e85385945593113f35b300199c/examples/hosttypes). Tests prove partial-value retention, context forwarding, replaced module resolution, and rejection after an imported return type changes. This fixture does not establish adoption of a complex third-party SDK. Full host object representation remains the next interop question.

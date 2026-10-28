@@ -1,5 +1,7 @@
 # Runtime-independent machine plans and providers
 
+> **Status:** describes the retired `.ef` language, removed 2026-10-28 by [#205](https://github.com/cevr/ergo/issues/205); kept as design reference. The [retirement record](../receipts/retire-ef.md) lists what was removed.
+
 > **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
 
 Status: owner-directed design, 2026-10-08; the contract is specified here but is not implemented language or runtime support. A [draft plan interface](#draft-plan-interface-2026-10-09) against the checked plan was added on 2026-10-09. The machine declaration and lifecycle laws remain in [checked state machines](state-machines.md). This document defines the boundary between their checked plan and an ordinary userland runtime provider.

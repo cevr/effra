@@ -359,7 +359,7 @@ These are rules of the designed language. The parser enforces the syntax rules t
 | Laws | Designed ([#162](https://github.com/cevr/ergo/issues/162)); the [#125 spike](docs/research/laws.md) prototyped them for the earlier language on an unmerged branch |
 | Actors as a library | Landed as a spike in [`prototypes/actorlib`](prototypes/actorlib/doc.go) ([#101](https://github.com/cevr/ergo/issues/101), closed); the std package is [#57](https://github.com/cevr/ergo/issues/57) |
 | Go interop | Designed |
-| `ergo test`, lint rules, `ergo inspect`, MCP and the language server | Unavailable until ported to the new front end ([#203](https://github.com/cevr/ergo/issues/203)) |
+| Lint rules, `ergo inspect`, MCP and the language server | Unavailable until ported to the new front end ([#203](https://github.com/cevr/ergo/issues/203)) |
 | The earlier `.ef` language | Removed by [#205](https://github.com/cevr/ergo/issues/205) ([record](docs/receipts/retire-ef.md)) |
 
 ## Learn more

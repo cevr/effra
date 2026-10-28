@@ -17,12 +17,16 @@ Unlisted cases remain **reference-only, unassessed**. A source pointer records w
 # Mapping admission, offline
 go run ./scripts/conformance check
 
-# Execute the selected existing acceptance tests: real generated Go
+# Execute the evidence tests: one go test per package that holds one
 go run ./scripts/conformance check --run
 
-# Full gate also runs all Go tests, including the selected acceptance tests
+# Full gate also runs all Go tests, including any evidence tests
 ./scripts/gate.sh
 ```
+
+Evidence may be any Go test in a `*_test.go` file of the repository. The gate's mapping step keys on the directories of the evidence tests that the mapping names.
+
+**Since [#205](https://github.com/cevr/ergo/issues/205), no case has evidence.** The evidence tests of the 17 `covered` and `difference` cases were in the retired compiler, so each of those cases is now `pending` with no evidence; its limits keep the earlier text after "Earlier limits:", and the [retirement record](receipts/retire-ef.md#conformance-cases-without-evidence) lists them. A case returns to `covered` or `difference` when a v1 test asserts it. The next three paragraphs record what the removed evidence asserted.
 
 To move the pin:
 
@@ -30,9 +34,9 @@ To move the pin:
 2. Re-read every mapped case at the new commit and update its file, line and label deliberately.
 3. Update the prose that states the pin: the first paragraph of this page, `conformance/README.md`, and the Effect and Effect Cluster rows of `PRIOR_ART.md`. Other citations of the old commit, such as the source comparison below and those in `docs/research` and `docs/specs`, record what was read at that commit; change one only when its source is re-read at the new pin.
 
-The first selection covers child interruption and completed child-before-parent cleanup, preservation of an expected failure plus cleanup defect, and virtual-time admission of an unstarted fork. Timeout has an explicit difference row: Ergo's nominal `Timeout` and required `Scheduler` differ from upstream `Cause.TimeoutError`; a supplemental timer-defect test ensures defects are not rewritten as timeouts. Existing lifecycle acceptance also checks unobserved child failure, but that assertion has no selected upstream case mapping yet and is not counted as another port.
+The first selection covered child interruption and completed child-before-parent cleanup, preservation of an expected failure plus cleanup defect, and virtual-time admission of an unstarted fork. Timeout has an explicit difference row: Ergo's nominal `Timeout` and required `Scheduler` differ from upstream `Cause.TimeoutError`; a supplemental timer-defect test ensures defects are not rewritten as timeouts. Existing lifecycle acceptance also checks unobserved child failure, but that assertion has no selected upstream case mapping yet and is not counted as another port.
 
-Layer acquisition maps five `Layer.test.ts` cases to traces over the emitted Go runtime. Four are covered: parallel acquisition under build cancellation, a failure preserved while a shared acquisition is abandoned, release of every acquired resource after interruption, and dependent-first finalization. Cross-build memoization is a difference row: separate Ergo provisions are separate builds with independent acquisition tables, so a failed build is retried only by a new explicit build. The first-requester interruption row is also a difference, because producers belong to the build rather than to their first waiter.
+Layer acquisition mapped five `Layer.test.ts` cases to traces over the emitted Go runtime. Four were covered: parallel acquisition under build cancellation, a failure preserved while a shared acquisition is abandoned, release of every acquired resource after interruption, and dependent-first finalization. Cross-build memoization is a difference row: separate Ergo provisions are separate builds with independent acquisition tables, so a failed build is retried only by a new explicit build. The first-requester interruption row is also a difference, because producers belong to the build rather than to their first waiter.
 
 Generic acquisition, Deferred, Ref and fixed-capacity semaphore cases remain pending. Parallel scope finalization and detached child lifetime remain unsupported. Scheduler duration/precision and the rest of the corpus are not implied by the selected virtual-time fixture. Each later library, codec, server or machine family can add its own selected cases to the same mapping instead of creating another parity table.
 
