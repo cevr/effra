@@ -1,4 +1,4 @@
-// Package sketchfront is the front-end of the 2026 edition: a thin adapter
+// Package sketchfront is Ergo's one front end: a thin adapter
 // that parses with internal/sketch/syntax, checks and emits through the
 // prototype checker and emitter behind the bridge (internal/sketch/proto),
 // and formats with internal/sketch/format. It maps every diagnostic to a

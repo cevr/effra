@@ -50,7 +50,7 @@ func TestUTF16RangeCountsCodeUnitsAndNormalizesCRLF(t *testing.T) {
 }
 
 func TestFileURIUsesCanonicalEscapedIdentity(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "space é.ef")
+	path := filepath.Join(t.TempDir(), "space é.ergo")
 	if err := os.WriteFile(path, []byte("package p\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestReportPolicyFollowsTheDiagnostics(t *testing.T) {
 	source := "package p\n\nfunc main() {}\n"
 	clean := NewResult(source, Target, nil)
 	for _, strict := range []bool{false, true} {
-		report := clean.Report(SourceSnapshot{URI: "file:///x/main.ef", Text: source}, strict)
+		report := clean.Report(SourceSnapshot{URI: "file:///x/main.ergo", Text: source}, strict)
 		if !report.Checked || !report.PolicyPassed || report.Strict != strict || len(report.Diagnostics) != 0 || report.TotalCounts != (DiagnosticCounts{}) || report.Source.Origin != "disk" {
 			t.Fatalf("clean report (strict %v): %+v", strict, report)
 		}
@@ -141,15 +141,15 @@ func TestReportOrdersAndDeduplicatesFindings(t *testing.T) {
 func TestReportWritesText(t *testing.T) {
 	source := "package p\n\nfunc main() { 🌍; b }\n"
 	var out bytes.Buffer
-	if err := NewResult(source, Target, nil).Report(SourceSnapshot{Text: source}, false).WriteText(&out, "dir/main.ef"); err != nil || out.String() != "dir/main.ef: no diagnostics\n" {
+	if err := NewResult(source, Target, nil).Report(SourceSnapshot{Text: source}, false).WriteText(&out, "dir/main.ergo"); err != nil || out.String() != "dir/main.ergo: no diagnostics\n" {
 		t.Fatalf("clean text %q (%v)", out.String(), err)
 	}
 	out.Reset()
 	result := NewResult(source, Target, []Diagnostic{located(source, "S104", "b"), {Code: "S900", Message: "nowhere"}})
-	if err := result.Report(SourceSnapshot{Text: source}, false).WriteText(&out, "main.ef"); err != nil {
+	if err := result.Report(SourceSnapshot{Text: source}, false).WriteText(&out, "main.ergo"); err != nil {
 		t.Fatal(err)
 	}
-	want := "main.ef:3:19: error S104: S104 message\nmain.ef:1:1: error S900: nowhere\n"
+	want := "main.ergo:3:19: error S104: S104 message\nmain.ergo:1:1: error S900: nowhere\n"
 	if out.String() != want {
 		t.Fatalf("text %q, want %q (UTF-16 column after an astral character)", out.String(), want)
 	}

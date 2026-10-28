@@ -1,6 +1,5 @@
-// A module of the 2026 edition (docs/spec/ v0): the ergo.json beside this
-// file selects the Go-shaped front-end. The same workspace builds the
-// earlier edition's module in ../legacy.
+// A program of the decided language (docs/spec/ v0) inside the prototype
+// checker's subset: rows, try, catch, a closed wire and timeout.After.
 
 type NotFound { Name string }
 

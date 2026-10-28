@@ -13,7 +13,7 @@ func TestOpenReadsTheOpenFileAndNamesItsPhysicalPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := filepath.Join(root, "real", "main.ef")
+	target := filepath.Join(root, "real", "main.ergo")
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func TestOpenReadsTheOpenFileAndNamesItsPhysicalPath(t *testing.T) {
 	if err := os.Symlink(filepath.Join(root, "real"), filepath.Join(root, "alias")); err != nil {
 		t.Fatal(err)
 	}
-	file, err := Open(filepath.Join(root, "alias", "main.ef"))
+	file, err := Open(filepath.Join(root, "alias", "main.ergo"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestOpenRefusesDirectoriesAndMissingFiles(t *testing.T) {
 	if _, err := Open(dir); err == nil || !strings.Contains(err.Error(), "source must be a regular file") {
 		t.Fatalf("a directory was admitted: %v", err)
 	}
-	if _, err := Open(filepath.Join(dir, "missing.ef")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := Open(filepath.Join(dir, "missing.ergo")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a missing file gave %v", err)
 	}
 }

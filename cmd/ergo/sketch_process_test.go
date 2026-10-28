@@ -23,7 +23,7 @@ func TestSketchExampleBuildsAndRuns(t *testing.T) {
 	binary := buildTestCLI(t)
 	workspace := smokeWorkspace(t, "examples/editions/sketch", "go.mod")
 	dir := filepath.Join("examples", "editions", "sketch")
-	source := filepath.Join(dir, "main.ef")
+	source := filepath.Join(dir, "main.ergo")
 	expected := smokeRead(t, filepath.Join(workspace, dir, "expected.out"))
 	for _, c := range []struct {
 		args   []string
@@ -67,7 +67,7 @@ func envelopeKeys(t *testing.T, data []byte) []diagnosticKey {
 
 // TestCheckAndDiagnosticsReportLocatedSketchCodes: check and diagnostics
 // agree on every finding of a source, every finding has a sketch code and a
-// location, and retired .ef source is refused with a sketch syntax code.
+// location, and source in the retired language is refused with a sketch syntax code.
 func TestCheckAndDiagnosticsReportLocatedSketchCodes(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := smokeDir(t)
@@ -76,11 +76,11 @@ func TestCheckAndDiagnosticsReportLocatedSketchCodes(t *testing.T) {
 		name, text string
 		clean      bool
 	}{
-		{"legacy-syntax.ef", legacyCleanSource, false},
-		{"unknown-name.ef", "package p\n\nfunc main() needs Console {\n\tConsole.Println(\"🌍 ü\" + mïssing)\n}\n", false},
-		{"lexer.ef", "package p\n\n// ünïcode\nfunc main() needs Console { Console.Println(\"日本\") $ }\n", false},
-		{"missing-needs.ef", sketchMissingNeeds, false},
-		{"clean.ef", sketchCleanSource, true},
+		{"legacy-syntax.ergo", legacyCleanSource, false},
+		{"unknown-name.ergo", "func main() needs Console {\n\tConsole.Println(\"🌍 ü\" + mïssing)\n}\n", false},
+		{"lexer.ergo", "// ünïcode\nfunc main() needs Console { Console.Println(\"日本\") $ }\n", false},
+		{"missing-needs.ergo", sketchMissingNeeds, false},
+		{"clean.ergo", sketchCleanSource, true},
 	} {
 		path := smokeWrite(t, root, file.name, file.text)
 		checkOut, checkErr, checkCode := runSmokeCLI(t, processDeadline, binary, root, "", "check", path)
@@ -122,12 +122,12 @@ func TestAManifestSelectsNothing(t *testing.T) {
 	for _, manifest := range []string{`{"edition":"legacy"}`, `{"edition":"2026"}`, `{"edition":"bogus"}`, `{"edition":`, "not json"} {
 		dir := filepath.Join(root, strings.NewReplacer(`"`, "", "{", "", "}", "", ":", "-", " ", "-").Replace(manifest))
 		smokeWrite(t, dir, "ergo.json", manifest)
-		smokeWrite(t, dir, "main.ef", sketchCleanSource)
-		stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, dir, "", "run", "main.ef")
+		smokeWrite(t, dir, "main.ergo", sketchCleanSource)
+		stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, dir, "", "run", "main.ergo")
 		if code != 0 || string(stdout) != "ok\n" {
 			t.Fatalf("%s: run exit %d stdout %q\n%s", manifest, code, stdout, stderr)
 		}
-		stdout, stderr, code = runSmokeCLI(t, processDeadline, binary, dir, "", "check", "main.ef")
+		stdout, stderr, code = runSmokeCLI(t, processDeadline, binary, dir, "", "check", "main.ergo")
 		if code != 0 || bytes.Contains(stdout, []byte("edition")) || regexp.MustCompile(`EF14[4-6]`).Match(append(stdout, stderr...)) {
 			t.Fatalf("%s: check exit %d stdout %s stderr %s", manifest, code, stdout, stderr)
 		}
@@ -139,8 +139,8 @@ func TestAManifestSelectsNothing(t *testing.T) {
 func TestCommandsReadTheFileALinkNames(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := smokeDir(t)
-	target := smokeWrite(t, root, "new/main.ef", sketchCleanSource)
-	link := filepath.Join(root, "link.ef")
+	target := smokeWrite(t, root, "new/main.ergo", sketchCleanSource)
+	link := filepath.Join(root, "link.ergo")
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestALargeSourceChecksAndFmtRefusesIt(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := smokeDir(t)
 	large := "//" + strings.Repeat("x", maxFormatInputBytes) + "\n" + sketchCleanSource
-	path := smokeWrite(t, root, "main.ef", large)
+	path := smokeWrite(t, root, "main.ergo", large)
 	if stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, root, "", "check", path); code != 0 {
 		t.Fatalf("check of a large source: exit %d\n%s\n%s", code, firstLines(stdout), stderr)
 	}
@@ -189,8 +189,8 @@ func TestALargeSourceChecksAndFmtRefusesIt(t *testing.T) {
 func TestBuildAndRunRefuseASourceThatDoesNotCheck(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := smokeDir(t)
-	smokeWrite(t, root, "bad.ef", sketchMissingNeeds)
-	for _, args := range [][]string{{"run", "bad.ef"}, {"build", "bad.ef"}, {"build", "bad.ef", "-o", "out/bad"}} {
+	smokeWrite(t, root, "bad.ergo", sketchMissingNeeds)
+	for _, args := range [][]string{{"run", "bad.ergo"}, {"build", "bad.ergo"}, {"build", "bad.ergo", "-o", "out/bad"}} {
 		stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, root, "", args...)
 		envelope := smokeJSON(t, stdout)
 		if code != 1 || envelope["checked"] != false || string(stderr) != "check failed\n" {

@@ -69,12 +69,12 @@ func TestDiagnosticsSmokePositions(t *testing.T) {
 		source   string
 		expected []diagnosticsSmokeFinding
 	}{
-		{"unicode.ef", "package p\nfunc main() { \"𐐀é\" @ }\n", []diagnosticsSmokeFinding{{"S001", "@", 1}}},
-		{"crlf.ef", "// comment\r\npackage p\r\nfunc main() {}\r\n@", []diagnosticsSmokeFinding{{"S001", "@", 1}}},
-		{"eof.ef", "package p\r\nfunc main() {\r\n", []diagnosticsSmokeFinding{{"S001", "", 0}}},
-		{"cr-code.ef", "package p\rfunc main() {}\n", []diagnosticsSmokeFinding{{"S001", "func", 4}}},
-		{"checker.ef", "package p\r\n\r\nfunc main() needs Console {\r\n\tConsole.Println(\"𐐀é\" + nope)\r\n}\r\n", []diagnosticsSmokeFinding{{"S104", "nope", 4}}},
-		{"clean-crlf.ef", strings.ReplaceAll(sketchCleanSource, "\n", "\r\n"), nil},
+		{"unicode.ergo", "func main() { \"𐐀é\" @ }\n", []diagnosticsSmokeFinding{{"S001", "@", 1}}},
+		{"crlf.ergo", "// comment\r\nfunc main() {}\r\n@", []diagnosticsSmokeFinding{{"S001", "@", 1}}},
+		{"eof.ergo", "// comment\r\nfunc main() {\r\n", []diagnosticsSmokeFinding{{"S001", "", 0}}},
+		{"cr-code.ergo", "func main() {}\rfunc g() {}\n", []diagnosticsSmokeFinding{{"S001", "func g", 4}}},
+		{"checker.ergo", "func main() needs Console {\n\tConsole.Println(\"𐐀é\" + nope)\n}\n", []diagnosticsSmokeFinding{{"S104", "nope", 4}}},
+		{"clean-crlf.ergo", strings.ReplaceAll(sketchCleanSource, "\n", "\r\n"), nil},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			t.Parallel()
@@ -142,8 +142,8 @@ func TestDiagnosticsSmokeBounds(t *testing.T) {
 	directory := smokeDir(t)
 	for _, count := range []int{100, 101} {
 		// Each declaration of f after the first is one S108.
-		name := "findings-" + strconv.Itoa(count) + ".ef"
-		path := smokeWrite(t, directory, name, "package p\n\nfunc main() {}\n"+strings.Repeat("func f() {}\n", count+1))
+		name := "findings-" + strconv.Itoa(count) + ".ergo"
+		path := smokeWrite(t, directory, name, "func main() {}\n"+strings.Repeat("func f() {}\n", count+1))
 		stdout, _, code := runSmokeCLI(t, processDeadline, binary, directory, "", "check", path)
 		envelope := smokeJSON(t, stdout)
 		listed, _ := envelope["diagnostics"].([]any)
@@ -156,12 +156,12 @@ func TestDiagnosticsSmokeBounds(t *testing.T) {
 			t.Fatalf("%d findings: report %v", count, totals)
 		}
 	}
-	refused := []string{filepath.Join(directory, "directory.ef")}
+	refused := []string{filepath.Join(directory, "directory.ergo")}
 	if err := os.Mkdir(refused[0], 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if diagnosticsSmokeMkfifo(filepath.Join(directory, "fifo.ef")) == nil {
-		refused = append(refused, filepath.Join(directory, "fifo.ef"))
+	if diagnosticsSmokeMkfifo(filepath.Join(directory, "fifo.ergo")) == nil {
+		refused = append(refused, filepath.Join(directory, "fifo.ergo"))
 	}
 	for _, path := range refused {
 		for _, command := range []string{"check", "diagnostics", "build", "run"} {
@@ -189,19 +189,19 @@ func TestDiagnosticsSmokeIdentity(t *testing.T) {
 		if err := os.Symlink(filepath.Join("real", "inner"), filepath.Join(dots, "link")); err != nil {
 			t.Fatal(err)
 		}
-		lexical := smokeWrite(t, dots, "b.ef", sketchCleanSource)
-		smokeWrite(t, filepath.Join(dots, "real"), "b.ef", sketchMissingNeeds)
+		lexical := smokeWrite(t, dots, "b.ergo", sketchCleanSource)
+		smokeWrite(t, filepath.Join(dots, "real"), "b.ergo", sketchMissingNeeds)
 		expected := diagnosticsSmokeCLI(t, binary, lexical, false)
 		// Join would clean the path; the request must keep link/.. literally.
-		requested := dots + string(filepath.Separator) + "link" + string(filepath.Separator) + ".." + string(filepath.Separator) + "b.ef"
+		requested := dots + string(filepath.Separator) + "link" + string(filepath.Separator) + ".." + string(filepath.Separator) + "b.ergo"
 		assertReportParity(t, diagnosticsSmokeCLI(t, binary, requested, false), expected, report.DiagnosticReportSchemaVersion)
 	})
 	t.Run("symlink-uri", func(t *testing.T) {
 		t.Parallel()
 		directory := smokeDir(t)
-		original := smokeWrite(t, directory, "one.ef", sketchMissingNeeds)
-		smokeWrite(t, directory, "two.ef", sketchCleanSource)
-		link := filepath.Join(directory, "selected.ef")
+		original := smokeWrite(t, directory, "one.ergo", sketchMissingNeeds)
+		smokeWrite(t, directory, "two.ergo", sketchCleanSource)
+		link := filepath.Join(directory, "selected.ergo")
 		if err := os.Symlink(filepath.Base(original), link); err != nil {
 			t.Fatal(err)
 		}

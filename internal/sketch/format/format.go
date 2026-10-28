@@ -1,4 +1,4 @@
-// Package format is the 2026 edition's formatter (`ergo fmt`): one canonical
+// Package format is Ergo's formatter (`ergo fmt`): one canonical
 // layout with no options, printed from the internal/sketch/syntax AST. It is
 // apart from the parser so no checker or lowering code depends on layout
 // (docs/specs/formatting.md).

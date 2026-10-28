@@ -55,7 +55,7 @@ func TestCommandTableClassifiesEveryWordOnce(t *testing.T) {
 	if row, _ := lookupCommand([]string{"lint", "rules", "x"}); row.name != "lint rules" {
 		t.Fatalf("lint rules resolved to %q", row.name)
 	}
-	if row, _ := lookupCommand([]string{"lint", "main.ef"}); row.name != "lint" {
+	if row, _ := lookupCommand([]string{"lint", "main.ergo"}); row.name != "lint" {
 		t.Fatalf("lint FILE resolved to %q", row.name)
 	}
 }
@@ -66,12 +66,12 @@ func TestCommandTableClassifiesEveryWordOnce(t *testing.T) {
 func TestStubsAnswerBeforeReadingArguments(t *testing.T) {
 	binary := buildTestCLI(t)
 	dir := t.TempDir()
-	smokeWrite(t, dir, "main.ef", sketchCleanSource)
+	smokeWrite(t, dir, "main.ergo", sketchCleanSource)
 	for _, c := range commands {
 		if c.fate == available {
 			continue
 		}
-		for _, args := range [][]string{nil, {"main.ef"}, {"--help"}, {"-h"}, {"main.ef", "--json"}, {"a", "b", "c"}, {"--target", "go"}, {"/nonexistent/loop-probe-x"}} {
+		for _, args := range [][]string{nil, {"main.ergo"}, {"--help"}, {"-h"}, {"main.ergo", "--json"}, {"a", "b", "c"}, {"--target", "go"}, {"/nonexistent/loop-probe-x"}} {
 			argv := append(strings.Fields(c.name), args...)
 			stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, dir, "", argv...)
 			if code != 1 || len(stdout) != 0 || string(stderr) != c.stubMessage()+"\n" {
@@ -116,7 +116,7 @@ func TestHelpListsOnlyTheKeptCommands(t *testing.T) {
 			t.Fatalf("ergo %s: exit %d stdout %q", args, code, stdout)
 		}
 	}
-	stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, dir, "", "frobnicate", "main.ef")
+	stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, dir, "", "frobnicate", "main.ergo")
 	if code != 1 || len(stdout) != 0 || string(stderr) != "unknown command frobnicate; use ergo --help\n" {
 		t.Fatalf("an unknown command: exit %d stdout %q stderr %q", code, stdout, stderr)
 	}

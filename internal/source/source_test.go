@@ -8,7 +8,7 @@ import (
 )
 
 func TestReadRegularFileChecksConfiguredBound(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "main.ef")
+	path := filepath.Join(t.TempDir(), "main.ergo")
 	if err := os.WriteFile(path, []byte("12345"), 0o600); err != nil {
 		t.Fatal(err)
 	}

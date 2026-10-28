@@ -114,18 +114,18 @@ func runTestCLIDir(t *testing.T, binary, directory string, input string, args ..
 
 // sketchMissingNeeds is a source whose greet uses Console without
 // declaring it: one located S102 on line 4.
-const sketchMissingNeeds = "package p\n\nfunc greet() {\n\tConsole.Println(\"é\")\n}\n\nfunc main() needs Console {\n\tgreet()\n}\n"
+const sketchMissingNeeds = "func greet() {\n\tConsole.Println(\"é\")\n}\n\nfunc main() needs Console {\n\tgreet()\n}\n"
 
 func TestDiagnosticsCLIProcessFormatsTextJSONAndUsage(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := t.TempDir()
-	path := filepath.Join(root, "space é.ef")
+	path := filepath.Join(root, "space é.ergo")
 	if err := os.WriteFile(path, []byte(sketchMissingNeeds), 0600); err != nil {
 		t.Fatal(err)
 	}
 
 	textOutput, textError, code := runTestCLI(t, binary, "diagnostics", path)
-	if code != 1 || string(textOutput) != path+":4:17: error S102: greet requires Console, which its needs clause does not list and no with provides\n" || string(textError) != "diagnostics failed policy\n" {
+	if code != 1 || string(textOutput) != path+":2:17: error S102: greet requires Console, which its needs clause does not list and no with provides\n" || string(textError) != "diagnostics failed policy\n" {
 		t.Fatalf("unexpected diagnostics text: code=%d stdout=%q stderr=%q", code, textOutput, textError)
 	}
 
@@ -155,7 +155,7 @@ func TestDiagnosticsCLIProcessFormatsTextJSONAndUsage(t *testing.T) {
 		t.Fatalf("wrong diagnostics JSON: %+v", report)
 	}
 
-	clean := filepath.Join(root, "clean.ef")
+	clean := filepath.Join(root, "clean.ergo")
 	if err := os.WriteFile(clean, []byte(sketchCleanSource), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestDiagnosticsCLIProcessFormatsTextJSONAndUsage(t *testing.T) {
 		{[]string{"diagnostics", path, "--target"}, "--target requires a value"},
 		{[]string{"diagnostics", path, clean}, "incorrect arguments for diagnostics"},
 		{[]string{"diagnostics", "--json"}, "source file required"},
-		{[]string{"diagnostics", filepath.Join(root, "main.go")}, "source file must have .ef extension"},
+		{[]string{"diagnostics", filepath.Join(root, "main.go")}, "source file must have .ergo extension"},
 		{[]string{"diagnostics", path, "-o", "out"}, "-o is only supported by build"},
 	} {
 		stdout, stderr, code := runTestCLI(t, binary, c.args...)
@@ -185,7 +185,7 @@ func TestDiagnosticsCLIProcessFormatsTextJSONAndUsage(t *testing.T) {
 			t.Fatalf("ergo %v: code=%d stdout=%q stderr=%q; want exit 2 and %q", c.args, code, stdout, stderr, c.want)
 		}
 	}
-	_, missingError, code := runTestCLI(t, binary, "diagnostics", filepath.Join(root, "missing.ef"), "--json")
+	_, missingError, code := runTestCLI(t, binary, "diagnostics", filepath.Join(root, "missing.ergo"), "--json")
 	if code != 1 || len(missingError) == 0 {
 		t.Fatalf("missing source was not reported as an operational failure: code=%d stderr=%q", code, missingError)
 	}
@@ -196,7 +196,7 @@ func TestDiagnosticsCLIProcessFormatsTextJSONAndUsage(t *testing.T) {
 func TestFileCommandsRefuseOptionsTheyDoNotTake(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := t.TempDir()
-	path := filepath.Join(root, "main.ef")
+	path := filepath.Join(root, "main.ergo")
 	if err := os.WriteFile(path, []byte(sketchCleanSource), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestFileCommandsRefuseOptionsTheyDoNotTake(t *testing.T) {
 		{[]string{"build", path, "--target", "wasm"}, "EF110: unsupported target wasm; the only target is go"},
 		{[]string{"check"}, "source file required"},
 		{[]string{"run", path, path}, "incorrect arguments for run"},
-		{[]string{"check", filepath.Join(root, "main.txt")}, "source file must have .ef extension"},
+		{[]string{"check", filepath.Join(root, "main.txt")}, "source file must have .ergo extension"},
 		{[]string{"build", path, "-o", root + string(filepath.Separator)}, "names a directory"},
 		{[]string{"build", path, "-o", root}, "is a directory"},
 	} {
@@ -229,7 +229,7 @@ func TestFileCommandsRefuseOptionsTheyDoNotTake(t *testing.T) {
 func TestFormatCLIProcessModesAndAtomicWrites(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := t.TempDir()
-	path := filepath.Join(root, "main.ef")
+	path := filepath.Join(root, "main.ergo")
 	source := sketchUnformatted
 	want, err := sketchfront.Format(source, 0)
 	if err != nil {
@@ -309,13 +309,13 @@ func TestFormatCLIProcessModesAndAtomicWrites(t *testing.T) {
 		t.Fatal("unchanged formatting rewrote the file")
 	}
 
-	valid := filepath.Join(root, "valid.ef")
-	invalid := filepath.Join(root, "invalid.ef")
+	valid := filepath.Join(root, "valid.ergo")
+	invalid := filepath.Join(root, "invalid.ergo")
 	validSource := sketchUnformatted
 	if err := os.WriteFile(valid, []byte(validSource), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(invalid, []byte("package p\n\nfunc main() { @ }\n"), 0600); err != nil {
+	if err := os.WriteFile(invalid, []byte("func main() { @ }\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	mixedOutput, mixedError, code := runTestCLI(t, binary, "fmt", "--json", valid, invalid)
@@ -352,7 +352,7 @@ func TestFormatCLIProcessModesAndAtomicWrites(t *testing.T) {
 	if code != 2 || len(stdinJSONError) != 0 {
 		t.Fatalf("incompatible stdin invocation was not a structured JSON failure: code=%d stderr=%q", code, stdinJSONError)
 	}
-	symlink := filepath.Join(root, "link.ef")
+	symlink := filepath.Join(root, "link.ergo")
 	if err := os.Symlink(path, symlink); err != nil {
 		t.Fatal(err)
 	}
@@ -367,12 +367,12 @@ func TestFormatCLIProcessModesAndAtomicWrites(t *testing.T) {
 }
 
 // formatExpansion is a source whose formatted text is about ten times
-// longer: each one-line statement inside 64 nested blocks gets its own line
+// longer: each one-line statement inside 64 nested ifs gets its own line
 // and 65 tabs.
 func formatExpansion(statements int) []byte {
 	var source strings.Builder
-	source.WriteString("package p\nfunc f() {")
-	source.WriteString(strings.Repeat("{ ", 64))
+	source.WriteString("func f() {")
+	source.WriteString(strings.Repeat("if c { ", 64))
 	source.WriteString(strings.Repeat("x = 1; ", statements))
 	source.WriteString(strings.Repeat(" }", 64))
 	source.WriteString("}\n")
@@ -389,15 +389,15 @@ func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := sketchUnformatted
-	deepPath := filepath.Join(root, "deep", "e.ef")
-	rootPath := filepath.Join(root, "e.ef")
+	deepPath := filepath.Join(root, "deep", "e.ergo")
+	rootPath := filepath.Join(root, "e.ergo")
 	if err := os.WriteFile(deepPath, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(rootPath, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
-	output, stderr, code := runTestCLIDir(t, binary, root, "", "fmt", "--json", "jump/../e.ef", "./e.ef")
+	output, stderr, code := runTestCLIDir(t, binary, root, "", "fmt", "--json", "jump/../e.ergo", "./e.ergo")
 	if code != 0 || len(stderr) != 0 {
 		t.Fatalf("OS path resolution failed: code=%d stderr=%q stdout=%q", code, stderr, output)
 	}
@@ -416,9 +416,9 @@ func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
 		}
 	}
 
-	resolvedParentTarget := filepath.Join(root, "deep", "parent-target.ef")
-	lexicalParentCounterpart := filepath.Join(root, "parent-target.ef")
-	lexicalBytes := []byte("package lexical\n")
+	resolvedParentTarget := filepath.Join(root, "deep", "parent-target.ergo")
+	lexicalParentCounterpart := filepath.Join(root, "parent-target.ergo")
+	lexicalBytes := []byte("// lexical\n")
 	if err := os.WriteFile(resolvedParentTarget, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +428,7 @@ func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
 	if err := os.Chmod(root, 0555); err != nil {
 		t.Fatal(err)
 	}
-	output, stderr, code = runTestCLIDir(t, binary, root, "", "fmt", "--json", "jump/../parent-target.ef")
+	output, stderr, code = runTestCLIDir(t, binary, root, "", "fmt", "--json", "jump/../parent-target.ergo")
 	if err := os.Chmod(root, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -436,7 +436,7 @@ func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
 		t.Fatalf("resolved parent replacement failed with a read-only lexical parent: code=%d stderr=%q stdout=%q", code, stderr, output)
 	}
 	var resolvedParentReport formatReport
-	if err := json.Unmarshal(output, &resolvedParentReport); err != nil || len(resolvedParentReport.Files) != 1 || !resolvedParentReport.Files[0].Written || resolvedParentReport.Files[0].Path != "jump/../parent-target.ef" {
+	if err := json.Unmarshal(output, &resolvedParentReport); err != nil || len(resolvedParentReport.Files) != 1 || !resolvedParentReport.Files[0].Written || resolvedParentReport.Files[0].Path != "jump/../parent-target.ergo" {
 		t.Fatalf("resolved parent replacement lost requested identity: err=%v report=%+v", err, resolvedParentReport)
 	}
 	resolvedBytes, err := os.ReadFile(resolvedParentTarget)
@@ -447,15 +447,15 @@ func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
 		t.Fatalf("lexical counterpart was changed: err=%v bytes=%q", err, got)
 	}
 
-	hardlinkOne := filepath.Join(root, "hard-one.ef")
-	hardlinkTwo := filepath.Join(root, "hard-two.ef")
+	hardlinkOne := filepath.Join(root, "hard-one.ergo")
+	hardlinkTwo := filepath.Join(root, "hard-two.ergo")
 	if err := os.WriteFile(hardlinkOne, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Link(hardlinkOne, hardlinkTwo); err != nil {
 		t.Fatal(err)
 	}
-	output, stderr, code = runTestCLIDir(t, binary, root, "", "fmt", "--json", "hard-one.ef")
+	output, stderr, code = runTestCLIDir(t, binary, root, "", "fmt", "--json", "hard-one.ergo")
 	if code != 0 || len(stderr) != 0 {
 		t.Fatalf("single hardlink formatting failed: code=%d stderr=%q stdout=%q", code, stderr, output)
 	}
@@ -482,14 +482,14 @@ func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
 		t.Fatal("atomic replacement did not split the selected hardlink entry")
 	}
 
-	readOnly := filepath.Join(root, "readonly.ef")
+	readOnly := filepath.Join(root, "readonly.ergo")
 	if err := os.WriteFile(readOnly, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(readOnly, 0444); err != nil {
 		t.Fatal(err)
 	}
-	output, stderr, code = runTestCLIDir(t, binary, root, "", "fmt", "--json", "readonly.ef")
+	output, stderr, code = runTestCLIDir(t, binary, root, "", "fmt", "--json", "readonly.ergo")
 	if code != 0 || len(stderr) != 0 {
 		t.Fatalf("read-only file in writable directory was not replaceable: code=%d stderr=%q stdout=%q", code, stderr, output)
 	}
@@ -505,14 +505,14 @@ func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
 		t.Fatalf("read-only replacement did not preserve bytes/mode: mode=%#o bytes=%q", readOnlyInfo.Mode().Perm(), readOnlyBytes)
 	}
 
-	specialMode := filepath.Join(root, "special-mode.ef")
+	specialMode := filepath.Join(root, "special-mode.ergo")
 	if err := os.WriteFile(specialMode, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(specialMode, 0755|os.ModeSetgid); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, code = runTestCLIDir(t, binary, root, "", "fmt", "special-mode.ef"); code != 0 {
+	if _, _, code = runTestCLIDir(t, binary, root, "", "fmt", "special-mode.ergo"); code != 0 {
 		t.Fatalf("special mode file formatting failed: code=%d", code)
 	}
 	specialInfo, err := os.Stat(specialMode)
@@ -527,8 +527,8 @@ func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
 func TestFormatApplySeamReportsStaleAndEarlierWrites(t *testing.T) {
 	root := t.TempDir()
 	source := sketchUnformatted
-	firstPath := filepath.Join(root, "first.ef")
-	secondPath := filepath.Join(root, "second.ef")
+	firstPath := filepath.Join(root, "first.ergo")
+	secondPath := filepath.Join(root, "second.ergo")
 	if err := os.WriteFile(firstPath, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -547,10 +547,10 @@ func TestFormatApplySeamReportsStaleAndEarlierWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report := formatReport{Success: true, Files: []formatFileReport{{Path: "first.ef", Changed: true, Completed: true}, {Path: "second.ef", Changed: true, Completed: true}}}
+	report := formatReport{Success: true, Files: []formatFileReport{{Path: "first.ergo", Changed: true, Completed: true}, {Path: "second.ergo", Changed: true, Completed: true}}}
 	plans := []formatPlan{
-		{path: firstPath, displayPath: "first.ef", info: firstInfo, source: []byte(source), result: result, reportAt: 0},
-		{path: secondPath, displayPath: "second.ef", info: secondInfo, source: []byte(source), result: result, reportAt: 1},
+		{path: firstPath, displayPath: "first.ergo", info: firstInfo, source: []byte(source), result: result, reportAt: 0},
+		{path: secondPath, displayPath: "second.ergo", info: secondInfo, source: []byte(source), result: result, reportAt: 1},
 	}
 	calls := 0
 	err = applyFormatPlans(plans, &report, func(plan formatPlan) error {
@@ -560,7 +560,7 @@ func TestFormatApplySeamReportsStaleAndEarlierWrites(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			edited := "package edited\n"
+			edited := "// edited\n"
 			if err := os.WriteFile(plan.path, []byte(edited), 0600); err != nil {
 				return err
 			}
@@ -570,7 +570,7 @@ func TestFormatApplySeamReportsStaleAndEarlierWrites(t *testing.T) {
 		}
 		return replaceFormattedFile(plan)
 	})
-	if err == nil || !report.Partial || report.Success || !report.Files[0].Written || report.Files[1].Written || len(report.Failures) != 1 || report.Failures[0].Code != "EFMT_STALE" || report.Failures[0].Path != "second.ef" {
+	if err == nil || !report.Partial || report.Success || !report.Files[0].Written || report.Files[1].Written || len(report.Failures) != 1 || report.Failures[0].Code != "EFMT_STALE" || report.Failures[0].Path != "second.ergo" {
 		t.Fatalf("partial apply report lost causal state: err=%v report=%+v", err, report)
 	}
 	firstBytes, err := os.ReadFile(firstPath)
@@ -581,7 +581,7 @@ func TestFormatApplySeamReportsStaleAndEarlierWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(firstBytes) != result.Text || string(secondBytes) != "package edited\n" {
+	if string(firstBytes) != result.Text || string(secondBytes) != "// edited\n" {
 		t.Fatalf("real partial write did not preserve disk state: first=%q second=%q", firstBytes, secondBytes)
 	}
 	entries, err := os.ReadDir(root)
@@ -597,7 +597,7 @@ func TestFormatApplySeamReportsStaleAndEarlierWrites(t *testing.T) {
 
 func TestReplaceFormattedFileCleansTempAfterActualFailure(t *testing.T) {
 	root := t.TempDir()
-	path := filepath.Join(root, "main.ef")
+	path := filepath.Join(root, "main.ergo")
 	source := sketchUnformatted
 	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
 		t.Fatal(err)
@@ -610,7 +610,7 @@ func TestReplaceFormattedFileCleansTempAfterActualFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := formatPlan{path: path, displayPath: "main.ef", info: info, source: []byte(source), result: result}
+	plan := formatPlan{path: path, displayPath: "main.ergo", info: info, source: []byte(source), result: result}
 	err = replaceFormattedFileWithHook(plan, func(string) error { return os.ErrPermission })
 	var failure *formatAdapterError
 	if err == nil || !errors.As(err, &failure) || failure.code != "EFMT_WRITE" || failure.path != plan.displayPath {
@@ -633,7 +633,7 @@ func TestReplaceFormattedFileCleansTempAfterActualFailure(t *testing.T) {
 
 func TestReplaceFormattedFileRejectsSameBytesDifferentInode(t *testing.T) {
 	root := t.TempDir()
-	path := filepath.Join(root, "main.ef")
+	path := filepath.Join(root, "main.ergo")
 	source := sketchUnformatted
 	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
 		t.Fatal(err)
@@ -646,8 +646,8 @@ func TestReplaceFormattedFileRejectsSameBytesDifferentInode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := formatPlan{path: path, parentPath: root, displayPath: "main.ef", info: info, source: []byte(source), result: result}
-	replacement := filepath.Join(root, "replacement.ef")
+	plan := formatPlan{path: path, parentPath: root, displayPath: "main.ergo", info: info, source: []byte(source), result: result}
+	replacement := filepath.Join(root, "replacement.ergo")
 	if err := os.WriteFile(replacement, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -682,11 +682,11 @@ func TestReplaceFormattedFileUsesResolvedParentForRawPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := sketchUnformatted
-	actualPath := filepath.Join(root, "deep", "raw-parent.ef")
+	actualPath := filepath.Join(root, "deep", "raw-parent.ergo")
 	if err := os.WriteFile(actualPath, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
-	rawPath := root + string(filepath.Separator) + "jump" + string(filepath.Separator) + ".." + string(filepath.Separator) + "raw-parent.ef"
+	rawPath := root + string(filepath.Separator) + "jump" + string(filepath.Separator) + ".." + string(filepath.Separator) + "raw-parent.ergo"
 	info, err := os.Stat(rawPath)
 	if err != nil {
 		t.Fatal(err)
@@ -699,7 +699,7 @@ func TestReplaceFormattedFileUsesResolvedParentForRawPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := formatPlan{path: rawPath, parentPath: filepath.Dir(resolved), displayPath: "jump/../raw-parent.ef", info: info, source: []byte(source), result: result}
+	plan := formatPlan{path: rawPath, parentPath: filepath.Dir(resolved), displayPath: "jump/../raw-parent.ergo", info: info, source: []byte(source), result: result}
 	var temporaryParent string
 	err = replaceFormattedFileWithHook(plan, func(tempPath string) error {
 		temporaryParent = filepath.Dir(tempPath)

@@ -11,7 +11,7 @@ import (
 )
 
 func TestLoadRejectsFIFOBeforeOpen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "blocked.ef")
+	path := filepath.Join(t.TempDir(), "blocked.ergo")
 	if err := syscall.Mkfifo(path, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestLoadRejectsFIFOBeforeOpen(t *testing.T) {
 }
 
 func TestFmtRejectsFIFOBeforeOpen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "blocked.ef")
+	path := filepath.Join(t.TempDir(), "blocked.ergo")
 	if err := syscall.Mkfifo(path, 0o600); err != nil {
 		t.Fatal(err)
 	}

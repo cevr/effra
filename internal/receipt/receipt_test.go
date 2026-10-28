@@ -89,19 +89,19 @@ func TestLocateSourceAndArtifactPaths(t *testing.T) {
 	symlink(t, "real", filepath.Join(root, "dir-link"))
 	t.Chdir(root)
 
-	spelled := "dir-link/../dir-link/main.ef"
+	spelled := "dir-link/../dir-link/main.ergo"
 	source, err := receipt.LocateSource("jump/../" + spelled)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source.String() != "jump/../"+spelled || source.Admitted() != filepath.Join(root, "dir-link", "main.ef") || source.Path() != filepath.Join(root, "real", "main.ef") {
+	if source.String() != "jump/../"+spelled || source.Admitted() != filepath.Join(root, "dir-link", "main.ergo") || source.Path() != filepath.Join(root, "real", "main.ergo") {
 		t.Fatalf("source located as spelled=%q admitted=%q path=%q", source, source.Admitted(), source.Path())
 	}
-	artifact, err := receipt.Locate("jump/../main.ef")
+	artifact, err := receipt.Locate("jump/../main.ergo")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if artifact.Path() != filepath.Join(root, "parent", "main.ef") || artifact.Admitted() != "" {
+	if artifact.Path() != filepath.Join(root, "parent", "main.ergo") || artifact.Admitted() != "" {
 		t.Fatalf("artifact located at %q (admitted %q)", artifact.Path(), artifact.Admitted())
 	}
 	for _, path := range []string{"missing/../out", "missing/./out", "missing/.."} {

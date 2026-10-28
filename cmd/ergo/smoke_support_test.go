@@ -23,17 +23,15 @@ import (
 // because run and build write dist/ in the working directory.
 
 // sketchCleanSource checks, formats to itself and prints "ok".
-const sketchCleanSource = `package p
-
-func main() needs Console {
+const sketchCleanSource = `func main() needs Console {
 	Console.Println("ok")
 }
 `
 
 // sketchUnformatted formats to sketchCleanSource.
-const sketchUnformatted = "package p\n\n\n\nfunc main()  needs Console {\n        Console.Println(\"ok\")\n}\n"
+const sketchUnformatted = "\n\nfunc main()  needs Console {\n        Console.Println(\"ok\")\n}\n"
 
-// legacyCleanSource is a program of the retired .ef language, which the one
+// legacyCleanSource is a program of the retired language, which the one
 // front end refuses as a syntax error.
 const legacyCleanSource = `effect fn main() -> void {
     run Console.log("ok").provide<Console>(Stdout)

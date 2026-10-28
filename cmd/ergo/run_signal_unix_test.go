@@ -15,19 +15,17 @@ import (
 )
 
 // sketchWaitSource prints "ready" and then sleeps for a minute.
-const sketchWaitSource = `package p
-
-func wait() needs Console, Scheduler {
+const sketchWaitSource = `func wait() needs Console, Scheduler {
 	Console.Println("ready")
 	Scheduler.Sleep(60s)
 }
 
-wire Clock {
-	Scheduler = LiveScheduler{}
+let Clock = wire {
+	Scheduler: LiveScheduler{},
 }
 
 func main() needs Console {
-	with(Clock) { wait() }
+	with Clock { wait() }
 }
 `
 
@@ -40,7 +38,7 @@ func main() needs Console {
 func TestRunForwardsSignalsToTheProgram(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := smokeDir(t)
-	file := smokeWrite(t, root, "wait.ef", sketchWaitSource)
+	file := smokeWrite(t, root, "wait.ergo", sketchWaitSource)
 	for signal, want := range map[syscall.Signal]int{syscall.SIGINT: 130, syscall.SIGTERM: 143} {
 		start := time.Now()
 		stdout, stderr, code := runInterruptedEntry(t, binary, root, file, signal)

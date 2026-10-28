@@ -28,7 +28,7 @@ func TestProducerSmoke(t *testing.T) {
 	}
 	workspace := func(t *testing.T) (string, string) {
 		directory := smokeDir(t)
-		return directory, smokeWrite(t, directory, "main.ef", sketchCleanSource)
+		return directory, smokeWrite(t, directory, "main.ergo", sketchCleanSource)
 	}
 	commandsPath := filepath.Join(root, "cmd", "ergo", "commands.go")
 	ownerPath := filepath.Join(root, "internal", "producer", "identity.go")
@@ -169,7 +169,7 @@ func main(){json.NewEncoder(os.Stdout).Encode(map[string]any{"marker":marker,"pr
 		if got := producerSmokeRun(t, directory, lazy, "run", file); got != "ok\n" {
 			t.Fatalf("run printed %q", got)
 		}
-		bad := smokeWrite(t, directory, "bad.ef", sketchMissingNeeds)
+		bad := smokeWrite(t, directory, "bad.ergo", sketchMissingNeeds)
 		for _, args := range [][]string{{"check", file}, {"diagnostics", file}, {"build", bad}} {
 			_, stderr, code := runSmokeCLI(t, processDeadline, lazy, directory, "", args...)
 			if code == 0 || !strings.Contains(string(stderr), "producer acquisition forbidden") {

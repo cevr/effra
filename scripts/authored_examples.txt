@@ -1,6 +1,6 @@
-examples/editions/sketch/main.ef
-docs/research/ef-migrate/checkout.ef
-docs/research/ef-migrate/data.ef
-docs/research/ef-migrate/lifecycle.ef
-docs/research/ef-migrate/machine-breaker.ef
-docs/research/ef-migrate/main.ef
+examples/editions/sketch/main.ergo
+docs/research/ef-migrate/checkout.ergo
+docs/research/ef-migrate/data.ergo
+docs/research/ef-migrate/lifecycle.ergo
+docs/research/ef-migrate/machine-breaker.ergo
+docs/research/ef-migrate/main.ergo

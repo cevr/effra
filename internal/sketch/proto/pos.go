@@ -1,7 +1,7 @@
 // Package proto is the prototype checker and direct-Go emitter of sketch 9
 // (moved unchanged from prototypes/sketch9/sketch: ast.go, check.go,
 // emit.go, rt/), behind the bridge FromSyntax from the promoted parser's
-// AST (internal/sketch/syntax). It is the 2026 edition's checker and emitter
+// AST (internal/sketch/syntax). It is Ergo's checker and emitter
 // until #196 replaces the checker and #199/#207 the emitter and runtime.
 //
 // The bridge maps the prototype's subset one to one and refuses every other

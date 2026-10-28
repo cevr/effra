@@ -22,12 +22,12 @@ import (
 func TestFmtUsesTheOneFormatter(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := smokeDir(t)
-	first := smokeWrite(t, root, "one/main.ef", sketchUnformatted)
-	second := smokeWrite(t, root, "two/main.ef", sketchUnformatted)
-	malformedSource := "package p\n\nfunc main() {\n\tx := )\n}\n"
-	malformed := smokeWrite(t, root, "bad.ef", malformedSource)
+	first := smokeWrite(t, root, "one/main.ergo", sketchUnformatted)
+	second := smokeWrite(t, root, "two/main.ergo", sketchUnformatted)
+	malformedSource := "func main() {\n\tlet x = )\n}\n"
+	malformed := smokeWrite(t, root, "bad.ergo", malformedSource)
 
-	stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, root, "", "fmt", "--check", "--json", "one/main.ef", "two/main.ef")
+	stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, root, "", "fmt", "--check", "--json", "one/main.ergo", "two/main.ergo")
 	if code != 1 {
 		t.Fatalf("ergo fmt --check: exit %d, want 1\n%s\n%s", code, stdout, stderr)
 	}
@@ -44,7 +44,7 @@ func TestFmtUsesTheOneFormatter(t *testing.T) {
 		}
 	}
 
-	if stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, root, "", "fmt", "one/main.ef", "two/main.ef"); code != 0 {
+	if stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, root, "", "fmt", "one/main.ergo", "two/main.ergo"); code != 0 {
 		t.Fatalf("ergo fmt: exit %d\n%s\n%s", code, stdout, stderr)
 	}
 	for _, path := range []string{first, second} {
@@ -53,14 +53,14 @@ func TestFmtUsesTheOneFormatter(t *testing.T) {
 		}
 	}
 
-	_, stderr, code = runSmokeCLI(t, processDeadline, binary, root, "", "fmt", "bad.ef")
-	if code != 2 || !strings.Contains(string(stderr), "EFMT_SYNTAX") || !strings.Contains(string(stderr), "source cannot be formatted: S001 at 4:7: ") {
+	_, stderr, code = runSmokeCLI(t, processDeadline, binary, root, "", "fmt", "bad.ergo")
+	if code != 2 || !strings.Contains(string(stderr), "EFMT_SYNTAX") || !strings.Contains(string(stderr), "source cannot be formatted: S001 at 2:10: ") {
 		t.Fatalf("ergo fmt of a malformed file: exit %d, stderr %q", code, stderr)
 	}
-	stdout, _, _ = runSmokeCLI(t, processDeadline, binary, root, "", "fmt", "--json", "bad.ef")
+	stdout, _, _ = runSmokeCLI(t, processDeadline, binary, root, "", "fmt", "--json", "bad.ergo")
 	formatted = formatReport{}
 	if err := json.Unmarshal(stdout, &formatted); err != nil || len(formatted.Failures) != 1 || formatted.Failures[0].Code != "EFMT_SYNTAX" ||
-		len(formatted.Failures[0].Diagnostics) != 1 || formatted.Failures[0].Diagnostics[0].Code != "S001" || formatted.Failures[0].Diagnostics[0].Span.Line != 4 {
+		len(formatted.Failures[0].Diagnostics) != 1 || formatted.Failures[0].Diagnostics[0].Code != "S001" || formatted.Failures[0].Diagnostics[0].Span.Line != 2 {
 		t.Fatalf("ergo fmt --json of a malformed file: %s", stdout)
 	}
 	if after := smokeRead(t, malformed); string(after) != malformedSource {
@@ -71,7 +71,7 @@ func TestFmtUsesTheOneFormatter(t *testing.T) {
 		t.Fatalf("ergo fmt --stdin: exit %d, stdout %q\n%s", code, stdout, stderr)
 	}
 	if stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, root, legacyCleanSource, "fmt", "--stdin"); code != 2 || len(stdout) != 0 || !strings.Contains(string(stderr), "S001") {
-		t.Fatalf("ergo fmt --stdin of retired .ef source: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+		t.Fatalf("ergo fmt --stdin of source in the retired language: exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 }
 
@@ -84,8 +84,8 @@ func TestFmtReadsTheFileTheSpellingReaches(t *testing.T) {
 	for _, mode := range [][]string{{"fmt", "--check"}, {"fmt"}} {
 		t.Run(strings.Join(mode, " "), func(t *testing.T) {
 			root := smokeDir(t)
-			lexical := smokeWrite(t, root, "main.ef", sketchUnformatted)
-			target := smokeWrite(t, root, "new/main.ef", sketchUnformatted)
+			lexical := smokeWrite(t, root, "main.ergo", sketchUnformatted)
+			target := smokeWrite(t, root, "new/main.ergo", sketchUnformatted)
 			if err := os.MkdirAll(filepath.Join(root, "new", "deeper"), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -93,7 +93,7 @@ func TestFmtReadsTheFileTheSpellingReaches(t *testing.T) {
 				t.Fatal(err)
 			}
 			// filepath.Join would clean the `..` before the process sees it.
-			spelling := root + "/alias/../main.ef"
+			spelling := root + "/alias/../main.ergo"
 			if reached, err := filepath.EvalSymlinks(spelling); err != nil || reached != target {
 				t.Fatalf("the spelling reaches %s (%v), want %s", reached, err, target)
 			}
@@ -117,24 +117,24 @@ func TestFmtReadsTheFileTheSpellingReaches(t *testing.T) {
 	}
 }
 
-// TestFmtFormatsAMixedVarGroupUnderTheDefaultBound (review r2 M1): a var
-// group whose long type is followed by an inferred declaration and 2,000
-// short typed ones formats under the default 4 MiB bound. Before the fix
-// the empty type cell carried the long type's width to every short line,
-// and the 39,225-byte file needed 8,232,442 bytes of output.
-func TestFmtFormatsAMixedVarGroupUnderTheDefaultBound(t *testing.T) {
+// TestFmtFormatsAMixedLetRunUnderTheDefaultBound (review r2 M1): a run of
+// commented lets whose first has a long type, followed by an inferred one
+// and 2,000 short typed ones, formats under the default 4 MiB bound. The
+// run is the decided language's form of the Go var group of the review:
+// before the fix, an empty cell carried the long cell's width to every
+// short line, and the 39,225-byte file needed 8,232,442 bytes of output.
+func TestFmtFormatsAMixedLetRunUnderTheDefaultBound(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := smokeDir(t)
 	long := strings.Repeat("L", 4096)
 	var b strings.Builder
-	b.WriteString("package p\ntype " + long + " struct{}\nvar (\na " + long + " = " + long + "{}\nb = 2\n")
+	b.WriteString("type " + long + " {}\nlet a " + long + " = " + long + "{} // c\nlet b = 2 // c\n")
 	for i := range 2000 {
-		fmt.Fprintf(&b, "c%d int = 3\n", i)
+		fmt.Fprintf(&b, "let c%d int = 3 // c\n", i)
 	}
-	b.WriteString(")\n")
 	source := b.String()
-	path := smokeWrite(t, root, "alignment-empty.ef", source)
-	stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, root, "", "fmt", "--json", "alignment-empty.ef")
+	path := smokeWrite(t, root, "alignment-empty.ergo", source)
+	stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, root, "", "fmt", "--json", "alignment-empty.ergo")
 	if code != 0 {
 		t.Fatalf("ergo fmt: exit %d\n%s\n%s", code, firstLines(stdout), stderr)
 	}
@@ -143,20 +143,21 @@ func TestFmtFormatsAMixedVarGroupUnderTheDefaultBound(t *testing.T) {
 	}
 }
 
-// TestFmtFormatsATaperedStructUnderTheDefaultBound (review r3 M1): a struct
+// TestFmtFormatsATaperedStructUnderTheDefaultBound (review r3 M1): a record
 // whose first field name is 4,096 wide, whose next names taper to 40 (each
 // half the geometric mean of the names before it) and which ends with
 // 16,384 short names formats under the default 4 MiB bound. Before the
-// section bound, the 225,682-byte file needed 69,090,014 bytes of output.
+// section bound, the reviewer's 225,682-byte Go-spelled file needed
+// 69,090,014 bytes of output; the decided spelling adds a comma per field.
 func TestFmtFormatsATaperedStructUnderTheDefaultBound(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := smokeDir(t)
 	var b strings.Builder
-	b.WriteString("package p\ntype T struct {\n")
+	b.WriteString("type T {\n")
 	lnsum, count := 0.0, 0
 	for w := 4096; ; {
 		name := fmt.Sprintf("p%d", count)
-		fmt.Fprintf(&b, "%s%s int\n", name, strings.Repeat("a", w-len(name)))
+		fmt.Fprintf(&b, "%s%s int,\n", name, strings.Repeat("a", w-len(name)))
 		lnsum += math.Log(float64(w))
 		count++
 		if w == 40 {
@@ -165,15 +166,15 @@ func TestFmtFormatsATaperedStructUnderTheDefaultBound(t *testing.T) {
 		w = max(40, int(math.Ceil(math.Exp(lnsum/float64(count))/2)))
 	}
 	for i := range 4 * 4096 {
-		fmt.Fprintf(&b, "f%d int\n", i)
+		fmt.Fprintf(&b, "f%d int,\n", i)
 	}
 	b.WriteString("}\n")
 	source := b.String()
-	if len(source) != 225682 {
-		t.Fatalf("the generated taper is %d bytes, want the reviewer's 225682", len(source))
+	if len(source) != 242508 {
+		t.Fatalf("the generated taper is %d bytes, want 242508: the reviewer's taper with a comma per field", len(source))
 	}
-	path := smokeWrite(t, root, "alignment-taper.ef", source)
-	stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, root, "", "fmt", "--json", "alignment-taper.ef")
+	path := smokeWrite(t, root, "alignment-taper.ergo", source)
+	stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, root, "", "fmt", "--json", "alignment-taper.ergo")
 	if code != 0 {
 		t.Fatalf("ergo fmt: exit %d\n%s\n%s", code, firstLines(stdout), stderr)
 	}
@@ -200,7 +201,7 @@ func TestFormatSmokeLimitsAndPaths(t *testing.T) {
 	binary := buildTestCLI(t)
 
 	chain := t.TempDir()
-	path := smokeWrite(t, chain, "main.ef", sketchUnformatted)
+	path := smokeWrite(t, chain, "main.ergo", sketchUnformatted)
 	original, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -239,8 +240,8 @@ func TestFormatSmokeLimitsAndPaths(t *testing.T) {
 	t.Run("hardlink-alias", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		valid := smokeWrite(t, dir, "valid.ef", sketchUnformatted)
-		alias := filepath.Join(dir, "alias.ef")
+		valid := smokeWrite(t, dir, "valid.ergo", sketchUnformatted)
+		alias := filepath.Join(dir, "alias.ergo")
 		if err := os.Link(valid, alias); err != nil {
 			t.Fatal(err)
 		}
@@ -256,8 +257,8 @@ func TestFormatSmokeLimitsAndPaths(t *testing.T) {
 	t.Run("option-like-path", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		option := smokeWrite(t, dir, "--option.ef", sketchUnformatted)
-		if stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, dir, "", "fmt", "--", "--option.ef"); code != 0 || string(smokeRead(t, option)) != sketchCleanSource {
+		option := smokeWrite(t, dir, "--option.ergo", sketchUnformatted)
+		if stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, dir, "", "fmt", "--", "--option.ergo"); code != 0 || string(smokeRead(t, option)) != sketchCleanSource {
 			t.Fatalf("exit %d stdout=%q stderr=%q", code, stdout, stderr)
 		}
 	})
@@ -265,13 +266,13 @@ func TestFormatSmokeLimitsAndPaths(t *testing.T) {
 	t.Run("duplicate-requested-paths", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		smokeWrite(t, dir, "main.ef", sketchCleanSource)
-		stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, dir, "", "fmt", "--json", "main.ef", "./main.ef")
+		smokeWrite(t, dir, "main.ergo", sketchCleanSource)
+		stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, dir, "", "fmt", "--json", "main.ergo", "./main.ergo")
 		if code != 0 || len(stderr) != 0 {
 			t.Fatalf("exit %d stdout=%q stderr=%q", code, stdout, stderr)
 		}
 		files, _ := smokeJSON(t, stdout)["files"].([]any)
-		if file, _ := files[0].(map[string]any); len(files) != 1 || !reflect.DeepEqual(file["requestedPaths"], []any{"main.ef", "./main.ef"}) {
+		if file, _ := files[0].(map[string]any); len(files) != 1 || !reflect.DeepEqual(file["requestedPaths"], []any{"main.ergo", "./main.ergo"}) {
 			t.Fatalf("files: %v", files)
 		}
 	})
@@ -279,12 +280,12 @@ func TestFormatSmokeLimitsAndPaths(t *testing.T) {
 	t.Run("input-limits", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		// Each file is exactly the per-file bound: a package clause and a
-		// comment padding it out.
-		exact := "package p\n//" + strings.Repeat("x", maxFormatInputBytes-len("package p\n//")-1) + "\n"
+		// Each file is exactly the per-file bound: one comment line padded
+		// out to it.
+		exact := "//" + strings.Repeat("x", maxFormatInputBytes-len("//")-1) + "\n"
 		var inputs []string
 		for index := 0; index < 4; index++ {
-			name := "input-" + strconv.Itoa(index) + ".ef"
+			name := "input-" + strconv.Itoa(index) + ".ergo"
 			smokeWrite(t, dir, name, exact)
 			inputs = append(inputs, name)
 		}
@@ -292,14 +293,14 @@ func TestFormatSmokeLimitsAndPaths(t *testing.T) {
 		if code != 0 || smokeJSON(t, stdout)["success"] != true {
 			t.Fatalf("exact aggregate input: exit %d stdout=%q stderr=%q", code, firstLines(stdout), stderr)
 		}
-		smokeWrite(t, dir, "aggregate-extra.ef", " ")
-		stdout, stderr, code = runSmokeCLI(t, processDeadline, binary, dir, "", append(append([]string{"fmt", "--json"}, inputs...), "aggregate-extra.ef")...)
+		smokeWrite(t, dir, "aggregate-extra.ergo", " ")
+		stdout, stderr, code = runSmokeCLI(t, processDeadline, binary, dir, "", append(append([]string{"fmt", "--json"}, inputs...), "aggregate-extra.ergo")...)
 		failure := formatFirstFailure(t, stdout)
 		if message, _ := failure["message"].(string); code != 2 || failure["code"] != "EFMT_INPUT_LIMIT" || !strings.Contains(message, "aggregate input limit") {
 			t.Fatalf("aggregate input over: exit %d stdout=%q stderr=%q", code, firstLines(stdout), stderr)
 		}
-		smokeWrite(t, dir, "aggregate-extra.ef", exact+" ")
-		stdout, stderr, code = runSmokeCLI(t, processDeadline, binary, dir, "", "fmt", "--json", "aggregate-extra.ef")
+		smokeWrite(t, dir, "aggregate-extra.ergo", exact+" ")
+		stdout, stderr, code = runSmokeCLI(t, processDeadline, binary, dir, "", "fmt", "--json", "aggregate-extra.ergo")
 		if code != 2 || formatFirstFailure(t, stdout)["code"] != "EFMT_INPUT_LIMIT" {
 			t.Fatalf("per-file input over: exit %d stdout=%q stderr=%q", code, firstLines(stdout), stderr)
 		}
@@ -335,7 +336,7 @@ func TestFormatSmokeLimitsAndPaths(t *testing.T) {
 			dir := t.TempDir()
 			var outputs []string
 			for index := 0; index < 4; index++ {
-				name := "output-" + strconv.Itoa(index) + ".ef"
+				name := "output-" + strconv.Itoa(index) + ".ergo"
 				smokeWrite(t, dir, name, string(exactSource))
 				outputs = append(outputs, name)
 			}
@@ -343,8 +344,8 @@ func TestFormatSmokeLimitsAndPaths(t *testing.T) {
 			if code != 1 || smokeJSON(t, stdout)["success"] != true {
 				t.Fatalf("exact aggregate output: exit %d stdout=%q stderr=%q", code, firstLines(stdout), stderr)
 			}
-			smokeWrite(t, dir, "aggregate-extra.ef", "package p\n")
-			stdout, stderr, code = runSmokeCLI(t, processDeadline, binary, dir, "", append(append([]string{"fmt", "--json"}, outputs...), "aggregate-extra.ef")...)
+			smokeWrite(t, dir, "aggregate-extra.ergo", "// x\n")
+			stdout, stderr, code = runSmokeCLI(t, processDeadline, binary, dir, "", append(append([]string{"fmt", "--json"}, outputs...), "aggregate-extra.ergo")...)
 			failure := formatFirstFailure(t, stdout)
 			if message, _ := failure["message"].(string); code != 2 || failure["code"] != "EFMT_OUTPUT_LIMIT" || !strings.Contains(message, "aggregate output limit") {
 				t.Fatalf("aggregate output over: exit %d stdout=%q stderr=%q", code, firstLines(stdout), stderr)

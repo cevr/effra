@@ -24,11 +24,11 @@ import (
 //     blockquote, list item), and so do an unclosed fence and a carriage
 //     return anywhere, so the blocks read here are exactly the blocks
 //     CommonMark renders;
-//   - every go block parses and is canonical under the 2026 parser and formatter, with a
-//     package clause added, and uses no form the specification removed:
-//     `uses` (#217), `nil` (types.md) or a prefix catch (rows.md); nor a
-//     deferred Close, which the README never shows because resources
-//     release themselves (resources.md, `defer`);
+//   - every go block parses and is canonical under the 2026 parser and
+//     formatter, and uses no form the specification removed: `uses`
+//     (#217), `nil` (types.md) or a prefix catch (rows.md); nor a Close
+//     in `scope.OnExit`, which the README never shows because resources
+//     release themselves (resources.md, `scope.OnExit`);
 //   - the quoted S102 line is what `ergo diagnostics` prints for
 //     readmeSmokeS102Source;
 //   - each `./bin/ergo` command under "Working in this repo" exits 0 and
@@ -60,26 +60,24 @@ const readmeSmokeMinBlocks = 5
 
 // readmeSmokeS102Source is the source file behind the README's quoted
 // diagnostic: pay calls Gateway, which its needs clause does not list.
-const readmeSmokeS102Source = `package checkout
+const readmeSmokeS102Source = `type OrderNotFound { ID string }
+type GatewayDown {}
 
-type OrderNotFound struct{ ID string }
-type GatewayDown struct{}
-
-type Order struct {
-	ID    string
-	Total int64
+type Order {
+	ID    string,
+	Total int64,
 }
 
-type Orders interface {
-	Find(id string) (Order, error[OrderNotFound])
+type Orders {
+	Find(id string) Order fails OrderNotFound,
 }
 
-type Gateway interface {
-	Charge(order Order) (string, error[GatewayDown])
+type Gateway {
+	Charge(order Order) string fails GatewayDown,
 }
 
-func pay(id string) (string, error[OrderNotFound | GatewayDown]) needs Orders {
-	order := try Orders.Find(id)
+func pay(id string) string fails OrderNotFound | GatewayDown needs Orders {
+	let order = try Orders.Find(id)
 	return Gateway.Charge(order)
 }
 
@@ -142,31 +140,28 @@ func readmeProblems(readme string) []string {
 
 // readmeBlockProblem reports why one README go block is not admissible
 // source of the decided language, or nil when it is.
-func readmeBlockProblem(body string) error {
-	const header = "package readme\n\n"
-	source := header + body
+func readmeBlockProblem(source string) error {
 	file, err := syntax.Parse(source)
 	if err != nil {
 		// S001 covers `uses` as a clause, since it is not a keyword, and a
-		// prefix catch, which no production admits. The line is the
-		// block's own.
+		// prefix catch, which no production admits.
 		if located, ok := err.(*syntax.Error); ok {
-			return fmt.Errorf("line %d, column %d: %s %s", located.Line-strings.Count(header, "\n"), located.Column, located.Code, located.Message)
+			return fmt.Errorf("line %d, column %d: %s %s", located.Line, located.Column, located.Code, located.Message)
 		}
 		return err
 	}
 	var refused []string
 	lineOf := func(pos syntax.Pos) int {
-		return strings.Count(source[:int(pos)], "\n") + 1 - strings.Count(header, "\n")
+		return strings.Count(source[:int(pos)], "\n") + 1
 	}
 	syntax.Inspect(file, func(n syntax.Node) bool {
-		if deferred, ok := n.(*syntax.DeferStmt); ok {
-			// Ordinary defer is valid Ergo; a deferred Close is what the
-			// README promises the reader never writes.
-			syntax.Inspect(deferred.Stmt, func(m syntax.Node) bool {
+		if onExit, ok := n.(*syntax.CallExpr); ok && isScopeOnExit(onExit) {
+			// Ordinary exit cleanup is valid Ergo; a Close on exit is what
+			// the README promises the reader never writes.
+			syntax.Inspect(onExit.Trailing, func(m syntax.Node) bool {
 				if call, ok := m.(*syntax.CallExpr); ok {
 					if selector, ok := call.Fun.(*syntax.SelectorExpr); ok && selector.Sel.Name == "Close" {
-						refused = append(refused, fmt.Sprintf("line %d: a resource releases itself; the README shows no deferred Close (resources.md)", lineOf(deferred.Defer)))
+						refused = append(refused, fmt.Sprintf("line %d: a resource releases itself; the README shows no deferred Close (resources.md)", lineOf(onExit.Pos())))
 					}
 				}
 				return true
@@ -190,9 +185,20 @@ func readmeBlockProblem(body string) error {
 		return fmt.Errorf("%s", strings.Join(refused, "; "))
 	}
 	if formatted := format.File(file); formatted != source {
-		return fmt.Errorf("not canonical; ergo fmt prints:\n%s", strings.TrimPrefix(formatted, header))
+		return fmt.Errorf("not canonical; ergo fmt prints:\n%s", formatted)
 	}
 	return nil
+}
+
+// isScopeOnExit reports whether call is `scope.OnExit() { … }`, the
+// cleanup a scope runs when it exits (resources.md).
+func isScopeOnExit(call *syntax.CallExpr) bool {
+	selector, ok := call.Fun.(*syntax.SelectorExpr)
+	if !ok || selector.Sel.Name != "OnExit" || call.Trailing == nil {
+		return false
+	}
+	scope, ok := selector.X.(*syntax.Ident)
+	return ok && scope.Name == "scope"
 }
 
 func TestReadmeSmoke(t *testing.T) {
@@ -215,7 +221,7 @@ func TestReadmeSmoke(t *testing.T) {
 	t.Run("refuses-document-mutants", func(t *testing.T) {
 		t.Parallel()
 		const charge = "needs Accounts, Payments, Scheduler {"
-		const lock = "\t\tlock := try Accounts.Lock(card) // a resource: released on every exit, the timeout included\n"
+		const lock = "\t\tlet lock = try Accounts.Lock(card) // a resource: released on every exit, the timeout included\n"
 		if !strings.Contains(readme, "```go\n") || strings.Count(readme, charge) != 1 || strings.Count(readme, lock) != 1 {
 			t.Fatal("the mutant anchors are not in README.md once each; update them with the first snippet")
 		}
@@ -225,8 +231,8 @@ func TestReadmeSmoke(t *testing.T) {
 		}
 		const fence = "non-canonical fence"
 		for _, mutant := range []struct{ name, doc, want string }{
-			{"uses clause", uses(readme), "README go block 1: line 7, column 92: S001"},
-			{"deferred Close", strings.Replace(readme, lock, lock+"\t\tdefer lock.Close()\n", 1), "README go block 1: line 10: a resource releases itself"},
+			{"uses clause", uses(readme), "README go block 1: line 5, column 88: S001"},
+			{"deferred Close", strings.Replace(readme, lock, lock+"\t\tscope.OnExit() { lock.Close() }\n", 1), "README go block 1: line 8: a resource releases itself"},
 			// The reviewer's round-2 cases (round-2-receipts).
 			{"indented tilde marker before a go block with uses", readme + "\n    ~~~text\n\n```go\nfunc bad() uses Console {\n\twork()\n}\n```\n", fence},
 			{"indented closer inside a go block, uses after it", readme + "\n```go\nfunc okay() {\n\twork()\n}\n    ```\nfunc bad() uses Console {\n\twork()\n}\n```\n", fence},
@@ -240,13 +246,13 @@ func TestReadmeSmoke(t *testing.T) {
 			{"opener `go title=pay.ergo`", uses(first("```go title=pay.ergo\n")), fence},
 			{"opener of four backticks", uses(first("````go\n")), fence},
 			{"bare opener with no language", readme + "\n```\nfunc bad() uses Console {}\n```\n", fence},
-			{"closer with trailing text", strings.Replace(readme, "\tT.Equal(r.ID, \"timed-out\")\n}\n```\n", "\tT.Equal(r.ID, \"timed-out\")\n}\n``` end\n", 1), fence},
+			{"closer with trailing text", strings.Replace(readme, "\tassert r.ID == \"timed-out\"\n}\n```\n", "\tassert r.ID == \"timed-out\"\n}\n``` end\n", 1), fence},
 			// The reviewer's round-3 cases (round-3-findings, T1).
 			{"quoted fence", readme + "\n> ```go\n> func bad() uses Console {\n> \twork()\n> }\n> ```\n", fence},
 			{"nested quoted tilde fence", readme + "\n>> ~~~go\n>> func bad() uses Console {\n>> \twork()\n>> }\n>> ~~~\n", fence},
 			{"list item holding a quoted fence", readme + "\n- > ```go\n  > func bad() uses Console {\n  > \twork()\n  > }\n  > ```\n", fence},
 			{"CR line endings", strings.ReplaceAll(readme, "\n", "\r\n"), "carriage return"},
-			{"closer of four backticks", strings.Replace(readme, "\tT.Equal(r.ID, \"timed-out\")\n}\n```\n", "\tT.Equal(r.ID, \"timed-out\")\n}\n````\n", 1), fence},
+			{"closer of four backticks", strings.Replace(readme, "\tassert r.ID == \"timed-out\"\n}\n```\n", "\tassert r.ID == \"timed-out\"\n}\n````\n", 1), fence},
 		} {
 			problems := strings.Join(readmeProblems(mutant.doc), "\n")
 			if !strings.Contains(problems, mutant.want) {
@@ -270,13 +276,13 @@ func TestReadmeSmoke(t *testing.T) {
 		t.Parallel()
 		for _, mutant := range []struct{ name, body, want string }{
 			{"uses clause", "func f() uses Console {\n\tConsole.Println(\"x\")\n}\n", "S001"},
-			{"uses name", "func f() {\n\tuses := 1\n\tg(uses)\n}\n", "`uses` was replaced"},
+			{"uses name", "func f() {\n\tlet uses = 1\n\tg(uses)\n}\n", "`uses` was replaced"},
 			{"nil comparison", "func f(x Order) bool {\n\treturn x == nil\n}\n", "no nil"},
 			{"nil value", "func f() Order {\n\treturn nil\n}\n", "no nil"},
 			{"prefix catch of a type", "func f() Receipt {\n\treturn catch Declined {\n\t\tReceipt{}\n\t}\n}\n", "S001"},
-			{"prefix catch of a call", "func f() Receipt {\n\tr := catch Charge(c, 1) {\n\tcase Declined:\n\t\tReceipt{}\n\t}\n\treturn r\n}\n", "S001"},
+			{"prefix catch of a call", "func f() Receipt {\n\tlet r = catch Charge(c, 1) {\n\tcase Declined:\n\t\tReceipt{}\n\t}\n\treturn r\n}\n", "S001"},
 			{"not canonical", "func f()   {\n}\n", "not canonical"},
-			{"deferred Close", "func f() needs FS {\n\tfile := FS.Open(\"x\")\n\tdefer file.Close()\n\tread(file)\n}\n", "deferred Close"},
+			{"deferred Close", "func f() needs FS {\n\tlet file = FS.Open(\"x\")\n\tscope.OnExit() { file.Close() }\n\tread(file)\n}\n", "deferred Close"},
 		} {
 			problem := readmeBlockProblem(mutant.body)
 			if problem == nil || !strings.Contains(problem.Error(), mutant.want) {
@@ -284,9 +290,9 @@ func TestReadmeSmoke(t *testing.T) {
 			}
 		}
 		for _, control := range []string{
-			"func f(x Order) (Receipt, error[Declined]) needs Payments {\n\treturn Payments.Charge(x)\n}\n",
-			// Ordinary defer stays valid language (resources.md, `defer`).
-			"func f(done chan int64) {\n\tdefer done <- 1\n\twork()\n}\n",
+			"func f(x Order) Receipt fails Declined needs Payments {\n\treturn Payments.Charge(x)\n}\n",
+			// Exit cleanup that is not a release stays valid (resources.md, `scope.OnExit`).
+			"func f(done queue.Queue[int64]) {\n\tscope.OnExit() { done.Push(1) }\n\twork()\n}\n",
 		} {
 			if problem := readmeBlockProblem(control); problem != nil {
 				t.Errorf("control block refused: %v\n%s", problem, control)

@@ -5,16 +5,14 @@
 Ergo is a design and a prototype. The program below is the designed language. It parses and formats today, and most of its checks are designed, not built:
 
 ```go
-import (
-	"testing"
-	"timeout"
-)
+import testing
+import timeout
 
 // A signature lists every expected failure and every service the caller must supply.
-func Charge(card Card, amount int64) (Receipt, error[Declined | Frozen | timeout.Expired]) needs Accounts, Payments, Scheduler {
+func Charge(card Card, amount int64) Receipt fails Declined | Frozen | timeout.Expired needs Accounts, Payments, Scheduler {
 	return timeout.After(2s) { // the block runs as a child task; at 2s it is stopped and drained
-		lock := try Accounts.Lock(card) // a resource: released on every exit, the timeout included
-		Payments.Charge(lock, amount)   // lends lock for the call
+		let lock = try Accounts.Lock(card) // a resource: released on every exit, the timeout included
+		Payments.Charge(lock, amount)      // lends lock for the call
 	}
 }
 
@@ -24,20 +22,20 @@ func LawRefundNeverExceedsCharge(r Receipt) bool needs Payments {
 }
 
 // A test with replaced providers and virtual time: no sleeps and no mock framework.
-wire SlowWorld {
-	Accounts  = MemoryAccounts{}
-	Payments  = NewSlowGateway         // a constructor: it answers after 5s on this wire's Scheduler
-	Scheduler = testing.VirtualClock{} // jumps to the next timer when every task waits
+let SlowWorld = wire {
+	Accounts:  MemoryAccounts{},
+	Payments:  NewSlowGateway,         // a constructor: it answers after 5s on this wire's Scheduler
+	Scheduler: testing.VirtualClock{}, // jumps to the next timer when every task waits
 }
 
-func TestSlowGatewayTimesOut() needs testing.T {
-	r := with(SlowWorld) { Charge(Card{Number: "4242"}, 100) } catch {
+test SlowGatewayTimesOut {
+	let r = with SlowWorld { Charge(Card{Number: "4242"}, 100) } catch {
 	case timeout.Expired:
 		Receipt{ID: "timed-out"} // reached at once, in virtual time
 	case Declined, Frozen:
 		Receipt{}
 	}
-	T.Equal(r.ID, "timed-out")
+	assert r.ID == "timed-out"
 }
 ```
 
@@ -61,7 +59,7 @@ The "In Ergo" column is the design. The last column says what runs today.
 
 | Guarantee | What it means | In Go today | In Ergo | Runs today |
 | --- | --- | --- | --- | --- |
-| **Typed errors** | You can see every expected failure of a function, and the compiler knows which failures you handled. | `error` says only "something failed" | `error[NotFound \| Declined]`, exhaustive `catch` | prototype checker |
+| **Typed errors** | You can see every expected failure of a function, and the compiler knows which failures you handled. | `error` says only "something failed" | `fails NotFound \| Declined`, exhaustive `catch` | prototype checker |
 | **Declared dependencies** | You can see every service the caller must supply. A missing one is a compile error. | `context.Context` values, globals, constructor plumbing | `needs` rows, `wire … provides`, `with` | prototype checker: `needs` rows, closed wires |
 | **Resource safety** | Everything acquired is released once, on every exit: success, failure, panic or cancellation. | `defer`, if you remember it | release at scope end; moves and lends | release rules in `runtime/rt`; checks designed ([#197](https://github.com/cevr/ergo/issues/197)) |
 | **Structured concurrency** | No task outlives its scope. A stop reaches every child. A stop cannot cut cleanup short. | goroutines can leak; `context` is cooperative | scoped tasks, interruption points, masked release | task tree, stops and masks in `runtime/rt` |
@@ -79,18 +77,18 @@ Ergo keeps Go's spelling, Go's runtime and garbage collector, and single static 
 *Status:* the prototype checker enforces the rules below today ([rows](docs/spec/rows.md)). One part of the example is designed, not built: a method call on a value, such as `order.Paid()`.
 
 ```go
-type NotFound struct{ ID string }
-type Declined struct{ Reason string }
+type NotFound { ID string }
+type Declined { Reason string }
 
-func Checkout(id string, card Card) (Receipt, error[NotFound | Declined]) needs Orders, Payments {
-	order := try Orders.Get(id)
-	receipt := try Payments.Authorize(card, order.Total)
+func Checkout(id string, card Card) Receipt fails NotFound | Declined needs Orders, Payments {
+	let order = try Orders.Get(id)
+	let receipt = try Payments.Authorize(card, order.Total)
 	Orders.Save(order.Paid())
 	return receipt
 }
 
-func Settle(id string, card Card) error[NotFound] needs Orders, Payments {
-	receipt := try Checkout(id, card) catch {
+func Settle(id string, card Card) fails NotFound needs Orders, Payments {
+	let receipt = try Checkout(id, card) catch {
 	case Declined:
 		Receipt{} // handled: Declined leaves the row
 	} // NotFound is not handled: try passes it up, into the row of Settle
@@ -108,18 +106,18 @@ func Settle(id string, card Card) error[NotFound] needs Orders, Payments {
 *Status:* the prototype checks `needs` rows, inline wires and closed named wires today. The rest of this section is designed, not built: the `provides` and `needs` wire header, constructors, embedding, `replace` and an error row on `main` parse and format, and their checks are designed ([rows](docs/spec/rows.md#wire)).
 
 ```go
-wire Store provides Orders needs Config {
-	Orders = OpenPostgres // a constructor that returns a resource: closed when the with block ends
+let Store = wire provides Orders needs Config {
+	Orders: OpenPostgres, // a constructor that returns a resource: closed when the with block ends
 }
 
-wire Live provides Orders, Payments {
-	Store
-	Payments = Stripe{}
-	Config   = EnvConfig{} // Store uses it; callers cannot see it
+let Live = wire provides Orders, Payments {
+	Store,
+	Payments: Stripe{},
+	Config:   EnvConfig{}, // Store uses it; callers cannot see it
 }
 
-func main() error[NotFound | Declined | DialFailed] needs Console {
-	receipt := try with(Live) { Checkout("ord-7", Card{Number: "4242"}) }
+func main() fails NotFound | Declined | DialFailed needs Console {
+	let receipt = try with Live { Checkout("ord-7", Card{Number: "4242"}) }
 	Console.Println(receipt.ID)
 }
 ```
@@ -135,11 +133,11 @@ func main() error[NotFound | Declined | DialFailed] needs Console {
 *Status:* designed, not built. `replace` and embedding parse and format; `testing.VirtualClock` is designed ([stdlib](docs/spec/stdlib.md#testing)).
 
 ```go
-wire Fixture provides Orders, Payments, Scheduler {
-	Live
-	replace Orders   = MemoryOrders{} // OpenPostgres is never built
-	replace Payments = FakePayments{Decline: "4000"}
-	Scheduler        = testing.VirtualClock{}
+let Fixture = wire provides Orders, Payments, Scheduler {
+	Live,
+	replace Orders:   MemoryOrders{}, // OpenPostgres is never built
+	replace Payments: FakePayments{Decline: "4000"},
+	Scheduler:        testing.VirtualClock{},
 }
 ```
 
@@ -148,10 +146,10 @@ wire Fixture provides Orders, Payments, Scheduler {
 *Status:* designed, not built: the checker does not yet track resources ([resources](docs/spec/resources.md), [#197](https://github.com/cevr/ergo/issues/197)). `runtime/rt` implements the release rules that emitted code will call.
 
 ```go
-func copyFile(src, dst string) error[NotFound | WriteFailed] needs FS {
-	in := try FS.Open(src)
-	out := try FS.Create(dst) // if this fails, in is still closed
-	try io.Copy(out, in)      // lends out and in
+func copyFile(src, dst string) fails NotFound | WriteFailed needs FS {
+	let in2 = try FS.Open(src)
+	let out = try FS.Create(dst) // if this fails, in is still closed
+	try io.Copy(out, in2)        // lends out and in
 } // out closed, then in
 ```
 
@@ -159,16 +157,16 @@ func copyFile(src, dst string) error[NotFound | WriteFailed] needs FS {
 - Returning a resource, storing it in a struct or giving it to a task moves it. Using it after a move is a compile error.
 - Passing a resource as an argument lends it. A lent resource cannot escape the call, so no lifetime annotations are needed.
 - Releases run to completion, even when the scope ends because it was stopped.
-- There is no `defer f.Close()` to forget, and no double close.
+- There is no cleanup call to forget, and no double close.
 
 ## Tasks that cannot leak
 
-*Status:* `go`, `Task` and the `tasks` package are designed, not built ([runtime](docs/spec/runtime.md#tasks)). Today `runtime/rt` implements the task tree, stops, masks and `timeout.After`, and the prototype checks `timeout.After`. The runtime keeps every defect, but not yet every typed failure. A completed child's failure that nobody waited for is dropped when its scope closes normally. When a deadline wins, `timeout.After` drains the child and returns `timeout.Expired` to its caller, with any cleanup defects; the child's own exit keeps its own failure, marked interrupted when the stop reached the child first, and the caller's cause does not carry it ([receipt](runtime/rt/RECEIPT.md)).
+*Status:* `task.Go`, `Task` and the `tasks` package are designed, not built ([runtime](docs/spec/runtime.md#tasks)). Today `runtime/rt` implements the task tree, stops, masks and `timeout.After`, and the prototype checks `timeout.After`. The runtime keeps every defect, but not yet every typed failure. A completed child's failure that nobody waited for is dropped when its scope closes normally. When a deadline wins, `timeout.After` drains the child and returns `timeout.Expired` to its caller, with any cleanup defects; the child's own exit keeps its own failure, marked interrupted when the stop reached the child first, and the caller's cause does not carry it ([receipt](runtime/rt/RECEIPT.md)).
 
 ```go
-func Prices(ids []string) ([]Price, error[NotFound | timeout.Expired]) needs Catalog, Scheduler {
+func Prices(ids []string) []Price fails NotFound | timeout.Expired needs Catalog, Scheduler {
 	return timeout.After(2s) {
-		tasks.Map(ids, 8, func(id string) (Price, error[NotFound]) needs Catalog {
+		tasks.Map(ids, 8, func(id string) Price fails NotFound needs Catalog {
 			return Catalog.Price(id)
 		})
 	}
@@ -185,11 +183,11 @@ func Prices(ids []string) ([]Price, error[NotFound | timeout.Expired]) needs Cat
 *Status:* designed, not built. The `machine` declaration and the multi-subject switch parse, and their checks are designed ([runtime](docs/spec/runtime.md#machines-and-actors)). The actor library's hand-written Go lowering runs in [`prototypes/actorlib`](prototypes/actorlib/doc.go), with its cost measured ([#101 note](docs/research/actor-library.md)).
 
 ```go
-type State interface{ Closed | Open | HalfOpen }
-type Signal interface{ Failure | Success | Retry }
+type State = Closed | Open | HalfOpen
+type Signal = Failure | Success | Retry
 
-func step(s State, sig Signal) (Decision[State, string], error[ProbeDown]) needs Probe {
-	switch s, sig := s.(type), sig.(type) {
+func step(s State, sig Signal) Decision[State, string] fails ProbeDown needs Probe {
+	match (s, sig) {
 	case (Closed, Failure):
 		return Enter{Open{sig.Endpoint}}
 	case (HalfOpen, Success):
@@ -200,18 +198,18 @@ func step(s State, sig Signal) (Decision[State, string], error[ProbeDown]) needs
 }
 
 type Breaker machine[State, Signal] {
-	initial Closed{0}
-	step    step
+	initial: Closed{0},
+	step:    step,
 }
 
-func trip(endpoint string) error[actor.Stopped] needs Probe {
-	b := actor.StartMachine(Breaker{}, 16) // the actor library runs it; stopped at scope end
+func trip(endpoint string) fails actor.Stopped needs Probe {
+	let b = actor.StartMachine(Breaker{}, 16) // the actor library runs it; stopped at scope end
 	try b.Send(Failure{Endpoint: endpoint})
 }
 
-func join(name string) (int64, error[RoomFull | actor.Stopped | actor.NoReply]) {
-	room := actor.StartAgent(Room{}, 16)
-	return actor.Call(room.Address(), func(r *Room) (int64, error[RoomFull]) { return r.Join(name) })
+func join(name string) int64 fails RoomFull | actor.Stopped | actor.NoReply {
+	let room = actor.StartAgent(Room{}, 16)
+	return actor.Call(room.Address(), func(r *Room) int64 fails RoomFull { return r.Join(name) })
 }
 ```
 
@@ -226,7 +224,7 @@ func join(name string) (int64, error[RoomFull | actor.Stopped | actor.NoReply]) 
 ```go
 // Found by name, like TestX, and run with generated inputs and shrinking.
 func LawRoundTrip(o Order) bool {
-	decoded := ParseOrder(o.Wire()) catch {
+	let decoded = ParseOrder(o.Wire()) catch {
 	case DecodeFailed:
 		return false // a decode failure refutes the law, with the shrunk input
 	}
@@ -280,7 +278,7 @@ Agents read the same checked model as the compiler, through the CLI today and th
 
 ```console
 $ ergo diagnostics pay.ergo
-pay.ergo:21:23: error S102: pay requires Gateway, which its needs clause does not list and no with provides
+pay.ergo:19:23: error S102: pay requires Gateway, which its needs clause does not list and no with provides
 ```
 
 `ergo inspect` will answer the same questions as JSON when it returns on the new front end ([#203](https://github.com/cevr/ergo/issues/203)). Designed output:
@@ -304,14 +302,14 @@ $ ergo inspect checkout.ergo Checkout
 *Status:* designed, not built: the prototype checker refuses `import go` with S109 ([grammar](docs/spec/grammar.md#declarations)).
 
 ```go
-import go "strconv" // every call through strconv charges go.Foreign
+import go strconv // every call through strconv charges go.Foreign
 
-func parsePort(text string) (int64, error[go.Error]) needs go.Foreign {
+func parsePort(text string) int64 fails go.Error needs go.Foreign {
 	return strconv.ParseInt(text, 10, 64)
 }
 ```
 
-- Go's `(T, error)` becomes `(T, error[go.Error])`. A Go result that may be nil becomes `Option`. A Go panic becomes a defect. Slices and maps are copied at the boundary.
+- A Go function that returns `(T, error)` becomes one that returns `T fails go.Error`. A Go result that may be nil becomes `Option`. A Go panic becomes a defect. Slices and maps are copied at the boundary.
 - A bodiless declaration with a `//ef:go pkg.Func` directive binds one Go function with stated types, and a generated adapter checks them.
 - The emitted Go stays readable. The prototype carries source positions in `//line` directives, so Go panics, pprof, delve and the race detector point at Ergo lines.
 

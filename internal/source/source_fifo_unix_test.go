@@ -11,7 +11,7 @@ import (
 )
 
 func TestReadRegularFileRejectsFIFOBeforeOpen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "blocked.ef")
+	path := filepath.Join(t.TempDir(), "blocked.ergo")
 	if err := syscall.Mkfifo(path, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestReadRegularFileRejectsFIFOBeforeOpen(t *testing.T) {
 // caller's stat: the non-blocking open returns at once and the FIFO is then
 // refused.
 func TestOpenRefusesFIFOWithoutBlocking(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "blocked.ef")
+	path := filepath.Join(t.TempDir(), "blocked.ergo")
 	if err := syscall.Mkfifo(path, 0o600); err != nil {
 		t.Fatal(err)
 	}
