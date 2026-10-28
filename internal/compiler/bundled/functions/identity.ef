@@ -1,3 +1,0 @@
-fn identity(input: string) -> string {
-    input
-}

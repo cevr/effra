@@ -1,28 +1,24 @@
+// Command ergo checks, formats, builds and runs Ergo source on its one front
+// end (internal/sketchfront). The command table (commands.go) classifies
+// every command word; this file holds the commands that read one source.
 package main
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
-	"ergo.local/prototype/internal/compiler"
-	"ergo.local/prototype/internal/edition"
-	"ergo.local/prototype/internal/lintpacks"
-	"ergo.local/prototype/internal/lsp"
-	"ergo.local/prototype/internal/mcp"
 	"ergo.local/prototype/internal/producer"
 	"ergo.local/prototype/internal/receipt"
+	"ergo.local/prototype/internal/report"
+	"ergo.local/prototype/internal/sketchfront"
+	sourcefile "ergo.local/prototype/internal/source"
 )
 
 func main() {
@@ -41,10 +37,13 @@ func main() {
 	}
 }
 
+// usageError is an invalid invocation: exit 2.
 type usageError struct{ message string }
 
 func (e usageError) Error() string { return e.message }
 
+// exitStatusError exits with code, printing message unless the command
+// already reported the failure (handled).
 type exitStatusError struct {
 	code    int
 	message string
@@ -60,690 +59,243 @@ func invalidInvocation(err error) error {
 	return usageError{message: err.Error()}
 }
 
-// lintSelection removes the lint configuration flags from args: at most one
-// --lint-config FILE and any number of --rules MANIFEST. Every occurrence
-// counts, and an empty path is refused rather than read as no selection.
-func lintSelection(args []string) (lintpacks.Selection, []string, error) {
-	var selection lintpacks.Selection
-	var rest []string
-	configured := false
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--lint-config", "--rules":
-			if i+1 == len(args) {
-				return selection, nil, fmt.Errorf("%s requires a value", args[i])
-			}
-			if args[i] == "--lint-config" {
-				if configured {
-					return selection, nil, fmt.Errorf("--lint-config may be given once")
-				}
-				configured = true
-			}
-			if args[i+1] == "" {
-				return selection, nil, fmt.Errorf("%s requires a file path, not an empty value", args[i])
-			}
-			if args[i] == "--rules" {
-				selection.Manifests = append(selection.Manifests, args[i+1])
-			} else {
-				selection.Config = args[i+1]
-			}
-			i++
-		default:
-			rest = append(rest, args[i])
-		}
-	}
-	return selection, rest, nil
-}
-
-// loadLint loads the selected lint configuration. Every failure is an
-// invalid invocation: no pack starts under a configuration that does not
-// load and validate.
-func loadLint(selection lintpacks.Selection) (*lintpacks.Session, error) {
-	session, err := lintpacks.Load(selection)
-	if err != nil {
-		return nil, invalidInvocation(err)
-	}
-	return session, nil
-}
-
+// printJSON prints v as indented JSON.
 func printJSON(v any) error {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(v)
 }
 
-// graphError maps a graph refusal to its exit class: a malformed request is an
-// invalid invocation (exit 2); a refusal about the checked source is exit 1.
-// Both print the same CODE: message text MCP returns.
-func graphError(err error) error {
-	var refusal *compiler.GraphRefusal
-	if errors.As(err, &refusal) && refusal.Invocation() {
-		return usageError{message: refusal.Error()}
-	}
-	return err
-}
-
-// graphUsage lists the graph view options from the table MCP also advertises.
-func graphUsage() string {
-	var b strings.Builder
-	b.WriteString("graph views: ergo graph FILE [--target go]")
-	for _, option := range compiler.GraphOptions() {
-		value := strings.ToUpper(option.Field)
-		if len(option.Values) > 0 {
-			value = strings.Join(option.Values, "|")
-		}
-		fmt.Fprintf(&b, " [%s %s]", option.Flag, value)
-		if option.Repeatable {
-			b.WriteString("...")
-		}
-	}
-	b.WriteString("\nWithout view options, ergo graph prints the frozen legacy dependency graph JSON.")
-	return b.String()
-}
-
-// printGraphView prints one selected GraphViewV1: compact JSON for json, or
-// exactly the rendering text MCP returns for mermaid and dot.
-func printGraphView(r *compiler.Result, request compiler.GraphRequest) error {
-	view, err := r.GraphView(request)
-	if err != nil {
-		return graphError(err)
-	}
-	payload, rendering, err := compiler.GraphViewPayload(view, request.Format)
-	if err != nil {
-		return graphError(err)
-	}
-	if rendering == nil {
-		return printProjectionJSON(payload)
-	}
-	_, err = io.WriteString(os.Stdout, rendering.Text)
-	return err
-}
-
-// Canonical projection accounting describes compact JSON before terminal LF.
+// printProjectionJSON prints v as compact JSON and a line feed.
 func printProjectionJSON(v any) error {
 	return json.NewEncoder(os.Stdout).Encode(v)
 }
-func load(path, target string) (*compiler.Result, error) {
-	source, err := locateSource(path)
-	if err != nil {
-		return nil, err
+
+// sourceExtension is the extension of every source file.
+const sourceExtension = ".ef"
+
+// requireSourceExtension is the one source-extension rule of every command.
+func requireSourceExtension(path string) error {
+	if filepath.Ext(path) != sourceExtension {
+		return fmt.Errorf("source file must have %s extension", sourceExtension)
 	}
-	r, _, err := loadSource(source, target)
-	return r, err
+	return nil
 }
 
-// locateSource admits a source path once. Every command loads, builds,
-// tests and measures through the returned location, so no step reads,
-// protects or records a different file by interpreting the spelling again.
-func locateSource(path string) (receipt.Location, error) {
-	if filepath.Ext(path) != ".ef" {
-		return receipt.Location{}, fmt.Errorf("source file must have .ef extension")
-	}
-	return receipt.LocateSource(path)
-}
+const diagnosticsHelp = "usage: ergo diagnostics FILE [--strict] [--json] [--target go]\n" +
+	"Locations: one-based UTF-16 lines/columns in text; zero-based UTF-16 ranges and original UTF-8 byte spans in JSON.\n" +
+	"Exit codes: 0 policy passed; 1 failed policy or source/operational failure; 2 invalid invocation.\n" +
+	"With --json, source findings produce a report on stdout even when policy fails; operational failures produce no report and explain the error on stderr.\n"
 
-// loadSource admits the located source and compiles it with the legacy
-// front-end. Commands admit once and route by edition first (command); this
-// path serves callers that load a known legacy source.
-func loadSource(source receipt.Location, target string) (*compiler.Result, compiler.SourceSnapshot, error) {
-	admitted, err := admitSource(source.Path())
-	if err != nil {
-		return nil, compiler.SourceSnapshot{}, err
-	}
-	defer admitted.Close()
-	return compileAdmitted(source, admitted, target)
-}
-
-// compileAdmitted reads the admitted open file and checks it. Diagnostics
-// name the admitted path and module imports resolve beside it; the bytes
-// come from the file the edition is bound to.
-func compileAdmitted(source receipt.Location, admitted *edition.Source, target string) (*compiler.Result, compiler.SourceSnapshot, error) {
-	uri, err := compiler.FileURI(source.Admitted())
-	if err != nil {
-		return nil, compiler.SourceSnapshot{}, err
-	}
-	text, err := admitted.Read(0)
-	if err != nil {
-		return nil, compiler.SourceSnapshot{}, err
-	}
-	snapshot := compiler.SourceSnapshot{URI: uri, Origin: "disk", Text: string(text)}
-	return compiler.CompileAt(snapshot.Text, target, filepath.Dir(source.Admitted())), snapshot, nil
-}
-
-type options struct {
+// fileOptions are the options of a command that reads one source.
+type fileOptions struct {
 	target, output string
-	strict         bool
-	json           bool
-	timeoutMillis  int
-	live           bool
-	receipt        string
-	positional     []string
-	typeSelection  compiler.TypeSelection
-	lint           lintpacks.Selection
-	// graph holds graph view options exactly as the shared compiler admission
-	// receives them from MCP: strings, an integer depth and repeated lists.
-	graph map[string]any
+	strict, json   bool
+	file           string
 }
 
-func parseOptions(args []string) (options, error) {
-	opts := options{target: "go"}
-	var err error
-	if opts.lint, args, err = lintSelection(args); err != nil {
-		return opts, err
-	}
+// parseFileOptions reads the options of command. --strict and --json belong
+// to diagnostics and -o to build; any other option is unknown. A target
+// other than Go is the EF110 refusal.
+func parseFileOptions(command string, args []string) (fileOptions, error) {
+	opts := fileOptions{target: report.Target}
+	var positional []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--target", "-o", "--receipt", "--timeout-ms", "--symbol", "--offset", "--definition", "--revision":
+		case "--target", "-o":
 			if i+1 == len(args) {
 				return opts, fmt.Errorf("%s requires a value", args[i])
 			}
-			flag := args[i]
-			i++
-			if flag == "--target" {
-				opts.target = args[i]
-			} else if flag == "--symbol" {
-				opts.typeSelection.Symbol = args[i]
-			} else if flag == "--definition" {
-				opts.typeSelection.Definition = args[i]
-			} else if flag == "--revision" {
-				opts.typeSelection.ExpectedRevision = args[i]
-			} else if flag == "--receipt" {
-				if args[i] == "" {
-					return opts, fmt.Errorf("--receipt requires a non-empty path")
-				}
-				opts.receipt = args[i]
-			} else if flag == "--offset" {
-				n, err := strconv.Atoi(args[i])
-				if err != nil || n < 0 {
-					return opts, fmt.Errorf("--offset requires a non-negative byte offset")
-				}
-				opts.typeSelection.Offset = &n
-			} else if flag == "--timeout-ms" {
-				n, err := strconv.Atoi(args[i])
-				if err != nil || n <= 0 || n > 3600000 {
-					return opts, fmt.Errorf("--timeout-ms requires 1..3600000")
-				}
-				opts.timeoutMillis = n
+			if args[i] == "--target" {
+				opts.target = args[i+1]
 			} else {
-				opts.output = args[i]
+				opts.output = args[i+1]
 			}
-		case "--live":
-			opts.live = true
+			i++
 		case "--strict":
 			opts.strict = true
 		case "--json":
 			opts.json = true
 		default:
-			if option, ok := compiler.GraphOptionField(args[i]); ok {
-				if i+1 == len(args) {
-					return opts, &compiler.GraphRefusal{Code: compiler.GraphRefusalInvocation, Message: args[i] + " requires a value"}
-				}
-				i++
-				if opts.graph == nil {
-					opts.graph = map[string]any{}
-				}
-				if option.Repeatable {
-					values, _ := opts.graph[option.Field].([]any)
-					opts.graph[option.Field] = append(values, args[i])
-					continue
-				}
-				if _, repeated := opts.graph[option.Field]; repeated {
-					return opts, &compiler.GraphRefusal{Code: compiler.GraphRefusalInvocation, Message: option.Flag + " may be given once"}
-				}
-				var value any = args[i]
-				if option.Field == "depth" {
-					// The flag text decodes as the JSON value MCP
-					// carries, so both adapters admit the same depth.
-					if decoded, err := compiler.DecodeGraphJSON([]byte(args[i])); err == nil {
-						value = decoded
-					}
-				}
-				opts.graph[option.Field] = value
-				continue
-			}
 			if strings.HasPrefix(args[i], "-") {
 				return opts, fmt.Errorf("unknown option %s", args[i])
 			}
-			opts.positional = append(opts.positional, args[i])
+			positional = append(positional, args[i])
 		}
 	}
-	if err := targetError(opts.target); err != nil {
-		return opts, err
+	if diagnostic, unsupported := report.UnsupportedTarget(opts.target); unsupported {
+		return opts, fmt.Errorf("%s: %s", diagnostic.Code, diagnostic.Message)
 	}
-	return opts, nil
+	switch {
+	case len(positional) == 0:
+		return opts, fmt.Errorf("source file required")
+	case opts.strict && command != "diagnostics":
+		return opts, fmt.Errorf("--strict is only supported by diagnostics")
+	case opts.json && command != "diagnostics":
+		return opts, fmt.Errorf("--json is only supported by diagnostics")
+	case opts.output != "" && command != "build":
+		return opts, fmt.Errorf("-o is only supported by build")
+	case len(positional) != 1:
+		return opts, fmt.Errorf("incorrect arguments for %s", command)
+	}
+	opts.file = positional[0]
+	return opts, requireSourceExtension(opts.file)
 }
 
-// targetError reports a target other than Go as the compiler's EF110
-// diagnostic, so every command refuses it the same way.
-func targetError(target string) error {
-	if diagnostic, unsupported := compiler.UnsupportedTarget(target); unsupported {
-		return fmt.Errorf("%s: %s", diagnostic.Code, diagnostic.Message)
+// loaded is one source admitted once and checked: its location, the bytes
+// read from the open file, the analysis and its diagnostics-only result.
+type loaded struct {
+	source   receipt.Location
+	snapshot report.SourceSnapshot
+	analysis sketchfront.Analysis
+	result   *report.Result
+}
+
+// load admits a source path once and checks it. The spelling is located
+// once (receipt.LocateSource): diagnostics name the admitted path and
+// //line directives name it too, and the bytes come from one non-blocking
+// open of the located file, which must be a regular file.
+func load(path, target string) (loaded, error) {
+	if err := requireSourceExtension(path); err != nil {
+		return loaded{}, err
+	}
+	source, err := receipt.LocateSource(path)
+	if err != nil {
+		return loaded{}, err
+	}
+	uri, err := report.FileURI(source.Admitted())
+	if err != nil {
+		return loaded{}, err
+	}
+	file, err := sourcefile.Open(source.Path())
+	if err != nil {
+		return loaded{}, err
+	}
+	text, err := file.Read(0)
+	file.Close()
+	if err != nil {
+		return loaded{}, err
+	}
+	analysis := sketchfront.Check(string(text))
+	return loaded{
+		source:   source,
+		snapshot: report.SourceSnapshot{URI: uri, Origin: "disk", Text: string(text)},
+		analysis: analysis,
+		result:   analysis.Result(string(text), target),
+	}, nil
+}
+
+// checkCommand prints the check envelope; exit 1 when the source does not
+// check.
+func checkCommand(args []string) error {
+	opts, err := parseFileOptions("check", args)
+	if err != nil {
+		return err
+	}
+	l, err := load(opts.file, opts.target)
+	if err != nil {
+		return err
+	}
+	if err := l.result.Qualify(producer.Current()); err != nil {
+		return err
+	}
+	if err := printProjectionJSON(l.result.CheckEnvelope()); err != nil {
+		return err
+	}
+	if !l.result.Checked {
+		return fmt.Errorf("check failed")
 	}
 	return nil
 }
-func command(args []string) error {
-	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h")) {
-		fmt.Println("Ergo prototype\nusage: ergo check FILE [--target go] | edition FILE | diagnostics FILE [--strict] [--json] [--target go] [LINT] | lint FILE [--strict] [--target go] [LINT] | lint rules [LINT] | lint test PATH... [--update] [LINT] | lint receipt FILE [--runs N] [--target go] [LINT] | test FILE [--target go] [--timeout-ms 30000] [--live] | graph FILE [--target go] [GRAPH VIEW OPTIONS] | query FILE BYTE_OFFSET [--target go] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go] [-o PATH] [--receipt PATH] | run FILE [--target go] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] [LINT] | lsp [--target go] [LINT]\nLINT: [--lint-config FILE] [--rules MANIFEST]... selects custom rule packs; a lint configuration error exits 2.")
-		fmt.Println("type: ergo type FILE (--symbol NAME | --offset BYTE | --definition TYPE_ID --revision REVISION) [--target go] [--json]")
-		fmt.Println(graphUsage())
-		return nil
-	}
-	if args[0] == "fmt" {
-		return formatCommand(args[1:])
-	}
-	if args[0] == "edition" {
-		return editionCommand(args[1:])
-	}
-	if args[0] == "lsp" {
-		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
-			fmt.Println("usage: ergo lsp [--target go] [--lint-config FILE] [--rules MANIFEST]...\nContent-Length framed JSON-RPC on stdio. Full-document synchronization and UTF-16 diagnostics only.\nThe lint configuration loads once at startup; a rule pack failure is published as an EFL000 error at the document start.")
-			return nil
-		}
-		selection, rest, err := lintSelection(args[1:])
-		if err != nil {
-			return invalidInvocation(err)
-		}
-		target := "go"
-		if len(rest) == 2 && rest[0] == "--target" {
-			target = rest[1]
-		} else if len(rest) != 0 {
-			return invalidInvocation(fmt.Errorf("usage: ergo lsp [--target go] [--lint-config FILE] [--rules MANIFEST]..."))
-		}
-		if err := targetError(target); err != nil {
-			return invalidInvocation(err)
-		}
-		session, err := loadLint(selection)
-		if err != nil {
-			return err
-		}
-		return lsp.Serve(target, session, os.Stdin, os.Stdout)
-	}
-	if len(args) >= 2 && args[0] == "lint" && args[1] == "test" {
-		return lintTestCommand(args[2:])
-	}
-	if len(args) >= 2 && args[0] == "lint" && args[1] == "receipt" {
-		return lintReceiptCommand(args[2:])
-	}
-	if len(args) >= 2 && args[0] == "lint" && args[1] == "rules" {
-		selection, rest, err := lintSelection(args[2:])
-		if err != nil || len(rest) != 0 {
-			return invalidInvocation(fmt.Errorf("usage: ergo lint rules [--lint-config FILE] [--rules MANIFEST]..."))
-		}
-		session, err := loadLint(selection)
-		if err != nil {
-			return err
-		}
-		return printJSON(session.Rules())
-	}
-	if args[0] == "mcp" {
-		selection, rest, err := lintSelection(args[1:])
-		if err != nil {
-			return invalidInvocation(err)
-		}
-		root := "."
-		if len(rest) > 1 {
-			return fmt.Errorf("usage: ergo mcp [ROOT] [--lint-config FILE] [--rules MANIFEST]...")
-		}
-		if len(rest) == 1 {
-			root = rest[0]
-		}
-		session, err := loadLint(selection)
-		if err != nil {
-			return err
-		}
-		return mcp.Serve(root, session, os.Stdin, os.Stdout)
-	}
-	// The remaining file commands come from the table that routes them by
-	// edition; fmt, edition, lint test and lint receipt dispatched above.
-	if _, ok := lookupFileCommand(args[0]); !ok {
-		return fmt.Errorf("unknown command %s; use ergo --help", args[0])
-	}
-	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
-		if args[0] == "diagnostics" {
-			fmt.Println("usage: ergo diagnostics FILE [--strict] [--json] [--target go] [--lint-config FILE] [--rules MANIFEST]...\nLocations: one-based UTF-16 lines/columns in text; zero-based UTF-16 ranges and original UTF-8 byte spans in JSON.\nExit codes: 0 policy passed; 1 failed policy or source/operational failure; 2 invalid invocation.\nWith --json, source findings produce a report on stdout even when policy fails; operational failures produce no report and explain the error on stderr.")
-			return nil
-		}
-		return command([]string{"--help"})
-	}
-	opts, err := parseOptions(args[1:])
+
+// diagnosticsCommand prints the diagnostic report as text or JSON; exit 1
+// when the policy fails, 2 on an invalid invocation.
+func diagnosticsCommand(args []string) error {
+	opts, err := parseFileOptions("diagnostics", args)
 	if err != nil {
-		if args[0] == "diagnostics" || args[0] == "lint" {
-			return invalidInvocation(err)
-		}
-		return graphError(err)
+		return invalidInvocation(err)
 	}
-	usage := func(err error) error {
-		if args[0] == "diagnostics" || args[0] == "lint" {
-			return invalidInvocation(err)
-		}
-		return err
-	}
-	if len(opts.positional) == 0 {
-		return usage(fmt.Errorf("source file required"))
-	}
-	if opts.live && args[0] != "test" {
-		return usage(fmt.Errorf("--live is only supported by test"))
-	}
-	if opts.timeoutMillis != 0 && args[0] != "test" {
-		return usage(fmt.Errorf("--timeout-ms is only supported by test"))
-	}
-	if opts.strict && args[0] != "lint" {
-		if args[0] != "diagnostics" {
-			return usage(fmt.Errorf("--strict is only supported by lint"))
-		}
-	}
-	if (opts.lint.Config != "" || len(opts.lint.Manifests) > 0) && args[0] != "lint" && args[0] != "diagnostics" {
-		return usage(fmt.Errorf("--lint-config and --rules are only supported by lint and diagnostics"))
-	}
-	if opts.json && args[0] != "diagnostics" && args[0] != "type" {
-		return usage(fmt.Errorf("--json is only supported by diagnostics"))
-	}
-	if args[0] != "type" && (opts.typeSelection.Symbol != "" || opts.typeSelection.Offset != nil || opts.typeSelection.Definition != "" || opts.typeSelection.ExpectedRevision != "") {
-		return usage(fmt.Errorf("type selection flags are only supported by type"))
-	}
-	if len(opts.graph) > 0 && args[0] != "graph" {
-		return usage(fmt.Errorf("graph view options are only supported by graph"))
-	}
-	var graphRequest *compiler.GraphRequest
-	if len(opts.graph) > 0 {
-		request, err := compiler.ParseGraphRequest(opts.graph)
-		if err != nil {
-			return graphError(err)
-		}
-		graphRequest = &request
-	}
-	if opts.output != "" && args[0] != "build" {
-		return usage(fmt.Errorf("-o is only supported by build"))
-	}
-	if opts.receipt != "" && args[0] != "build" {
-		return usage(fmt.Errorf("--receipt is only supported by build"))
-	}
-	want := 1
-	if args[0] == "inspect" || args[0] == "explain" || args[0] == "query" {
-		want = 2
-	}
-	if len(opts.positional) != want {
-		return usage(fmt.Errorf("incorrect arguments for %s", args[0]))
-	}
-	if (args[0] == "diagnostics" || args[0] == "lint") && filepath.Ext(opts.positional[0]) != ".ef" {
-		return invalidInvocation(fmt.Errorf("source file must have .ef extension"))
-	}
-	var session *lintpacks.Session
-	if args[0] == "lint" || args[0] == "diagnostics" {
-		if session, err = loadLint(opts.lint); err != nil {
-			return err
-		}
-	}
-	source, err := locateSource(opts.positional[0])
+	l, err := load(opts.file, opts.target)
 	if err != nil {
 		return err
 	}
-	// The source is opened once and bound to its edition before any
-	// front-end reads it; every byte below comes from that open file. Only
-	// the legacy edition reaches the legacy front-end.
-	admitted, err := admitSource(source.Path())
+	if err := l.result.Qualify(producer.Current()); err != nil {
+		return err
+	}
+	findings := l.result.Report(l.snapshot, opts.strict)
+	if opts.json {
+		err = printJSON(findings)
+	} else {
+		err = findings.WriteText(os.Stdout, l.source.String())
+	}
 	if err != nil {
 		return err
 	}
-	defer admitted.Close()
-	if resolution := admitted.Resolution; resolution.Diagnostic != nil || resolution.Edition != edition.Legacy {
-		return foreignCommand(args[0], source, admitted, opts, session)
+	if !findings.PolicyPassed {
+		return fmt.Errorf("diagnostics failed policy")
 	}
-	r, snapshot, err := compileAdmitted(source, admitted, opts.target)
+	return nil
+}
+
+// buildCommand builds a native executable and prints its path.
+func buildCommand(args []string) error {
+	output, err := buildSource("build", args)
 	if err != nil {
 		return err
 	}
-	// Executable production does not acquire inspection identity.
-	if args[0] != "build" && args[0] != "run" && args[0] != "test" {
-		if err := r.Qualify(producer.Current()); err != nil {
-			return err
-		}
-	}
-	switch args[0] {
-	case "type":
-		response, err := r.SelectType(opts.typeSelection)
-		if err != nil {
-			return err
-		}
-		return printProjectionJSON(response)
-	case "diagnostics":
-		report := r.DiagnosticReportWith(snapshot, opts.strict, session.Run(context.Background(), r, snapshot))
-		if opts.json {
-			if err := printJSON(report); err != nil {
-				return err
-			}
-		} else {
-			printDiagnosticText(report, source.String())
-		}
-		if !report.PolicyPassed {
-			return fmt.Errorf("diagnostics failed policy")
-		}
-		return nil
-	case "graph":
-		if graphRequest != nil {
-			return printGraphView(r, *graphRequest)
-		}
-		graph, err := r.Graph()
-		if err != nil {
-			return err
-		}
-		return printProjectionJSON(graph)
-	case "lint":
-		lint := r.LintWith(opts.strict, session.Run(context.Background(), r, snapshot))
-		if err := printJSON(lint); err != nil {
-			return err
-		}
-		if !lint.LintPassed {
-			return fmt.Errorf("lint failed")
-		}
-		return nil
-	case "query":
-		offset, err := strconv.Atoi(opts.positional[1])
-		if err != nil {
-			return fmt.Errorf("byte offset must be an integer")
-		}
-		info, err := r.TypeAt(offset)
-		if err != nil {
-			return err
-		}
-		projection := r.ProjectExpression(info)
-		if !projection.Complete {
-			return fmt.Errorf("type projection unavailable: %s", projection.Error)
-		}
-		response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "expression": info, "types": projection.Types, "rows": projection.Rows, "declarations": r.ProjectionDeclarations(projection), "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": projection.Complete}
-		r.AddSourceInputs(response)
-		usage, err := r.ValidateProjectionResponse(projection, response)
-		if err != nil {
-			return err
-		}
-		response["typeProjectionUsage"] = usage
-		return printProjectionJSON(response)
-	case "check":
-		if err := printProjectionJSON(r.CheckResponse()); err != nil {
-			return err
-		}
-		if !r.Checked {
-			return fmt.Errorf("check failed")
-		}
-		return nil
-	case "inspect", "explain":
-		if !r.Checked {
-			return fmt.Errorf("inspection requires checked source")
-		}
-		symbol := r.Find(opts.positional[1])
-		if symbol == nil {
-			if r.FindLayer(opts.positional[1]) != nil {
-				response, err := r.LayerInspection(opts.positional[1], source.String())
-				if err != nil {
-					return err
-				}
-				return printProjectionJSON(response)
-			}
-			if r.FindMachine(opts.positional[1]) != nil {
-				response, err := r.MachineInspection(opts.positional[1], opts.positional[0])
-				if err != nil {
-					return err
-				}
-				return printProjectionJSON(response)
-			}
-			if declaration := r.FindDeclaration(opts.positional[1]); declaration != nil {
-				projection := r.ProjectDeclaration(declaration)
-				if !projection.Complete {
-					return fmt.Errorf("type projection unavailable: %s", projection.Error)
-				}
-				response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "declaration": declaration, "declarations": r.ProjectionDeclarations(projection), "types": projection.Types, "rows": projection.Rows, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": projection.Complete}
-				r.AddSourceInputs(response)
-				usage, err := r.ValidateProjectionResponse(projection, response)
-				if err != nil {
-					return err
-				}
-				response["typeProjectionUsage"] = usage
-				return printProjectionJSON(response)
-			}
-			if !r.Checked {
-				_ = printJSON(r)
-			}
-			return fmt.Errorf("unknown symbol %s", opts.positional[1])
-		}
-		projection := r.ProjectSymbol(symbol)
-		if !projection.Complete {
-			return fmt.Errorf("type projection unavailable: %s", projection.Error)
-		}
-		bindings, err := r.SymbolBindings(symbol)
-		if err != nil {
-			return err
-		}
-		response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "symbol": symbol, "declarations": r.ProjectionDeclarations(projection), "types": projection.Types, "rows": projection.Rows, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": projection.Complete, "bindings": bindings}
-		r.AddSourceInputs(response)
-		usage, err := r.ValidateProjectionResponse(projection, response)
-		if err != nil {
-			return err
-		}
-		response["typeProjectionUsage"] = usage
-		return printProjectionJSON(response)
-	case "test":
-		if err := r.TestMode(opts.live); err != nil {
-			return err
-		}
-		return runTests(r, source, opts.timeoutMillis)
-	case "build", "run":
-		paths, err := locateBuild(source, opts)
-		if err != nil {
-			return err
-		}
-		var measured *receipt.Application
-		var destination *receipt.Destination
-		if opts.receipt != "" {
-			if destination, err = receipt.Admit(opts.receipt, paths.protected(), paths.managed); err != nil {
-				return err
-			}
-			defer destination.Close()
-		}
-		measured, err = buildGo(r, paths.source, paths.output, opts.receipt != "")
-		if err != nil {
-			if !r.Checked {
-				_ = printJSON(r)
-			}
-			return err
-		}
-		if args[0] == "build" {
-			if measured != nil {
-				if err := destination.Publish(measured); err != nil {
-					return err
-				}
-			}
-			fmt.Println(paths.output)
-			return nil
-		}
-		child := exec.Command(paths.output.Path())
-		child.Stdout = os.Stdout
-		child.Stderr = os.Stderr
-		child.Stdin = os.Stdin
-		return runEntryProcess(child)
-	default:
-		return fmt.Errorf("unknown command %s", args[0])
-	}
+	fmt.Println(output)
+	return nil
 }
 
-// runEntryProcess runs a built program as `ergo run`'s child. SIGINT and SIGTERM
-// are forwarded so the program's entry interrupts main and reports, and the
-// program's exit status passes through without an extra message: the entry
-// failure report is the program's own output.
-func runEntryProcess(child *exec.Cmd) error {
-	signals := make(chan os.Signal, 2)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(signals)
-	if err := child.Start(); err != nil {
+// runCommand builds a native executable and runs it as a child.
+func runCommand(args []string) error {
+	output, err := buildSource("run", args)
+	if err != nil {
 		return err
 	}
-	done := make(chan error, 1)
-	go func() { done <- child.Wait() }()
-	for {
-		select {
-		case received := <-signals:
-			_ = child.Process.Signal(received)
-		case err := <-done:
-			var exited *exec.ExitError
-			if errors.As(err, &exited) && exited.ExitCode() > 0 {
-				return exitStatusError{code: exited.ExitCode(), handled: true}
-			}
-			return err
-		}
-	}
+	child := exec.Command(output.Path())
+	child.Stdout = os.Stdout
+	child.Stderr = os.Stderr
+	child.Stdin = os.Stdin
+	return runEntryProcess(child)
 }
 
-func printDiagnosticText(report compiler.DiagnosticReport, source string) {
-	if len(report.Diagnostics) == 0 {
-		fmt.Printf("%s: no diagnostics\n", source)
-		return
-	}
-	for _, diagnostic := range report.Diagnostics {
-		location := "?:?"
-		if diagnostic.LSP != nil {
-			location = fmt.Sprintf("%d:%d", diagnostic.LSP.Range.Start.Line+1, diagnostic.LSP.Range.Start.Character+1)
-		}
-		fmt.Printf("%s:%s: %s %s: %s\n", source, location, diagnostic.Severity, diagnostic.Code, diagnostic.Message)
-		if diagnostic.Help != "" {
-			fmt.Printf("  help: %s\n", diagnostic.Help)
-		}
-		for _, suggestion := range diagnostic.Suggestions {
-			fmt.Printf("  suggestion: %s\n", suggestion.Message)
-		}
-	}
-}
-func sourceBase(source string) string {
-	return strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
-}
-
-// goOutputPath is the executable a native build writes.
-func goOutputPath(source, output string) string {
-	if output == "" {
-		return filepath.Join("dist", sourceBase(source))
-	}
-	return output
-}
-
-// buildPaths are a build's source and artifact locations. Each is
-// resolved once, and the same value is handed to receipt admission, to the
-// build that writes it and to measurement.
-type buildPaths struct {
-	source  receipt.Location
-	output  receipt.Location
-	managed []receipt.Location
-}
-
-func locateBuild(source receipt.Location, opts options) (buildPaths, error) {
-	paths := buildPaths{source: source}
-	var err error
-	if paths.output, err = locateArtifact(goOutputPath(source.String(), opts.output)); err != nil {
-		return paths, err
-	}
-	root, err := receipt.Locate(goApplicationsRoot)
+// buildSource checks the source and builds it to its output: -o, or
+// dist/NAME for a source NAME.ef. A source that does not check prints its
+// check envelope and builds nothing. Building acquires no producer
+// identity; only the refusal, which prints facts, does.
+func buildSource(command string, args []string) (receipt.Location, error) {
+	opts, err := parseFileOptions(command, args)
 	if err != nil {
-		return paths, err
+		return receipt.Location{}, err
 	}
-	paths.managed = []receipt.Location{root}
-	return paths, nil
+	l, err := load(opts.file, opts.target)
+	if err != nil {
+		return receipt.Location{}, err
+	}
+	if !l.result.Checked {
+		if err := l.result.Qualify(producer.Current()); err != nil {
+			return receipt.Location{}, err
+		}
+		_ = printJSON(l.result.CheckEnvelope())
+		return receipt.Location{}, fmt.Errorf("check failed")
+	}
+	output, err := locateArtifact(outputPath(l.source.String(), opts.output))
+	if err != nil {
+		return receipt.Location{}, err
+	}
+	if err := sketchfront.Build(l.analysis, l.source.Admitted(), output.Path(), os.Stderr); err != nil {
+		return receipt.Location{}, err
+	}
+	return output, nil
+}
+
+// outputPath is the executable a build writes.
+func outputPath(source, output string) string {
+	if output != "" {
+		return output
+	}
+	return filepath.Join("dist", strings.TrimSuffix(filepath.Base(source), filepath.Ext(source)))
 }
 
 // locateArtifact locates a file the build writes. A directory is refused
@@ -764,162 +316,50 @@ func locateArtifact(path string) (receipt.Location, error) {
 	return location, nil
 }
 
-// protected are the paths a receipt must never replace: the source and
-// every artifact the build writes.
-func (p buildPaths) protected() []receipt.Location {
-	return []receipt.Location{p.source, p.output}
-}
-
-// buildGo builds the ordinary native application at output. With measure,
-// it also returns the application receipt of the published generation and
-// executable.
-func buildGo(r *compiler.Result, source, output receipt.Location, measure bool) (*receipt.Application, error) {
-	application, err := goApplication(r, source, compiler.GoGenerationBuild)
-	if err != nil {
-		return nil, err
+// runEntryProcess runs a built program as `ergo run`'s child. SIGINT and
+// SIGTERM are forwarded to the program, and the program's exit status
+// passes through without an extra message: the program reports its own
+// failure. A program that a forwarded signal ended exits 128 plus the
+// signal number, as a shell reports it (130 for SIGINT, 143 for SIGTERM),
+// which is also the interruption status of docs/spec/runtime.md rule 6.
+func runEntryProcess(child *exec.Cmd) error {
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	if err := child.Start(); err != nil {
+		return err
 	}
-	generation, err := buildGoApplication(r, source, output, application)
-	if err != nil || !measure {
-		return nil, err
-	}
-	measured, err := receipt.Native(r, source, application, generation, output)
-	if err != nil {
-		return nil, fmt.Errorf("receipt: %w", err)
-	}
-	return measured, nil
-}
-
-// goApplication plans and lowers one native entry mode of source, whose
-// generated main names the source's admitted file in //line directives. A
-// plan refusal is a compiler diagnostic: it is reported as JSON on stdout
-// like a failed check.
-func goApplication(r *compiler.Result, source receipt.Location, mode compiler.GoGenerationMode) (*compiler.GoApplication, error) {
-	application, err := r.GoApplicationFrom(mode, source.Admitted())
-	var refusal *compiler.ApplicationPlanError
-	if errors.As(err, &refusal) {
-		_ = printJSON(map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "mode": mode, "diagnostics": []compiler.Diagnostic{refusal.Diagnostic()}})
-	}
-	return application, err
-}
-
-func buildGoApplication(r *compiler.Result, source receipt.Location, output receipt.Location, application *compiler.GoApplication) (compiler.GoGeneration, error) {
-	snapshot, err := r.GoSourceSnapshot(source.Path(), application)
-	if err != nil {
-		return compiler.GoGeneration{}, err
-	}
-	generation, err := compiler.PublishGoSourceSnapshot(goApplicationsRoot, snapshot)
-	if err != nil {
-		return compiler.GoGeneration{}, err
-	}
-	if err = os.MkdirAll(filepath.Dir(output.Path()), 0755); err != nil {
-		return compiler.GoGeneration{}, err
-	}
-	// Imported packages use the resolved module graph; the executable is standalone.
-	child := receipt.GoBuildCommand(generation.Directory, output.Path(), ".")
-	child.Stdout = os.Stderr
-	child.Stderr = os.Stderr
-	if err = child.Run(); err != nil {
-		return compiler.GoGeneration{}, fmt.Errorf("Go build failed: %w", err)
-	}
-	return generation, nil
-}
-
-// goApplicationsRoot is the managed tree of published generated modules.
-var goApplicationsRoot = filepath.Join("dist", "go", "apps")
-
-func replaceEnv(environment []string, key, value string) []string {
-	prefix := key + "="
-	result := make([]string, 0, len(environment)+1)
-	found := false
-	for _, entry := range environment {
-		if strings.HasPrefix(entry, prefix) {
-			if !found {
-				result = append(result, prefix+value)
-				found = true
+	done := make(chan error, 1)
+	go func() { done <- child.Wait() }()
+	forwarded := map[syscall.Signal]bool{}
+	for {
+		select {
+		case received := <-signals:
+			if number, ok := received.(syscall.Signal); ok {
+				forwarded[number] = true
 			}
-			continue
+			_ = child.Process.Signal(received)
+		case err := <-done:
+			var exited *exec.ExitError
+			if !errors.As(err, &exited) {
+				return err
+			}
+			if exited.ExitCode() > 0 {
+				return exitStatusError{code: exited.ExitCode(), handled: true}
+			}
+			if number, ok := signalOf(exited); ok && forwarded[number] {
+				return exitStatusError{code: 128 + int(number), handled: true}
+			}
+			return err
 		}
-		result = append(result, entry)
 	}
-	if !found {
-		result = append(result, prefix+value)
-	}
-	return result
 }
 
-func runTests(r *compiler.Result, source receipt.Location, timeoutMillis int) error {
-	if timeoutMillis == 0 {
-		timeoutMillis = 30000
+// signalOf is the signal that ended a program, when one did.
+func signalOf(exited *exec.ExitError) (syscall.Signal, bool) {
+	status, ok := exited.Sys().(syscall.WaitStatus)
+	if !ok || !status.Signaled() {
+		return 0, false
 	}
-	application, err := goApplication(r, source, compiler.GoGenerationTest)
-	if err != nil {
-		return err
-	}
-	executable, err := receipt.Locate(filepath.Join("dist", sourceBase(source.String())+".tests"))
-	if err != nil {
-		return err
-	}
-	if _, err = buildGoApplication(r, source, executable, application); err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMillis)*time.Millisecond)
-	defer cancel()
-	child := exec.CommandContext(ctx, executable.Path())
-	var stdout, stderr testOutput
-	child.Stdout = &stdout
-	child.Stderr = &stderr
-	child.WaitDelay = time.Second
-	runErr := child.Run()
-	if ctx.Err() != nil {
-		_ = printJSON(map[string]any{"schemaVersion": 1, "revision": r.Revision, "target": r.Target, "passed": false, "watchdogExpired": true, "cleanupCompleted": false, "output": stdout.String(), "stderr": stderr.String(), "outputTruncated": stdout.truncated || stderr.truncated})
-		return fmt.Errorf("test process exceeded real-time watchdog; managed cleanup is not confirmed")
-	}
-	output := strings.TrimSuffix(stdout.String(), "\n")
-	last := strings.LastIndex(output, "\n")
-	report := map[string]any{}
-	if err = json.Unmarshal([]byte(output[last+1:]), &report); err != nil {
-		_ = printJSON(map[string]any{"schemaVersion": 1, "revision": r.Revision, "target": r.Target, "passed": false, "watchdogExpired": false, "cleanupCompleted": false, "reportMissing": true, "output": stdout.String(), "stderr": stderr.String(), "outputTruncated": stdout.truncated || stderr.truncated})
-		return fmt.Errorf("test process did not produce a report: %v", runErr)
-	}
-	report["revision"] = r.Revision
-	report["target"] = r.Target
-	report["watchdogExpired"] = false
-	report["outputTruncated"] = stdout.truncated || stderr.truncated
-	if last >= 0 {
-		report["output"] = output[:last+1]
-	}
-	if stderr.Len() > 0 {
-		report["stderr"] = stderr.String()
-	}
-	if err = printJSON(report); err != nil {
-		return err
-	}
-	if runErr != nil {
-		return fmt.Errorf("tests failed")
-	}
-	return nil
-}
-
-// Retain the tail (including the terminal JSON report) without allowing test
-// logging to grow the runner's memory without bound.
-type testOutput struct {
-	bytes.Buffer
-	truncated bool
-}
-
-func (b *testOutput) Write(p []byte) (int, error) {
-	const limit = 1024 * 1024
-	n := len(p)
-	if n >= limit {
-		b.Reset()
-		p = p[n-limit:]
-		b.truncated = true
-	} else if b.Len()+n > limit {
-		remaining := append([]byte(nil), b.Bytes()[b.Len()+n-limit:]...)
-		b.Reset()
-		_, _ = b.Buffer.Write(remaining)
-		b.truncated = true
-	}
-	_, err := b.Buffer.Write(p)
-	return n, err
+	return status.Signal(), true
 }

@@ -1,5 +1,7 @@
 # Compiler-distributed modules
 
+> **Status:** describes the retired `.ef` language, removed 2026-10-28 by [#205](https://github.com/cevr/ergo/issues/205); kept as design reference. The [retirement record](receipts/retire-ef.md) lists what was removed.
+
 Ergo admits explicit portable imports from a finite compiler distribution.
 `import Fns "ergo/functions"` resolves the ordinary `Fns.call` forwarding
 function, the pure `Fns.identity` function, the managed callback forwarding
@@ -234,7 +236,7 @@ selecting a later variant can invoke that variant's witness before a
 witness listed earlier on another branch. Plans carry `transform` nodes
 with the witness, child node, step index and both function identities;
 structural nodes under a `with` scope have a scoped identity, so equal
-scopes share a plan. [`examples/codec-transforms.ef`](../examples/codec-transforms.ef)
+scopes share a plan. [`examples/codec-transforms.ef`](https://github.com/cevr/ergo/blob/dbf135bff09901e85385945593113f35b300199c/examples/codec-transforms.ef)
 exercises pure, normalizing, refining and effectful witnesses, nested
 composition and a configuration caller.
 

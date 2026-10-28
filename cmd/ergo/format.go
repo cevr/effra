@@ -9,9 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"ergo.local/prototype/internal/compiler"
-	"ergo.local/prototype/internal/edition"
 	"ergo.local/prototype/internal/producer"
+	"ergo.local/prototype/internal/report"
 	"ergo.local/prototype/internal/sketchfront"
 	sourcefile "ergo.local/prototype/internal/source"
 )
@@ -26,9 +25,7 @@ const (
 
 const fmtHelp = "usage: ergo fmt FILE... [--check] [--json]\n" +
 	"       ergo fmt --stdin\n\n" +
-	"Format supported .ef syntax using the canonical syntax-only formatter of each\n" +
-	"file's edition (ergo.json). --stdin has no directory and uses the legacy\n" +
-	"formatter.\n\n" +
+	"Format .ef source with the canonical syntax-only formatter.\n\n" +
 	"Options:\n" +
 	"  --check  report files that would change without writing them\n" +
 	"  --stdin  format source from stdin and write only formatted source to stdout\n" +
@@ -56,9 +53,8 @@ type fmtOptions struct {
 type formatFileReport struct {
 	Path           string   `json:"path"`
 	RequestedPaths []string `json:"requestedPaths,omitempty"`
-	// FormatterVersion is the identity of the formatter of this file's
-	// edition. The report's top-level formatterVersion stays the legacy
-	// formatter's, so a request can mix editions.
+	// FormatterVersion is the identity of the formatter that formatted
+	// this file, the report's top-level formatterVersion.
 	FormatterVersion string `json:"formatterVersion"`
 	InputDigest      string `json:"inputDigest,omitempty"`
 	OutputDigest     string `json:"outputDigest,omitempty"`
@@ -68,10 +64,10 @@ type formatFileReport struct {
 }
 
 type formatFailureReport struct {
-	Code        string                `json:"code"`
-	Path        string                `json:"path,omitempty"`
-	Message     string                `json:"message"`
-	Diagnostics []compiler.Diagnostic `json:"diagnostics,omitempty"`
+	Code        string              `json:"code"`
+	Path        string              `json:"path,omitempty"`
+	Message     string              `json:"message"`
+	Diagnostics []report.Diagnostic `json:"diagnostics,omitempty"`
 }
 
 type formatReport struct {
@@ -91,7 +87,7 @@ type formatPlan struct {
 	displayPath string
 	info        os.FileInfo
 	source      []byte
-	result      compiler.FormatResult
+	result      report.FormatResult
 	reportAt    int
 }
 
@@ -99,7 +95,7 @@ type formatAdapterError struct {
 	code        string
 	path        string
 	message     string
-	diagnostics []compiler.Diagnostic
+	diagnostics []report.Diagnostic
 }
 
 func (e *formatAdapterError) Error() string {
@@ -232,8 +228,8 @@ func newFormatReport(opts fmtOptions) formatReport {
 	}
 	return formatReport{
 		Producer:         producer.Current(),
-		SchemaVersion:    compiler.FormatterSchemaVersion,
-		FormatterVersion: compiler.FormatterIdentity,
+		SchemaVersion:    report.FormatterSchemaVersion,
+		FormatterVersion: sketchfront.FormatterIdentity,
 		Mode:             mode,
 		Success:          true,
 		Files:            []formatFileReport{},
@@ -249,9 +245,9 @@ func formatStdin() error {
 	if len(input) > maxFormatInputBytes {
 		return exitStatusError{code: 2, message: (&formatAdapterError{code: "EFMT_INPUT_LIMIT", message: fmt.Sprintf("stdin exceeds %d-byte limit", maxFormatInputBytes)}).Error()}
 	}
-	result, err := compiler.FormatSourceBounded(string(input), maxFormatOutputBytes)
+	result, err := sketchfront.Format(string(input), maxFormatOutputBytes)
 	if err != nil {
-		return exitStatusError{code: 2, message: formatSourceError("", err, legacyFormatter).Error()}
+		return exitStatusError{code: 2, message: formatSourceError("", err).Error()}
 	}
 	if len(result.Text) > maxFormatOutputBytes {
 		return exitStatusError{code: 2, message: (&formatAdapterError{code: "EFMT_OUTPUT_LIMIT", message: fmt.Sprintf("formatted stdin exceeds %d-byte limit", maxFormatOutputBytes)}).Error()}
@@ -273,8 +269,8 @@ func formatFiles(opts fmtOptions) (formatReport, error) {
 		if err != nil {
 			return formatPlanFailure(&report, formatPathError(displayPath, err))
 		}
-		if filepath.Ext(path) != ".ef" {
-			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_PATH", path: displayPath, message: "source file must have .ef extension"})
+		if err := requireSourceExtension(path); err != nil {
+			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_PATH", path: displayPath, message: err.Error()})
 		}
 		lstat, err := os.Lstat(path)
 		if err != nil {
@@ -286,29 +282,17 @@ func formatFiles(opts fmtOptions) (formatReport, error) {
 		if lstat.Mode()&os.ModeSymlink == 0 && !lstat.Mode().IsRegular() {
 			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_SPECIAL_FILE", path: displayPath, message: "source must be a regular file"})
 		}
-		// The source is opened once and bound to its edition; the spelling
-		// is walked as the file system walks it (a `..` after a link applies
-		// to the link's target). The bytes come from that open file, and the
-		// replacement goes to its physical path only while that path still
-		// names the open file (validateFormatSnapshot), so the edition always
-		// governs the bytes that are formatted and written.
-		admitted, err := admitSource(path)
+		// The source is opened once; the spelling is walked as the file
+		// system walks it (a `..` after a link applies to the link's
+		// target). The bytes come from that open file, and the replacement
+		// goes to its physical path only while that path still names the
+		// open file (validateFormatSnapshot), so the bytes formatted are the
+		// bytes replaced.
+		admitted, err := sourcefile.Open(path)
 		if err != nil {
-			code := "EFMT_READ"
-			var admission *edition.AdmissionError
-			if errors.As(err, &admission) {
-				code = admission.Diagnostic.Code
-			}
-			return formatPlanFailure(&report, &formatAdapterError{code: code, path: displayPath, message: err.Error()})
+			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_READ", path: displayPath, message: err.Error()})
 		}
 		resolvedPath, info := admitted.Path, admitted.Info()
-		// Each source reaches its own edition's formatter; an edition
-		// without one is refused, never passed through.
-		if refusal := editionRefusal("fmt", admitted.Resolution); refusal != nil {
-			admitted.Close()
-			return formatPlanFailure(&report, &formatAdapterError{code: refusal.Code, path: displayPath, message: refusal.Message})
-		}
-		formatter := formatterFor(admitted.Resolution.Edition)
 		if planIndex, ok := byResolvedPath[resolvedPath]; ok {
 			admitted.Close()
 			report.Files[plans[planIndex].reportAt].RequestedPaths = append(report.Files[plans[planIndex].reportAt].RequestedPaths, displayPath)
@@ -330,7 +314,7 @@ func formatFiles(opts fmtOptions) (formatReport, error) {
 			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_INPUT_LIMIT", path: displayPath, message: fmt.Sprintf("request exceeds %d-byte aggregate input limit", maxFormatTotalInput)})
 		}
 
-		fileReport := formatFileReport{Path: displayPath, RequestedPaths: []string{displayPath}, FormatterVersion: formatter.identity}
+		fileReport := formatFileReport{Path: displayPath, RequestedPaths: []string{displayPath}, FormatterVersion: sketchfront.FormatterIdentity}
 		remainingOutput := maxFormatTotalOutput - outputTotal
 		aggregateOutputBound := remainingOutput < maxFormatOutputBytes
 		formatOutputBound := remainingOutput
@@ -343,18 +327,17 @@ func formatFiles(opts fmtOptions) (formatReport, error) {
 		if formatOutputBound > maxFormatOutputBytes {
 			formatOutputBound = maxFormatOutputBytes
 		}
-		result, err := formatter.format(string(source), formatOutputBound)
+		result, err := sketchfront.Format(string(source), formatOutputBound)
 		fileReport.InputDigest = result.InputDigest
 		fileReport.OutputDigest = result.OutputDigest
 		fileReport.Changed = result.Changed
 		report.Files = append(report.Files, fileReport)
 		reportAt := len(report.Files) - 1
 		if err != nil {
-			var limit compiler.FormatLimitError
-			if aggregateOutputBound && errors.As(err, &limit) {
+			if aggregateOutputBound && isFormatLimit(err) {
 				return formatPlanFailure(&report, aggregateOutputFailure(displayPath))
 			}
-			return formatPlanFailure(&report, formatSourceError(displayPath, err, formatter))
+			return formatPlanFailure(&report, formatSourceError(displayPath, err))
 		}
 		if remainingOutput >= 0 && len(result.Text) > remainingOutput {
 			return formatPlanFailure(&report, aggregateOutputFailure(displayPath))
@@ -416,35 +399,18 @@ func formatPlanFailure(report *formatReport, err *formatAdapterError) (formatRep
 	return *report, err
 }
 
-// editionFormatter is one edition's syntax-only formatter: its identity, its
-// bounded format function (zero bound is unbounded) and the text of its
-// syntax failure.
-type editionFormatter struct {
-	identity string
-	format   func(source string, maxOutputBytes int) (compiler.FormatResult, error)
-	failure  func(compiler.FormatFailure) string
+// isFormatLimit reports whether err is the formatter's output-bound refusal.
+func isFormatLimit(err error) bool {
+	var limit report.FormatLimitError
+	return errors.As(err, &limit)
 }
 
-var (
-	legacyFormatter = editionFormatter{compiler.FormatterIdentity, compiler.FormatSourceBounded, compiler.FormatFailure.Error}
-	sketchFormatter = editionFormatter{sketchfront.FormatterIdentity, sketchfront.Format, sketchfront.FailureMessage}
-)
-
-// formatterFor is the formatter of an admitted edition. editionRefusal has
-// already refused every edition without one.
-func formatterFor(e edition.Edition) editionFormatter {
-	if e == edition.E2026 {
-		return sketchFormatter
-	}
-	return legacyFormatter
-}
-
-func formatSourceError(path string, err error, formatter editionFormatter) *formatAdapterError {
-	var failure compiler.FormatFailure
+func formatSourceError(path string, err error) *formatAdapterError {
+	var failure report.FormatFailure
 	if errors.As(err, &failure) {
-		return &formatAdapterError{code: "EFMT_SYNTAX", path: path, message: formatter.failure(failure), diagnostics: failure.Diagnostics}
+		return &formatAdapterError{code: "EFMT_SYNTAX", path: path, message: sketchfront.FailureMessage(failure), diagnostics: failure.Diagnostics}
 	}
-	var limit compiler.FormatLimitError
+	var limit report.FormatLimitError
 	if errors.As(err, &limit) {
 		return &formatAdapterError{code: "EFMT_OUTPUT_LIMIT", path: path, message: fmt.Sprintf("formatted source exceeds %d-byte per-file output limit", limit.Limit)}
 	}

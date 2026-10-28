@@ -1,9 +1,9 @@
-// Package sketchfront is the front-end of the 2026 edition: a thin adapter
+// Package sketchfront is the front-end of the language: a thin adapter
 // that parses with internal/sketch/syntax, checks with internal/sketch/check,
 // and formats with internal/sketch/format. It maps every diagnostic to a
-// compiler diagnostic with a UTF-8 byte span, so every surface projects it
-// with the shared report code. CLI, MCP and LSP check and format 2026
-// sources only through Check and Format, so they report one identity.
+// report diagnostic with a UTF-8 byte span, so every surface projects it
+// with the shared report code. The CLI checks and formats sources only
+// through Check and Format, so it reports one identity.
 //
 // Build lowers a checked program through the prototype's bridge, checker and
 // direct-Go emitter (internal/sketch/proto) until #50 lowers from the
@@ -22,8 +22,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"ergo.local/prototype/internal/compiler"
 	"ergo.local/prototype/internal/receipt"
+	"ergo.local/prototype/internal/report"
 	"ergo.local/prototype/internal/sketch/check"
 	"ergo.local/prototype/internal/sketch/format"
 	"ergo.local/prototype/internal/sketch/proto"
@@ -34,7 +34,7 @@ import (
 type Analysis struct {
 	// Diagnostics are the checker's diagnostics in source order, with UTF-8
 	// byte spans into the analysed text.
-	Diagnostics []compiler.Diagnostic
+	Diagnostics []report.Diagnostic
 	source      string
 	file        *syntax.File
 }
@@ -44,15 +44,15 @@ type Analysis struct {
 func Check(source string) Analysis {
 	file, err := syntax.Parse(source)
 	if err != nil {
-		return Analysis{Diagnostics: []compiler.Diagnostic{syntaxDiagnostic(err)}, source: source}
+		return Analysis{Diagnostics: []report.Diagnostic{syntaxDiagnostic(err)}, source: source}
 	}
 	analysis := Analysis{source: source, file: file}
 	_, diagnostics := check.Check("main", []*syntax.File{file}, nil)
 	for _, d := range diagnostics {
-		analysis.Diagnostics = append(analysis.Diagnostics, compiler.Diagnostic{
+		analysis.Diagnostics = append(analysis.Diagnostics, report.Diagnostic{
 			Code:    d.Code,
 			Message: d.Message,
-			Span:    compiler.Span{Offset: d.Offset, Length: d.Length, Line: d.Line, Column: d.Column},
+			Span:    report.Span{Offset: d.Offset, Length: d.Length, Line: d.Line, Column: d.Column},
 		})
 	}
 	return analysis
@@ -65,7 +65,7 @@ const EmitterTicket = "#50"
 // lower converts a checked program through the bridge and checks it with
 // the prototype checker, the emitter's input. Every refusal is re-coded
 // S109 at its position, naming #50 (spec D12).
-func (a Analysis) lower() (*proto.Checked, []compiler.Diagnostic) {
+func (a Analysis) lower() (*proto.Checked, []report.Diagnostic) {
 	converted, refusals := proto.FromSyntax(a.file)
 	var checked *proto.Checked
 	diagnostics := refusals
@@ -76,9 +76,9 @@ func (a Analysis) lower() (*proto.Checked, []compiler.Diagnostic) {
 		return checked, nil
 	}
 	lines := lineStarts(a.source)
-	var out []compiler.Diagnostic
+	var out []report.Diagnostic
 	for _, d := range diagnostics {
-		out = append(out, compiler.Diagnostic{
+		out = append(out, report.Diagnostic{
 			Code:    check.CodeOutside,
 			Message: fmt.Sprintf("the prototype emitter cannot lower this program yet (%s): %s %s", EmitterTicket, d.Code, d.Msg),
 			Span:    span(a.source, lines, d.Pos.Line, d.Pos.Col),
@@ -89,7 +89,7 @@ func (a Analysis) lower() (*proto.Checked, []compiler.Diagnostic) {
 
 // BuildError is a build refusal: the diagnostics that stop the build, with
 // their positions. Nothing is written.
-type BuildError struct{ Diagnostics []compiler.Diagnostic }
+type BuildError struct{ Diagnostics []report.Diagnostic }
 
 func (e *BuildError) Error() string {
 	if len(e.Diagnostics) == 0 {
@@ -102,55 +102,55 @@ func (e *BuildError) Error() string {
 	return fmt.Sprintf("%s: %s", d.Code, d.Message)
 }
 
-// syntaxDiagnostic is the compiler diagnostic of a parse error, located by
+// syntaxDiagnostic is the report diagnostic of a parse error, located by
 // the parser's own byte span.
-func syntaxDiagnostic(err error) compiler.Diagnostic {
+func syntaxDiagnostic(err error) report.Diagnostic {
 	var e *syntax.Error
 	if !errors.As(err, &e) {
-		return compiler.Diagnostic{Code: syntax.CodeSyntax, Message: err.Error()}
+		return report.Diagnostic{Code: syntax.CodeSyntax, Message: err.Error()}
 	}
-	return compiler.Diagnostic{Code: e.Code, Message: e.Message, Span: compiler.Span{Offset: e.Offset, Length: e.Length, Line: e.Line, Column: e.Column}}
+	return report.Diagnostic{Code: e.Code, Message: e.Message, Span: report.Span{Offset: e.Offset, Length: e.Length, Line: e.Line, Column: e.Column}}
 }
 
-// Result is the diagnostics-only compiler result of the analysis.
-func (a Analysis) Result(source, target string) *compiler.Result {
-	return compiler.ForeignResult(source, target, a.Diagnostics)
+// Result is the diagnostics-only report result of the analysis.
+func (a Analysis) Result(source, target string) *report.Result {
+	return report.NewResult(source, target, a.Diagnostics)
 }
 
 // FormatterIdentity names the 2026 formatter on every surface.
 const FormatterIdentity = format.Identity
 
 // Format formats a 2026 source with the syntax-only formatter, with the
-// legacy formatter's result shape and errors: a compiler.FormatFailure
-// holding the syntax diagnostic, or a compiler.FormatLimitError when the
+// legacy formatter's result shape and errors: a report.FormatFailure
+// holding the syntax diagnostic, or a report.FormatLimitError when the
 // output would exceed a positive maxOutputBytes.
-func Format(source string, maxOutputBytes int) (compiler.FormatResult, error) {
+func Format(source string, maxOutputBytes int) (report.FormatResult, error) {
 	if maxOutputBytes < 0 {
-		return compiler.FormatResult{}, fmt.Errorf("formatter output limit must not be negative")
+		return report.FormatResult{}, fmt.Errorf("formatter output limit must not be negative")
 	}
-	inputDigest := compiler.FormatDigest(source)
-	partial := compiler.FormatResult{SchemaVersion: compiler.FormatterSchemaVersion, InputDigest: inputDigest}
+	inputDigest := report.FormatDigest(source)
+	partial := report.FormatResult{SchemaVersion: report.FormatterSchemaVersion, InputDigest: inputDigest}
 	// The bound is checked while rendering, before the text is built.
 	text, err := format.SourceBounded(source, maxOutputBytes)
 	var limit *format.LimitError
 	switch {
 	case errors.As(err, &limit):
-		return partial, compiler.FormatLimitError{Limit: maxOutputBytes}
+		return partial, report.FormatLimitError{Limit: maxOutputBytes}
 	case err != nil:
-		return partial, compiler.FormatFailure{Diagnostics: []compiler.Diagnostic{syntaxDiagnostic(err)}}
+		return partial, report.FormatFailure{Diagnostics: []report.Diagnostic{syntaxDiagnostic(err)}}
 	}
-	return compiler.FormatResult{
-		SchemaVersion: compiler.FormatterSchemaVersion,
+	return report.FormatResult{
+		SchemaVersion: report.FormatterSchemaVersion,
 		InputDigest:   inputDigest,
-		OutputDigest:  compiler.FormatDigest(text),
+		OutputDigest:  report.FormatDigest(text),
 		Changed:       text != source,
 		Text:          text,
 	}, nil
 }
 
 // FailureMessage is the refusal text of a 2026 formatting failure: it names
-// the first diagnostic's code and position, as the LSP does for legacy.
-func FailureMessage(failure compiler.FormatFailure) string {
+// the first diagnostic's code and position.
+func FailureMessage(failure report.FormatFailure) string {
 	if len(failure.Diagnostics) == 0 {
 		return failure.Error()
 	}
@@ -178,9 +178,9 @@ func lineStarts(source string) []int {
 // so the offset is the line start plus the column minus one. The span covers
 // the identifier or number at that offset, else one character, and is empty
 // at the end of the text. A position outside the text has no location.
-func span(source string, lines []int, line, col int) compiler.Span {
+func span(source string, lines []int, line, col int) report.Span {
 	if line < 1 || line > len(lines) || col < 1 {
-		return compiler.Span{}
+		return report.Span{}
 	}
 	offset := lines[line-1] + col - 1
 	end := len(source)
@@ -188,7 +188,7 @@ func span(source string, lines []int, line, col int) compiler.Span {
 		end = lines[line] - 1
 	}
 	if offset > end || offset > len(source) {
-		return compiler.Span{}
+		return report.Span{}
 	}
 	length := 0
 	for offset+length < len(source) {
@@ -202,7 +202,7 @@ func span(source string, lines []int, line, col int) compiler.Span {
 		}
 		break
 	}
-	return compiler.Span{Offset: offset, Length: length, Line: line, Column: col}
+	return report.Span{Offset: offset, Length: length, Line: line, Column: col}
 }
 
 // Build lowers the checked analysis through the prototype emitter as a Go

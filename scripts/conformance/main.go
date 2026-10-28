@@ -110,14 +110,16 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		return fail(err)
 	}
 	if *runEvidence {
-		command := exec.Command("go", "test", "./internal/compiler", "-run", "^("+strings.Join(tests, "|")+")$", "-count=1")
-		command.Dir, command.Stdout, command.Stderr = root, stdout, stderr
-		if err := command.Run(); err != nil {
-			var exit *exec.ExitError
-			if errors.As(err, &exit) {
-				return exit.ExitCode()
+		for _, argv := range evidenceCommands(tests) {
+			command := exec.Command(argv[0], argv[1:]...)
+			command.Dir, command.Stdout, command.Stderr = root, stdout, stderr
+			if err := command.Run(); err != nil {
+				var exit *exec.ExitError
+				if errors.As(err, &exit) {
+					return exit.ExitCode()
+				}
+				return fail(fmt.Errorf("cannot execute Go evidence runner: %v", err))
 			}
-			return fail(fmt.Errorf("cannot execute Go evidence runner: %v", err))
 		}
 	}
 	cases := mapping["cases"].([]any)

@@ -1,5 +1,0 @@
-// The body is compiler-owned: the loader replaces this marker with the
-// decimal formatting operation (Go strconv.FormatInt(value, 10), JS String).
-fn format(value: i64) -> string {
-    "ergo:intrinsic i64.format"
-}

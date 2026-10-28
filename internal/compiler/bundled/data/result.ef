@@ -1,8 +1,0 @@
-enum Result<T: type, E: type> {
-    Ok {
-        value: T
-    },
-    Err {
-        error: E
-    }
-}

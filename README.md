@@ -43,7 +43,7 @@ func TestSlowGatewayTimesOut() needs testing.T {
 
 **What runs today:** the parser and the formatter accept all of this code. The prototype checker checks error rows, `try`, total `catch`, `needs` rows, closed wires and `timeout.After`. The task runtime `runtime/rt` records traces. Resource and law checks, provider replacement, `testing.VirtualClock` and `ergo test` are designed, not built. See the [status table](#status).
 
-Designed output, because `ergo test` does not run 2026-edition files yet:
+Designed output, because `ergo test` is not built yet ([#196](https://github.com/cevr/ergo/issues/196)):
 
 ```console
 $ ergo test --trace
@@ -274,16 +274,16 @@ cause trace of the root exit (links recorded by the runtime; candidates are labe
 
 ## Built for agents
 
-*Status:* `ergo diagnostics`, `ergo fmt` and the MCP formatter work on 2026-edition files today. `ergo inspect` and the semantic MCP tools refuse 2026-edition files until the checker lands ([#196](https://github.com/cevr/ergo/issues/196)); for the earlier language they work today.
+*Status:* `ergo check`, `ergo diagnostics` and `ergo fmt` work today. `ergo inspect`, the MCP server and the language server are unavailable until they are ported to the new front end ([#203](https://github.com/cevr/ergo/issues/203)).
 
-Agents read the same checked model as the compiler, through the CLI or MCP. A diagnostic has a registered code, a position and a message. This is real output of the current CLI for a 2026-edition file whose `pay` calls `Gateway` without declaring it:
+Agents read the same checked model as the compiler, through the CLI today and through MCP once it is ported. A diagnostic has a registered code, a position and a message. This is real output of the current CLI for a file whose `pay` calls `Gateway` without declaring it:
 
 ```console
 $ ergo diagnostics pay.ef
 pay.ef:21:9: error S102: this call requires checkout.Gateway, which is not in the capability row of function pay and no with provides it
 ```
 
-`ergo inspect` answers the same questions as JSON. For a 2026-edition file it reports EF145 until the checker lands ([#196](https://github.com/cevr/ergo/issues/196)). Designed output:
+`ergo inspect` will answer the same questions as JSON when it returns on the new front end ([#203](https://github.com/cevr/ergo/issues/203)). Designed output:
 
 ```console
 $ ergo inspect checkout.ef Checkout
@@ -301,7 +301,7 @@ $ ergo inspect checkout.ef Checkout
 
 ## Go interop
 
-*Status:* designed, not built, for the 2026 edition: the prototype checker refuses `import go` with S109 ([grammar](docs/spec/grammar.md#declarations)). The earlier `.ef` language imports Go packages today ([interop](docs/interop.md)).
+*Status:* designed, not built: the prototype checker refuses `import go` with S109 ([grammar](docs/spec/grammar.md#declarations)).
 
 ```go
 import go "strconv" // every call through strconv charges go.Foreign
@@ -349,8 +349,8 @@ These are rules of the designed language. The parser enforces the syntax rules t
 
 | Part | Status |
 | --- | --- |
-| Parser and `ergo fmt` for the 2026 edition | In the main compiler ([#195](https://github.com/cevr/ergo/issues/195)) |
-| `ergo check`, `build` and `run` on a 2026-edition module | Accept the prototype subset: rows, `try`, `catch`, closed wires and `timeout.After` ([example](examples/editions/sketch/main.ef)) |
+| Parser and `ergo fmt` | In the main compiler ([#195](https://github.com/cevr/ergo/issues/195)) |
+| `ergo check`, `diagnostics`, `build` and `run` | Accept the prototype subset: rows, `try`, `catch`, closed wires and `timeout.After` ([example](examples/editions/sketch/main.ef)) |
 | Checker: types, generics, error and needs rows | In progress ([#196](https://github.com/cevr/ergo/issues/196)) |
 | Linearity, borrows and captures | Designed ([#197](https://github.com/cevr/ergo/issues/197)) |
 | Lowering to Go in the main compiler | Open ([#50](https://github.com/cevr/ergo/issues/50)); prototype in [`prototypes/sketch9`](prototypes/sketch9/README.md) |
@@ -358,8 +358,9 @@ These are rules of the designed language. The parser enforces the syntax rules t
 | Standard library | Designed ([outline](docs/spec/stdlib.md), [#206](https://github.com/cevr/ergo/issues/206)) |
 | Laws | Designed ([#162](https://github.com/cevr/ergo/issues/162)); the [#125 spike](docs/research/laws.md) prototyped them for the earlier language on an unmerged branch |
 | Actors as a library | Landed as a spike in [`prototypes/actorlib`](prototypes/actorlib/doc.go) ([#101](https://github.com/cevr/ergo/issues/101), closed); the std package is [#57](https://github.com/cevr/ergo/issues/57) |
-| Go interop for the 2026 edition | Designed |
-| The earlier `.ef` language (`internal/compiler`) | Still builds and runs; [#205](https://github.com/cevr/ergo/issues/205) retires it |
+| Go interop | Designed |
+| Lint rules, `ergo inspect`, MCP and the language server | Unavailable until ported to the new front end ([#203](https://github.com/cevr/ergo/issues/203)) |
+| The earlier `.ef` language | Removed by [#205](https://github.com/cevr/ergo/issues/205) ([record](docs/receipts/retire-ef.md)) |
 
 ## Learn more
 
@@ -378,11 +379,11 @@ git clone https://github.com/cevr/ergo.git
 cd ergo
 go build -o bin/ergo ./cmd/ergo
 
-./bin/ergo run examples/editions/sketch/main.ef    # a 2026-edition module: hello, Ada / no friend named Bob
+./bin/ergo run examples/editions/sketch/main.ef    # prints: hello, Ada / no friend named Bob
 ./bin/ergo fmt --check examples/editions/sketch/main.ef
-./scripts/gate.sh                                  # the merge gate: formatting, vet, tests, CLI, MCP and LSP checks
+./scripts/gate.sh                                  # the merge gate: formatting, vet, tests and CLI checks
 ```
 
-- A module opts into the 2026 edition with an `ergo.json` of `{"edition": "2026"}`. A file without one is the earlier language.
-- Where things live: the parser in `internal/sketch/syntax`, the formatter in `internal/sketch/format`, the prototype checker and its bridge in `internal/sketch/proto`, the task runtime in `runtime/rt`, the CLI in `cmd/ergo`, and the specification in `docs/spec`.
-- The earlier language lives in `internal/compiler` and `examples/` until [#205](https://github.com/cevr/ergo/issues/205). Its documents are [implemented syntax](docs/prototype.md), [tooling](docs/tooling.md), [testing](docs/testing.md) and [bundled modules](docs/bundled-modules.md).
+- A source is one `.ef` file. There is no manifest and no edition.
+- Where things live: the parser in `internal/sketch/syntax`, the formatter in `internal/sketch/format`, the prototype checker and its bridge in `internal/sketch/proto`, the front end the commands share in `internal/sketchfront`, the task runtime in `runtime/rt`, the CLI in `cmd/ergo`, and the specification in `docs/spec`.
+- [#205](https://github.com/cevr/ergo/issues/205) removed the earlier `.ef` language ([record](docs/receipts/retire-ef.md)). Its documents stay as design reference: [implemented syntax](docs/prototype.md), [testing](docs/testing.md) and [bundled modules](docs/bundled-modules.md).

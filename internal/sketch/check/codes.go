@@ -1,6 +1,6 @@
 package check
 
-// Code is a registered diagnostic code of the 2026 edition's S namespace
+// Code is a registered diagnostic code of the language's S namespace
 // (docs/spec/diagnostics.md). A test keeps this table, the codes the parser
 // and the checker emit, and the rows of diagnostics.md in step (#79's
 // mechanism for the S namespace; #79 later joins it with the EF registry).

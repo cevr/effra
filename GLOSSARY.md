@@ -6,7 +6,7 @@ The sections are:
 - **Language**: the Go-shaped language of `docs/spec/`.
 - **Constructs, contracts and laws**: how constructs are admitted, and the vocabulary of laws and evidence.
 - **Runtime and providers**: tasks, interruption, exits and lawful providers.
-- **Earlier `.ef` language**: terms of the language that `internal/compiler` implements today. They stay in force for that compiler until [#205](https://github.com/cevr/ergo/issues/205) retires it.
+- **Earlier `.ef` language**: terms of the retired language that [#205](https://github.com/cevr/ergo/issues/205) removed with its compiler. They stay as design reference.
 - **Tooling and testing**.
 
 A status in parentheses applies to the term's support: *checked* (the 2026 checker `internal/sketch/check`, [#196](https://github.com/cevr/ergo/issues/196), checks it; building may still need [#50](https://github.com/cevr/ergo/issues/50)), *implemented in prototype* (`prototypes/sketch9`), *designed* (decided, not implemented), or, in the earlier-language section, the earlier labels.
@@ -235,7 +235,7 @@ A status in parentheses applies to the term's support: *checked* (the 2026 check
 
 ## Earlier `.ef` language
 
-These terms describe the `.ef` language that `internal/compiler` and `runtime/ergo` implement today, with its `effect fn`, `run`, `raises` and `service` forms. The Go-shaped language replaces it; where a term has a counterpart above, the entry says so.
+These terms describe the retired `.ef` language, with its `effect fn`, `run`, `raises` and `service` forms. [#205](https://github.com/cevr/ergo/issues/205) removed its compiler ([retirement record](docs/receipts/retire-ef.md)); its runtime, `runtime/ergo`, stays in the tree until lowering replaces it. The terms stay as design reference. The Go-shaped language replaces it; where a term has a counterpart above, the entry says so.
 
 **Record**: A nominal data type with declared fields. Construction checks every required field and its type. Counterpart: struct.
 
@@ -380,10 +380,6 @@ These terms describe the `.ef` language that `internal/compiler` and `runtime/er
 **Request scope**: A fresh owning scope for one HTTP request, linked to connection and server cancellation. Completed shutdown includes its handler cleanup.
 
 ## Tooling and testing
-
-**Edition**: The language version that governs a source file and selects its front-end. `legacy` is the earlier `.ef` language of `internal/compiler`; `2026` is the Go-shaped language of `docs/spec/` v0. Files of both editions keep the `.ef` extension and build in one workspace. The edition comes only from an edition manifest, never from file content; a file that no manifest governs is `legacy` until [#205](https://github.com/cevr/ergo/issues/205). See [editions](docs/specs/editions.md).
-
-**Edition manifest**: A file named `ergo.json` that holds exactly one JSON object, `{"edition": "<id>"}`. It governs the source files in its directory and in subdirectories without a nearer manifest, up to the nearest Go module root. A manifest that is unsupported or malformed is the EF144 refusal, never a fallback.
 
 **Lint advice**: Optional guidance about an admitted program, distinct from diagnostics that determine whether its contracts are valid.
 

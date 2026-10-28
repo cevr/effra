@@ -1,6 +1,6 @@
 package prelude
 
-// The prelude of the 2026 edition (docs/spec/stdlib.md, Prelude). It is
+// The prelude of the language (docs/spec/stdlib.md, Prelude). It is
 // ordinary Ergo source, checked by internal/sketch/check like any other
 // package; its exported names are in scope in every package without an
 // import. The method sets of the four capabilities are provisional: they

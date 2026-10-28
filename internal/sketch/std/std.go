@@ -1,4 +1,4 @@
-// Package std holds the Ergo source of the 2026 edition's prelude and
+// Package std holds the Ergo source of the language's prelude and
 // standard-library root (docs/spec/stdlib.md). The sources are ordinary
 // Ergo code: internal/sketch/check checks them with the same rules as user
 // packages, so no library item is a compiler branch (owner, 2026-10-12;

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"ergo.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/sketchfront"
 	"ergo.local/prototype/internal/testinputs"
 )
 
@@ -112,27 +112,27 @@ func runTestCLIDir(t *testing.T, binary, directory string, input string, args ..
 	return nil, nil, -1
 }
 
+// sketchMissingNeeds is a source whose exported Greet uses Console
+// without declaring it (an exported function spells its rows): one
+// located S102 on line 4.
+const sketchMissingNeeds = "package p\n\nfunc Greet() {\n\tConsole.Println(\"é\")\n}\n\nfunc main() needs Console {\n\tGreet()\n}\n"
+
 func TestDiagnosticsCLIProcessFormatsTextJSONAndUsage(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := t.TempDir()
 	path := filepath.Join(root, "space é.ef")
-	source := `effect fn task() -> string { "ok" }
-effect fn main() -> string {
-let forgotten = task()
-run task().provide<Console>(Stdout)
-}`
-	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(sketchMissingNeeds), 0600); err != nil {
 		t.Fatal(err)
 	}
 
 	textOutput, textError, code := runTestCLI(t, binary, "diagnostics", path)
-	if code != 0 || len(textError) != 0 || !strings.Contains(string(textOutput), "warning EFL001") || !strings.Contains(string(textOutput), "hint EFL002") {
+	if code != 1 || string(textOutput) != path+":4:2: error S102: this call requires Console, which is not in the capability row of function Greet and no with provides it\n" || string(textError) != "diagnostics failed policy\n" {
 		t.Fatalf("unexpected diagnostics text: code=%d stdout=%q stderr=%q", code, textOutput, textError)
 	}
 
 	jsonOutput, jsonError, code := runTestCLI(t, binary, "diagnostics", path, "--strict", "--json")
 	if code != 1 || len(jsonError) == 0 {
-		t.Fatalf("strict diagnostics did not fail policy: code=%d stderr=%q", code, jsonError)
+		t.Fatalf("diagnostics of an unchecked source did not fail policy: code=%d stderr=%q", code, jsonError)
 	}
 	var report struct {
 		Checked      bool `json:"checked"`
@@ -142,6 +142,7 @@ run task().provide<Console>(Stdout)
 			URI string `json:"uri"`
 		} `json:"source"`
 		Diagnostics []struct {
+			Code     string `json:"code"`
 			Severity string `json:"severity"`
 			LSP      struct {
 				Severity int `json:"severity"`
@@ -151,44 +152,78 @@ run task().provide<Console>(Stdout)
 	if err := json.Unmarshal(jsonOutput, &report); err != nil {
 		t.Fatalf("diagnostics JSON was not parseable: %v\n%s", err, jsonOutput)
 	}
-	if !report.Checked || report.PolicyPassed || !report.Strict || !strings.HasPrefix(report.Source.URI, "file://") || strings.Contains(report.Source.URI, " ") || !strings.Contains(report.Source.URI, "%20") || !strings.Contains(report.Source.URI, "%C3%A9") || len(report.Diagnostics) != 2 || report.Diagnostics[0].Severity != "warning" || report.Diagnostics[0].LSP.Severity != 2 || report.Diagnostics[1].Severity != "hint" || report.Diagnostics[1].LSP.Severity != 4 {
+	if report.Checked || report.PolicyPassed || !report.Strict || !strings.HasPrefix(report.Source.URI, "file://") || strings.Contains(report.Source.URI, " ") || !strings.Contains(report.Source.URI, "%20") || !strings.Contains(report.Source.URI, "%C3%A9") || len(report.Diagnostics) != 1 || report.Diagnostics[0].Code != "S102" || report.Diagnostics[0].Severity != "error" || report.Diagnostics[0].LSP.Severity != 1 {
 		t.Fatalf("wrong diagnostics JSON: %+v", report)
 	}
 
-	_, usageErrorOutput, code := runTestCLI(t, binary, "diagnostics", path, "--unknown")
-	if code != 2 || !strings.Contains(string(usageErrorOutput), "unknown option") {
-		t.Fatalf("invalid diagnostics invocation did not use exit 2: code=%d stderr=%q", code, usageErrorOutput)
+	clean := filepath.Join(root, "clean.ef")
+	if err := os.WriteFile(clean, []byte(sketchCleanSource), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"diagnostics", clean}, {"diagnostics", clean, "--strict", "--json"}} {
+		stdout, stderr, code := runTestCLI(t, binary, args...)
+		if code != 0 || len(stderr) != 0 {
+			t.Fatalf("ergo %v on a clean source: code=%d stdout=%q stderr=%q", args, code, stdout, stderr)
+		}
 	}
 
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"diagnostics", path, "--unknown"}, "unknown option --unknown"},
+		{[]string{"diagnostics", path, "--lint-config", "lint.json"}, "unknown option --lint-config"},
+		{[]string{"diagnostics", path, "--rules", "rules.json"}, "unknown option --rules"},
+		{[]string{"diagnostics", path, "--target", "llvm"}, "EF110: unsupported target llvm; the only target is go"},
+		{[]string{"diagnostics", path, "--target"}, "--target requires a value"},
+		{[]string{"diagnostics", path, clean}, "incorrect arguments for diagnostics"},
+		{[]string{"diagnostics", "--json"}, "source file required"},
+		{[]string{"diagnostics", filepath.Join(root, "main.go")}, "source file must have .ef extension"},
+		{[]string{"diagnostics", path, "-o", "out"}, "-o is only supported by build"},
+	} {
+		stdout, stderr, code := runTestCLI(t, binary, c.args...)
+		if code != 2 || len(stdout) != 0 || !strings.Contains(string(stderr), c.want) {
+			t.Fatalf("ergo %v: code=%d stdout=%q stderr=%q; want exit 2 and %q", c.args, code, stdout, stderr, c.want)
+		}
+	}
 	_, missingError, code := runTestCLI(t, binary, "diagnostics", filepath.Join(root, "missing.ef"), "--json")
 	if code != 1 || len(missingError) == 0 {
 		t.Fatalf("missing source was not reported as an operational failure: code=%d stderr=%q", code, missingError)
 	}
-	_, unsupportedError, code := runTestCLI(t, binary, "diagnostics", path, "--target", "llvm")
-	if code != 2 || !strings.Contains(string(unsupportedError), "unsupported target") {
-		t.Fatalf("unsupported target was not rejected as invalid invocation: code=%d stderr=%q", code, unsupportedError)
-	}
+}
 
-	suppressedPath := filepath.Join(root, "suppressed.ef")
-	suppressedSource := `effect fn task() -> string { "ok" }
-effect fn main() -> string {
-// ergo-lint-disable-next-line unused-recipe -- deliberate deferred hook
-let forgotten = task()
-"ok"
-}`
-	if err := os.WriteFile(suppressedPath, []byte(suppressedSource), 0600); err != nil {
+// The other file commands report an invalid invocation with exit 1, and
+// their options are the ones the command table names.
+func TestFileCommandsRefuseOptionsTheyDoNotTake(t *testing.T) {
+	binary := buildTestCLI(t)
+	root := t.TempDir()
+	path := filepath.Join(root, "main.ef")
+	if err := os.WriteFile(path, []byte(sketchCleanSource), 0600); err != nil {
 		t.Fatal(err)
 	}
-	suppressedOutput, suppressedError, code := runTestCLI(t, binary, "diagnostics", suppressedPath, "--strict", "--json")
-	if code != 0 || len(suppressedError) != 0 {
-		t.Fatalf("reasoned suppression did not pass diagnostics policy: code=%d stderr=%q", code, suppressedError)
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"check", path, "--json"}, "--json is only supported by diagnostics"},
+		{[]string{"check", path, "--strict"}, "--strict is only supported by diagnostics"},
+		{[]string{"check", path, "--target", "js"}, "EF110: unsupported target js; the only target is go"},
+		{[]string{"run", path, "-o", "out"}, "-o is only supported by build"},
+		{[]string{"build", path, "--receipt", "receipt.json"}, "unknown option --receipt"},
+		{[]string{"build", path, "--target", "wasm"}, "EF110: unsupported target wasm; the only target is go"},
+		{[]string{"check"}, "source file required"},
+		{[]string{"run", path, path}, "incorrect arguments for run"},
+		{[]string{"check", filepath.Join(root, "main.txt")}, "source file must have .ef extension"},
+		{[]string{"build", path, "-o", root + string(filepath.Separator)}, "names a directory"},
+		{[]string{"build", path, "-o", root}, "is a directory"},
+	} {
+		stdout, stderr, code := runTestCLIDir(t, binary, root, "", c.args...)
+		if code != 1 || len(stdout) != 0 || !strings.Contains(string(stderr), c.want) {
+			t.Fatalf("ergo %v: code=%d stdout=%q stderr=%q; want exit 1 and %q", c.args, code, stdout, stderr, c.want)
+		}
 	}
-	var suppressed struct {
-		PolicyPassed bool              `json:"policyPassed"`
-		Diagnostics  []json.RawMessage `json:"diagnostics"`
-	}
-	if err := json.Unmarshal(suppressedOutput, &suppressed); err != nil || !suppressed.PolicyPassed || len(suppressed.Diagnostics) != 0 {
-		t.Fatalf("suppressed diagnostics report was not empty and passing: err=%v report=%+v", err, suppressed)
+	if _, err := os.Stat(filepath.Join(root, "dist")); err == nil {
+		t.Fatal("a refused build wrote dist/")
 	}
 }
 
@@ -196,9 +231,8 @@ func TestFormatCLIProcessModesAndAtomicWrites(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := t.TempDir()
 	path := filepath.Join(root, "main.ef")
-	source := `import go missing "example.invalid/no-such-package"
-effect fn main() -> string { "ok" }`
-	want, err := compiler.FormatSource(source)
+	source := sketchUnformatted
+	want, err := sketchfront.Format(source, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,11 +276,12 @@ effect fn main() -> string { "ok" }`
 	var writeReport struct {
 		FormatterVersion string `json:"formatterVersion"`
 		Files            []struct {
-			Changed bool `json:"changed"`
-			Written bool `json:"written"`
+			FormatterVersion string `json:"formatterVersion"`
+			Changed          bool   `json:"changed"`
+			Written          bool   `json:"written"`
 		} `json:"files"`
 	}
-	if err := json.Unmarshal(writeOutput, &writeReport); err != nil || writeReport.FormatterVersion == "" || len(writeReport.Files) != 1 || !writeReport.Files[0].Changed || !writeReport.Files[0].Written {
+	if err := json.Unmarshal(writeOutput, &writeReport); err != nil || writeReport.FormatterVersion != sketchfront.FormatterIdentity || len(writeReport.Files) != 1 || writeReport.Files[0].FormatterVersion != sketchfront.FormatterIdentity || !writeReport.Files[0].Changed || !writeReport.Files[0].Written {
 		t.Fatalf("wrong format write report: err=%v report=%+v", err, writeReport)
 	}
 	actual, err := os.ReadFile(path)
@@ -277,11 +312,11 @@ effect fn main() -> string { "ok" }`
 
 	valid := filepath.Join(root, "valid.ef")
 	invalid := filepath.Join(root, "invalid.ef")
-	validSource := `effect fn main() -> string { "valid" }`
+	validSource := sketchUnformatted
 	if err := os.WriteFile(valid, []byte(validSource), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(invalid, []byte(`effect fn main() -> string { @ }`), 0600); err != nil {
+	if err := os.WriteFile(invalid, []byte("package p\n\nfunc main() { @ }\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	mixedOutput, mixedError, code := runTestCLI(t, binary, "fmt", "--json", valid, invalid)
@@ -326,27 +361,23 @@ effect fn main() -> string { "ok" }`
 	if code != 2 || !strings.Contains(string(symlinkError), "EFMT_SYMLINK") {
 		t.Fatalf("symlink write was not rejected: code=%d stderr=%q", code, symlinkError)
 	}
-	invalidBytesSlice := append([]byte("// invalid "), 0xff)
-	invalidBytesSlice = append(invalidBytesSlice, []byte("\neffect fn main() -> void { void }\n")...)
-	invalidBytes := string(invalidBytesSlice)
-	invalidStdout, invalidStderr, code := runTestCLIInput(t, binary, invalidBytes, "fmt", "--stdin")
-	if code != 2 || len(invalidStdout) != 0 || !strings.Contains(string(invalidStderr), "EFMT_SYNTAX") || !strings.Contains(string(invalidStderr), "not valid UTF-8") {
-		t.Fatalf("invalid stdin UTF-8 was not rejected without replacement: code=%d stdout=%q stderr=%q", code, invalidStdout, invalidStderr)
-	}
-	var expanded strings.Builder
-	expanded.WriteString("effect fn main() -> void { ")
-	for index := 0; index < 64; index++ {
-		expanded.WriteString("scope { ")
-	}
-	expanded.WriteString(strings.Repeat("void;\n", 20000))
-	for index := 0; index < 64; index++ {
-		expanded.WriteString(" }")
-	}
-	expanded.WriteString(" }")
-	limitedStdout, limitedStderr, code := runTestCLIInput(t, binary, expanded.String(), "fmt", "--stdin")
+	limitedStdout, limitedStderr, code := runTestCLIInput(t, binary, string(formatExpansion(80000)), "fmt", "--stdin")
 	if code != 2 || len(limitedStdout) != 0 || !strings.Contains(string(limitedStderr), "EFMT_OUTPUT_LIMIT") {
 		t.Fatalf("stdin output bound was not enforced before replacement: code=%d stdout=%d stderr=%q", code, len(limitedStdout), limitedStderr)
 	}
+}
+
+// formatExpansion is a source whose formatted text is about ten times
+// longer: each one-line statement inside 64 nested blocks gets its own line
+// and 65 tabs.
+func formatExpansion(statements int) []byte {
+	var source strings.Builder
+	source.WriteString("package p\nfunc f() {")
+	source.WriteString(strings.Repeat("{ ", 64))
+	source.WriteString(strings.Repeat("x = 1; ", statements))
+	source.WriteString(strings.Repeat(" }", 64))
+	source.WriteString("}\n")
+	return []byte(source.String())
 }
 
 func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
@@ -358,7 +389,7 @@ func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
 	if err := os.Symlink(filepath.Join(root, "deep", "inner"), filepath.Join(root, "jump")); err != nil {
 		t.Fatal(err)
 	}
-	source := `effect fn main() -> string { "ok" }`
+	source := sketchUnformatted
 	deepPath := filepath.Join(root, "deep", "e.ef")
 	rootPath := filepath.Join(root, "e.ef")
 	if err := os.WriteFile(deepPath, []byte(source), 0600); err != nil {
@@ -375,7 +406,7 @@ func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
 	if err := json.Unmarshal(output, &report); err != nil || len(report.Files) != 2 || !report.Files[0].Written || !report.Files[1].Written {
 		t.Fatalf("distinct OS paths were falsely deduplicated: err=%v report=%+v", err, report)
 	}
-	want, err := compiler.FormatSource(source)
+	want, err := sketchfront.Format(source, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +419,7 @@ func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
 
 	resolvedParentTarget := filepath.Join(root, "deep", "parent-target.ef")
 	lexicalParentCounterpart := filepath.Join(root, "parent-target.ef")
-	lexicalBytes := []byte(`effect fn lexical() -> string { "keep" }`)
+	lexicalBytes := []byte("package lexical\n")
 	if err := os.WriteFile(resolvedParentTarget, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -496,7 +527,7 @@ func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
 
 func TestFormatApplySeamReportsStaleAndEarlierWrites(t *testing.T) {
 	root := t.TempDir()
-	source := `effect fn main() -> string { "ok" }`
+	source := sketchUnformatted
 	firstPath := filepath.Join(root, "first.ef")
 	secondPath := filepath.Join(root, "second.ef")
 	if err := os.WriteFile(firstPath, []byte(source), 0600); err != nil {
@@ -505,7 +536,7 @@ func TestFormatApplySeamReportsStaleAndEarlierWrites(t *testing.T) {
 	if err := os.WriteFile(secondPath, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
-	result, err := compiler.FormatSource(source)
+	result, err := sketchfront.Format(source, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +561,7 @@ func TestFormatApplySeamReportsStaleAndEarlierWrites(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			edited := `effect fn main() -> string { "edited" }`
+			edited := "package edited\n"
 			if err := os.WriteFile(plan.path, []byte(edited), 0600); err != nil {
 				return err
 			}
@@ -551,7 +582,7 @@ func TestFormatApplySeamReportsStaleAndEarlierWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(firstBytes) != result.Text || string(secondBytes) != `effect fn main() -> string { "edited" }` {
+	if string(firstBytes) != result.Text || string(secondBytes) != "package edited\n" {
 		t.Fatalf("real partial write did not preserve disk state: first=%q second=%q", firstBytes, secondBytes)
 	}
 	entries, err := os.ReadDir(root)
@@ -568,7 +599,7 @@ func TestFormatApplySeamReportsStaleAndEarlierWrites(t *testing.T) {
 func TestReplaceFormattedFileCleansTempAfterActualFailure(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "main.ef")
-	source := `effect fn main() -> string { "ok" }`
+	source := sketchUnformatted
 	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -576,7 +607,7 @@ func TestReplaceFormattedFileCleansTempAfterActualFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := compiler.FormatSource(source)
+	result, err := sketchfront.Format(source, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -604,7 +635,7 @@ func TestReplaceFormattedFileCleansTempAfterActualFailure(t *testing.T) {
 func TestReplaceFormattedFileRejectsSameBytesDifferentInode(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "main.ef")
-	source := `effect fn main() -> string { "ok" }`
+	source := sketchUnformatted
 	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -612,7 +643,7 @@ func TestReplaceFormattedFileRejectsSameBytesDifferentInode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := compiler.FormatSource(source)
+	result, err := sketchfront.Format(source, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -651,7 +682,7 @@ func TestReplaceFormattedFileUsesResolvedParentForRawPath(t *testing.T) {
 	if err := os.Symlink(filepath.Join(root, "deep", "inner"), filepath.Join(root, "jump")); err != nil {
 		t.Fatal(err)
 	}
-	source := `effect fn main() -> string { "ok" }`
+	source := sketchUnformatted
 	actualPath := filepath.Join(root, "deep", "raw-parent.ef")
 	if err := os.WriteFile(actualPath, []byte(source), 0600); err != nil {
 		t.Fatal(err)
@@ -661,7 +692,7 @@ func TestReplaceFormattedFileUsesResolvedParentForRawPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := compiler.FormatSource(source)
+	result, err := sketchfront.Format(source, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
