@@ -118,7 +118,7 @@ func TestFormat(t *testing.T) {
 	if err != nil || again.Changed || again.Text != want {
 		t.Fatalf("formatted text changed again: %+v, %v", again, err)
 	}
-	if FormatterIdentity != "ergo-2026/formatter-1" {
+	if FormatterIdentity != "ergo-2026/formatter-2" {
 		t.Fatalf("identity %q", FormatterIdentity)
 	}
 

@@ -39,7 +39,7 @@ This directory is the normative specification of the Go-shaped Ergo language: Ef
 | Construct | Status | Section |
 | --- | --- | --- |
 | Parsing every production of grammar.md and Go's productions where it is silent; S001 | Implemented ([#195](https://github.com/cevr/ergo/issues/195), `internal/sketch/syntax`); a form the prototype checker lacks is S109 until [#196](https://github.com/cevr/ergo/issues/196) | [grammar](grammar.md#parser) |
-| Formatting, `ergo-2026/formatter-1` | Implemented ([#195](https://github.com/cevr/ergo/issues/195), `internal/sketch/format`) | [formatting](../specs/formatting.md#2026-edition) |
+| Formatting, `ergo-2026/formatter-2` | Implemented ([#195](https://github.com/cevr/ergo/issues/195), `internal/sketch/format`) | [formatting](../specs/formatting.md#2026-edition) |
 | Package clause, one `import` path per line | Implemented in prototype | [grammar](grammar.md#declarations) |
 | Identifiers by decoded code point (round-7 rule) | Implemented in prototype | [grammar](grammar.md#identifiers) |
 | Integer, duration and string literals | Implemented in prototype | [grammar](grammar.md#literals) |

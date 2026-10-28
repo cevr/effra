@@ -40,7 +40,7 @@ import "ergo.local/prototype/internal/sketch/syntax"
 
 // Identity names this formatter on every surface (MCP formatterVersion,
 // the per-file formatterVersion of `ergo fmt --json`).
-const Identity = "ergo-2026/formatter-1"
+const Identity = "ergo-2026/formatter-2"
 
 // Source formats a 2026 source file. A syntax error is returned as the
 // parser's *syntax.Error, and no text.
