@@ -425,6 +425,18 @@ func (tab *typeTable) local(r *Row) *Row {
 	return l
 }
 
+// idsOf returns the ids of r's elements in tab when no element waits on an
+// unbound variable, else nil: the distinct elements converge credits are
+// counted by ids that do not change with the inference context, so an
+// element seen again is never new.
+func (r *Row) idsOf(tab *typeTable) []int32 {
+	l := tab.local(r)
+	if l.Empty() || l.infer {
+		return nil
+	}
+	return l.ids
+}
+
 // row builds the row of elems.
 func (tab *typeTable) row(elems ...Type) *Row {
 	r := newRow()

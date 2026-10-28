@@ -594,20 +594,6 @@ func (c *checker) newSolutions() {
 	clear(c.inferSubjects)
 }
 
-// rowSize is the number of elements in a body's inferred rows so far.
-func (n *bodyNode) rowSize() int {
-	if n.fn == nil {
-		return 0
-	}
-	size := 0
-	for _, v := range []*RowVar{n.fn.errVar, n.fn.useVar} {
-		if v != nil {
-			size += len(v.sol.Elems())
-		}
-	}
-	return size
-}
-
 // refuseRows reports the functions of a component whose inferred rows did
 // not reach a fixpoint within the bound (S108: soundness by refusal).
 func (c *checker) refuseRows(scc []*bodyNode) {
@@ -640,11 +626,22 @@ func (f *Func) resetRows() {
 // rows are monotone in its callees' rows), so the worklist empties; no row
 // is published to another component before it has converged.
 // They are monotone because no type inside the group depends on a row still
-// being inferred: a member used as a value inside its group has its
-// unwritten rows pinned empty (class G, pinGroup). As a safety net the worklist is
-// bounded by the component and its rows so far: each check that grows a row
-// adds to the bound, so a monotone fixpoint always fits, and a worklist
-// past it refuses the rows (S108) instead of guessing.
+// being inferred: a member used as a value inside its group, directly or
+// through a function literal or go task that is a value, has its unwritten
+// rows pinned empty (class G, pinGroup).
+//
+// The worklist is bounded whatever the rows do: 2·(bodies + edges)·(D + 1)
+// checks, where D counts the distinct row elements (kind and interned id)
+// the component has produced so far. A monotone solve changes each row at
+// most D times and requeues each predecessor once per change, so it fits.
+// Only an element seen for the first time raises D; an element removed and
+// added again earns nothing, so an oscillating component reaches the bound
+// (TestConvergeBoundOscillation). D is finite: the elements are types of
+// the check, and expanding instantiation cycles are rejected before the
+// solve (checkInstantiationCycles). Past the bound the component is S108
+// "cannot infer the error row of f; write it" (refuseRows), never a guess.
+// converge is the only iterating solver path of a component: the silent
+// pass before it and the reporting pass after it check each body once.
 //
 // Prior art: Koka and Gleam infer per strongly connected component; the
 // worklist is the standard chaotic-iteration solver of dataflow analysis.
@@ -666,11 +663,25 @@ func (c *checker) converge(scc []*bodyNode) bool {
 	for _, n := range scc {
 		queued[n] = true
 	}
+	edges := 0
+	for _, ps := range preds {
+		edges += len(ps)
+	}
+	// The bound: (bodies + edges) checks for each distinct row element
+	// the component has produced, plus one round. Only an element seen
+	// for the first time extends it; one removed and added again earns
+	// nothing, so an oscillation ends in the refusal (round 14 O1).
+	seen := map[[2]int32]bool{}
+	budget := func() int { return 2 * (len(scc) + edges) * (len(seen) + 1) }
+	check := c.checkNode
+	if c.nodeCheck != nil {
+		check = c.nodeCheck // the synthetic oscillation test
+	}
 	c.silent++
-	checks, budget, growth := 0, 4*(len(scc)+1), 0
-	lastGrowth := map[*bodyNode]int{}
+	checks := 0
+	defer func() { c.convergeChecks += checks }()
 	for len(queue) > 0 {
-		if checks > budget {
+		if checks >= budget() {
 			c.silent--
 			c.refuseRows(scc)
 			return false
@@ -679,22 +690,18 @@ func (c *checker) converge(scc []*bodyNode) bool {
 		n := queue[0]
 		queue = queue[1:]
 		queued[n] = false
-		before := n.rowSize()
-		if !c.checkNode(n) {
-			continue
+		changed := check(n)
+		if n.fn != nil {
+			for k, v := range []*RowVar{n.fn.errVar, n.fn.useVar} {
+				if v != nil {
+					for _, id := range v.sol.idsOf(c.types) {
+						seen[[2]int32{int32(k), id}] = true
+					}
+				}
+			}
 		}
-		// Only growth extends the bound: each new element pays for one
-		// more check of each body that references n. A row that changes
-		// without growing extends nothing, so a cycle of changes ends in
-		// the refusal.
-		if grown := n.rowSize() - before; grown > 0 {
-			budget += 2 * grown * (len(preds[n]) + 1)
-			growth += grown
-		} else if n.v != nil && growth > lastGrowth[n] {
-			// A var's type follows the rows of the literals it holds: it
-			// may change once per growth elsewhere in the component.
-			budget += 2 * (len(preds[n]) + 1)
-			lastGrowth[n] = growth
+		if !changed {
+			continue
 		}
 		for _, p := range preds[n] {
 			if !queued[p] {

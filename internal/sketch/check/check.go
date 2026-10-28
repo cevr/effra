@@ -99,7 +99,11 @@ type checker struct {
 	lits       []*litFrame    // the literal frames being checked, innermost last
 	discardGo  *syntax.GoExpr // a go expression statement: its task is not a value
 	inertGroup bool           // checking a var on an initialization cycle: no value use
-	grew       map[*Func][2]bool
+	// nodeCheck replaces checkNode in converge for the synthetic oscillation
+	// test (nil otherwise); convergeChecks counts converge's checks.
+	nodeCheck      func(*bodyNode) bool
+	convergeChecks int
+	grew           map[*Func][2]bool
 	// untyped holds the expressions Info records with an untyped type, and
 	// whether each was a constant, until a context converts them
 	// (updateExprType; go/types check.untyped).
