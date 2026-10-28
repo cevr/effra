@@ -66,7 +66,7 @@ Whether to adopt the full Non-Go syntax is not decided. The [#220 stage-1b arm](
 
 The owner delegated this round on 2026-10-28 ("dont block on me anymore"). The orchestrator decided it by principle: rules removed per cost, one form per job, agent interpretability, and speed (#190). The owner's own decisions are unchanged. Each item joins the stage in brackets.
 
-1. A declaration always names its fields: `type Option[T] = Some{Value T} | None{}` [196p].
+1. A declaration always names its fields, as the prelude's own definition does: the prelude defines `type Option[T] = Some{Value T} | None{}`, and user code cannot redeclare `Option` (eighth-round addendum, item 2) [196p].
 2. Every record with no fields is written bare in use, not only a union variant: `type Frozen {}` is used as `Frozen`, `case Frozen:` and `fails Frozen` [196p].
 3. One `catch` form [196r]. `e catch err { … }` is removed; `e catch { case err: … }` binds the whole failure, as in any `match`.
 4. `break` and `continue` inside a `match` act on the enclosing `for` [196p]. `match` is not a target of `break`.
@@ -326,7 +326,7 @@ fn main() needs Console {
 ```
 
 - The pattern `Declined{Reason: Fraud{Rule: rule}}` covers one variant of the nested union. The arm `Declined` covers the rest. The exhaustiveness check treats a variant pattern as a constructor, as Maranget's usefulness algorithm does (196p rule 3).
-- In a pattern, a name that resolves to a type matches that type. Any other name binds. Rust resolves a bare name the same way, as a path pattern when the name resolves and as a binding otherwise. But a Rust path pattern matches only a constant or a variant with no fields; a variant with a payload needs `Declined { .. }`. Ergo adds a rule: a bare type name such as `case Declined:` tests the type of a variant that has fields.
+- In a pattern, a name that resolves to a type matches that type. Any other name binds. Rust resolves a bare name the same way, as a path pattern when the name resolves and as a binding otherwise. But a Rust path pattern matches only a constant, a fieldless struct, or a fieldless enum variant; a variant with a payload needs `Declined { .. }`. Ergo adds a rule: a bare type name such as `case Declined:` tests the type of a variant that has fields.
 - Every variant here has one field, so `case Authorized{id}:` and `Declined{Fraud{"velocity"}}` are also legal: a literal or a pattern of a one-field record may omit the key (sixth round). A record with two or more fields stays keyed. The blocks keep the keyed form, which Today's checked file uses, so the counts compare like with like.
 - `"ok \(id)"` interpolates `id` (196s). `\(` is not a valid escape in a Go string, so the form cannot be misread. Each interpolated value must have a generated text form (196d).
 - The two decided bodies of `describe` are now the same text. The union declarations differ only in the colon of each field, and the signatures in `func` against `fn` and `-> string`.
