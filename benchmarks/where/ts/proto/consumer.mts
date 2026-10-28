@@ -1,5 +1,5 @@
 // TypeScript caller of the .d.mts the prototype generates (proto head
-// 034df57d) for sample.ef. Strict, no casts, no any. The witness parameters
+// 034df57d) for sample.ergo. Strict, no casts, no any. The witness parameters
 // are the trailing arguments; owner methods are exported as Type_method.
 import { user, userId, three, sort3, empty, insert, lookup, User_compare, UserId_hash, UserId_equals } from './out/sample.mjs';
 

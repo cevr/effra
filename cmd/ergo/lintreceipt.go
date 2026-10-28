@@ -51,7 +51,7 @@ func lintReceiptCommand(args []string) error {
 	if err := targetError(target); err != nil {
 		return invalidInvocation(err)
 	}
-	if len(paths) != 1 || filepath.Ext(paths[0]) != ".ef" {
+	if len(paths) != 1 || checkSourceExtension(paths[0], nil) != nil {
 		return invalidInvocation(fmt.Errorf("%s", lintReceiptUsage))
 	}
 	absolute, err := filepath.Abs(paths[0])

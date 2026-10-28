@@ -97,8 +97,8 @@ Status: **designed, not yet implemented** ([#69](https://github.com/cevr/ergo/is
 
    ```text
    defect: index out of range [3] with length 3
-     at handle (ingest.ef:31)
-     task #7 handle, started by tasks.Set #2 at main (ingest.ef:24)
+     at handle (ingest.ergo:31)
+     task #7 handle, started by tasks.Set #2 at main (ingest.ergo:24)
        span ingest  region=eu  peer=10.0.0.4
      task #1 main
    ```

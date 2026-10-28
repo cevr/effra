@@ -31,9 +31,9 @@ func TestFormatterResolvesTheEditionOfTheFileItReads(t *testing.T) {
 				// An unformatted legacy file, so that the legacy formatter
 				// would rewrite it in place or report it in check mode.
 				unformatted := strings.ReplaceAll(legacyCleanSource, "    ", "  ")
-				editionWrite(t, filepath.Join(root, "main.ef"), unformatted)
+				editionWrite(t, filepath.Join(root, "main.ergo"), unformatted)
 				editionWrite(t, filepath.Join(root, "new", "ergo.json"), manifest.content)
-				target := filepath.Join(root, "new", "main.ef")
+				target := filepath.Join(root, "new", "main.ergo")
 				editionWrite(t, target, unformatted)
 				if err := os.MkdirAll(filepath.Join(root, "new", "deeper"), 0o755); err != nil {
 					t.Fatal(err)
@@ -42,7 +42,7 @@ func TestFormatterResolvesTheEditionOfTheFileItReads(t *testing.T) {
 					t.Fatal(err)
 				}
 				// filepath.Join would clean the `..` before the process sees it.
-				spelling := root + "/alias/../main.ef"
+				spelling := root + "/alias/../main.ergo"
 				if reached, err := filepath.EvalSymlinks(spelling); err != nil || reached != target {
 					t.Fatalf("the spelling reaches %s (%v), want %s", reached, err, target)
 				}
@@ -52,7 +52,7 @@ func TestFormatterResolvesTheEditionOfTheFileItReads(t *testing.T) {
 				if code == 0 || !strings.Contains(output, manifest.code) {
 					t.Fatalf("ergo %s: exit %d, want %s\nstdout %s\nstderr %s", strings.Join(args, " "), code, manifest.code, stdout, stderr)
 				}
-				for _, path := range []string{target, filepath.Join(root, "main.ef")} {
+				for _, path := range []string{target, filepath.Join(root, "main.ergo")} {
 					if after, err := os.ReadFile(path); err != nil || string(after) != unformatted {
 						t.Fatalf("%s changed (%v)", path, err)
 					}
@@ -69,9 +69,16 @@ func TestEditionFollowsTheFileALinkReaches(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := editionWorkspace(t)
 	editionWrite(t, filepath.Join(root, "new", "ergo.json"), `{"edition":"2026"}`)
+	editionWrite(t, filepath.Join(root, "new", "main.ergo"), sketchCleanSource)
+	link := filepath.Join(root, "link.ergo")
+	if err := os.Symlink(filepath.Join(root, "new", "main.ergo"), link); err != nil {
+		t.Fatal(err)
+	}
+	// MCP and the LSP read the legacy spelling until retire-ef removes them
+	// (#205): they follow a link of that name to a copy of the source.
 	editionWrite(t, filepath.Join(root, "new", "main.ef"), sketchCleanSource)
-	link := filepath.Join(root, "link.ef")
-	if err := os.Symlink(filepath.Join(root, "new", "main.ef"), link); err != nil {
+	legacyLink := filepath.Join(root, "link.ef")
+	if err := os.Symlink(filepath.Join(root, "new", "main.ef"), legacyLink); err != nil {
 		t.Fatal(err)
 	}
 	admitted, err := admitSource(link)
@@ -95,7 +102,7 @@ func TestEditionFollowsTheFileALinkReaches(t *testing.T) {
 	if text, isError := mcpToolText(t, responses[1]); isError || text != want {
 		t.Fatalf("MCP: %s (error %v), want %s", text, isError, want)
 	}
-	lsp := lspSession(t, binary, root, []map[string]any{lspSmokeCall("ergo/edition", map[string]any{"textDocument": map[string]any{"uri": editionURI(link)}}, "link")})
+	lsp := lspSession(t, binary, root, []map[string]any{lspSmokeCall("ergo/edition", map[string]any{"textDocument": map[string]any{"uri": editionURI(legacyLink)}}, "link")})
 	if got := string(lspReply(t, lsp, "link")["result"]); got != want {
 		t.Fatalf("LSP: %s, want %s", got, want)
 	}

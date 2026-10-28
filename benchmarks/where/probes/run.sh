@@ -15,8 +15,13 @@ set -u
 sed --version 2>/dev/null | grep -q GNU || { echo "run.sh needs GNU sed (on macOS: gsed, first on PATH as sed)" >&2; exit 2; }
 here=$(cd "$(dirname "$0")" && pwd)
 EF=${1:?usage: run.sh EF_PROTO}
+# The probes are stored as .ergo (#221); the spike compiler reads .ef, so
+# each probe is checked from a copy with that extension.
+scratch=$(mktemp -d)
 failures=0
-for f in "$here"/*.ef; do
+for src in "$here"/*.ergo; do
+  f="$scratch/$(basename "$src" .ergo).ef"
+  cp "$src" "$f"
   expect=$(head -1 "$f" | sed -n 's%^// expect: \(accepted\|EF[0-9][0-9][0-9]\)\( .*\)\{0,1\}$%\1%p')
   if [ -z "$expect" ]; then
     printf '%-18s INVALID  first line must be `// expect: accepted` or `// expect: EFnnn`\n' "$(basename "$f")"

@@ -24,18 +24,22 @@ const sketchUnformatted = "package p\n\n\n\nfunc main()  needs Console {\n      
 func TestFmtFormatsEachFileWithItsEditionsFormatter(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := editionWorkspace(t)
-	sketch := filepath.Join(root, "new", "main.ef")
+	sketch := filepath.Join(root, "new", "main.ergo")
+	// MCP and the LSP read the legacy spelling until retire-ef removes them
+	// (#205); they get a copy of the 2026 source under that name.
+	sketchLegacyName := filepath.Join(root, "new", "main.ef")
 	legacy := filepath.Join(root, "old", "main.ef")
-	malformed := filepath.Join(root, "new", "bad.ef")
+	malformed := filepath.Join(root, "new", "bad.ergo")
 	editionWrite(t, filepath.Join(root, "new", "ergo.json"), `{"edition":"2026"}`)
 	editionWrite(t, sketch, sketchUnformatted)
+	editionWrite(t, sketchLegacyName, sketchUnformatted)
 	legacyUnformatted := strings.ReplaceAll(legacyCleanSource, "    ", "  ")
 	editionWrite(t, legacy, legacyUnformatted)
 	malformedSource := "package p\n\nfunc main() {\n\tx := )\n}\n"
 	editionWrite(t, malformed, malformedSource)
 
 	// Check mode: both files change, each under its own formatter.
-	stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "--check", "--json", "new/main.ef", "old/main.ef")
+	stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "--check", "--json", "new/main.ergo", "old/main.ef")
 	if code != 1 {
 		t.Fatalf("ergo fmt --check: exit %d, want 1\n%s\n%s", code, stdout, stderr)
 	}
@@ -66,7 +70,7 @@ func TestFmtFormatsEachFileWithItsEditionsFormatter(t *testing.T) {
 	if err := json.Unmarshal(responses[1]["result"], &tool); err != nil || tool.Structured.Text != sketchCleanSource || tool.Structured.FormatterVersion != sketchfront.FormatterIdentity {
 		t.Fatalf("MCP code.format answered %s", responses[1]["result"])
 	}
-	uri := editionURI(sketch)
+	uri := editionURI(sketchLegacyName)
 	messages := lspSession(t, binary, root, []map[string]any{
 		lspOpen(uri, sketchUnformatted),
 		lspSmokeCall("textDocument/formatting", map[string]any{"textDocument": map[string]any{"uri": uri}, "options": map[string]any{"tabSize": 4, "insertSpaces": true}}, "format"),
@@ -79,7 +83,7 @@ func TestFmtFormatsEachFileWithItsEditionsFormatter(t *testing.T) {
 	}
 
 	// Write mode writes both files with their own formatter's text.
-	if stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "new/main.ef", "old/main.ef"); code != 0 {
+	if stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "new/main.ergo", "old/main.ef"); code != 0 {
 		t.Fatalf("ergo fmt: exit %d\n%s\n%s", code, stdout, stderr)
 	}
 	if after, err := os.ReadFile(sketch); err != nil || string(after) != sketchCleanSource {
@@ -95,11 +99,11 @@ func TestFmtFormatsEachFileWithItsEditionsFormatter(t *testing.T) {
 
 	// A 2026 syntax error: EFMT_SYNTAX naming S001 and its position, nothing
 	// written.
-	_, stderr, code = runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "new/bad.ef")
+	_, stderr, code = runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "new/bad.ergo")
 	if code != 2 || !strings.Contains(string(stderr), "EFMT_SYNTAX") || !strings.Contains(string(stderr), "source cannot be formatted: S001 at 4:7: ") {
 		t.Fatalf("ergo fmt of a malformed 2026 file: exit %d, stderr %q", code, stderr)
 	}
-	stdout, _, _ = runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "--json", "new/bad.ef")
+	stdout, _, _ = runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "--json", "new/bad.ergo")
 	report = formatReport{}
 	if err := json.Unmarshal(stdout, &report); err != nil || len(report.Failures) != 1 || report.Failures[0].Code != "EFMT_SYNTAX" ||
 		len(report.Failures[0].Diagnostics) != 1 || report.Failures[0].Diagnostics[0].Code != "S001" {
@@ -132,12 +136,12 @@ func TestFmtFormatsAMixedVarGroupUnderTheDefaultBound(t *testing.T) {
 	b.WriteString(")\n")
 	source := b.String()
 	editionWrite(t, filepath.Join(root, "new", "ergo.json"), `{"edition":"2026"}`)
-	editionWrite(t, filepath.Join(root, "new", "alignment-empty.ef"), source)
-	stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "--json", "new/alignment-empty.ef")
+	editionWrite(t, filepath.Join(root, "new", "alignment-empty.ergo"), source)
+	stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "--json", "new/alignment-empty.ergo")
 	if code != 0 {
 		t.Fatalf("ergo fmt: exit %d\n%s\n%s", code, firstLines(stdout), stderr)
 	}
-	after, err := os.ReadFile(filepath.Join(root, "new", "alignment-empty.ef"))
+	after, err := os.ReadFile(filepath.Join(root, "new", "alignment-empty.ergo"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,12 +180,12 @@ func TestFmtFormatsATaperedStructUnderTheDefaultBound(t *testing.T) {
 		t.Fatalf("the generated taper is %d bytes, want the reviewer's 225682", len(source))
 	}
 	editionWrite(t, filepath.Join(root, "new", "ergo.json"), `{"edition":"2026"}`)
-	editionWrite(t, filepath.Join(root, "new", "alignment-taper.ef"), source)
-	stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "--json", "new/alignment-taper.ef")
+	editionWrite(t, filepath.Join(root, "new", "alignment-taper.ergo"), source)
+	stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, root, "", "fmt", "--json", "new/alignment-taper.ergo")
 	if code != 0 {
 		t.Fatalf("ergo fmt: exit %d\n%s\n%s", code, firstLines(stdout), stderr)
 	}
-	after, err := os.ReadFile(filepath.Join(root, "new", "alignment-taper.ef"))
+	after, err := os.ReadFile(filepath.Join(root, "new", "alignment-taper.ergo"))
 	if err != nil {
 		t.Fatal(err)
 	}

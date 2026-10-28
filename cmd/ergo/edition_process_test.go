@@ -266,6 +266,7 @@ func onlyCodes(t *testing.T, context, text string, want ...string) {
 func TestEditionsBuildSideBySide(t *testing.T) {
 	binary := buildTestCLI(t)
 	workspace := smokeWorkspace(t, "examples/editions", "go.mod", "ergo.bindings.json")
+	mainFile := map[string]string{"legacy": "main.ef", "sketch": "main.ergo"}
 	for _, module := range []string{"legacy", "sketch"} {
 		dir := filepath.Join("examples", "editions", module)
 		expected, err := os.ReadFile(filepath.Join(workspace, dir, "expected.out"))
@@ -273,7 +274,7 @@ func TestEditionsBuildSideBySide(t *testing.T) {
 			t.Fatal(err)
 		}
 		output := filepath.Join(workspace, "out", module)
-		stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, workspace, "", "build", filepath.Join(dir, "main.ef"), "-o", output)
+		stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, workspace, "", "build", filepath.Join(dir, mainFile[module]), "-o", output)
 		if code != 0 {
 			t.Fatalf("ergo build %s: exit %d\n%s%s", module, code, stdout, stderr)
 		}
@@ -284,14 +285,14 @@ func TestEditionsBuildSideBySide(t *testing.T) {
 		if !bytes.Equal(got, expected) {
 			t.Fatalf("%s printed %q, want %q", module, got, expected)
 		}
-		stdout, stderr, code = runSmokeCLI(t, editionDeadline, binary, workspace, "", "run", filepath.Join(dir, "main.ef"))
+		stdout, stderr, code = runSmokeCLI(t, editionDeadline, binary, workspace, "", "run", filepath.Join(dir, mainFile[module]))
 		if code != 0 || !bytes.Equal(stdout, expected) {
 			t.Fatalf("ergo run %s: exit %d, stdout %q, want %q\n%s", module, code, stdout, expected, stderr)
 		}
 	}
 	// The editions are what the manifests say.
 	for module, want := range map[string]string{"legacy": `"edition":"legacy","source":"manifest"`, "sketch": `"edition":"2026","source":"manifest"`} {
-		stdout, _, code := runSmokeCLI(t, editionDeadline, binary, workspace, "", "edition", filepath.Join("examples", "editions", module, "main.ef"))
+		stdout, _, code := runSmokeCLI(t, editionDeadline, binary, workspace, "", "edition", filepath.Join("examples", "editions", module, mainFile[module]))
 		if code != 0 || !strings.Contains(string(stdout), want) {
 			t.Fatalf("ergo edition %s = %s (exit %d), want %s", module, stdout, code, want)
 		}
@@ -452,7 +453,14 @@ func TestDiagnosticsRouteByEditionAcrossSurfaces(t *testing.T) {
 	lsp := lspSession(t, binary, root, messages)
 	for index, file := range files {
 		path := filepath.Join(root, filepath.FromSlash(file.rel))
-		stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, root, "", "diagnostics", path, "--json")
+		// MCP and the LSP read the legacy spelling until retire-ef removes
+		// them (#205); the CLI reads a 2026 source as .ergo (#221).
+		cliPath := path
+		if strings.HasPrefix(file.rel, "new/") {
+			cliPath = strings.TrimSuffix(path, ".ef") + ".ergo"
+			editionWrite(t, cliPath, file.text)
+		}
+		stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, root, "", "diagnostics", cliPath, "--json")
 		if (code == 0) != file.clean || code > 1 {
 			t.Fatalf("%s: ergo diagnostics exit %d\n%s%s", file.rel, code, stdout, stderr)
 		}
@@ -588,7 +596,7 @@ func TestUnsupportedEditionIsNeverPassedThrough(t *testing.T) {
 func TestUnavailableOperationsReportEF145(t *testing.T) {
 	binary := buildTestCLI(t)
 	workspace := smokeWorkspace(t, "examples/editions/sketch", "go.mod")
-	rel := filepath.Join("examples", "editions", "sketch", "main.ef")
+	rel := filepath.Join("examples", "editions", "sketch", "main.ergo")
 	path := filepath.Join(workspace, rel)
 	original, err := os.ReadFile(path)
 	if err != nil {
@@ -623,6 +631,10 @@ func TestUnavailableOperationsReportEF145(t *testing.T) {
 			t.Fatalf("build --receipt wrote %s", written)
 		}
 	}
+	// MCP and the LSP read the legacy spelling until retire-ef removes them
+	// (#205); they get a copy of the module's source under that name.
+	rel = filepath.Join("examples", "editions", "sketch", "main.ef")
+	editionWrite(t, filepath.Join(workspace, rel), string(original))
 	// Every MCP file tool but the supported ones.
 	list := mcpSession(t, binary, workspace, nil)[0]
 	tools := mcpFileTools(t, list)
@@ -645,7 +657,7 @@ func TestUnavailableOperationsReportEF145(t *testing.T) {
 	}
 	// LSP: the formatted module needs no formatting edit; navigation has no
 	// answer.
-	uri := editionURI(path)
+	uri := editionURI(filepath.Join(workspace, rel))
 	messages := lspSession(t, binary, workspace, []map[string]any{
 		lspOpen(uri, string(original)),
 		lspSmokeCall("textDocument/formatting", map[string]any{"textDocument": map[string]any{"uri": uri}, "options": map[string]any{"tabSize": 4, "insertSpaces": true}}, "format"),

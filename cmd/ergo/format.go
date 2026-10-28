@@ -26,7 +26,7 @@ const (
 
 const fmtHelp = "usage: ergo fmt FILE... [--check] [--json]\n" +
 	"       ergo fmt --stdin\n\n" +
-	"Format supported .ef syntax using the canonical syntax-only formatter of each\n" +
+	"Format supported .ergo syntax using the canonical syntax-only formatter of each\n" +
 	"file's edition (ergo.json). --stdin has no directory and uses the legacy\n" +
 	"formatter.\n\n" +
 	"Options:\n" +
@@ -273,8 +273,8 @@ func formatFiles(opts fmtOptions) (formatReport, error) {
 		if err != nil {
 			return formatPlanFailure(&report, formatPathError(displayPath, err))
 		}
-		if filepath.Ext(path) != ".ef" {
-			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_PATH", path: displayPath, message: "source file must have .ef extension"})
+		if err := checkSourceExtension(path, nil); err != nil {
+			return formatPlanFailure(&report, formatPathError(displayPath, err))
 		}
 		lstat, err := os.Lstat(path)
 		if err != nil {
@@ -293,6 +293,9 @@ func formatFiles(opts fmtOptions) (formatReport, error) {
 		// names the open file (validateFormatSnapshot), so the edition always
 		// governs the bytes that are formatted and written.
 		admitted, err := admitSource(path)
+		if errors.Is(err, errSourceExtension) {
+			return formatPlanFailure(&report, formatPathError(displayPath, err))
+		}
 		if err != nil {
 			code := "EFMT_READ"
 			var admission *edition.AdmissionError

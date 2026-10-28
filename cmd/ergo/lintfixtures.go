@@ -141,8 +141,8 @@ func lintTestCommand(args []string) error {
 	return nil
 }
 
-// lintFixtures expands each path: a .ef file is one fixture, and a
-// directory contributes its .ef files, sorted, without recursion.
+// lintFixtures expands each path: a source file is one fixture, and a
+// directory contributes its source files, sorted, without recursion.
 func lintFixtures(paths []string) ([]string, error) {
 	var fixtures []string
 	for _, path := range paths {
@@ -154,8 +154,8 @@ func lintFixtures(paths []string) ([]string, error) {
 			if !info.Mode().IsRegular() {
 				return nil, fmt.Errorf("fixture %s is not a regular file", path)
 			}
-			if filepath.Ext(path) != ".ef" {
-				return nil, fmt.Errorf("fixture %s must have .ef extension", path)
+			if err := checkSourceExtension(path, nil); err != nil {
+				return nil, fmt.Errorf("fixture %s: %w", path, err)
 			}
 			fixtures = append(fixtures, path)
 			continue
@@ -166,12 +166,12 @@ func lintFixtures(paths []string) ([]string, error) {
 		}
 		var found []string
 		for _, entry := range entries {
-			if entry.Type().IsRegular() && filepath.Ext(entry.Name()) == ".ef" {
+			if entry.Type().IsRegular() && checkSourceExtension(entry.Name(), nil) == nil {
 				found = append(found, filepath.Join(path, entry.Name()))
 			}
 		}
 		if len(found) == 0 {
-			return nil, fmt.Errorf("no .ef fixtures in %s", path)
+			return nil, fmt.Errorf("no source fixtures in %s", path)
 		}
 		slices.Sort(found)
 		fixtures = append(fixtures, found...)

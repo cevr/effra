@@ -48,9 +48,9 @@ Designed output, because `ergo test` does not run 2026-edition files yet:
 ```console
 $ ergo test --trace
 TestSlowGatewayTimesOut  ok  virtual 2s
-  └ timeout.After(2s)    pay.ef:10:9   expired
-      └ Accounts.Lock    pay.ef:11:15  released
-      └ Payments.Charge  pay.ef:12:3   interrupted
+  └ timeout.After(2s)    pay.ergo:10:9   expired
+      └ Accounts.Lock    pay.ergo:11:15  released
+      └ Payments.Charge  pay.ergo:12:3   interrupted
 ```
 
 In about thirty lines, the design checks what Go leaves to convention. Every expected failure is in a type. Every service the caller must supply is declared. The lock cannot leak. The timeout stops its block and waits for its cleanup. The law covers every Payments provider. The test is designed to run in virtual time, and its trace needs no logging code. The prototype already emits plain `if err != nil`, ordinary interfaces and calls into a small task runtime.
@@ -279,14 +279,14 @@ cause trace of the root exit (links recorded by the runtime; candidates are labe
 Agents read the same checked model as the compiler, through the CLI or MCP. A diagnostic has a registered code, a position and a message. This is real output of the current CLI for a 2026-edition file whose `pay` calls `Gateway` without declaring it:
 
 ```console
-$ ergo diagnostics pay.ef
-pay.ef:21:23: error S102: pay requires Gateway, which its needs clause does not list and no with provides
+$ ergo diagnostics pay.ergo
+pay.ergo:21:23: error S102: pay requires Gateway, which its needs clause does not list and no with provides
 ```
 
 `ergo inspect` answers the same questions as JSON. For a 2026-edition file it reports EF145 until the checker lands ([#196](https://github.com/cevr/ergo/issues/196)). Designed output:
 
 ```console
-$ ergo inspect checkout.ef Checkout
+$ ergo inspect checkout.ergo Checkout
 {
   "def": "checkout.Checkout",
   "errors": ["checkout.Declined", "checkout.NotFound"],
@@ -350,7 +350,7 @@ These are rules of the designed language. The parser enforces the syntax rules t
 | Part | Status |
 | --- | --- |
 | Parser and `ergo fmt` for the 2026 edition | In the main compiler ([#195](https://github.com/cevr/ergo/issues/195)) |
-| `ergo check`, `build` and `run` on a 2026-edition module | Accept the prototype subset: rows, `try`, `catch`, closed wires and `timeout.After` ([example](examples/editions/sketch/main.ef)) |
+| `ergo check`, `build` and `run` on a 2026-edition module | Accept the prototype subset: rows, `try`, `catch`, closed wires and `timeout.After` ([example](examples/editions/sketch/main.ergo)) |
 | Checker: types, generics, error and needs rows | In progress ([#196](https://github.com/cevr/ergo/issues/196)) |
 | Linearity, borrows and captures | Designed ([#197](https://github.com/cevr/ergo/issues/197)) |
 | Lowering to Go in the main compiler | Open ([#50](https://github.com/cevr/ergo/issues/50)); prototype in [`prototypes/sketch9`](prototypes/sketch9/README.md) |
@@ -378,8 +378,8 @@ git clone https://github.com/cevr/ergo.git
 cd ergo
 go build -o bin/ergo ./cmd/ergo
 
-./bin/ergo run examples/editions/sketch/main.ef    # a 2026-edition module: hello, Ada / no friend named Bob
-./bin/ergo fmt --check examples/editions/sketch/main.ef
+./bin/ergo run examples/editions/sketch/main.ergo    # a 2026-edition module: hello, Ada / no friend named Bob
+./bin/ergo fmt --check examples/editions/sketch/main.ergo
 ./scripts/gate.sh                                  # the merge gate: formatting, vet, tests, CLI, MCP and LSP checks
 ```
 

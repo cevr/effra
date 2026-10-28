@@ -46,7 +46,7 @@ var (
 	// readmeSmokeOpener is the one admitted opening fence.
 	readmeSmokeOpener = regexp.MustCompile("^```([a-z]+)$")
 	// readmeSmokeDiagnostics is the console block that quotes the S102 line.
-	readmeSmokeDiagnostics = regexp.MustCompile("(?ms)^```console\n\\$ ergo diagnostics pay\\.ef\n(.*?)^```$")
+	readmeSmokeDiagnostics = regexp.MustCompile("(?ms)^```console\n\\$ ergo diagnostics pay\\.ergo\n(.*?)^```$")
 	// readmeSmokeShBlock is the shell block of "Working in this repo".
 	readmeSmokeShBlock = regexp.MustCompile("(?ms)^## Working in this repo\n.*?^```sh\n(.*?)^```$")
 	// readmeSmokeCommand is one `./bin/ergo` line, with an optional
@@ -237,7 +237,7 @@ func TestReadmeSmoke(t *testing.T) {
 			{"opener indented by one space", uses(first(" ```go\n")), fence},
 			{"opener `~~~go`", uses(first("~~~go\n")), fence},
 			{"opener `Go`", uses(first("```Go\n")), fence},
-			{"opener `go title=pay.ef`", uses(first("```go title=pay.ef\n")), fence},
+			{"opener `go title=pay.ergo`", uses(first("```go title=pay.ergo\n")), fence},
 			{"opener of four backticks", uses(first("````go\n")), fence},
 			{"bare opener with no language", readme + "\n```\nfunc bad() uses Console {}\n```\n", fence},
 			{"closer with trailing text", strings.Replace(readme, "\tT.Equal(r.ID, \"timed-out\")\n}\n```\n", "\tT.Equal(r.ID, \"timed-out\")\n}\n``` end\n", 1), fence},
@@ -298,21 +298,21 @@ func TestReadmeSmoke(t *testing.T) {
 		t.Parallel()
 		quoted := readmeSmokeDiagnostics.FindStringSubmatch(readme)
 		if quoted == nil {
-			t.Fatal("README has no `$ ergo diagnostics pay.ef` console block")
+			t.Fatal("README has no `$ ergo diagnostics pay.ergo` console block")
 		}
 		binary := buildTestCLI(t)
 		dir := t.TempDir()
-		for name, content := range map[string]string{"ergo.json": "{\"edition\": \"2026\"}\n", "pay.ef": readmeSmokeS102Source} {
+		for name, content := range map[string]string{"ergo.json": "{\"edition\": \"2026\"}\n", "pay.ergo": readmeSmokeS102Source} {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 				t.Fatal(err)
 			}
 		}
-		stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, dir, "", "diagnostics", "pay.ef")
+		stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, dir, "", "diagnostics", "pay.ergo")
 		if code == 0 {
-			t.Fatalf("ergo diagnostics pay.ef exited 0\n%s", stdout)
+			t.Fatalf("ergo diagnostics pay.ergo exited 0\n%s", stdout)
 		}
 		if string(stdout) != quoted[1] {
-			t.Fatalf("ergo diagnostics pay.ef printed %q, README quotes %q\n%s", stdout, quoted[1], stderr)
+			t.Fatalf("ergo diagnostics pay.ergo printed %q, README quotes %q\n%s", stdout, quoted[1], stderr)
 		}
 	})
 

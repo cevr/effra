@@ -2,7 +2,7 @@
 
 Version 0, 2026-10-27. Ticket [#193](https://github.com/cevr/ergo/issues/193), part of the compiler track [#192](https://github.com/cevr/ergo/issues/192).
 
-This directory is the normative specification of the Go-shaped Ergo language: Effect's guarantees with Go's spelling, compiled to Go (owner, 2026-10-26: "this will be effect for Go with this kind of new language as well"). `.ef` source is authoritative. The parser ([#195](https://github.com/cevr/ergo/issues/195)), the checker ([#196](https://github.com/cevr/ergo/issues/196)) and the linearity pass ([#197](https://github.com/cevr/ergo/issues/197)) implement this text.
+This directory is the normative specification of the Go-shaped Ergo language: Effect's guarantees with Go's spelling, compiled to Go (owner, 2026-10-26: "this will be effect for Go with this kind of new language as well"). `.ergo` source is authoritative: a source file ends in `.ergo`, and every other extension, the earlier `.ef` included, is refused with "source file must have .ergo extension" ([#221](https://github.com/cevr/ergo/issues/221)). The parser ([#195](https://github.com/cevr/ergo/issues/195)), the checker ([#196](https://github.com/cevr/ergo/issues/196)) and the linearity pass ([#197](https://github.com/cevr/ergo/issues/197)) implement this text.
 
 ## Scope
 

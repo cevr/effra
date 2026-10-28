@@ -54,7 +54,7 @@
     {
       "name": "main",
       "source": "examples/main.ef",
-      "migrated": "docs/research/ef-migrate/main.ef",
+      "migrated": "docs/research/ef-migrate/main.ergo",
       "seconds": 26,
       "minutes": 0.43,
       "mechanical": 20,
@@ -80,7 +80,7 @@
     {
       "name": "data",
       "source": "examples/data.ef",
-      "migrated": "docs/research/ef-migrate/data.ef",
+      "migrated": "docs/research/ef-migrate/data.ergo",
       "seconds": 20,
       "minutes": 0.33,
       "mechanical": 14,
@@ -103,7 +103,7 @@
     {
       "name": "lifecycle",
       "source": "examples/lifecycle.ef",
-      "migrated": "docs/research/ef-migrate/lifecycle.ef",
+      "migrated": "docs/research/ef-migrate/lifecycle.ergo",
       "seconds": 34,
       "minutes": 0.57,
       "mechanical": 19,
@@ -134,7 +134,7 @@
     {
       "name": "checkout",
       "source": "examples/checkout.ef",
-      "migrated": "docs/research/ef-migrate/checkout.ef",
+      "migrated": "docs/research/ef-migrate/checkout.ergo",
       "seconds": 17,
       "minutes": 0.28,
       "mechanical": 38,
@@ -170,7 +170,7 @@
     {
       "name": "machine-breaker",
       "source": "examples/machine-breaker.ef",
-      "migrated": "docs/research/ef-migrate/machine-breaker.ef",
+      "migrated": "docs/research/ef-migrate/machine-breaker.ergo",
       "seconds": 26,
       "minutes": 0.43,
       "mechanical": 43,

@@ -29,19 +29,19 @@ func retargetAt(t *testing.T, stage, link, target string) func() {
 	})
 }
 
-// admissionWorkspace holds a 2026 module and a legacy module: new/main.ef
-// is 2026 source, and old/main.ef is unformatted earlier-language source.
+// admissionWorkspace holds a 2026 module and a legacy module: new/main.ergo
+// is 2026 source, and old/main.ergo is unformatted earlier-language source.
 func admissionWorkspace(t *testing.T) (root string) {
 	t.Helper()
 	root = editionWorkspace(t)
 	editionWrite(t, filepath.Join(root, "new", "ergo.json"), `{"edition":"2026"}`)
-	editionWrite(t, filepath.Join(root, "new", "main.ef"), sketchCleanSource)
+	editionWrite(t, filepath.Join(root, "new", "main.ergo"), sketchCleanSource)
 	editionWrite(t, filepath.Join(root, "old", "ergo.json"), `{"edition":"legacy"}`)
-	editionWrite(t, filepath.Join(root, "old", "main.ef"), strings.ReplaceAll(legacyCleanSource, "    ", "  "))
+	editionWrite(t, filepath.Join(root, "old", "main.ergo"), strings.ReplaceAll(legacyCleanSource, "    ", "  "))
 	return root
 }
 
-// The CLI opens old/main.ef, a legacy file. Then the path is atomically
+// The CLI opens old/main.ergo, a legacy file. Then the path is atomically
 // replaced by a link to the 2026 module's file, as in the reviewer's race.
 // The opened file is unlinked, so it has no physical path to resolve and
 // the command is refused with EF146; legacy bytes are never checked under
@@ -49,8 +49,8 @@ func admissionWorkspace(t *testing.T) (root string) {
 func TestCheckRefusesASourceRetargetedDuringAdmission(t *testing.T) {
 	for _, command := range []string{"check", "diagnostics", "edition"} {
 		root := admissionWorkspace(t)
-		source := filepath.Join(root, "old", "main.ef")
-		restore := retargetAt(t, edition.StageOpened, source, filepath.Join(root, "new", "main.ef"))
+		source := filepath.Join(root, "old", "main.ergo")
+		restore := retargetAt(t, edition.StageOpened, source, filepath.Join(root, "new", "main.ergo"))
 		err := runCommand(command, source)
 		restore()
 		if err == nil || !strings.HasPrefix(err.Error(), edition.CodeAdmission+": ") {
@@ -62,8 +62,8 @@ func TestCheckRefusesASourceRetargetedDuringAdmission(t *testing.T) {
 	// refused too.
 	for _, stage := range []string{edition.StageResolving, edition.StageWalked} {
 		root := admissionWorkspace(t)
-		source := filepath.Join(root, "old", "main.ef")
-		restore := retargetAt(t, stage, source, filepath.Join(root, "new", "main.ef"))
+		source := filepath.Join(root, "old", "main.ergo")
+		restore := retargetAt(t, stage, source, filepath.Join(root, "new", "main.ergo"))
 		err := runCommand("check", source)
 		restore()
 		if err == nil || !strings.HasPrefix(err.Error(), edition.CodeAdmission+": ") {
@@ -89,9 +89,9 @@ func runCommand(args ...string) error {
 // A source whose directory link is retargeted to the legacy module at any
 // step of the admission of the 2026 file is never formatted as legacy, in
 // check mode or in place, and nothing is written. Before the physical path
-// is read, the opened file is still the 2026 file at new/main.ef, so the
+// is read, the opened file is still the 2026 file at new/main.ergo, so the
 // 2026 formatter formats it (it is already formatted); later, the moved
-// spelling is refused with EF146 or still names new/main.ef. Either way the
+// spelling is refused with EF146 or still names new/main.ergo. Either way the
 // legacy formatter never runs.
 func TestFormatterNeverFormatsASourceRetargetedDuringAdmissionAsLegacy(t *testing.T) {
 	for _, stage := range []string{edition.StageOpened, edition.StageResolving, edition.StageWalked} {
@@ -109,7 +109,7 @@ func formatRetargeted(t *testing.T, stage string, check bool) {
 		t.Fatal(err)
 	}
 	before := map[string][]byte{}
-	for _, path := range []string{filepath.Join(root, "new", "main.ef"), filepath.Join(root, "old", "main.ef")} {
+	for _, path := range []string{filepath.Join(root, "new", "main.ergo"), filepath.Join(root, "old", "main.ergo")} {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -117,13 +117,13 @@ func formatRetargeted(t *testing.T, stage string, check bool) {
 		before[path] = data
 	}
 	restore := retargetAt(t, stage, alias, filepath.Join(root, "old"))
-	report, err := formatFiles(fmtOptions{check: check, files: []string{filepath.Join(alias, "main.ef")}})
+	report, err := formatFiles(fmtOptions{check: check, files: []string{filepath.Join(alias, "main.ergo")}})
 	restore()
 	formatted2026 := err == nil && len(report.Failures) == 0 && len(report.Files) == 1 &&
 		report.Files[0].FormatterVersion == sketchfront.FormatterIdentity && !report.Files[0].Changed
 	refused := err != nil && len(report.Failures) == 1 && report.Failures[0].Code == edition.CodeAdmission
 	if !formatted2026 && !refused {
-		t.Fatalf("%s check=%v: %+v, %+v, %v; want the 2026 formatter on new/main.ef or %s", stage, check, report.Files, report.Failures, err, edition.CodeAdmission)
+		t.Fatalf("%s check=%v: %+v, %+v, %v; want the 2026 formatter on new/main.ergo or %s", stage, check, report.Files, report.Failures, err, edition.CodeAdmission)
 	}
 	for path, data := range before {
 		if after, err := os.ReadFile(path); err != nil || string(after) != string(data) {
@@ -138,9 +138,9 @@ func formatRetargeted(t *testing.T, stage string, check bool) {
 func TestLintCommandsRefuseASourceRetargetedDuringAdmission(t *testing.T) {
 	for _, args := range [][]string{{"lint", "test"}, {"lint", "receipt"}} {
 		root := admissionWorkspace(t)
-		source := filepath.Join(root, "old", "main.ef")
+		source := filepath.Join(root, "old", "main.ergo")
 		editionWrite(t, source, legacyCleanSource)
-		restore := retargetAt(t, edition.StageOpened, source, filepath.Join(root, "new", "main.ef"))
+		restore := retargetAt(t, edition.StageOpened, source, filepath.Join(root, "new", "main.ergo"))
 		err := runCommand(append(append([]string{}, args...), source)...)
 		restore()
 		if err == nil || !strings.Contains(err.Error(), edition.CodeAdmission+": ") {
@@ -161,7 +161,7 @@ func TestCheckNeverAcceptsLegacySourceInADirectoryMovedDuringAdmission(t *testin
 		root := editionWorkspace(t)
 		pkg := filepath.Join(root, "pkg")
 		editionWrite(t, filepath.Join(pkg, "ergo.json"), `{"edition":"2026"}`)
-		source := filepath.Join(pkg, "nested", "main.ef")
+		source := filepath.Join(pkg, "nested", "main.ergo")
 		editionWrite(t, source, legacyCleanSource)
 		before, err := os.Stat(source)
 		if err != nil {
@@ -193,7 +193,7 @@ func TestCheckNeverAcceptsLegacySourceInADirectoryMovedDuringAdmission(t *testin
 		if statErr != nil {
 			t.Fatal(statErr)
 		}
-		physical := edition.ResolveDocument(filepath.Join(moved, "prefix", "nested", "main.ef"))
+		physical := edition.ResolveDocument(filepath.Join(moved, "prefix", "nested", "main.ergo"))
 		if !didMove || !os.SameFile(before, after) || physical.Edition != edition.E2026 {
 			t.Fatalf("%s: invalid control: moved=%v same inode=%v physical=%s", stage, didMove, os.SameFile(before, after), physical.JSON())
 		}
@@ -215,7 +215,7 @@ func TestCheckRefusesAManifestWhoseBytesChangeDuringAdmission(t *testing.T) {
 		for _, stamp := range []string{"ordinary", "preserve-time", "different-time"} {
 			t.Run(map[bool]string{false: "regular", true: "symlink"}[linked]+"/"+stamp, func(t *testing.T) {
 				root := editionWorkspace(t)
-				source := filepath.Join(root, "main.ef")
+				source := filepath.Join(root, "main.ergo")
 				editionWrite(t, source, legacyCleanSource)
 				manifest := filepath.Join(root, edition.ManifestName)
 				backing := manifest
@@ -271,7 +271,7 @@ func TestCheckRefusesAManifestWhoseBytesChangeDuringAdmission(t *testing.T) {
 	}
 }
 
-// R/ergo.json selects 2026. R/pkg/main.ef is legacy source, and R/pkg/go.mod
+// R/ergo.json selects 2026. R/pkg/main.ergo is legacy source, and R/pkg/go.mod
 // links to R/search-only/inner.mod. When the target directory is searchable
 // but not readable, the go.mod is a regular file through Stat, but admission
 // cannot inspect it through a directory handle. An inspection error is not
@@ -288,7 +288,7 @@ func TestCheckRefusesAModuleBoundaryItCannotInspect(t *testing.T) {
 			private := filepath.Join(root, "search-only")
 			backing := filepath.Join(private, "inner.mod")
 			editionWrite(t, backing, "module inner\n")
-			source := filepath.Join(root, "pkg", "main.ef")
+			source := filepath.Join(root, "pkg", "main.ergo")
 			editionWrite(t, source, legacyCleanSource)
 			goMod := filepath.Join(root, "pkg", "go.mod")
 			if err := os.Symlink(backing, goMod); err != nil {

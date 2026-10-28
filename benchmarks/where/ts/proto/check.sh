@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds sample.ef with the prototype compiler (branch wf10/spike-where-proto)
+# Builds sample.ergo with the prototype compiler (branch wf10/spike-where-proto)
 # to JavaScript, then type-checks and runs the TypeScript callers against the
 # generated .d.mts. out/ is ignored; `effect` resolves from the repository's
 # node_modules; TypeScript is the repository's pinned copy (../tools/lib.sh).
@@ -15,8 +15,10 @@ mkdir -p out
 echo "== versions"
 echo "tsc $(node "$TSC" --version) (<repo>/$TS_DIR)"
 echo "node $(node --version)"
-echo "== ef build sample.ef --target js"
-"$EF" build sample.ef --target js -o out/sample.mjs >/dev/null
+echo "== ef build sample.ergo --target js"
+# The spike compiler reads .ef: build from a copy with that extension (#221).
+cp sample.ergo out/sample.ef
+"$EF" build out/sample.ef --target js -o out/sample.mjs >/dev/null
 check "ef build" || finish
 echo "== generated witness signatures"
 grep -E 'function_(sort3|insert|lookup|User_compare|UserId_hash|UserId_equals):' out/sample.d.mts

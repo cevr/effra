@@ -176,10 +176,39 @@ func load(path, target string) (*compiler.Result, error) {
 // tests and measures through the returned location, so no step reads,
 // protects or records a different file by interpreting the spelling again.
 func locateSource(path string) (receipt.Location, error) {
-	if filepath.Ext(path) != ".ef" {
-		return receipt.Location{}, fmt.Errorf("source file must have .ef extension")
+	if err := checkSourceExtension(path, nil); err != nil {
+		return receipt.Location{}, err
 	}
 	return receipt.LocateSource(path)
+}
+
+// SourceExtension is the extension of an Ergo source file (#221).
+const SourceExtension = ".ergo"
+
+// errSourceExtension is the one refusal of a path that does not name an
+// Ergo source: every extension, the retired .ef included, gets these words
+// (#217: no rename hint and no special case for an old spelling).
+var errSourceExtension = errors.New("source file must have " + SourceExtension + " extension")
+
+// checkSourceExtension is the source-file rule: a source path ends in
+// .ergo. Until retire-ef (#205) deletes the legacy edition, a file outside
+// the 2026 edition keeps its legacy extension, because the legacy compiler's
+// tests read those files by name. resolution is nil before the file is
+// admitted, where the legacy spelling passes until admission decides the
+// edition; admitSource checks the path again with the resolution, so a 2026
+// source with the legacy spelling gets exactly the refusal of any other
+// extension. An edition refusal (EF144) still reports itself. retire-ef
+// deletes the legacy branch with the edition.
+func checkSourceExtension(path string, resolution *edition.Resolution) error {
+	switch filepath.Ext(path) {
+	case SourceExtension:
+		return nil
+	case ".ef":
+		if resolution == nil || resolution.Diagnostic != nil || resolution.Edition != edition.E2026 {
+			return nil
+		}
+	}
+	return errSourceExtension
 }
 
 // loadSource admits the located source and compiles it with the legacy
@@ -465,8 +494,10 @@ func command(args []string) error {
 	if len(opts.positional) != want {
 		return usage(fmt.Errorf("incorrect arguments for %s", args[0]))
 	}
-	if (args[0] == "diagnostics" || args[0] == "lint") && filepath.Ext(opts.positional[0]) != ".ef" {
-		return invalidInvocation(fmt.Errorf("source file must have .ef extension"))
+	if args[0] == "diagnostics" || args[0] == "lint" {
+		if err := checkSourceExtension(opts.positional[0], nil); err != nil {
+			return invalidInvocation(err)
+		}
 	}
 	var session *lintpacks.Session
 	if args[0] == "lint" || args[0] == "diagnostics" {

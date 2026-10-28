@@ -89,7 +89,7 @@ func TestLintPackSelectionCLIProcess(t *testing.T) {
 		{[]string{"lint", source, "--lint-config", "", "--lint-config", config}, "not an empty value"},
 		{[]string{"lint", source, "--lint-config", config, "--lint-config", ""}, "once"},
 		{[]string{"diagnostics", source, "--rules", ""}, "not an empty value"},
-		{[]string{"lint", filepath.Join(dir, "source.txt")}, ".ef extension"},
+		{[]string{"lint", filepath.Join(dir, "source.txt")}, ".ergo extension"},
 		{[]string{"lint", "rules", "--lint-config", filepath.Join(dir, "absent.json")}, "absent.json"},
 		{[]string{"mcp", dir, "--lint-config", filepath.Join(dir, "absent.json")}, "absent.json"},
 		{[]string{"lsp", "--lint-config", filepath.Join(dir, "absent.json")}, "absent.json"},

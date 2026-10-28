@@ -62,7 +62,7 @@ func TestSketchCheckReportsPrototypeDiagnostics(t *testing.T) {
 			if character == want-lineStart {
 				t.Fatalf("case has no non-ASCII text before the error")
 			}
-			report := analysis.Result(c.source, compiler.Target).ForeignReport(compiler.SourceSnapshot{URI: "file:///x/main.ef", Text: c.source}, false, "lint unavailable")
+			report := analysis.Result(c.source, compiler.Target).ForeignReport(compiler.SourceSnapshot{URI: "file:///x/main.ergo", Text: c.source}, false, "lint unavailable")
 			if report.Checked || len(report.Diagnostics) != len(analysis.Diagnostics) {
 				t.Fatalf("report checked=%v with %d findings, want unchecked with %d", report.Checked, len(report.Diagnostics), len(analysis.Diagnostics))
 			}
@@ -87,7 +87,7 @@ func TestSketchCheckReportsPrototypeDiagnostics(t *testing.T) {
 		}
 	})
 	t.Run("clean source", func(t *testing.T) {
-		source, err := os.ReadFile(filepath.Join("..", "..", "examples", "editions", "sketch", "main.ef"))
+		source, err := os.ReadFile(filepath.Join("..", "..", "examples", "editions", "sketch", "main.ergo"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -146,7 +146,7 @@ func TestFormat(t *testing.T) {
 
 func TestSketchBuildRunsProgram(t *testing.T) {
 	dir := filepath.Join("..", "..", "examples", "editions", "sketch")
-	source, err := os.ReadFile(filepath.Join(dir, "main.ef"))
+	source, err := os.ReadFile(filepath.Join(dir, "main.ergo"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestSketchBuildRunsProgram(t *testing.T) {
 	}
 	output := filepath.Join(t.TempDir(), "program")
 	var stderr bytes.Buffer
-	if err := Build(analysis, filepath.Join(dir, "main.ef"), output, &stderr); err != nil {
+	if err := Build(analysis, filepath.Join(dir, "main.ergo"), output, &stderr); err != nil {
 		t.Fatalf("build: %v\n%s", err, stderr.String())
 	}
 	got, err := exec.Command(output).Output()
@@ -171,7 +171,7 @@ func TestSketchBuildRunsProgram(t *testing.T) {
 		t.Fatalf("stdout %q, want %q", got, expected)
 	}
 	// An analysis with diagnostics never builds.
-	if err := Build(Check("package p\n$"), "bad.ef", filepath.Join(t.TempDir(), "bad"), &stderr); err == nil {
+	if err := Build(Check("package p\n$"), "bad.ergo", filepath.Join(t.TempDir(), "bad"), &stderr); err == nil {
 		t.Fatal("an analysis with diagnostics built")
 	}
 }

@@ -58,6 +58,21 @@ func lookupFileCommand(name string) (fileCommand, bool) {
 // the returned Source and closes it, so the edition always governs the bytes
 // it reads.
 func admitSource(path string) (*edition.Source, error) {
+	source, err := admitPath(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkSourceExtension(path, &source.Resolution); err != nil {
+		source.Close()
+		return nil, err
+	}
+	return source, nil
+}
+
+// admitPath binds the open file at path to its edition without the
+// source-extension rule: `ergo edition` reports the edition of a path and
+// never reads the file.
+func admitPath(path string) (*edition.Source, error) {
 	file, err := edition.OpenSource(path)
 	if err != nil {
 		return nil, err
@@ -110,7 +125,7 @@ func editionCommand(args []string) error {
 	}
 	// The file is opened and bound, never read: the edition does not depend
 	// on its size or content.
-	admitted, err := admitSource(source.Path())
+	admitted, err := admitPath(source.Path())
 	if err != nil {
 		return err
 	}
