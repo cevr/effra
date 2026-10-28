@@ -48,19 +48,19 @@ func (c *checker) charge(n syntax.Node, cap Type) {
 	for i := len(t.withs) - 1; i >= 0; i-- {
 		// A nil scope is a with whose wire is unknown (reported): it
 		// discharges everything, so no charge cascades from it (D3; M18).
-		if t.withs[i] == nil || t.withs[i].Has(cap) {
+		if t.withs[i] == nil || t.withs[i].has(c.types, cap) {
 			return
 		}
 	}
-	if t.wire && t.internal.Has(cap) {
-		t.charged = t.charged.with(cap)
+	if t.wire && t.internal.has(c.types, cap) {
+		t.charged = t.charged.with(c.types, cap)
 		return
 	}
 	if t.declUses == nil {
-		t.uses = t.uses.with(cap)
+		t.uses = t.uses.with(c.types, cap)
 		return
 	}
-	if t.declUses.Has(cap) {
+	if t.declUses.has(c.types, cap) {
 		return
 	}
 	switch {
@@ -88,10 +88,10 @@ func (c *checker) escape(n syntax.Node, row *Row) {
 	}
 	t := c.fn.t
 	if t.declErrors == nil {
-		t.errors = t.errors.union(row)
+		t.errors = t.errors.union(c.types, row)
 		return
 	}
-	extra := row.minus(t.declErrors)
+	extra := row.minus(c.types, t.declErrors)
 	if extra.Empty() {
 		return
 	}
@@ -251,6 +251,7 @@ func (c *checker) discoverInit() {
 			f.Sig.Uses = newRow()
 		}
 	}
+	c.types.changed()
 	c.checkInitCycles()
 }
 
@@ -291,6 +292,7 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 				n.fn.Sig.Uses = newRow()
 			}
 		}
+		c.types.changed()
 	}
 	if cyclic && inferred {
 		c.converge(scc)
@@ -352,7 +354,7 @@ func (c *checker) checkNode(n *bodyNode) bool {
 		before := n.v.obj.Type
 		c.checkPkgVar(n.v)
 		after := n.v.obj.Type
-		return before == nil || after == nil || !identical(before, after)
+		return before == nil || after == nil || !c.identical(before, after)
 	}
 	return c.checkFuncBody(n.fn)
 }
@@ -489,7 +491,7 @@ func (c *checker) checkFuncBody(f *Func) bool {
 		if len(field.Names) > 0 {
 			rt := Type(f.Recv)
 			if len(f.Recv.TParams) > 0 {
-				rt = c.instantiate(f.Recv, typeParamsAsArgs(f.Recv.TParams))
+				rt = c.instantiate(f.Recv, c.typeParamsAsArgs(f.Recv.TParams))
 			}
 			if f.Ptr {
 				rt = &Pointer{Elem: rt}
@@ -523,25 +525,30 @@ func (c *checker) checkFuncBody(f *Func) bool {
 	c.reportUnused(fc)
 	changed := false
 	if f.inferErrors {
-		if !t.errors.equal(sig.Errors) {
+		if !t.errors.equal(c.types, sig.Errors) {
 			changed = true
 		}
 		sig.Errors = t.errors
 	}
 	if f.inferUses {
-		if !t.uses.equal(sig.Uses) {
+		if !t.uses.equal(c.types, sig.Uses) {
 			changed = true
 		}
 		sig.Uses = t.uses
 	}
+	if f.inferErrors || f.inferUses {
+		// The rows of an inferred signature changed: identities built on
+		// it held for the previous epoch only (intern.go).
+		c.types.changed()
+	}
 	return changed
 }
 
-func typeParamsAsArgs(tps []*TypeParam) []Type {
+func (c *checker) typeParamsAsArgs(tps []*TypeParam) []Type {
 	out := make([]Type, len(tps))
 	for i, tp := range tps {
 		if tp.Kind != KindType {
-			out[i] = &RowArg{Row: newRow(tp)}
+			out[i] = &RowArg{Row: c.types.row(tp)}
 			continue
 		}
 		out[i] = tp

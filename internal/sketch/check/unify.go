@@ -196,7 +196,7 @@ func (in *inferer) nify(x, y Type, mode unifyMode, depth int) bool {
 		switch {
 		case bi != nil && yi != nil:
 			if bn && yn {
-				return identical(b, y)
+				return in.c.identical(b, y)
 			}
 			if len(bi.Methods) != len(yi.Methods) {
 				return false
@@ -260,7 +260,7 @@ func (in *inferer) nify(x, y Type, mode unifyMode, depth int) bool {
 	}
 	switch x := x.(type) {
 	case *Basic:
-		return identical(x, y)
+		return in.c.identical(x, y)
 	case *Named:
 		yn, ok := y.(*Named)
 		if !ok || yn.origin() != x.origin() || len(yn.TArgs) != len(x.TArgs) {
@@ -353,7 +353,7 @@ func (in *inferer) nify(x, y Type, mode unifyMode, depth int) bool {
 		ym, ok := y.(*MachineType)
 		return ok && in.nify(x.State, ym.State, emode, depth) && in.nify(x.Signal, ym.Signal, emode, depth)
 	}
-	return identical(x, y)
+	return in.c.identical(x, y)
 }
 
 // nifySig unifies two signatures: parameters and results in mode, and

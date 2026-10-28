@@ -558,7 +558,11 @@ func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 	case *Map:
 		// A constant key appears once, compared after conversion to the
 		// key type, as in Go (N3).
-		seen := map[string]bool{}
+		type constKey struct {
+			typ int32 // the interned id of the key's dynamic type
+			val string
+		}
+		seen := map[constKey]bool{}
 		for _, e := range x.Elts {
 			kv, ok := e.(*syntax.KeyValueExpr)
 			if !ok {
@@ -573,7 +577,7 @@ func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 				if asInterface(u.Key) != nil {
 					dyn = defaultType(k.typ)
 				}
-				key := typeKey(dyn) + "|" + k.val.Kind().String() + ":" + k.val.ExactString()
+				key := constKey{c.types.id(dyn), k.val.Kind().String() + ":" + k.val.ExactString()}
 				if seen[key] {
 					c.errorf(kv.Key, CodeType, "the key %s appears twice in this map literal", k.val.ExactString())
 				}

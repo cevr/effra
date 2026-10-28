@@ -16,10 +16,11 @@ type switchUnion struct {
 	m    map[*TypeParam]Type // the instance's type arguments; nil for a non-instance
 	inst map[int]Type        // the variants substituted so far
 	tps  []*TypeParam        // the declaration's type parameters, in order (determinism)
-	// bound indexes the instance's type arguments by identity key, and
-	// rows its bound rows per index node, each built once (variantindex.go).
-	bound map[int][]*TypeParam
-	rows  map[*vnode]map[string][]*vnode
+	// bound indexes the instance's type arguments by interned id, and rows
+	// its bound rows per index node by row id, each built once
+	// (variantindex.go, intern.go).
+	bound map[int32][]*TypeParam
+	rows  map[*vnode]map[int32][]*vnode
 }
 
 // subjectUnion returns t's union as a switch subject, or nil when t is not
@@ -88,8 +89,10 @@ func (s *switchUnion) lookup(t Type, b *lookupSteps) int {
 	if !ok {
 		return -1
 	}
-	ix := s.orig.index(b.ops)
-	if ix.over {
+	// The identity work of the lookup (intern.go) is charged to b.
+	defer s.c.types.attach(b)()
+	ix := s.c.unionIndex(s.orig)
+	if ix.b.over {
 		return variantOver
 	}
 	if n.Orig == nil && len(n.TParams) > 0 {
@@ -106,18 +109,17 @@ func (s *switchUnion) lookup(t Type, b *lookupSteps) int {
 		if cand.exact {
 			return cand.i
 		}
-		// A wildcard candidate is confirmed by substituting the variant and
-		// one identity check: charged by the sizes of both (interned first).
-		if _, ok := s.c.identOf(s.orig.Variants[cand.i], b); !ok {
+		// A wildcard candidate is confirmed by substituting the variant
+		// (charged by its size) and one identity check (the table charges
+		// the nodes it interns).
+		if !b.charge(s.c.types.size(s.orig.Variants[cand.i])) {
 			return variantOver
 		}
-		if _, ok := s.c.identOf(t, b); !ok {
+		same := s.c.identical(s.at(cand.i), t)
+		if b.over {
 			return variantOver
 		}
-		if !b.charge(s.c.identSize(s.orig.Variants[cand.i]) + s.c.identSize(t)) {
-			return variantOver
-		}
-		if identical(s.at(cand.i), t) {
+		if same {
 			return cand.i
 		}
 	}

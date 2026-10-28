@@ -408,13 +408,13 @@ func (in *inferer) unifyRow(p, a *Row) {
 				if in.joined[tp] {
 					joined = append(joined, tp)
 				}
-				rest = rest.union(b.Row)
+				rest = rest.union(in.c.types, b.Row)
 				continue
 			}
 		}
-		rest = rest.with(e)
+		rest = rest.with(in.c.types, e)
 	}
-	extra := a.minus(rest)
+	extra := a.minus(in.c.types, rest)
 	switch {
 	case len(free) > 0:
 		in.m[free[0]] = &RowArg{Row: extra}
@@ -429,7 +429,7 @@ func (in *inferer) unifyRow(p, a *Row) {
 		}
 	case len(joined) > 0 && !extra.Empty():
 		tp := joined[0]
-		in.m[tp] = &RowArg{Row: in.m[tp].(*RowArg).Row.union(extra)}
+		in.m[tp] = &RowArg{Row: in.m[tp].(*RowArg).Row.union(in.c.types, extra)}
 	}
 }
 
@@ -468,7 +468,7 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 		// A typed argument that does not match its parameter, or
 		// conflicts with what an earlier argument inferred (round-5 M3;
 		// go/types infer.go).
-		if want := c.subst(pt, in.m); in.hasFree(pt) || identical(want, pt) {
+		if want := c.subst(pt, in.m); in.hasFree(pt) || c.identical(want, pt) {
 			c.errorf(at, CodeType, "the argument has type %s, which does not match %s (D6; type inference)", t, pt)
 		} else {
 			c.errorf(at, CodeType, "the argument has type %s, which does not match %s, inferred for %s (D6; type inference)", t, want, pt)
@@ -1095,7 +1095,7 @@ func (c *checker) builtin(x *syntax.CallExpr, b *Builtin, hint Type) operand {
 			c.errorf(x.Args[0], CodeType, "copy expects slice arguments")
 			return bad(x)
 		}
-		if ss, ok := under(s.typ).(*Slice); !(ok && identical(ss.Elem, ds.Elem) || isString(s.typ) && isBasic(ds.Elem, Uint8)) {
+		if ss, ok := under(s.typ).(*Slice); !(ok && c.identical(ss.Elem, ds.Elem) || isString(s.typ) && isBasic(ds.Elem, Uint8)) {
 			c.errorf(x, CodeType, "copy of mismatched slices %s and %s", d.typ, s.typ)
 			return bad(x)
 		}

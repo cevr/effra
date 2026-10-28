@@ -413,7 +413,7 @@ func (c *checker) interfaceType(spec *syntax.InterfaceType, ctx *typeCtx) *Inter
 
 func (c *checker) unionType(n *Named, spec *syntax.InterfaceType, ctx *typeCtx) Type {
 	u := &Union{}
-	seen := map[string]bool{}
+	seen := map[int32]bool{}
 	for _, x := range spec.Union {
 		t := c.typExpr(x, ctx)
 		if isInvalid(t) {
@@ -433,7 +433,7 @@ func (c *checker) unionType(n *Named, spec *syntax.InterfaceType, ctx *typeCtx) 
 			u.Bad = true
 			continue
 		}
-		key := typeKey(t)
+		key := c.types.id(t)
 		if seen[key] {
 			c.errorf(x, CodeType, "variant %s is listed twice", t)
 			continue
@@ -734,14 +734,17 @@ func (c *checker) instantiateExprs(n *Named, args []syntax.Expr, at syntax.Node,
 }
 
 // instantiate returns the instance of a generic named type. Its body is
-// substituted lazily, so a recursive generic type terminates.
+// substituted lazily, so a recursive generic type terminates. The cache is
+// keyed by the instance's interned id, (origin, argument ids), and looked up
+// before anything is built (class E): an argument interned before costs one
+// lookup, however deep it is.
 func (c *checker) instantiate(orig *Named, targs []Type) *Named {
-	inst := &Named{Obj: orig.Obj, Orig: orig, TArgs: targs, state: 2}
-	key := typeKey(inst)
+	key, unstable := c.types.named(orig, targs)
 	if prev, ok := c.instance[key]; ok {
 		return prev
 	}
-	inst.ctx = c
+	inst := &Named{Obj: orig.Obj, Orig: orig, TArgs: targs, state: 2, ctx: c}
+	c.types.remember(inst, key, unstable)
 	c.instance[key] = inst
 	c.instancesMade++
 	return inst
@@ -790,7 +793,7 @@ func (c *checker) rowExpr(xs []syntax.Expr, kind Kind, ctx *typeCtx) *Row {
 			ok = false
 			continue
 		}
-		row = row.with(t)
+		row = row.with(c.types, t)
 	}
 	if !ok {
 		return nil
@@ -1188,6 +1191,8 @@ func (c *checker) funcSig(f *Func) *Signature {
 	f.Sig = sig
 	f.state = 2
 	c.inferFlags(f)
+	// Inferred rows change until inference ends (intern.go epochs).
+	sig.inferred = f.inferErrors || f.inferUses
 	return sig
 }
 

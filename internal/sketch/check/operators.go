@@ -334,7 +334,7 @@ func (c *checker) matchTypes(x *syntax.BinaryExpr, l, r *operand) bool {
 		r.typ = l.typ
 		c.updateExprType(x.Y, l.typ)
 	}
-	if !identical(l.typ, r.typ) {
+	if !c.identical(l.typ, r.typ) {
 		if isComparison(x.Op) && (x.Op == syntax.EQL || x.Op == syntax.NEQ) {
 			if ok, _ := c.assignable(l.typ, r.typ); ok {
 				l.typ = r.typ
@@ -532,7 +532,7 @@ func (c *checker) convertible(v, t Type) bool {
 		return true
 	}
 	vu, tu := under(v), under(t)
-	if identical(vu, tu) {
+	if c.identical(vu, tu) {
 		return true
 	}
 	vb, vok := vu.(*Basic)

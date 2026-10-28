@@ -105,10 +105,6 @@ type Union struct {
 	// Bad: a variant failed to resolve (reported), so a case that names no
 	// listed variant may name the lost one: no case diagnostic follows (D3).
 	Bad bool
-
-	// vindex is the variant index (variantindex.go), built on the first
-	// lookup and shared by every instance of a generic union.
-	vindex *variantIndex
 }
 
 // MachineType is a `machine[S, E]` declaration's type.
@@ -151,6 +147,10 @@ type Signature struct {
 	Fallible bool
 	Errors   *Row
 	Uses     *Row
+	// inferred marks a function's signature whose rows are inferred from
+	// its body: they change until inference ends, so an identity built on
+	// it holds for one table epoch only (intern.go).
+	inferred bool
 }
 
 // Kind is the kind of a type parameter (rows-and-constraints §3: by
@@ -338,25 +338,25 @@ func (*noValue) String() string { return "no value" }
 
 // Row is a closed set of error types or capabilities, plus row parameters in
 // a generic signature (rows.md: a row is a set; order and repetition carry no
-// meaning). Elements are kept sorted by a canonical key, so every operation is
-// deterministic.
+// meaning). Elements are kept sorted by their interned ids (intern.go), so
+// set operations merge in linear time and dedup by id. Every operation that
+// may intern takes the check's table; a row built by another check is
+// re-interned in this one, never written to. Printing sorts the elements by
+// typeString (String, list), so output does not follow id order.
 type Row struct {
 	elems []Type
-	keys  []string
+	ids   []int32
+	tab   *typeTable // the table of ids; nil for an empty row
+	rid   int32      // the row's own id in tab, once computed
 }
 
-func newRow(elems ...Type) *Row {
-	r := &Row{}
-	for _, e := range elems {
-		r = r.with(e)
-	}
-	return r
-}
+func newRow() *Row { return &Row{} }
 
 // Empty reports whether the row has no element.
 func (r *Row) Empty() bool { return r == nil || len(r.elems) == 0 }
 
-// Elems returns the row's elements in canonical order.
+// Elems returns the row's elements in the check's identity order, which
+// depends on the source alone. Print them with String.
 func (r *Row) Elems() []Type {
 	if r == nil {
 		return nil
@@ -364,43 +364,44 @@ func (r *Row) Elems() []Type {
 	return r.elems
 }
 
-func (r *Row) find(key string) (int, bool) {
+func (r *Row) find(id int32) (int, bool) {
 	if r == nil {
 		return 0, false
 	}
-	i := sort.SearchStrings(r.keys, key)
-	return i, i < len(r.keys) && r.keys[i] == key
+	i := sort.Search(len(r.ids), func(i int) bool { return r.ids[i] >= id })
+	return i, i < len(r.ids) && r.ids[i] == id
 }
 
-// Has reports whether t is an element.
-func (r *Row) Has(t Type) bool {
-	_, ok := r.find(typeKey(t))
+// has reports whether t is an element.
+func (r *Row) has(tab *typeTable, t Type) bool {
+	r = tab.local(r)
+	tab.charge(1)
+	_, ok := r.find(tab.id(t))
 	return ok
 }
 
-func (r *Row) with(t Type) *Row {
+func (r *Row) with(tab *typeTable, t Type) *Row {
 	if ra, ok := t.(*RowArg); ok {
-		return r.union(ra.Row)
+		return r.union(tab, ra.Row)
 	}
-	key := typeKey(t)
-	i, ok := r.find(key)
+	r = tab.local(r)
+	id := tab.id(t)
+	i, ok := r.find(id)
 	if ok {
-		if r == nil {
-			return &Row{}
-		}
 		return r
 	}
-	out := &Row{}
+	tab.charge(1 + len(r.Elems()))
+	out := &Row{tab: tab}
 	if r != nil {
 		out.elems = append(append(append(make([]Type, 0, len(r.elems)+1), r.elems[:i]...), t), r.elems[i:]...)
-		out.keys = append(append(append(make([]string, 0, len(r.keys)+1), r.keys[:i]...), key), r.keys[i:]...)
+		out.ids = append(append(append(make([]int32, 0, len(r.ids)+1), r.ids[:i]...), id), r.ids[i:]...)
 	} else {
-		out.elems, out.keys = []Type{t}, []string{key}
+		out.elems, out.ids = []Type{t}, []int32{id}
 	}
 	return out
 }
 
-func (r *Row) union(o *Row) *Row {
+func (r *Row) union(tab *typeTable, o *Row) *Row {
 	if o.Empty() {
 		if r == nil {
 			return &Row{}
@@ -410,18 +411,20 @@ func (r *Row) union(o *Row) *Row {
 	if r.Empty() {
 		return o
 	}
-	out := &Row{elems: make([]Type, 0, len(r.elems)+len(o.elems)), keys: make([]string, 0, len(r.keys)+len(o.keys))}
+	r, o = tab.local(r), tab.local(o)
+	tab.charge(len(r.ids) + len(o.ids))
+	out := &Row{tab: tab, elems: make([]Type, 0, len(r.elems)+len(o.elems)), ids: make([]int32, 0, len(r.ids)+len(o.ids))}
 	i, j := 0, 0
-	for i < len(r.keys) || j < len(o.keys) {
+	for i < len(r.ids) || j < len(o.ids) {
 		switch {
-		case j >= len(o.keys) || i < len(r.keys) && r.keys[i] < o.keys[j]:
-			out.elems, out.keys = append(out.elems, r.elems[i]), append(out.keys, r.keys[i])
+		case j >= len(o.ids) || i < len(r.ids) && r.ids[i] < o.ids[j]:
+			out.elems, out.ids = append(out.elems, r.elems[i]), append(out.ids, r.ids[i])
 			i++
-		case i >= len(r.keys) || o.keys[j] < r.keys[i]:
-			out.elems, out.keys = append(out.elems, o.elems[j]), append(out.keys, o.keys[j])
+		case i >= len(r.ids) || o.ids[j] < r.ids[i]:
+			out.elems, out.ids = append(out.elems, o.elems[j]), append(out.ids, o.ids[j])
 			j++
 		default:
-			out.elems, out.keys = append(out.elems, r.elems[i]), append(out.keys, r.keys[i])
+			out.elems, out.ids = append(out.elems, r.elems[i]), append(out.ids, r.ids[i])
 			i++
 			j++
 		}
@@ -429,104 +432,117 @@ func (r *Row) union(o *Row) *Row {
 	return out
 }
 
-func (r *Row) minus(o *Row) *Row {
+// minus returns the elements of r that are not in o.
+func (r *Row) minus(tab *typeTable, o *Row) *Row {
 	out := &Row{}
-	for i, e := range r.Elems() {
-		if !o.Has(e) {
-			out.elems, out.keys = append(out.elems, e), append(out.keys, r.keys[i])
+	if r.Empty() {
+		return out
+	}
+	r, o = tab.local(r), tab.local(o)
+	tab.charge(len(r.Elems()) + len(o.Elems()))
+	j := 0
+	for i, id := range r.ids {
+		for o != nil && j < len(o.ids) && o.ids[j] < id {
+			j++
 		}
+		if o != nil && j < len(o.ids) && o.ids[j] == id {
+			continue
+		}
+		out.tab = tab
+		out.elems, out.ids = append(out.elems, r.elems[i]), append(out.ids, id)
 	}
 	return out
 }
 
 // subsetOf reports whether every element of r is in o.
-func (r *Row) subsetOf(o *Row) bool {
-	for _, e := range r.Elems() {
-		if !o.Has(e) {
-			return false
-		}
-	}
-	return true
+func (r *Row) subsetOf(tab *typeTable, o *Row) bool {
+	return r.minus(tab, o).Empty()
 }
 
-func (r *Row) equal(o *Row) bool {
-	return len(r.Elems()) == len(o.Elems()) && r.subsetOf(o)
+func (r *Row) equal(tab *typeTable, o *Row) bool {
+	return len(r.Elems()) == len(o.Elems()) && r.subsetOf(tab, o)
 }
 
+// list prints the elements in typeString order (ties, which only distinct
+// declarations of one name can make, keep the identity order).
 func (r *Row) list(sep string) string {
-	parts := make([]string, len(r.Elems()))
-	for i, e := range r.Elems() {
-		parts[i] = e.String()
+	elems := r.Elems()
+	keys := make([]string, len(elems))
+	for i, e := range elems {
+		keys[i] = typeString(e)
+	}
+	order := make([]int, len(elems))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return keys[order[a]] < keys[order[b]] })
+	parts := make([]string, len(elems))
+	for i, k := range order {
+		parts[i] = elems[k].String()
 	}
 	return strings.Join(parts, sep)
 }
 
 func (r *Row) String() string { return r.list(" | ") }
 
-// typeKey is a canonical identity key of a type, used for row elements,
-// instantiation caches and determinism.
-func typeKey(t Type) string {
+// typeString is a type's canonical text for printing order only: package
+// paths qualify names, and it carries no identity (two distinct declarations
+// of one name print alike). The checker compares, caches and indexes types
+// by their interned ids (intern.go), never by this string; a test keeps its
+// callers to printing.
+func typeString(t Type) string {
 	switch t := t.(type) {
 	case *Named:
-		orig := t
-		if t.Orig != nil {
-			orig = t.Orig
+		orig := t.origin()
+		key := orig.Obj.Name
+		if orig.Obj.Pkg != nil {
+			key = orig.Obj.Pkg.Path + "." + key
 		}
-		key := orig.Obj.Pkg.Path + "." + orig.Obj.Name + "#" + strconv.Itoa(orig.Obj.id)
 		if len(t.TArgs) > 0 {
 			parts := make([]string, len(t.TArgs))
 			for i, a := range t.TArgs {
-				parts[i] = typeKey(a)
+				parts[i] = typeString(a)
 			}
 			key += "[" + strings.Join(parts, ",") + "]"
 		}
 		return key
 	case *TypeParam:
-		return "$" + t.Name + "#" + strconv.Itoa(t.id)
+		return "$" + t.Name
 	case *RowArg:
-		parts := make([]string, len(t.Row.Elems()))
-		copy(parts, t.Row.keys)
-		return "{" + strings.Join(parts, "|") + "}"
+		return "{" + t.Row.list("|") + "}"
 	case *Slice:
-		return "[]" + typeKey(t.Elem)
+		return "[]" + typeString(t.Elem)
 	case *Array:
-		return "[" + strconv.FormatInt(t.Len, 10) + "]" + typeKey(t.Elem)
+		return "[" + strconv.FormatInt(t.Len, 10) + "]" + typeString(t.Elem)
 	case *Map:
-		return "map[" + typeKey(t.Key) + "]" + typeKey(t.Elem)
+		return "map[" + typeString(t.Key) + "]" + typeString(t.Elem)
 	case *Chan:
-		return fmt.Sprintf("chan%d ", t.Dir) + typeKey(t.Elem)
+		return fmt.Sprintf("chan%d ", t.Dir) + typeString(t.Elem)
 	case *Pointer:
-		return "*" + typeKey(t.Elem)
+		return "*" + typeString(t.Elem)
 	case *Signature:
 		var b strings.Builder
 		b.WriteString("func(")
 		for _, p := range t.Params {
-			b.WriteString(typeKey(p.Type) + ",")
+			b.WriteString(typeString(p.Type) + ",")
 		}
 		if t.Variadic {
 			b.WriteString("...")
 		}
 		b.WriteString(")(")
 		for _, r := range t.Results {
-			b.WriteString(typeKey(r) + ",")
+			b.WriteString(typeString(r) + ",")
 		}
-		b.WriteString(")e{" + strings.Join(t.Errors.keysOrNil(), "|") + "}u{" + strings.Join(t.Uses.keysOrNil(), "|") + "}")
+		b.WriteString(")e{" + t.Errors.list("|") + "}u{" + t.Uses.list("|") + "}")
 		return b.String()
 	case *Tuple:
 		parts := make([]string, len(t.Types))
 		for i, x := range t.Types {
-			parts[i] = typeKey(x)
+			parts[i] = typeString(x)
 		}
 		return "(" + strings.Join(parts, ",") + ")"
 	}
 	return t.String()
-}
-
-func (r *Row) keysOrNil() []string {
-	if r == nil {
-		return nil
-	}
-	return r.keys
 }
 
 // ---------------------------------------------------------------- helpers

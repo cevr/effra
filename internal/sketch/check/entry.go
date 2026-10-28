@@ -202,11 +202,11 @@ func (c *checker) checkMachine(tn *TypeName) {
 	want := "func(" + state.String() + ", " + signal.String() + ") Decision[" + state.String() + ", O]"
 	bad := len(sig.TParams) > 0 || sig.Variadic || len(sig.Params) != 2 || len(sig.Results) != 1
 	if !bad {
-		bad = !identical(sig.Params[0].Type, state) || !identical(sig.Params[1].Type, signal)
+		bad = !c.identical(sig.Params[0].Type, state) || !c.identical(sig.Params[1].Type, signal)
 	}
 	if !bad {
 		r, ok := sig.Results[0].(*Named)
-		bad = !ok || decision == nil || r.origin() != decision || len(r.TArgs) == 0 || !identical(r.TArgs[0], state)
+		bad = !ok || decision == nil || r.origin() != decision || len(r.TArgs) == 0 || !c.identical(r.TArgs[0], state)
 	}
 	if bad {
 		c.errorf(id, CodeType, "the step %s of machine %s must have the type %s, with any error and capability rows (runtime.md, Machines and actors 1)", id.Name, tn.Name, want)

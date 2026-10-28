@@ -69,8 +69,10 @@ type checker struct {
 	seen     map[string]bool
 	silent   int
 
-	cur      *fileInfo
-	instance map[string]*Named
+	cur *fileInfo
+	// instance caches the instances of generic named types by their
+	// interned id: (origin, type argument ids), looked up before building.
+	instance map[int32]*Named
 	// untyped holds the expressions Info records with an untyped type, and
 	// whether each was a constant, until a context converts them
 	// (updateExprType; go/types check.untyped).
@@ -97,10 +99,13 @@ type checker struct {
 	// inferOps counts the constraint-guard work of generic calls: linear
 	// in each signature (round-8 M4), bounded by a test.
 	inferOps int
-	// idents interns type identities for the variant index (variantindex.go);
+	// types is the check's hash-consing table (intern.go): the one identity
+	// for comparing, caching and indexing types. vindex holds the variant
+	// index of each union this check switches on (variantindex.go).
 	// subjects shares one switchUnion per union instance, so its caches are
 	// built once per instance, not once per switch subject (round-9 M1).
-	idents   identTable
+	types    *typeTable
+	vindex   map[*Union]*variantIndex
 	subjects map[any]*switchUnion
 	mono     monoState // the instantiation graph (instantiation cycles)
 
@@ -157,7 +162,8 @@ func newChecker(path string, imp Importer, universe *Scope) *checker {
 		imp:        imp,
 		universe:   universe,
 		seen:       map[string]bool{},
-		instance:   map[string]*Named{},
+		instance:   map[int32]*Named{},
+		types:      newTypeTable(),
 		errorTypes: map[*Named]syntax.Pos{},
 		guarded:    map[*Func]bool{},
 		reach:      map[any]*reachNode{},

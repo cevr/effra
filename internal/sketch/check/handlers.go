@@ -95,15 +95,15 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 			if !valid {
 				continue
 			}
-			if !row.Has(t) {
+			if !row.has(c.types, t) {
 				c.errorf(te, CodeType, "%s is not in the caught row %s (rows.md, Catch 2)", t, rowText(row))
 				continue
 			}
-			if covered.Has(t) {
+			if covered.has(c.types, t) {
 				c.errorf(te, CodeType, "%s is caught twice (rows.md, Catch 2)", t)
 				continue
 			}
-			covered = covered.with(t)
+			covered = covered.with(c.types, t)
 		}
 		saved := c.fn.scope
 		c.fn.scope = newScope(saved)
@@ -131,7 +131,7 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 		}
 		return bad(x)
 	}
-	rest := row.minus(covered)
+	rest := row.minus(c.types, covered)
 	if !partial && !rest.Empty() {
 		c.errorAt(x.Catch, x.Catch+5, CodeNotTotal, "this catch does not handle %s; a catch without try handles every error of the row (rows.md, Catch 4)", rowText(rest))
 	}

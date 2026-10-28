@@ -146,10 +146,10 @@ func (c *checker) wireBody(body *syntax.WireBody) (*Row, bool) {
 			known = false
 		}
 		for _, cap := range c.wireBinds(inner).Elems() {
-			if embedded.Has(cap) {
+			if embedded.has(c.types, cap) {
 				collisions = append(collisions, collision{cap, e.Key})
 			}
-			embedded = embedded.with(cap)
+			embedded = embedded.with(c.types, cap)
 		}
 	}
 	binds := embedded
@@ -158,7 +158,7 @@ func (c *checker) wireBody(body *syntax.WireBody) (*Row, bool) {
 	if c.fn != nil && c.fn.t != nil && c.fn.t.wire {
 		build = c.fn.t
 	}
-	deps := &wireDeps{needs: map[string]*Row{}, at: map[string]syntax.Expr{}}
+	deps := &wireDeps{tab: c.types, needs: map[int32]*Row{}, at: map[int32]syntax.Expr{}}
 	for _, e := range body.Entries {
 		if e.Kind == syntax.WireEmbed {
 			continue
@@ -170,7 +170,7 @@ func (c *checker) wireBody(body *syntax.WireBody) (*Row, bool) {
 		binds, caps = c.wireEntry(e, binds, embedded)
 		if e.Kind == syntax.WireReplace {
 			for _, cap := range caps {
-				replaced = replaced.with(cap)
+				replaced = replaced.with(c.types, cap)
 			}
 		}
 		if build != nil {
@@ -181,7 +181,7 @@ func (c *checker) wireBody(body *syntax.WireBody) (*Row, bool) {
 		c.checkEntryCycles(build.name, deps)
 	}
 	for _, k := range collisions {
-		if !replaced.Has(k.cap) {
+		if !replaced.has(c.types, k.cap) {
 			c.errorf(k.at, CodeDuplicateCap, "%s is bound by two embedded wires; replace one entry (rows.md, Wire 7)", k.cap)
 		}
 	}
@@ -191,19 +191,21 @@ func (c *checker) wireBody(body *syntax.WireBody) (*Row, bool) {
 // wireDeps records, for a named wire's entries, the capabilities of the
 // wire each entry's provider uses while it is built.
 type wireDeps struct {
+	tab   *typeTable
 	order []Type
-	needs map[string]*Row
-	at    map[string]syntax.Expr
+	needs map[int32]*Row // by the capability's interned id
+	at    map[int32]syntax.Expr
 }
 
 func (d *wireDeps) add(caps []Type, needs *Row, at syntax.Expr) {
 	for _, cap := range caps {
-		if _, seen := d.needs[typeKey(cap)]; !seen {
+		id := d.tab.id(cap)
+		if _, seen := d.needs[id]; !seen {
 			d.order = append(d.order, cap)
-			d.at[typeKey(cap)] = at
-			d.needs[typeKey(cap)] = newRow()
+			d.at[id] = at
+			d.needs[id] = newRow()
 		}
-		d.needs[typeKey(cap)] = d.needs[typeKey(cap)].union(needs)
+		d.needs[id] = d.needs[id].union(d.tab, needs)
 	}
 }
 
@@ -217,24 +219,25 @@ func (c *checker) checkEntryCycles(name string, d *wireDeps) {
 		grey
 		black
 	)
-	colour := map[string]int{}
+	colour := map[int32]int{}
+	key := c.types.id
 	var stack []Type
 	var visit func(cap Type) []Type
 	visit = func(cap Type) []Type {
-		colour[typeKey(cap)] = grey
+		colour[key(cap)] = grey
 		stack = append(stack, cap)
 		defer func() {
 			stack = stack[:len(stack)-1]
-			colour[typeKey(cap)] = black
+			colour[key(cap)] = black
 		}()
-		for _, next := range d.needs[typeKey(cap)].Elems() {
-			if _, entry := d.needs[typeKey(next)]; !entry {
+		for _, next := range d.needs[key(cap)].Elems() {
+			if _, entry := d.needs[key(next)]; !entry {
 				continue // bound by an embedded wire, built in its own wire
 			}
-			switch colour[typeKey(next)] {
+			switch colour[key(next)] {
 			case grey:
 				for i, s := range stack {
-					if typeKey(s) == typeKey(next) {
+					if key(s) == key(next) {
 						return append([]Type(nil), stack[i:]...)
 					}
 				}
@@ -247,7 +250,7 @@ func (c *checker) checkEntryCycles(name string, d *wireDeps) {
 		return nil
 	}
 	for _, cap := range d.order {
-		if colour[typeKey(cap)] != white {
+		if colour[key(cap)] != white {
 			continue
 		}
 		cycle := visit(cap)
@@ -255,14 +258,14 @@ func (c *checker) checkEntryCycles(name string, d *wireDeps) {
 			continue
 		}
 		for _, m := range cycle {
-			colour[typeKey(m)] = black
+			colour[key(m)] = black
 		}
 		parts := make([]string, 0, len(cycle)+1)
 		for _, m := range cycle {
 			parts = append(parts, m.String())
 		}
 		parts = append(parts, cycle[0].String())
-		c.errorf(d.at[typeKey(cycle[0])], CodeType, "the entries of %s need each other (%s), so none can be built first (rows.md, Wire 4 and 5)", name, strings.Join(parts, " -> "))
+		c.errorf(d.at[key(cycle[0])], CodeType, "the entries of %s need each other (%s), so none can be built first (rows.md, Wire 4 and 5)", name, strings.Join(parts, " -> "))
 	}
 }
 
@@ -286,7 +289,7 @@ func (c *checker) wireEntry(e *syntax.WireEntry, binds, embedded *Row) (*Row, []
 	if c.isConstructor(e.Value) {
 		c.errorf(e.Value, CodeOutside, "a constructor entry is #37's (wire constructors); write a provider value, not a function")
 		for _, cap := range caps {
-			binds = binds.with(cap)
+			binds = binds.with(c.types, cap)
 		}
 		return binds, caps
 	}
@@ -294,12 +297,12 @@ func (c *checker) wireEntry(e *syntax.WireEntry, binds, embedded *Row) (*Row, []
 	for i, cap := range caps {
 		k := capKeys[i]
 		switch {
-		case e.Kind == syntax.WireReplace && !embedded.Has(cap):
+		case e.Kind == syntax.WireReplace && !embedded.has(c.types, cap):
 			c.errorf(k, CodeType, "replace %s names no entry of an embedded wire (rows.md, Wire 7)", cap)
-		case e.Kind != syntax.WireReplace && binds.Has(cap):
+		case e.Kind != syntax.WireReplace && binds.has(c.types, cap):
 			c.errorf(k, CodeDuplicateCap, "%s has a second entry in this wire; only replace overrides an embedded entry (rows.md, Wire 1; README Gap 28)", cap)
 		}
-		binds = binds.with(cap)
+		binds = binds.with(c.types, cap)
 		if op.invalid() {
 			continue
 		}
@@ -379,7 +382,7 @@ func (c *checker) wireBinds(w *Wire) *Row {
 				w.unknown = true
 				continue
 			}
-			binds = binds.union(c.wireBinds(inner))
+			binds = binds.union(c.types, c.wireBinds(inner))
 			if inner.unknown {
 				w.unknown = true
 			}
@@ -388,7 +391,7 @@ func (c *checker) wireBinds(w *Wire) *Row {
 		for _, k := range append([]syntax.Expr{e.Key}, e.Keys...) {
 			if t := c.rowElem(k, KindUses, nil); t != nil {
 				if _, isParam := t.(*TypeParam); !isParam {
-					binds = binds.with(t)
+					binds = binds.with(c.types, t)
 				}
 			}
 		}

@@ -635,12 +635,12 @@ func (c *checker) errorValueRow(t Type) *Row {
 			if !c.isErrorValue(v) {
 				return nil
 			}
-			row = row.with(v)
+			row = row.with(c.types, v)
 		}
 		return row
 	}
 	if c.isErrorValue(t) {
-		return newRow(t)
+		return c.types.row(t)
 	}
 	return nil
 }

@@ -104,101 +104,42 @@ func (c *checker) substRow(r *Row, m map[*TypeParam]Type) *Row {
 	}
 	out := newRow()
 	for _, e := range r.Elems() {
-		out = out.with(c.subst(e, m))
+		out = out.with(c.types, c.subst(e, m))
 	}
 	return out
 }
 
 // ---------------------------------------------------------------- identity
 
-func identical(a, b Type) bool {
+// identical reports type identity: equal interned ids (intern.go). The ids
+// follow Go's identity, minus what Ergo removes: a named type by its origin
+// and identical type arguments; a struct by field names and types in order;
+// an interface by method names and identical signatures; a signature by
+// identical parameters and results and equal rows; a row argument by its
+// set; a union and a machine only to themselves.
+func (c *checker) identical(a, b Type) bool {
 	if a == b {
 		return true
 	}
-	switch a := a.(type) {
-	case *Named:
-		b, ok := b.(*Named)
-		if !ok || a.origin() != b.origin() || len(a.TArgs) != len(b.TArgs) {
-			return false
-		}
-		for i := range a.TArgs {
-			if !identical(a.TArgs[i], b.TArgs[i]) {
-				return false
-			}
-		}
-		return true
-	case *RowArg:
-		b, ok := b.(*RowArg)
-		return ok && a.Row.equal(b.Row)
-	case *Slice:
-		b, ok := b.(*Slice)
-		return ok && identical(a.Elem, b.Elem)
-	case *Array:
-		b, ok := b.(*Array)
-		return ok && a.Len == b.Len && identical(a.Elem, b.Elem)
-	case *Map:
-		b, ok := b.(*Map)
-		return ok && identical(a.Key, b.Key) && identical(a.Elem, b.Elem)
-	case *Chan:
-		b, ok := b.(*Chan)
-		return ok && a.Dir == b.Dir && identical(a.Elem, b.Elem)
-	case *Pointer:
-		b, ok := b.(*Pointer)
-		return ok && identical(a.Elem, b.Elem)
-	case *Signature:
-		b, ok := b.(*Signature)
-		return ok && sameShape(a, b) && a.Errors.equal(b.Errors) && a.Uses.equal(b.Uses)
-	case *Interface:
-		b, ok := b.(*Interface)
-		if !ok || a.Comparable != b.Comparable || len(a.Methods) != len(b.Methods) {
-			return false
-		}
-		for _, m := range a.Methods {
-			o := b.method(m.Name)
-			if o == nil || !identical(m.Sig, o.Sig) {
-				return false
-			}
-		}
-		return true
-	case *Struct:
-		b, ok := b.(*Struct)
-		if !ok || len(a.Fields) != len(b.Fields) {
-			return false
-		}
-		for i := range a.Fields {
-			if a.Fields[i].Name != b.Fields[i].Name || !identical(a.Fields[i].Type, b.Fields[i].Type) {
-				return false
-			}
-		}
-		return true
-	case *Tuple:
-		b, ok := b.(*Tuple)
-		if !ok || len(a.Types) != len(b.Types) {
-			return false
-		}
-		for i := range a.Types {
-			if !identical(a.Types[i], b.Types[i]) {
-				return false
-			}
-		}
-		return true
+	if a == nil || b == nil {
+		return false
 	}
-	return false
+	return c.types.id(a) == c.types.id(b)
 }
 
 // sameShape reports whether two signatures have identical parameters and
 // results.
-func sameShape(a, b *Signature) bool {
+func (c *checker) sameShape(a, b *Signature) bool {
 	if len(a.Params) != len(b.Params) || len(a.Results) != len(b.Results) || a.Variadic != b.Variadic {
 		return false
 	}
 	for i := range a.Params {
-		if !identical(a.Params[i].Type, b.Params[i].Type) {
+		if !c.identical(a.Params[i].Type, b.Params[i].Type) {
 			return false
 		}
 	}
 	for i := range a.Results {
-		if !identical(a.Results[i], b.Results[i]) {
+		if !c.identical(a.Results[i], b.Results[i]) {
 			return false
 		}
 	}
@@ -212,7 +153,7 @@ func sameShape(a, b *Signature) bool {
 // union, a type to an interface by method-row compatibility, a function
 // value to a function type whose rows are supersets; #128, Gap 24).
 func (c *checker) assignable(v, t Type) (bool, string) {
-	if isInvalid(v) || isInvalid(t) || identical(v, t) {
+	if isInvalid(v) || isInvalid(t) || c.identical(v, t) {
 		return true, ""
 	}
 	if v == NoValue {
@@ -221,7 +162,7 @@ func (c *checker) assignable(v, t Type) (bool, string) {
 	if u := asUnion(t); u != nil {
 		if _, isNamed := t.(*Named); isNamed {
 			for _, variant := range u.Variants {
-				if identical(variant, v) {
+				if c.identical(variant, v) {
 					return true, ""
 				}
 			}
@@ -246,18 +187,18 @@ func (c *checker) assignable(v, t Type) (bool, string) {
 		if !ok {
 			return false, ""
 		}
-		if !sameShape(vs, tt) {
+		if !c.sameShape(vs, tt) {
 			return false, "the parameters or results differ"
 		}
-		if !vs.Errors.subsetOf(tt.Errors) {
+		if !vs.Errors.subsetOf(c.types, tt.Errors) {
 			return false, fmt.Sprintf("its error row %s is wider than %s", rowText(vs.Errors), rowText(tt.Errors))
 		}
-		if !vs.Uses.subsetOf(tt.Uses) {
+		if !vs.Uses.subsetOf(c.types, tt.Uses) {
 			return false, fmt.Sprintf("its capability row %s is wider than %s", rowText(vs.Uses), rowText(tt.Uses))
 		}
 		return true, ""
 	case *Chan:
-		if vc, ok := v.(*Chan); ok && vc.Dir == 0 && identical(vc.Elem, tt.Elem) {
+		if vc, ok := v.(*Chan); ok && vc.Dir == 0 && c.identical(vc.Elem, tt.Elem) {
 			return true, ""
 		}
 	}
@@ -330,14 +271,14 @@ func (c *checker) implements(v Type, it *Interface) string {
 		if fn != nil && fn.Ptr && !ptr {
 			return fmt.Sprintf("%s.%s has a *T receiver", v, m.Name)
 		}
-		if !sameShape(got, m.Sig) {
+		if !c.sameShape(got, m.Sig) {
 			return fmt.Sprintf("%s.%s has signature %s, want %s", v, m.Name, got, m.Sig)
 		}
-		if !got.Errors.subsetOf(m.Sig.Errors) {
-			return fmt.Sprintf("%s.%s can fail with %s, wider than %s", v, m.Name, rowText(got.Errors.minus(m.Sig.Errors)), rowText(m.Sig.Errors))
+		if !got.Errors.subsetOf(c.types, m.Sig.Errors) {
+			return fmt.Sprintf("%s.%s can fail with %s, wider than %s", v, m.Name, rowText(got.Errors.minus(c.types, m.Sig.Errors)), rowText(m.Sig.Errors))
 		}
-		if !got.Uses.subsetOf(m.Sig.Uses) {
-			return fmt.Sprintf("%s.%s requires %s, which the interface's method does not (README Gap 17 stays with #37)", v, m.Name, rowText(got.Uses.minus(m.Sig.Uses)))
+		if !got.Uses.subsetOf(c.types, m.Sig.Uses) {
+			return fmt.Sprintf("%s.%s requires %s, which the interface's method does not (README Gap 17 stays with #37)", v, m.Name, rowText(got.Uses.minus(c.types, m.Sig.Uses)))
 		}
 		if got.Fallible != m.Sig.Fallible {
 			return fmt.Sprintf("%s.%s differs in fallibility from the interface's method", v, m.Name)
@@ -349,19 +290,20 @@ func (c *checker) implements(v Type, it *Interface) string {
 // comparable reports whether == applies to values of t (Go's rule; a
 // union compares as an interface).
 func comparable(t Type) bool {
-	return comparableSeen(t, map[string]bool{})
+	return comparableSeen(t, map[Type]bool{})
 }
 
-func comparableSeen(t Type, seen map[string]bool) bool {
+func comparableSeen(t Type, seen map[Type]bool) bool {
 	switch u := under(t).(type) {
 	case *Basic:
 		return u.Kind != Invalid
 	case *Struct:
-		key := typeKey(t)
-		if seen[key] {
+		// A recursive struct reaches itself through a named type, the same
+		// type object (instances are cached by id).
+		if seen[t] {
 			return true
 		}
-		seen[key] = true
+		seen[t] = true
 		for _, f := range u.Fields {
 			if !comparableSeen(f.Type, seen) {
 				return false
@@ -402,10 +344,10 @@ func (c *checker) satisfies(t Type, constraint Type) string {
 // defaultable fields. A union, an interface, a function type, a pointer and
 // a struct that holds any of them are not.
 func defaultable(t Type) bool {
-	return defaultableSeen(t, map[string]bool{})
+	return defaultableSeen(t, map[Type]bool{})
 }
 
-func defaultableSeen(t Type, seen map[string]bool) bool {
+func defaultableSeen(t Type, seen map[Type]bool) bool {
 	switch u := under(t).(type) {
 	case *Basic:
 		return true
@@ -414,11 +356,12 @@ func defaultableSeen(t Type, seen map[string]bool) bool {
 	case *Array:
 		return defaultableSeen(u.Elem, seen)
 	case *Struct:
-		key := typeKey(t)
-		if seen[key] {
+		// A recursive struct reaches itself through a named type, the same
+		// type object (instances are cached by id).
+		if seen[t] {
 			return true
 		}
-		seen[key] = true
+		seen[t] = true
 		for _, f := range u.Fields {
 			if !defaultableSeen(f.Type, seen) {
 				return false
