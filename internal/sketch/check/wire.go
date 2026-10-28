@@ -119,6 +119,10 @@ func (c *checker) wireLit(w *syntax.WireLit) (binds *Row, known bool) {
 // unknown (reported).
 func (c *checker) wireBody(body *syntax.WireBody) (*Row, bool) {
 	known := true
+	// The named wire whose body this is (checkWires), left out of what its
+	// embeddings reach (wireReach); an inline wire inside it is not it.
+	self := c.building
+	c.building = nil
 	type collision struct {
 		cap Type
 		at  syntax.Expr
@@ -142,10 +146,11 @@ func (c *checker) wireBody(body *syntax.WireBody) (*Row, bool) {
 		if c.fn != nil && c.fn.reach != nil {
 			c.fn.reach.wires = append(c.fn.reach.wires, inner)
 		}
-		if c.wireBinds(inner) != nil && inner.unknown {
+		reach, innerKnown := c.wireReach(inner, self)
+		if !innerKnown {
 			known = false
 		}
-		for _, cap := range c.wireBinds(inner).Elems() {
+		for _, cap := range reach.Elems() {
 			if embedded.has(c.types, cap) {
 				collisions = append(collisions, collision{cap, e.Key})
 			}
@@ -358,49 +363,65 @@ func (c *checker) wireKey(k syntax.Expr) Type {
 }
 
 // wireBinds returns the capabilities a named wire binds: its entries and
-// those of the wires it embeds. An embedding cycle stops here; the cycle
-// itself is reported by checkWireCycles.
+// those of every wire its embeddings reach. It walks the whole embedding
+// graph, so the result does not depend on which wire was asked first (an
+// embedding cycle is reported by checkWireCycles; round 17 m3).
 func (c *checker) wireBinds(w *Wire) *Row {
-	if w.binds != nil {
-		return w.binds
+	if w.binds == nil {
+		var known bool
+		w.binds, known = c.wireReach(w, nil)
+		w.unknown = !known
 	}
-	if w.state == 1 {
-		return newRow()
+	return w.binds
+}
+
+// wireReach returns the capabilities bound by w and every wire its
+// embeddings reach, leaving out skip, and whether every embedded wire
+// exists. A named wire's body is checked against what its embeddings reach
+// without the wire itself: on an embedding cycle, already reported, the
+// wire's own entries come back through the cycle and are no second entry
+// (D3).
+func (c *checker) wireReach(w, skip *Wire) (*Row, bool) {
+	binds, known := newRow(), true
+	seen := map[*Wire]bool{}
+	if skip != nil {
+		seen[skip] = true
 	}
-	w.state = 1
-	saved := c.cur
-	c.cur = w.file
-	c.silent++
-	binds := newRow()
-	for _, e := range w.Decl.Body.Entries {
-		if e.Kind == syntax.WireEmbed {
-			var inner *Wire
-			if id, ok := e.Key.(*syntax.Ident); ok {
-				inner = w.pkg.Wires[id.Name]
-			}
-			if inner == nil {
-				w.unknown = true
+	var visit func(w *Wire)
+	visit = func(w *Wire) {
+		if seen[w] {
+			return
+		}
+		seen[w] = true
+		saved := c.cur
+		c.cur = w.file
+		c.silent++
+		for _, e := range w.Decl.Body.Entries {
+			if e.Kind == syntax.WireEmbed {
+				var inner *Wire
+				if id, ok := e.Key.(*syntax.Ident); ok {
+					inner = w.pkg.Wires[id.Name]
+				}
+				if inner == nil {
+					known = false
+					continue
+				}
+				visit(inner)
 				continue
 			}
-			binds = binds.union(c.types, c.wireBinds(inner))
-			if inner.unknown {
-				w.unknown = true
-			}
-			continue
-		}
-		for _, k := range append([]syntax.Expr{e.Key}, e.Keys...) {
-			if t := c.rowElem(k, KindUses, nil); t != nil {
-				if _, isParam := t.(*TypeParam); !isParam {
-					binds = binds.with(c.types, t)
+			for _, k := range append([]syntax.Expr{e.Key}, e.Keys...) {
+				if t := c.rowElem(k, KindUses, nil); t != nil {
+					if _, isParam := t.(*TypeParam); !isParam {
+						binds = binds.with(c.types, t)
+					}
 				}
 			}
 		}
+		c.silent--
+		c.cur = saved
 	}
-	c.silent--
-	c.cur = saved
-	w.binds = binds
-	w.state = 2
-	return binds
+	visit(w)
+	return binds, known
 }
 
 // checkWires checks the named wires: their entries, in a closed build
@@ -432,6 +453,7 @@ func (c *checker) checkWires() {
 		// The wire's providers may use what the wire binds (Wire 4).
 		t.internal = c.wireBinds(w)
 		c.fn = &funcCtx{t: t, scope: newScope(c.pkg.Scope), reach: c.reachOf(w)}
+		c.building = w
 		c.wireBody(d.Body)
 		c.fn = nil
 	}

@@ -18,7 +18,7 @@ import (
 // type]], must not make a valid later instantiation wider than itself.
 func TestRowVariableWitnesses(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join("testdata", "classf", "*.ef"))
-	if len(files) < 49 {
+	if len(files) < 51 {
 		t.Fatalf("want the 44 witnesses and controls of rounds 12 to 16, found %v", files)
 	}
 	for _, file := range files {

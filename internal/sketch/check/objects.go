@@ -106,7 +106,6 @@ type Wire struct {
 	// not exist (reported at the embedding): what it binds is unknown, so
 	// a with of it discharges everything (D3; M18).
 	unknown bool
-	state   int
 	pkg     *Package
 }
 

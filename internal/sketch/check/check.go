@@ -97,6 +97,9 @@ type checker struct {
 	group      map[*Func]bool
 	groupValue map[*Func][2]bool
 	lits       []*litFrame // the literal frames being checked, innermost last
+	// building is the named wire whose body checkWires is about to check
+	// (wireBody reads and clears it).
+	building *Wire
 	// nodeCheck replaces checkNode in converge for the synthetic oscillation
 	// test (nil otherwise); convergeChecks counts converge's checks.
 	nodeCheck      func(*bodyNode) bool
