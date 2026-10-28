@@ -120,7 +120,7 @@ func (c *checker) bodyRefs(f *Func) *refWalker {
 	if d.Recv != nil {
 		for _, field := range d.Recv.List {
 			for _, n := range field.Names {
-				w.bindAs(n.Name, &localBinding{typ: field.Type})
+				w.bindAs(n.Name, &localBinding{rt: w.receiverType(f, field.Type)})
 			}
 			// The receiver's type arguments name its type parameters.
 			rt := field.Type
@@ -141,7 +141,7 @@ func (c *checker) bodyRefs(f *Func) *refWalker {
 			w.tparams[tp.Name] = true
 		}
 	}
-	w.params(d.Type)
+	w.params(d.Type, f.Sig)
 	w.list(d.Body.List)
 	w.pop()
 	w.visit(d.Body)
@@ -188,12 +188,47 @@ func (c *checker) newRefWalker() *refWalker {
 }
 
 // A localBinding is what the walk knows of a local's type, which its
-// declaration fixes: a written type (a parameter, a receiver, a typed var,
-// a composite literal's type) or the signature of the declared function it
-// aliases. Either may be nil (unknown).
+// declaration fixes: a written type, resolved where it is declared (a
+// declared function's parameter or receiver takes its resolved signature's
+// type; a function literal's parameter, a typed var or a local bound to a
+// composite literal resolves the written name), or the signature of the
+// declared function it aliases. Either may be nil (unknown). A local
+// declared later with the type's name does not change it (round 18 m1).
 type localBinding struct {
-	typ syntax.Expr
+	rt  Type
 	sig *Signature
+}
+
+// receiverType is the type of f's receiver, as its declaration resolved
+// it, or the written type when f's receiver did not resolve.
+func (w *refWalker) receiverType(f *Func, written syntax.Expr) Type {
+	if f.Recv != nil {
+		return f.Recv
+	}
+	return w.writtenType(written)
+}
+
+// writtenType resolves a written type name, possibly instantiated or
+// behind *, through the package scope and the imports, at the point it is
+// declared: nil for a type parameter, a name a local shadows there, or any
+// other form. An instance resolves to its generic type, whose members keep
+// their type parameters, so closedRows treats a row that mentions them as
+// open.
+func (w *refWalker) writtenType(t syntax.Expr) Type {
+	if s, ok := t.(*syntax.StarExpr); ok {
+		t = s.X
+	}
+	if ix, ok := t.(*syntax.IndexExpr); ok {
+		t = ix.X
+	}
+	id, ok := t.(*syntax.Ident)
+	if !ok || w.tparams[id.Name] || w.local(id.Name) {
+		return nil
+	}
+	if tn, ok := w.c.typeObject(id.Name, w.c.cur).(*TypeName); ok {
+		return tn.Type
+	}
+	return nil
 }
 
 func (w *refWalker) push()            { w.scopes = append(w.scopes, map[string]*localBinding{}) }
@@ -211,20 +246,37 @@ func (w *refWalker) visit(n syntax.Node) {
 }
 
 // params binds a function type's parameter names and the bare names of its
-// written capability row (bindRequirements), and visits the signature.
-func (w *refWalker) params(ft *syntax.FuncType) {
+// written capability row (bindRequirements), and visits the signature. sig
+// is the declared function's resolved signature (nil for a function
+// literal): each parameter takes its type from there, so a written
+// structural type (`r struct{ Run func(…) }`) is known too.
+func (w *refWalker) params(ft *syntax.FuncType, sig *Signature) {
 	if ft == nil {
 		return
 	}
 	if ft.Params != nil {
+		count := 0
 		for _, field := range ft.Params.List {
-			b := &localBinding{typ: field.Type}
-			if _, variadic := field.Type.(*syntax.Ellipsis); variadic {
-				b.typ = nil
-			}
-			for _, n := range field.Names {
-				if n.Name != "_" {
-					w.bindAs(n.Name, b)
+			count += max(len(field.Names), 1)
+		}
+		if sig != nil && len(sig.Params) != count {
+			sig = nil
+		}
+		i := 0
+		for _, field := range ft.Params.List {
+			_, variadic := field.Type.(*syntax.Ellipsis)
+			for j := range max(len(field.Names), 1) {
+				var rt Type
+				switch {
+				case variadic:
+				case sig != nil:
+					rt = sig.Params[i].Type
+				default:
+					rt = w.writtenType(field.Type)
+				}
+				i++
+				if j < len(field.Names) && field.Names[j].Name != "_" {
+					w.bindAs(field.Names[j].Name, &localBinding{rt: rt})
 				}
 			}
 		}
@@ -365,7 +417,7 @@ func (w *refWalker) initBinding(e syntax.Expr) *localBinding {
 	switch e := unparen(e).(type) {
 	case *syntax.Ident:
 		if b := w.lookupLocal(e.Name); b != nil {
-			return &localBinding{typ: b.typ, sig: b.sig}
+			return &localBinding{rt: b.rt, sig: b.sig}
 		}
 		if sig := declaredSig(w.c.typeObject(e.Name, w.c.cur)); sig != nil && len(sig.TParams) == 0 {
 			return &localBinding{sig: sig}
@@ -379,43 +431,41 @@ func (w *refWalker) initBinding(e syntax.Expr) *localBinding {
 			}
 		}
 	case *syntax.CompositeLit:
-		return &localBinding{typ: e.Type}
+		return &localBinding{rt: w.writtenType(e.Type)}
 	}
 	return &localBinding{}
 }
 
-// staticType is the written type of a receiver expression, or nil: a local
-// with a written type, or a composite literal.
+// staticType is the type of a receiver expression fixed before bodies, or
+// nil: a local whose declaration resolved it (localBinding), or a
+// composite literal's written type.
 func (w *refWalker) staticType(e syntax.Expr) Type {
-	var t syntax.Expr
 	switch e := unparen(e).(type) {
 	case *syntax.Ident:
 		if b := w.lookupLocal(e.Name); b != nil {
-			t = b.typ
+			return b.rt
 		}
 	case *syntax.CompositeLit:
-		t = e.Type
-	}
-	if s, ok := t.(*syntax.StarExpr); ok {
-		t = s.X
-	}
-	if ix, ok := t.(*syntax.IndexExpr); ok {
-		t = ix.X
-	}
-	id, ok := t.(*syntax.Ident)
-	if !ok || w.tparams[id.Name] || w.local(id.Name) {
-		return nil
-	}
-	if tn, ok := w.c.typeObject(id.Name, w.c.cur).(*TypeName); ok {
-		return tn.Type
+		return w.writtenType(e.Type)
 	}
 	return nil
 }
 
 // memberSig is the signature of the method or the function-typed field
-// name of t. A method or field of a generic type keeps its type parameters,
-// so closedRows treats a row that mentions them as open.
+// name of t: a named type, a pointer to one, or a written struct type. A
+// method or field of a generic type keeps its type parameters, so
+// closedRows treats a row that mentions them as open.
 func memberSig(t Type, name string) *Signature {
+	if p, ok := t.(*Pointer); ok {
+		t = p.Elem
+	}
+	if s, ok := t.(*Struct); ok {
+		if fld, _ := s.field(name); fld != nil {
+			sig, _ := under0(fld.Type).(*Signature)
+			return sig
+		}
+		return nil
+	}
 	n, ok := t.(*Named)
 	if !ok {
 		return nil
@@ -532,7 +582,7 @@ func (w *refWalker) expr(x syntax.Expr) {
 		}
 		w.frame(f, func() {
 			w.push()
-			w.params(x.Type)
+			w.params(x.Type, nil)
 			w.visit(x.Body)
 			w.list(x.Body.List)
 			w.pop()
@@ -709,7 +759,7 @@ func (w *refWalker) stmt(s syntax.Stmt) {
 			w.exprs(spec.Values)
 			for i, n := range spec.Names {
 				w.visit(n)
-				b := &localBinding{typ: spec.Type}
+				b := &localBinding{rt: w.writtenType(spec.Type)}
 				if spec.Type == nil && len(spec.Values) == len(spec.Names) {
 					b = w.initBinding(spec.Values[i])
 				}
