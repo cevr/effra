@@ -18,20 +18,38 @@ type switchUnion struct {
 	tps  []*TypeParam        // the declaration's type parameters, in order (determinism)
 	// bound indexes the instance's type arguments by identity key, and
 	// rows its bound rows per index node, each built once (variantindex.go).
-	bound map[string][]*TypeParam
+	bound map[int][]*TypeParam
 	rows  map[*vnode]map[string][]*vnode
 }
 
 // subjectUnion returns t's union as a switch subject, or nil when t is not
 // a union.
+//
+// The result is shared by every subject of the same instance (or of the
+// same plain union), so its caches (the substituted variants, the bound
+// identities, the bound rows) are built once per instance, not once per
+// switch subject (round-9 M1).
 func (c *checker) subjectUnion(t Type) *switchUnion {
+	if c.subjects == nil {
+		c.subjects = map[any]*switchUnion{}
+	}
 	if n, ok := t.(*Named); ok && n.Orig != nil && n.under == nil {
 		if ou, ok := n.Orig.under.(*Union); ok {
-			return &switchUnion{c: c, orig: ou, m: paramMap(n.Orig.TParams, n.TArgs), tps: n.Orig.TParams}
+			if s, ok := c.subjects[n]; ok {
+				return s
+			}
+			s := &switchUnion{c: c, orig: ou, m: paramMap(n.Orig.TParams, n.TArgs), tps: n.Orig.TParams}
+			c.subjects[n] = s
+			return s
 		}
 	}
 	if u := asUnion(t); u != nil {
-		return &switchUnion{c: c, orig: u}
+		if s, ok := c.subjects[u]; ok {
+			return s
+		}
+		s := &switchUnion{c: c, orig: u}
+		c.subjects[u] = s
+		return s
 	}
 	return nil
 }
@@ -88,7 +106,15 @@ func (s *switchUnion) lookup(t Type, b *lookupSteps) int {
 		if cand.exact {
 			return cand.i
 		}
-		if !b.charge(1) {
+		// A wildcard candidate is confirmed by substituting the variant and
+		// one identity check: charged by the sizes of both (interned first).
+		if _, ok := s.c.identOf(s.orig.Variants[cand.i], b); !ok {
+			return variantOver
+		}
+		if _, ok := s.c.identOf(t, b); !ok {
+			return variantOver
+		}
+		if !b.charge(s.c.identSize(s.orig.Variants[cand.i]) + s.c.identSize(t)) {
 			return variantOver
 		}
 		if identical(s.at(cand.i), t) {

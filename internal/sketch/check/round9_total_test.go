@@ -151,8 +151,8 @@ func TestIndexScaling(t *testing.T) {
 					}
 				}
 				t.Logf("n=%d bytes=%d variant ops=%d diagnostics=%s", n, len(src), ops, describe(d))
-				if ops > 16*n {
-					t.Errorf("n=%d: %d variant operations, more than 16 per variant or case", n, ops)
+				if ops > 24*n {
+					t.Errorf("n=%d: %d variant operations, more than 24 per variant or case", n, ops)
 				}
 				if prevN > 0 && ops*prevN*10 > prevOps*n*11 {
 					t.Errorf("n=%d→%d: variant operations grow from %d to %d, faster than the source", prevN, n, prevOps, ops)

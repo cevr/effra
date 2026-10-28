@@ -148,7 +148,7 @@ func (ix *variantIndex) insert(n *vnode, t Type, ops *int) *vnode {
 		}
 		return child
 	}
-	if ra, ok := t.(*RowArg); ok && rowHasParam(ra.Row) {
+	if ra, ok := t.(*RowArg); ok && ix.rowMentions(ra.Row, ops) {
 		key := rowKey(ra.Row)
 		if n.rows == nil {
 			n.rows = map[string]*vrow{}
@@ -185,6 +185,20 @@ func (ix *variantIndex) insert(n *vnode, t Type, ops *int) *vnode {
 	return child
 }
 
+// rowMentions reports whether a row mentions a declaration parameter. The
+// test walks the row's elements: each visited node, and the key join per
+// element, is charged to the union's insertion counter (round-9 M1).
+func (ix *variantIndex) rowMentions(r *Row, ops *int) bool {
+	before := ix.steps
+	mentions := rowHasParam(r, &ix.steps)
+	ix.steps += len(r.Elems())
+	*ops += ix.steps - before
+	if ix.steps > totalityBudget {
+		ix.over = true
+	}
+	return mentions
+}
+
 // vcand is a variant a case may name: exact when its path took no
 // wildcard, so it is identical to the case.
 type vcand struct {
@@ -198,11 +212,14 @@ type vterms struct {
 	next *vterms
 }
 
-// lookup returns the variants whose path matches t, in variant order, and
-// false when the switch's step counter ran out.
+// candidates returns the variants whose path matches t, in variant order,
+// and false when the switch's step counter ran out. Every step is charged
+// before it is taken, in proportion to its work: a node visit and its
+// constructor's sub-terms, the identity of a sub-term (identOf, per new
+// type node), an identity check (the size of the case's sub-term), a bound
+// row index (per row element).
 func (s *switchUnion) candidates(ix *variantIndex, t Type, b *lookupSteps) ([]vcand, bool) {
 	var out []vcand
-	keys := map[Type]string{}
 	var walk func(n *vnode, p *vterms, exact bool)
 	walk = func(n *vnode, p *vterms, exact bool) {
 		if !b.charge(1) {
@@ -218,10 +235,19 @@ func (s *switchUnion) candidates(ix *variantIndex, t Type, b *lookupSteps) ([]vc
 			return
 		}
 		if len(n.vars) > 0 {
-			for _, tp := range s.boundTo(p.t, keys, b) {
+			tps, ok := s.boundTo(p.t, b)
+			if !ok {
+				return
+			}
+			for _, tp := range tps {
 				child := n.vars[tp]
-				if child == nil || !b.charge(1) {
+				if child == nil {
 					continue
+				}
+				// The identities are equal: identical walks the case's
+				// sub-term once, charged by its size.
+				if !b.charge(s.c.identSize(p.t)) {
+					return
 				}
 				if identical(s.bind(tp), p.t) {
 					walk(child, p.next, exact)
@@ -230,7 +256,11 @@ func (s *switchUnion) candidates(ix *variantIndex, t Type, b *lookupSteps) ([]vc
 		}
 		if len(n.rowList) > 0 {
 			if ra, ok := p.t.(*RowArg); ok {
-				for _, child := range s.rowsAt(n, b)[rowKey(ra.Row)] {
+				idx, ok := s.rowsAt(n, b)
+				if !ok || !b.charge(1+len(ra.Row.Elems())) {
+					return
+				}
+				for _, child := range idx[rowKey(ra.Row)] {
 					walk(child, p.next, exact)
 				}
 			}
@@ -239,6 +269,9 @@ func (s *switchUnion) candidates(ix *variantIndex, t Type, b *lookupSteps) ([]vc
 			walk(n.wild, p.next, false)
 		}
 		if sym, kids, ok := symOf(p.t); ok {
+			if !b.charge(len(kids)) {
+				return
+			}
 			if child := n.next[sym]; child != nil {
 				rest := p.next
 				for k := len(kids) - 1; k >= 0; k-- {
@@ -259,46 +292,60 @@ func (s *switchUnion) candidates(ix *variantIndex, t Type, b *lookupSteps) ([]vc
 }
 
 // boundTo returns the declaration parameters whose bound type may be
-// identical to t: those with t's identity key, from the instance's bound
-// identities, indexed once. Outside an instance a parameter stands for
-// itself.
-func (s *switchUnion) boundTo(t Type, keys map[Type]string, b *lookupSteps) []*TypeParam {
+// identical to t: those with t's identity, from the instance's bound
+// identities. They are indexed once per instance (the switchUnion is shared
+// by every subject of the instance, subjectUnion) and each identity is
+// interned once per type (identOf). Outside an instance a parameter stands
+// for itself. ok is false when the step counter ran out.
+func (s *switchUnion) boundTo(t Type, b *lookupSteps) ([]*TypeParam, bool) {
 	if s.m == nil {
 		if tp, ok := t.(*TypeParam); ok {
-			return []*TypeParam{tp}
+			return []*TypeParam{tp}, true
 		}
-		return nil
+		return nil, true
 	}
 	if s.bound == nil {
-		s.bound = map[string][]*TypeParam{}
+		bound := map[int][]*TypeParam{}
 		for _, tp := range s.tps {
-			if a, ok := s.m[tp]; ok {
-				b.charge(1)
-				k := idKey(a, nil)
-				s.bound[k] = append(s.bound[k], tp)
+			a, ok := s.m[tp]
+			if !ok {
+				continue
 			}
+			id, ok := s.c.identOf(a, b)
+			if !ok || !b.charge(1) {
+				return nil, false
+			}
+			bound[id] = append(bound[id], tp)
 		}
+		s.bound = bound
 	}
-	k, ok := keys[t]
+	id, ok := s.c.identOf(t, b)
 	if !ok {
-		k = idKey(t, keys)
+		return nil, false
 	}
-	return s.bound[k]
+	return s.bound[id], true
 }
 
 // rowsAt returns node n's row-pattern edges indexed by the identity of
-// the rows the instance binds them to, built once per instance and node.
-func (s *switchUnion) rowsAt(n *vnode, b *lookupSteps) map[string][]*vnode {
+// the rows the instance binds them to, built once per instance and node and
+// charged per row element. ok is false when the step counter ran out.
+func (s *switchUnion) rowsAt(n *vnode, b *lookupSteps) (map[string][]*vnode, bool) {
 	if idx, ok := s.rows[n]; ok {
-		return idx
-	}
-	if s.rows == nil {
-		s.rows = map[*vnode]map[string][]*vnode{}
+		return idx, true
 	}
 	idx := map[string][]*vnode{}
 	for _, vr := range n.rowList {
-		if !b.charge(1) {
-			break
+		// Substituting the pattern costs its elements' sizes, interned
+		// (and charged) first.
+		w := 1
+		for _, e := range vr.row.Elems() {
+			if _, ok := s.c.identOf(e, b); !ok {
+				return nil, false
+			}
+			w += s.c.identSize(e)
+		}
+		if !b.charge(w) {
+			return nil, false
 		}
 		r := vr.row
 		if s.m != nil {
@@ -307,53 +354,105 @@ func (s *switchUnion) rowsAt(n *vnode, b *lookupSteps) map[string][]*vnode {
 		k := rowKey(r)
 		idx[k] = append(idx[k], vr.node)
 	}
+	if s.rows == nil {
+		s.rows = map[*vnode]map[string][]*vnode{}
+	}
 	s.rows[n] = idx
-	return idx
+	return idx, true
 }
 
 // rowKey is a row's identity: its sorted element keys (Row.equal).
 func rowKey(r *Row) string { return strings.Join(r.keysOrNil(), "|") }
 
-// idKey is an identity key: identical types have the same key (types the
-// tree does not key share one), so a hash lookup by it, confirmed by
-// identical, finds every identical type. memo caches the keys of one
-// lookup's sub-terms; nil skips it.
-func idKey(t Type, memo map[Type]string) string {
-	if k, ok := memo[t]; ok {
-		return k
+// identTable interns type identities for the whole check (round-9 M1):
+// each type node gets a compact id, computed once and memoized on the type
+// (by its pointer), from its constructor and its sub-terms' ids, so a
+// node's key is O(its arity), never the string of a deep type. Identical
+// types get the same id; the types the tree does not key share one id,
+// confirmed by identical. size is the number of nodes, the cost of an
+// identity check against the type.
+type identTable struct {
+	of   map[Type]identEntry
+	keys map[string]int
+}
+
+type identEntry struct {
+	id, size int
+}
+
+// identOf returns t's interned identity. A type seen before costs nothing;
+// each new node is charged to b (one step plus its sub-terms) before its
+// key is built, so a deep type costs its depth, once per check. ok is
+// false when the step counter ran out.
+func (c *checker) identOf(t Type, b *lookupSteps) (int, bool) {
+	if e, ok := c.idents.of[t]; ok {
+		return e.id, true
 	}
-	var k string
+	if c.idents.of == nil {
+		c.idents.of = map[Type]identEntry{}
+		c.idents.keys = map[string]int{}
+	}
+	var key string
+	size := 1
 	switch t := t.(type) {
 	case *TypeParam:
-		k = "$" + strconv.Itoa(t.id)
+		if !b.charge(1) {
+			return 0, false
+		}
+		key = "$" + strconv.Itoa(t.id)
 	default:
 		sym, kids, ok := symOf(t)
+		w := 1 + len(kids)
+		if ra, isRow := t.(*RowArg); isRow {
+			w += len(ra.Row.Elems()) // its key joins the elements' keys
+		}
+		if !b.charge(w) {
+			return 0, false
+		}
 		if !ok {
-			k = "?"
+			key = "?"
 			break
 		}
 		var sb strings.Builder
 		sb.WriteByte(sym.kind)
 		switch r := sym.ref.(type) {
 		case *Named:
-			sb.WriteString(typeKey(r))
+			sb.WriteString(typeKey(r)) // the origin: no type arguments, O(1)
 		case *Basic:
 			sb.WriteString(strconv.Itoa(int(r.Kind)))
 		}
 		sb.WriteString("/" + strconv.FormatInt(sym.n, 10) + "/" + sym.s + "(")
 		for i, kid := range kids {
+			id, ok := c.identOf(kid, b)
+			if !ok {
+				return 0, false
+			}
 			if i > 0 {
 				sb.WriteByte(',')
 			}
-			sb.WriteString(idKey(kid, memo))
+			sb.WriteString(strconv.Itoa(id))
+			size += c.idents.of[kid].size
 		}
 		sb.WriteByte(')')
-		k = sb.String()
+		key = sb.String()
 	}
-	if memo != nil {
-		memo[t] = k
+	id, ok := c.idents.keys[key]
+	if !ok {
+		id = len(c.idents.keys) + 1
+		c.idents.keys[key] = id
 	}
-	return k
+	c.idents.of[t] = identEntry{id, size}
+	return id, true
+}
+
+// identSize is the size of a type whose identity identOf interned: the
+// cost of comparing or substituting it. It reads the memo only; callers
+// intern the type first.
+func (c *checker) identSize(t Type) int {
+	if e, ok := c.idents.of[t]; ok {
+		return e.size
+	}
+	return 1
 }
 
 // symOf returns t's constructor and sub-terms, or false for a type the
@@ -422,77 +521,80 @@ func symOf(t Type) (vsym, []Type, bool) {
 	return vsym{}, nil, false
 }
 
-// rowHasParam reports whether a row element mentions a type parameter.
-func rowHasParam(r *Row) bool {
+// rowHasParam reports whether a row element mentions a type parameter,
+// adding each visited type node to steps (the union's insertion counter).
+func rowHasParam(r *Row, steps *int) bool {
 	for _, e := range r.Elems() {
-		if hasParam(e) {
+		if hasParam(e, steps) {
 			return true
 		}
 	}
 	return false
 }
 
-// hasParam reports whether t mentions a type parameter.
-func hasParam(t Type) bool {
+// hasParam reports whether t mentions a type parameter, adding each visited
+// type node to steps.
+func hasParam(t Type, steps *int) bool {
+	*steps++
 	switch t := t.(type) {
 	case *TypeParam:
 		return true
 	case *Named:
 		for _, a := range t.TArgs {
-			if hasParam(a) {
+			if hasParam(a, steps) {
 				return true
 			}
 		}
 	case *RowArg:
-		return rowHasParam(t.Row)
+		return rowHasParam(t.Row, steps)
 	case *Slice:
-		return hasParam(t.Elem)
+		return hasParam(t.Elem, steps)
 	case *Array:
-		return hasParam(t.Elem)
+		return hasParam(t.Elem, steps)
 	case *Map:
-		return hasParam(t.Key) || hasParam(t.Elem)
+		return hasParam(t.Key, steps) || hasParam(t.Elem, steps)
 	case *Chan:
-		return hasParam(t.Elem)
+		return hasParam(t.Elem, steps)
 	case *Pointer:
-		return hasParam(t.Elem)
+		return hasParam(t.Elem, steps)
 	case *Tuple:
 		for _, e := range t.Types {
-			if hasParam(e) {
+			if hasParam(e, steps) {
 				return true
 			}
 		}
 	case *Struct:
 		for _, f := range t.Fields {
-			if hasParam(f.Type) {
+			if hasParam(f.Type, steps) {
 				return true
 			}
 		}
 	case *Signature:
 		for _, p := range t.Params {
-			if hasParam(p.Type) {
+			if hasParam(p.Type, steps) {
 				return true
 			}
 		}
 		for _, r := range t.Results {
-			if hasParam(r) {
+			if hasParam(r, steps) {
 				return true
 			}
 		}
-		return rowHasParam(t.Errors) || rowHasParam(t.Uses)
+		return rowHasParam(t.Errors, steps) || rowHasParam(t.Uses, steps)
 	case *Interface:
 		for _, m := range t.Methods {
-			if m.Sig != nil && hasParam(m.Sig) {
+			if m.Sig != nil && hasParam(m.Sig, steps) {
 				return true
 			}
 		}
 	case *Union:
 		for _, v := range t.Variants {
-			if hasParam(v) {
+			if hasParam(v, steps) {
 				return true
 			}
 		}
 	case *MachineType:
-		return hasParam(t.State) || hasParam(t.Signal)
+		return hasParam(t.State, steps) || hasParam(t.Signal, steps)
 	}
 	return false
 }

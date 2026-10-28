@@ -97,6 +97,11 @@ type checker struct {
 	// inferOps counts the constraint-guard work of generic calls: linear
 	// in each signature (round-8 M4), bounded by a test.
 	inferOps int
+	// idents interns type identities for the variant index (variantindex.go);
+	// subjects shares one switchUnion per union instance, so its caches are
+	// built once per instance, not once per switch subject (round-9 M1).
+	idents   identTable
+	subjects map[any]*switchUnion
 	mono     monoState // the instantiation graph (instantiation cycles)
 
 	errorTypes map[*Named]syntax.Pos // origin error types named in an error row of this package
