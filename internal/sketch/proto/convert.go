@@ -201,6 +201,10 @@ func (c *converter) typeDecl(d *syntax.TypeDecl) *TypeDecl {
 			return out
 		}
 		out.Kind = kindCapability
+		if len(t.Laws) > 0 {
+			c.refuse(t.Laws[0], "a law (laws come with #162)")
+			return nil
+		}
 		for _, m := range t.Methods {
 			s := &Sig{Pos: c.pos(m.Names[0].Pos()), Name: m.Names[0].Name}
 			c.signature(s, m.Type.(*syntax.FuncType))
@@ -455,8 +459,12 @@ func (c *converter) typeSwitch(s *syntax.TypeSwitchStmt) Stmt {
 		return nil
 	}
 	// The decided match binds the narrowed value with `case T as p` (#196,
-	// ninth round); the prototype's type switch has one binding shared by
-	// every case, so every `as` must name the same binding.
+	// ninth round), and the binding is local to its arm. The prototype's
+	// type switch has one binding that every case sees, so it can hold
+	// the match only when that sharing is invisible (round-1 review, M1):
+	// every `as` names the same binding, an arm either binds it in every
+	// pattern or in none, and an arm that binds nothing never names it,
+	// so it can neither read the binding nor an outer name it shadows.
 	bind := ""
 	if len(s.Binds) == 1 {
 		bind = s.Binds[0].Name
@@ -465,7 +473,7 @@ func (c *converter) typeSwitch(s *syntax.TypeSwitchStmt) Stmt {
 		for _, t := range cl.List {
 			if as, ok := t.(*syntax.AsPattern); ok {
 				if bind != "" && bind != as.Name.Name {
-					c.refuse(as, "a second binding name in one match")
+					c.refuse(as, "a match whose arms bind different `as` names")
 					return nil
 				}
 				bind = as.Name.Name
@@ -475,6 +483,22 @@ func (c *converter) typeSwitch(s *syntax.TypeSwitchStmt) Stmt {
 	if bind == "" {
 		c.refuseAt(s.Switch, "a match on a union without an `as` binding")
 		return nil
+	}
+	for _, cl := range s.Clauses {
+		binds := 0
+		for _, t := range cl.List {
+			if _, ok := t.(*syntax.AsPattern); ok {
+				binds++
+			}
+		}
+		switch {
+		case binds == 0 && namesIdent(cl.Body, bind):
+			c.refuseAt(cl.Case, "an arm that names "+bind+" without binding it")
+			return nil
+		case binds != 0 && binds != len(cl.List):
+			c.refuseAt(cl.Case, "an arm that binds "+bind+" in some patterns only")
+			return nil
+		}
 	}
 	out := &TypeSwitchStmt{Pos: c.pos(s.Switch), Bind: bind, Subject: c.expr(s.Subjects[0].X)}
 	for _, cl := range s.Clauses {
@@ -581,6 +605,31 @@ func (c *converter) expr(x syntax.Expr) Expr {
 		c.refuse(x, "this expression")
 	}
 	return nil
+}
+
+// namesIdent reports whether any statement of body names name as an
+// identifier. A selector's field is not a name; a composite-literal key
+// is counted, which can only refuse more.
+func namesIdent(body []syntax.Stmt, name string) bool {
+	found := false
+	for _, s := range body {
+		syntax.Inspect(s, func(n syntax.Node) bool {
+			switch n := n.(type) {
+			case *syntax.SelectorExpr:
+				syntax.Inspect(n.X, func(m syntax.Node) bool {
+					if id, ok := m.(*syntax.Ident); ok && id.Name == name {
+						found = true
+					}
+					return !found
+				})
+				return false
+			case *syntax.Ident:
+				found = found || n.Name == name
+			}
+			return !found
+		})
+	}
+	return found
 }
 
 // takesBlock reports whether the prototype models a trailing block on a
