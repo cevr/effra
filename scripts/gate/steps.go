@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 )
@@ -69,9 +70,10 @@ func declareSteps(root string, packages []string) ([]*Step, error) {
 	// packages.
 	foldkit := &Inputs{Paths: []string{"scripts/conformance/", "conformance/", "go.mod"}, Tools: []string{"go"}, Installed: []string{"conformance/upstream/foldkit-d21db423"}}
 	add(&Step{Name: "foldkit corpus self-check", Argv: []string{"go", "run", "./scripts/conformance", "foldkit", "--self-check"}, Inputs: foldkit})
-	// The mapping check reads the mapping and the evidence tests it names in
-	// internal/compiler. Its own tests run with the other Go packages.
-	mapping := &Inputs{Paths: []string{"scripts/conformance/", "conformance/effect-cases.json", "internal/compiler/*_test.go", "go.mod"}, Tools: []string{"go"}}
+	// The mapping check reads the mapping and the evidence tests it names,
+	// so the directories of those tests are inputs too. Its own tests run
+	// with the other Go packages.
+	mapping := &Inputs{Paths: append([]string{"scripts/conformance/", "conformance/effect-cases.json", "go.mod"}, evidenceDirectories(root)...), Tools: []string{"go"}}
 	add(&Step{Name: "effect conformance mapping", Argv: []string{"go", "run", "./scripts/conformance", "check"}, Inputs: mapping})
 
 	add(&Step{Name: "gofmt", Argv: append([]string{"sh", "-c", `unformatted=$(gofmt -l "$@"); if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi`, "gofmt"}, gofmtDirectories...)})
@@ -205,6 +207,43 @@ func readDurations(root string) (map[string]map[string]float64, error) {
 		return nil, fmt.Errorf("%s: %w", durationsFile, err)
 	}
 	return durations, nil
+}
+
+// evidenceDirectories are the directories of the evidence tests that the
+// Effect behavior mapping names, each as a subtree input ("dir/"), sorted.
+// A mapping that does not parse names none: the mapping file is an input
+// of its step, and the step refuses it.
+func evidenceDirectories(root string) []string {
+	content, err := os.ReadFile(filepath.Join(root, "conformance", "effect-cases.json"))
+	if err != nil {
+		return nil
+	}
+	var mapping struct {
+		Cases []struct {
+			Evidence []struct {
+				File string `json:"file"`
+			} `json:"evidence"`
+		} `json:"cases"`
+	}
+	if json.Unmarshal(content, &mapping) != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var directories []string
+	for _, item := range mapping.Cases {
+		for _, evidence := range item.Evidence {
+			directory := filepath.ToSlash(filepath.Dir(evidence.File)) + "/"
+			if directory == "./" {
+				directory = evidence.File
+			}
+			if !seen[directory] {
+				seen[directory] = true
+				directories = append(directories, directory)
+			}
+		}
+	}
+	slices.Sort(directories)
+	return directories
 }
 
 func authoredExamples(root string) ([]string, error) {

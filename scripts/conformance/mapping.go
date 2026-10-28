@@ -4,7 +4,7 @@ package main
 // behavior is specified upstream (file, line and test label at the pinned
 // commit) as provenance text; Ergo keeps no copy of the upstream corpus, so
 // the record is checked for shape, and its evidence must be an existing Go
-// test in internal/compiler.
+// test in a *_test.go file of the repository.
 
 import (
 	"encoding/json"
@@ -76,9 +76,15 @@ func positiveLine(value any) (int, bool) {
 	return int(line.Int64()), true
 }
 
+// evidenceTest is one evidence test: its Go package, as a ./-relative
+// directory of the repository, and its name.
+type evidenceTest struct {
+	pkg, name string
+}
+
 // validateMapping validates the mapping and its evidence tests under root and
-// returns the sorted evidence test names.
-func validateMapping(mapping map[string]any, root string) ([]string, error) {
+// returns the evidence tests, sorted by package and name, each once.
+func validateMapping(mapping map[string]any, root string) ([]evidenceTest, error) {
 	if !hasExactKeys(mapping, "schemaVersion", "sourceCommit", "cases") || pyType(mapping["schemaVersion"]) != "int" || !isPyInt(mapping["schemaVersion"], 1) || mapping["sourceCommit"] != pinnedCommit {
 		return nil, errors.New("mapping schema or upstream pin is invalid")
 	}
@@ -92,7 +98,7 @@ func validateMapping(mapping map[string]any, root string) ([]string, error) {
 		line int
 	}
 	upstreamCases := map[upstreamCase]bool{}
-	tests := map[string]bool{}
+	tests := map[evidenceTest]bool{}
 	for _, value := range cases {
 		if !hasExactKeys(value, "id", "status", "upstream", "behavior", "limits", "evidence") {
 			return nil, errors.New("mapping case fields are invalid")
@@ -144,7 +150,7 @@ func validateMapping(mapping map[string]any, root string) ([]string, error) {
 				return nil, err
 			}
 			test, testOK := pointer["test"].(string)
-			if !strings.HasPrefix(file, "internal/compiler/") || !strings.HasSuffix(file, "_test.go") || !testOK || !mappingTestName.MatchString(test) || !isGoTargets(pointer["targets"]) {
+			if !strings.HasSuffix(file, "_test.go") || !testOK || !mappingTestName.MatchString(test) || !isGoTargets(pointer["targets"]) {
 				return nil, fmt.Errorf("evidence must name an existing Go test for %s", identity)
 			}
 			contents, err := readText(filepath.Join(root, file))
@@ -155,15 +161,46 @@ func validateMapping(mapping map[string]any, root string) ([]string, error) {
 			if !declaration.MatchString(contents) {
 				return nil, fmt.Errorf("evidence test is unavailable for %s", identity)
 			}
-			tests[test] = true
+			tests[evidenceTest{pkg: packageOf(file), name: test}] = true
 		}
 	}
-	names := make([]string, 0, len(tests))
+	selected := make([]evidenceTest, 0, len(tests))
 	for test := range tests {
-		names = append(names, test)
+		selected = append(selected, test)
 	}
-	sort.Strings(names)
-	return names, nil
+	sort.Slice(selected, func(i, j int) bool {
+		if selected[i].pkg != selected[j].pkg {
+			return selected[i].pkg < selected[j].pkg
+		}
+		return selected[i].name < selected[j].name
+	})
+	return selected, nil
+}
+
+// packageOf is the go test package pattern of a repository-relative file.
+func packageOf(file string) string {
+	directory := filepath.ToSlash(filepath.Dir(file))
+	if directory == "." {
+		return "."
+	}
+	return "./" + directory
+}
+
+// evidenceCommands is one go test command line per package of the evidence
+// tests, in package order, each selecting only that package's tests.
+func evidenceCommands(tests []evidenceTest) [][]string {
+	var commands [][]string
+	for start := 0; start < len(tests); {
+		end := start
+		var names []string
+		for end < len(tests) && tests[end].pkg == tests[start].pkg {
+			names = append(names, tests[end].name)
+			end++
+		}
+		commands = append(commands, []string{"go", "test", tests[start].pkg, "-run", "^(" + strings.Join(names, "|") + ")$", "-count=1"})
+		start = end
+	}
+	return commands
 }
 
 // isUpstreamTest reports whether an upstream path names a test file: a path
