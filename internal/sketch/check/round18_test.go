@@ -88,3 +88,32 @@ func TestAnonymousStructLinear(t *testing.T) {
 		linear(t, fmt.Sprintf("anonymous struct (keyed=%v)", keyed), counts, 12)
 	}
 }
+
+// TestMissingLiteralType: a struct field's composite literal writes its
+// type, keyed or positional, as in Go; the elements and keys of a slice,
+// array or map literal may elide it (round 17 C1).
+func TestMissingLiteralType(t *testing.T) {
+	const decls = "package p\ntype S struct{ a int }\ntype Wrap[T any] struct{ value T }\n" +
+		"type Long struct{ alpha int; beta int; gamma int; delta int }\n"
+	for _, tc := range []struct{ body, want string }{
+		{"_ = Wrap[S]{value: {a: 1}}", "missing type in composite literal; write S{a: 1}"},
+		{"_ = Wrap[S]{{a: 1}}", "missing type in composite literal; write S{a: 1}"},
+		{"_ = Wrap[[]S]{value: {{a: 1}}}", "missing type in composite literal; write []S{{a: 1}}"},
+		{"_ = Wrap[Long]{value: {alpha: 10, beta: 20, gamma: 30, delta: 40}}", "missing type in composite literal; write Long{…}"},
+		{"_ = Wrap[S]{value: {\na: 1}}", "missing type in composite literal; write S{…}"},
+	} {
+		src := decls + "func F() {\n" + tc.body + "\n}\n"
+		_, diags := CheckSource(src)
+		if len(diags) != 1 || diags[0].Code != CodeType || diags[0].Message != tc.want {
+			t.Errorf("%s: want one S108 %q, got %v", tc.body, tc.want, diags)
+		}
+	}
+	for _, ok := range []string{
+		"_ = []S{{a: 1}}", "_ = [1]S{{a: 1}}", "_ = map[S]S{{a: 1}: {a: 2}}",
+		"_ = Wrap[S]{value: S{a: 1}}", "_ = Wrap[[]S]{value: []S{{a: 1}}}",
+	} {
+		if _, diags := CheckSource(decls + "func F() {\n" + ok + "\n}\n"); len(diags) > 0 {
+			t.Errorf("%s: want acceptance, got %v", ok, diags)
+		}
+	}
+}
