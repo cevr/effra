@@ -119,9 +119,11 @@ func (c *checker) wireLit(w *syntax.WireLit) (binds *Row, known bool) {
 // unknown (reported).
 func (c *checker) wireBody(body *syntax.WireBody) (*Row, bool) {
 	known := true
-	// The named wire whose body this is (checkWires), left out of what its
-	// embeddings reach (wireReach); an inline wire inside it is not it.
+	// The named wire whose body this is (checkWires): its own entries that
+	// come back through a reported cycle are no second entry (embeddedBinds).
+	// An inline wire inside it is not it.
 	self := c.building
+	selfSeen := false
 	c.building = nil
 	type collision struct {
 		cap Type
@@ -146,7 +148,7 @@ func (c *checker) wireBody(body *syntax.WireBody) (*Row, bool) {
 		if c.fn != nil && c.fn.reach != nil {
 			c.fn.reach.wires = append(c.fn.reach.wires, inner)
 		}
-		reach, innerKnown := c.wireReach(inner, self)
+		reach, innerKnown := c.embeddedBinds(inner, self, &selfSeen)
 		if !innerKnown {
 			known = false
 		}
@@ -363,40 +365,51 @@ func (c *checker) wireKey(k syntax.Expr) Type {
 }
 
 // wireBinds returns the capabilities a named wire binds: its entries and
-// those of every wire its embeddings reach. It walks the whole embedding
-// graph, so the result does not depend on which wire was asked first (an
-// embedding cycle is reported by checkWireCycles; round 17 m3).
+// those of every wire its embeddings reach (wireSummaries).
 func (c *checker) wireBinds(w *Wire) *Row {
-	if w.binds == nil {
-		var known bool
-		w.binds, known = c.wireReach(w, nil)
-		w.unknown = !known
-	}
+	c.wireSummaries()
 	return w.binds
 }
 
-// wireReach returns the capabilities bound by w and every wire its
-// embeddings reach, leaving out skip, and whether every embedded wire
-// exists. A named wire's body is checked against what its embeddings reach
-// without the wire itself: on an embedding cycle, already reported, the
-// wire's own entries come back through the cycle and are no second entry
-// (D3).
-func (c *checker) wireReach(w, skip *Wire) (*Row, bool) {
-	binds, known := newRow(), true
-	seen := map[*Wire]bool{}
-	if skip != nil {
-		seen[skip] = true
+// wireSummaries computes, once, every named wire's binding summary over
+// the embedding graph: the strongly connected components (Tarjan, linear)
+// in reverse topological order, each component's summary the union of its
+// members' own entries and its successors' summaries, shared by every
+// member. Every root and every embedding reuses it, so the work is linear
+// in the wires, the embeddings and the summaries' sizes, and the result
+// does not depend on which wire is asked first (round 17 M1; an embedding
+// cycle is reported by checkWireCycles). Prior art: go/types orders
+// package initialization over its dependency graph once (initorder.go);
+// rustc caches a query's result per item.
+func (c *checker) wireSummaries() {
+	if c.wireComp != nil {
+		return
 	}
-	var visit func(w *Wire)
-	visit = func(w *Wire) {
-		if seen[w] {
-			return
+	c.wireComp = map[*Wire]*wireComp{}
+	wires := make([]*Wire, 0, len(c.pkg.Wires))
+	for _, w := range c.pkg.Wires {
+		wires = append(wires, w)
+	}
+	sort.Slice(wires, func(i, j int) bool {
+		if wires[i].file.index != wires[j].file.index {
+			return wires[i].file.index < wires[j].file.index
 		}
-		seen[w] = true
+		return wires[i].Pos < wires[j].Pos
+	})
+	type node struct {
+		index, low int
+		onStack    bool
+		embeds     []*Wire
+	}
+	nodes := make(map[*Wire]*node, len(wires))
+	for _, w := range wires {
+		n := &node{index: -1}
 		saved := c.cur
 		c.cur = w.file
 		c.silent++
+		own, known := newRow(), true
 		for _, e := range w.Decl.Body.Entries {
+			c.wireOps++
 			if e.Kind == syntax.WireEmbed {
 				var inner *Wire
 				if id, ok := e.Key.(*syntax.Ident); ok {
@@ -406,22 +419,116 @@ func (c *checker) wireReach(w, skip *Wire) (*Row, bool) {
 					known = false
 					continue
 				}
-				visit(inner)
+				n.embeds = append(n.embeds, inner)
 				continue
 			}
 			for _, k := range append([]syntax.Expr{e.Key}, e.Keys...) {
 				if t := c.rowElem(k, KindUses, nil); t != nil {
 					if _, isParam := t.(*TypeParam); !isParam {
-						binds = binds.with(c.types, t)
+						own = own.with(c.types, t)
 					}
 				}
 			}
 		}
 		c.silent--
 		c.cur = saved
+		w.own, w.unknown = own, !known
+		nodes[w] = n
 	}
-	visit(w)
-	return binds, known
+	index := 0
+	var stack []*Wire
+	var connect func(w *Wire)
+	connect = func(w *Wire) {
+		n := nodes[w]
+		n.index, n.low = index, index
+		index++
+		stack = append(stack, w)
+		n.onStack = true
+		for _, e := range n.embeds {
+			c.wireOps++
+			m := nodes[e]
+			if m.index < 0 {
+				connect(e)
+				n.low = min(n.low, m.low)
+			} else if m.onStack {
+				n.low = min(n.low, m.index)
+			}
+		}
+		if n.low != n.index {
+			return
+		}
+		comp := &wireComp{binds: newRow()}
+		var members []*Wire
+		for {
+			m := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			nodes[m].onStack = false
+			c.wireComp[m] = comp
+			members = append(members, m)
+			if m == w {
+				break
+			}
+		}
+		comp.cyclic = len(members) > 1
+		unknown := false
+		for _, m := range members {
+			comp.binds = comp.binds.union(c.types, m.own)
+			unknown = unknown || m.unknown
+			for _, e := range nodes[m].embeds {
+				c.wireOps++
+				if d := c.wireComp[e]; d != comp {
+					comp.binds = comp.binds.union(c.types, d.binds)
+					unknown = unknown || d.unknown
+				} else {
+					comp.cyclic = true // a wire that embeds itself
+				}
+			}
+		}
+		comp.unknown = unknown
+		for _, m := range members {
+			m.binds, m.unknown = comp.binds, unknown
+		}
+	}
+	for _, w := range wires {
+		if nodes[w].index < 0 {
+			connect(w)
+		}
+	}
+}
+
+// A wireComp is a strongly connected component of the embedding graph and
+// its binding summary.
+type wireComp struct {
+	binds   *Row
+	unknown bool
+	cyclic  bool
+}
+
+// embeddedBinds returns what the embedding of inner contributes to the
+// body of the named wire self (nil for an inline wire), and whether every
+// wire it reaches exists. An embedding inside self's own component, on a
+// reported cycle, contributes the component's summary without self's own
+// entries, once per body: the entries that come back to self through the
+// cycle are no second entry (D3; round 16 m3). seen records that self's
+// component has contributed.
+func (c *checker) embeddedBinds(inner, self *Wire, seen *bool) (*Row, bool) {
+	c.wireSummaries()
+	c.wireOps++
+	comp := c.wireComp[inner]
+	if self == nil || comp != c.wireComp[self] {
+		return inner.binds, !inner.unknown
+	}
+	if *seen {
+		return newRow(), !comp.unknown
+	}
+	*seen = true
+	out := newRow()
+	for _, t := range comp.binds.Elems() {
+		if !self.own.has(c.types, t) {
+			out = out.with(c.types, t)
+		}
+	}
+	return out, !comp.unknown
 }
 
 // checkWires checks the named wires: their entries, in a closed build

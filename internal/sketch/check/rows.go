@@ -175,6 +175,7 @@ func (c *checker) checkBodies() {
 			w = c.varRefs(n.v)
 		}
 		c.refs[owner], c.valueRefs[owner] = w.refs, w.values
+		c.walkOps += w.ops
 	}
 	c.discoverInit()
 	c.bodyEdges = 0

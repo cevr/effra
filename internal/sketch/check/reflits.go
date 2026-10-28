@@ -22,6 +22,7 @@ const (
 	litUnknown litKind = iota // keys are walked as expressions, conservatively
 	litStruct                 // keys are field names
 	litKeyed                  // a map, slice or array: keys are expressions
+	litInvalid                // an elided type where none may be elided (C1)
 )
 
 // A litType is a composite literal's type as the walk knows it: a checked
@@ -60,6 +61,7 @@ func fromType(t Type) litType {
 
 // litTypeOf resolves a written type.
 func (c *checker) litTypeOf(e syntax.Expr, env *typeEnv) litType {
+	c.walkOps++
 	switch e := e.(type) {
 	case *syntax.ParenExpr:
 		return c.litTypeOf(e.X, env)
@@ -104,9 +106,17 @@ func (c *checker) typeObject(name string, file *fileInfo) Object {
 	return nil
 }
 
-// elemOf is the type of an elided element of a literal of type lt: a key
-// (key), the value of the field named field, or the i-th element.
-func (c *checker) elemOf(lt litType, key bool, field string, i int) litType {
+// elemOf is the type of an elided literal that is a key (key) or an element
+// of a literal of type lt. Only an array, slice or map literal elides its
+// elements' type, and a map literal its keys' type, as in Go (round 17 C1):
+// an elided literal anywhere else is an error (expr.go fieldValue), which
+// the checker does not type further. It looks nothing up by field, so a
+// literal's elements cost one step each (round 17 M2).
+func (c *checker) elemOf(lt litType, key bool) litType {
+	c.walkOps++
+	if lt.kind == litStruct || lt.kind == litInvalid {
+		return litType{kind: litInvalid}
+	}
 	if lt.typ != nil {
 		switch u := under(lt.typ).(type) {
 		case *Slice:
@@ -122,14 +132,6 @@ func (c *checker) elemOf(lt litType, key bool, field string, i int) litType {
 				return fromType(u.Key)
 			}
 			return fromType(u.Elem)
-		case *Struct:
-			if field != "" {
-				if f, _ := u.field(field); f != nil {
-					return fromType(f.Type)
-				}
-			} else if i < len(u.Fields) {
-				return fromType(u.Fields[i].Type)
-			}
 		}
 		return litType{}
 	}
@@ -143,23 +145,6 @@ func (c *checker) elemOf(lt litType, key bool, field string, i int) litType {
 			return c.litTypeOf(e.Key, lt.env)
 		}
 		return c.litTypeOf(e.Value, lt.env)
-	case *syntax.StructType:
-		if e.Fields == nil {
-			return litType{}
-		}
-		n := 0
-		for _, f := range e.Fields.List {
-			names := len(f.Names)
-			if names == 0 {
-				names = 1 // an embedded field
-			}
-			for j := range names {
-				if field != "" && j < len(f.Names) && f.Names[j].Name == field || field == "" && n == i {
-					return c.litTypeOf(f.Type, lt.env)
-				}
-				n++
-			}
-		}
 	}
 	return litType{}
 }
@@ -169,11 +154,13 @@ func (w *refWalker) bodyEnv() *typeEnv {
 	return &typeEnv{file: w.c.cur, params: w.tparams, w: w}
 }
 
-// element walks an element, key or value of a composite literal whose
-// type, when it is an elided composite literal itself, is lt.
-func (w *refWalker) element(e syntax.Expr, lt litType) {
+// element walks an element, key or value of a composite literal of type
+// lt; an elided literal there takes its type from lt (elemOf), which is
+// asked only then.
+func (w *refWalker) element(e syntax.Expr, lt litType, key bool) {
+	w.ops++
 	if cl, ok := e.(*syntax.CompositeLit); ok && cl.Type == nil {
-		w.compositeLit(cl, lt)
+		w.compositeLit(cl, w.c.elemOf(lt, key))
 		return
 	}
 	w.expr(e)
@@ -182,32 +169,39 @@ func (w *refWalker) element(e syntax.Expr, lt litType) {
 // compositeLit walks a composite literal; lt is its elided type, when its
 // type is not written.
 func (w *refWalker) compositeLit(x *syntax.CompositeLit, lt litType) {
+	if x.Type == nil && lt.kind == litInvalid {
+		// An elided type where none may be elided: the checker reports it
+		// and does not type the literal, so nothing in it is a reference.
+		syntax.Inspect(x, func(n syntax.Node) bool {
+			w.visit(n)
+			return true
+		})
+		return
+	}
 	w.visit(x)
 	if x.Type != nil {
 		w.typ(x.Type)
 		lt = w.c.litTypeOf(x.Type, w.bodyEnv())
 	}
-	for i, e := range x.Elts {
+	for _, e := range x.Elts {
 		kv, ok := e.(*syntax.KeyValueExpr)
 		if !ok {
-			w.element(e, w.c.elemOf(lt, false, "", i))
+			w.element(e, lt, false)
 			continue
 		}
 		w.visit(kv)
-		field := ""
 		id, isIdent := kv.Key.(*syntax.Ident)
 		switch {
 		case lt.kind == litStruct && isIdent:
 			w.visit(id) // a field name
-			field = id.Name
 		case lt.kind == litStruct:
 			w.expr(kv.Key) // not a field name: an error, walked as a value
 		default:
 			if lt.kind == litUnknown && isIdent && w.undecided != nil {
 				w.undecided[id] = true
 			}
-			w.element(kv.Key, w.c.elemOf(lt, true, "", i))
+			w.element(kv.Key, lt, true)
 		}
-		w.element(kv.Value, w.c.elemOf(lt, false, field, i))
+		w.element(kv.Value, lt, false)
 	}
 }

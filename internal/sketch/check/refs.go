@@ -20,11 +20,13 @@ import "ergo.local/prototype/internal/sketch/syntax"
 // Identifiers that are not value references are skipped: a selector's
 // name, a label, a type (a composite literal's type, a local var's type, a
 // function literal's signature, a case type of a type switch or a catch
-// arm), a wire key and a named wire, and a composite literal's identifier
-// key, which is a field name or a map key depending on the literal's type.
-// A map key never needs an edge: an edge orders a callee's rows before its
-// caller, and a key is not called; the key's var still reaches the
-// initialization order through typing.
+// arm), a wire key and a named wire, and a struct literal's field names. A
+// composite literal's key is a field label when the literal's type is a
+// struct and an expression otherwise (a map key, an array index), as in
+// go/types: the walk decides which from the literal's written type
+// (reflits.go), walks every expression key, so a map key that names a
+// package var or function is an edge and a class G value use (round 17),
+// and walks a key whose literal's kind it cannot decide as an expression.
 //
 // References that need types (a method through a selector, a function of
 // another package) are no edge: a method and an imported function spell
@@ -48,7 +50,7 @@ import "ergo.local/prototype/internal/sketch/syntax"
 // resolved before any body (decl.go run), so this is order-invariant.
 type refWalker struct {
 	c      *checker
-	scopes []map[string]bool
+	scopes []map[string]*localBinding
 	refs   map[any]bool
 	// values holds the class G value uses: for each package function with
 	// an inferred row, where the body first uses each of its rows (errors,
@@ -62,6 +64,9 @@ type refWalker struct {
 	// tparams are the type parameters of the function walked, which come
 	// before declarations in a written type (localTypeCtx).
 	tparams map[string]bool
+	// ops counts the literal elements walked (an operation count for the
+	// linear-growth tests).
+	ops int
 	// Test builds only (refTrace set): the resolution of each walked
 	// identifier (a package object or nil), the identifiers in type
 	// and wire positions (not value references), the composite-literal
@@ -115,7 +120,7 @@ func (c *checker) bodyRefs(f *Func) *refWalker {
 	if d.Recv != nil {
 		for _, field := range d.Recv.List {
 			for _, n := range field.Names {
-				w.bind(n.Name)
+				w.bindAs(n.Name, &localBinding{typ: field.Type})
 			}
 			// The receiver's type arguments name its type parameters.
 			rt := field.Type
@@ -182,9 +187,22 @@ func (c *checker) newRefWalker() *refWalker {
 	return w
 }
 
-func (w *refWalker) push()            { w.scopes = append(w.scopes, map[string]bool{}) }
+// A localBinding is what the walk knows of a local's type, which its
+// declaration fixes: a written type (a parameter, a receiver, a typed var,
+// a composite literal's type) or the signature of the declared function it
+// aliases. Either may be nil (unknown).
+type localBinding struct {
+	typ syntax.Expr
+	sig *Signature
+}
+
+func (w *refWalker) push()            { w.scopes = append(w.scopes, map[string]*localBinding{}) }
 func (w *refWalker) pop()             { w.scopes = w.scopes[:len(w.scopes)-1] }
-func (w *refWalker) bind(name string) { w.scopes[len(w.scopes)-1][name] = true }
+func (w *refWalker) bind(name string) { w.bindAs(name, &localBinding{}) }
+
+func (w *refWalker) bindAs(name string, b *localBinding) {
+	w.scopes[len(w.scopes)-1][name] = b
+}
 
 func (w *refWalker) visit(n syntax.Node) {
 	if w.visited != nil && n != nil {
@@ -200,9 +218,13 @@ func (w *refWalker) params(ft *syntax.FuncType) {
 	}
 	if ft.Params != nil {
 		for _, field := range ft.Params.List {
+			b := &localBinding{typ: field.Type}
+			if _, variadic := field.Type.(*syntax.Ellipsis); variadic {
+				b.typ = nil
+			}
 			for _, n := range field.Names {
 				if n.Name != "_" {
-					w.bind(n.Name)
+					w.bindAs(n.Name, b)
 				}
 			}
 		}
@@ -293,32 +315,127 @@ func (w *refWalker) callee(fun syntax.Expr) {
 	}
 }
 
-// calleeSig returns the signature of a call's callee when it is a declared
-// function: a plain identifier, possibly instantiated, that no local
-// shadows, naming a function of the package or the universe, or a function
-// of an imported package. Signatures are resolved before any body.
+// calleeSig returns the signature of a call's callee when it is fixed
+// before any body is typed (decl.go run resolves every signature first):
+//   - a plain identifier, possibly instantiated, that names a function of
+//     the package or the universe, or a local that aliases one;
+//   - a function of an imported package;
+//   - a method, or a field of function type, selected from a receiver whose
+//     type is written: a parameter, a receiver, a typed local or one bound
+//     to a composite literal, or a composite literal itself (round 17 m1).
+//
+// Any other callee (a value whose type is inferred) gives nil, and the
+// round-15 rule stays: conservative.
 func (w *refWalker) calleeSig(fun syntax.Expr) *Signature {
 	x := unparen(fun)
 	if ix, ok := x.(*syntax.IndexExpr); ok {
 		x = unparen(ix.X)
 	}
-	var o Object
 	switch x := x.(type) {
 	case *syntax.Ident:
-		if w.local(x.Name) {
-			return nil
+		if b := w.lookupLocal(x.Name); b != nil {
+			return b.sig
 		}
-		o = w.c.typeObject(x.Name, w.c.cur)
+		return declaredSig(w.c.typeObject(x.Name, w.c.cur))
 	case *syntax.SelectorExpr:
-		id, ok := x.X.(*syntax.Ident)
-		if !ok || w.local(id.Name) {
+		if id, ok := x.X.(*syntax.Ident); ok && !w.local(id.Name) {
+			if pn, ok := w.c.typeObject(id.Name, w.c.cur).(*PkgName); ok && !pn.broken {
+				return declaredSig(pn.Pkg.Scope.names[x.Sel.Name])
+			}
 			return nil
 		}
-		if pn, ok := w.c.typeObject(id.Name, w.c.cur).(*PkgName); ok && !pn.broken {
-			o = pn.Pkg.Scope.names[x.Sel.Name]
+		return memberSig(w.staticType(x.X), x.Sel.Name)
+	}
+	return nil
+}
+
+// declaredSig is the signature of a declared function that is not generic
+// in a way the call must infer: a function, not a method.
+func declaredSig(o Object) *Signature {
+	if f, ok := o.(*Func); ok && f.Recv == nil {
+		return f.Sig
+	}
+	return nil
+}
+
+// initBinding is what a local's initializer fixes of its type: the
+// signature of the declared function it aliases, or a composite literal's
+// written type.
+func (w *refWalker) initBinding(e syntax.Expr) *localBinding {
+	switch e := unparen(e).(type) {
+	case *syntax.Ident:
+		if b := w.lookupLocal(e.Name); b != nil {
+			return &localBinding{typ: b.typ, sig: b.sig}
+		}
+		if sig := declaredSig(w.c.typeObject(e.Name, w.c.cur)); sig != nil && len(sig.TParams) == 0 {
+			return &localBinding{sig: sig}
+		}
+	case *syntax.SelectorExpr:
+		if id, ok := e.X.(*syntax.Ident); ok && !w.local(id.Name) {
+			if pn, ok := w.c.typeObject(id.Name, w.c.cur).(*PkgName); ok && !pn.broken {
+				if sig := declaredSig(pn.Pkg.Scope.names[e.Sel.Name]); sig != nil && len(sig.TParams) == 0 {
+					return &localBinding{sig: sig}
+				}
+			}
+		}
+	case *syntax.CompositeLit:
+		return &localBinding{typ: e.Type}
+	}
+	return &localBinding{}
+}
+
+// staticType is the written type of a receiver expression, or nil: a local
+// with a written type, or a composite literal.
+func (w *refWalker) staticType(e syntax.Expr) Type {
+	var t syntax.Expr
+	switch e := unparen(e).(type) {
+	case *syntax.Ident:
+		if b := w.lookupLocal(e.Name); b != nil {
+			t = b.typ
+		}
+	case *syntax.CompositeLit:
+		t = e.Type
+	}
+	if s, ok := t.(*syntax.StarExpr); ok {
+		t = s.X
+	}
+	if ix, ok := t.(*syntax.IndexExpr); ok {
+		t = ix.X
+	}
+	id, ok := t.(*syntax.Ident)
+	if !ok || w.tparams[id.Name] || w.local(id.Name) {
+		return nil
+	}
+	if tn, ok := w.c.typeObject(id.Name, w.c.cur).(*TypeName); ok {
+		return tn.Type
+	}
+	return nil
+}
+
+// memberSig is the signature of the method or the function-typed field
+// name of t. A method or field of a generic type keeps its type parameters,
+// so closedRows treats a row that mentions them as open.
+func memberSig(t Type, name string) *Signature {
+	n, ok := t.(*Named)
+	if !ok {
+		return nil
+	}
+	switch u := under(n).(type) {
+	case *Interface:
+		if m := u.method(name); m != nil {
+			return m.Sig
+		}
+		return nil
+	case *Struct:
+		if f := n.method(name); f != nil {
+			return f.Sig
+		}
+		if fld, _ := u.field(name); fld != nil {
+			sig, _ := under0(fld.Type).(*Signature)
+			return sig
 		}
 	}
-	if f, ok := o.(*Func); ok && f.Recv == nil {
+	if f := n.method(name); f != nil {
 		return f.Sig
 	}
 	return nil
@@ -346,13 +463,16 @@ func closedRows(pt Type) [2]bool {
 	return [2]bool{closed(ps.Errors), closed(ps.Uses)}
 }
 
-func (w *refWalker) local(name string) bool {
+func (w *refWalker) local(name string) bool { return w.lookupLocal(name) != nil }
+
+// lookupLocal returns the innermost local named name, or nil.
+func (w *refWalker) lookupLocal(name string) *localBinding {
 	for i := len(w.scopes) - 1; i >= 0; i-- {
-		if w.scopes[i][name] {
-			return true
+		if b, ok := w.scopes[i][name]; ok {
+			return b
 		}
 	}
-	return false
+	return nil
 }
 
 // typ visits a type expression: no identifier in it is a value.
@@ -587,9 +707,13 @@ func (w *refWalker) stmt(s syntax.Stmt) {
 			w.visit(spec)
 			w.typ(spec.Type)
 			w.exprs(spec.Values)
-			for _, n := range spec.Names {
+			for i, n := range spec.Names {
 				w.visit(n)
-				w.bind(n.Name)
+				b := &localBinding{typ: spec.Type}
+				if spec.Type == nil && len(spec.Values) == len(spec.Names) {
+					b = w.initBinding(spec.Values[i])
+				}
+				w.bindAs(n.Name, b)
 			}
 		}
 	case *syntax.LabeledStmt:
@@ -614,10 +738,14 @@ func (w *refWalker) stmt(s syntax.Stmt) {
 	case *syntax.AssignStmt:
 		w.exprs(s.Rhs)
 		if s.Tok == syntax.DEFINE {
-			for _, l := range s.Lhs {
+			for i, l := range s.Lhs {
 				if id, ok := l.(*syntax.Ident); ok {
 					w.visit(id)
-					w.bind(id.Name)
+					b := &localBinding{}
+					if len(s.Lhs) == len(s.Rhs) {
+						b = w.initBinding(s.Rhs[i])
+					}
+					w.bindAs(id.Name, b)
 					continue
 				}
 				w.expr(l)

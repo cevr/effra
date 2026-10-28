@@ -3,6 +3,7 @@ package check
 import (
 	"go/constant"
 	"go/token"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -733,7 +734,7 @@ func (c *checker) structLit(x *syntax.CompositeLit, t Type, s *Struct) bool {
 				c.errorf(x, CodeType, "a positional literal of %s lists all %d fields, not %d (types.md, Structs 2)", t, len(s.Fields), len(x.Elts))
 				for i, e := range x.Elts {
 					if i < len(s.Fields) {
-						op := c.valueExpr(e, s.Fields[i].Type)
+						op := c.fieldValue(e, s.Fields[i].Type)
 						c.assign(&op, s.Fields[i].Type, "field "+s.Fields[i].Name)
 					} else {
 						c.valueExpr(e, nil)
@@ -743,7 +744,7 @@ func (c *checker) structLit(x *syntax.CompositeLit, t Type, s *Struct) bool {
 			}
 			for i, e := range x.Elts {
 				f := s.Fields[i]
-				op := c.valueExpr(e, f.Type)
+				op := c.fieldValue(e, f.Type)
 				c.assign(&op, f.Type, "field "+f.Name)
 			}
 			return true
@@ -775,7 +776,7 @@ func (c *checker) structLit(x *syntax.CompositeLit, t Type, s *Struct) bool {
 			continue
 		}
 		set[id.Name] = true
-		op := c.valueExpr(kv.Value, f.Type)
+		op := c.fieldValue(kv.Value, f.Type)
 		c.assign(&op, f.Type, "field "+f.Name)
 	}
 	if !ok {
@@ -810,6 +811,31 @@ func kindName(s *Struct, field string) string {
 		return "struct of non-defaultable fields"
 	}
 	return f.Type.String()
+}
+
+// fieldValue checks a struct literal's field value against the field type
+// ft. A composite literal there writes its type: as in Go, a type is
+// elided only for the elements of an array, slice or map literal and for
+// a map literal's keys (Go spec, Composite literals; round 17 C1).
+func (c *checker) fieldValue(v syntax.Expr, ft Type) operand {
+	if cl, ok := v.(*syntax.CompositeLit); ok && cl.Type == nil {
+		text := "{…}"
+		if src := c.cur.syntax.Src; int(cl.End()) <= len(src) {
+			if s := string(src[cl.Pos():cl.End()]); len(s) <= 40 && !strings.Contains(s, "\n") {
+				text = s
+			}
+		}
+		c.errorf(cl, CodeType, "missing type in composite literal; write %s%s", c.localTypeText(ft), text)
+		return bad(cl)
+	}
+	return c.valueExpr(v, ft)
+}
+
+// localTypeText writes t as the source of this package spells it: without
+// the package's own qualifier. It runs only for a diagnostic.
+func (c *checker) localTypeText(t Type) string {
+	re := regexp.MustCompile(`(^|[^\pL\pN_])` + regexp.QuoteMeta(c.pkg.Name) + `\.`)
+	return re.ReplaceAllString(t.String(), "$1")
 }
 
 func (c *checker) elements(x *syntax.CompositeLit, elem Type, n int64) int {

@@ -100,6 +100,12 @@ type checker struct {
 	// building is the named wire whose body checkWires is about to check
 	// (wireBody reads and clears it).
 	building *Wire
+	// walkOps and wireOps count the reference walk's literal elements and
+	// the wire summaries' steps: operation counts for the linear-growth
+	// tests (round 17 M1, M2).
+	walkOps, wireOps int
+	// wireComp maps each named wire to its embedding component (wireSummaries).
+	wireComp map[*Wire]*wireComp
 	// nodeCheck replaces checkNode in converge for the synthetic oscillation
 	// test (nil otherwise); convergeChecks counts converge's checks.
 	nodeCheck      func(*bodyNode) bool
