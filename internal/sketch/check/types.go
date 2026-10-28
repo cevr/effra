@@ -788,8 +788,7 @@ func isCapability(t Type) bool {
 }
 
 // isStructNamed reports whether t is a named struct type: a possible error
-// type and union variant.
-// isStructNamed reports whether t is a named struct type. A type still
+// type and union variant. A type still
 // being declared (on a cycle through the declaration that asks) has no
 // underlying type yet; its declaration decides, so the answer does not
 // depend on the order of the declarations.
