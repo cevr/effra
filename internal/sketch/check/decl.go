@@ -323,17 +323,10 @@ func (c *checker) resolveNamed(n *Named) {
 			n.under = c.interfaceType(spec, ctx)
 		}
 	case *syntax.MachineType:
-		m := &MachineType{State: c.typExpr(spec.State, ctx), Signal: c.typExpr(spec.Signal, ctx)}
-		for _, part := range []struct {
-			t Type
-			x syntax.Expr
-			w string
-		}{{m.State, spec.State, "state"}, {m.Signal, spec.Signal, "signal"}} {
-			if !isInvalid(part.t) && asUnion(part.t) == nil {
-				c.errorf(part.x, CodeType, "a machine's %s type must be a union, not %s", part.w, part.t)
-			}
-		}
-		n.under = m
+		// The state and signal must be unions (checkMachine, after every
+		// type declaration: a type still being declared here, on a cycle
+		// through this machine, has no underlying type yet).
+		n.under = &MachineType{State: c.typExpr(spec.State, ctx), Signal: c.typExpr(spec.Signal, ctx)}
 		c.machines = append(c.machines, n.Obj)
 	default:
 		n.under = invalid

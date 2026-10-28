@@ -156,7 +156,16 @@ func (c *checker) checkMachine(tn *TypeName) {
 		return
 	}
 	state, signal := m.State, m.Signal
-	valid := !isInvalid(state) && !isInvalid(signal) && asUnion(state) != nil && asUnion(signal) != nil
+	for _, part := range []struct {
+		t Type
+		x syntax.Expr
+		w string
+	}{{state, spec.State, "state"}, {signal, spec.Signal, "signal"}} {
+		if !isInvalid(part.t) && asUnion(part.t) == nil {
+			c.errorf(part.x, CodeType, "a machine's %s type must be a union, not %s", part.w, part.t)
+		}
+	}
+	valid :=!isInvalid(state) && !isInvalid(signal) && asUnion(state) != nil && asUnion(signal) != nil
 	if spec.Initial == nil || spec.Step == nil {
 		c.errorf(tn.Decl.Name, CodeType, "machine %s declares both initial and step (runtime.md, Machines and actors 1)", tn.Name)
 	}
