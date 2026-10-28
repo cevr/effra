@@ -31,6 +31,9 @@ type admissionGroup struct {
 //     the empty row gets one S108 at its first value use; nothing else is
 //     reported.
 //
+// Every body may also hold a nested literal whose parameter or local is
+// spelled as a member (lexical shadowing, round 14 M1): no reference.
+//
 // Admission calls pair members of the same kind (both written or both
 // unwritten), so every one is admitted and no type mismatch is expected.
 // In the error family every member fails (try mark()), and a call
@@ -40,6 +43,7 @@ type admissionGroup struct {
 // accepted unwritten.
 func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 	rng := rand.New(rand.NewPCG(seed, seed^0x51ab))
+	shadows := rand.New(rand.NewPCG(seed, seed^0x5ad0))
 	n := 2 + rng.IntN(5)
 	var g admissionGroup
 	var b strings.Builder
@@ -165,6 +169,19 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 				if firstUse[j] == 0 {
 					firstUse[j] = line
 				}
+			}
+		}
+		// Lexical shadowing (round 14 M1): a parameter or a local of a
+		// nested literal spelled as a member is no reference to it.
+		if r := shadows.IntN(3); r < 2 {
+			id := fmt.Sprintf("f%d", shadows.IntN(n))
+			if shadows.IntN(4) == 0 {
+				id = "local"
+			}
+			if r == 0 {
+				emit("\tfunc(%s func()) { %s() }(func() {})", id, id)
+			} else {
+				emit("\tfunc() { %s := func() {}; %s() }()", id, id)
 			}
 		}
 		emit("}")

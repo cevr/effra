@@ -56,6 +56,8 @@ func checkWithin(t *testing.T, src string, d time.Duration) (*check.Package, []c
 //   - class G: a function referenced by _ = f inside its own component of
 //     the body graph has its row pinned empty; when its body still needs
 //     C, it gets one S108 at its first value use.
+//   - a parameter or a local of a nested literal spelled as another body's
+//     name (lexical shadowing) is no reference: no edge.
 //
 // Nothing else is reported.
 func TestRowGraphDomain(t *testing.T) {
@@ -66,7 +68,8 @@ func TestRowGraphDomain(t *testing.T) {
 		kMethod
 		kExported
 	)
-	cycles, groups := 0, 0
+	cycles, groups, shadowed := 0, 0, 0
+	shadows := rand.New(rand.NewSource(1964))
 	for trial := 0; trial < 1500; trial++ {
 		n := 2 + rng.Intn(9)
 		kind := make([]int, n)
@@ -130,6 +133,23 @@ func TestRowGraphDomain(t *testing.T) {
 				} else {
 					fmt.Fprintf(&b, "\t_ = %s\n", name(e.to))
 				}
+			}
+			// Lexical shadowing (round 14 M1): a parameter or a local of a
+			// nested literal spelled as another body's name is not a
+			// reference to it, so the oracle adds no edge; a renamed control
+			// (local) is emitted the same way.
+			if r := shadows.Intn(3); r < 2 {
+				j := shadows.Intn(n)
+				id := "local"
+				if kind[j] != kMethod && shadows.Intn(4) != 0 {
+					id = name(j)
+				}
+				if r == 0 {
+					fmt.Fprintf(&b, "\tfunc(%s func()) { %s() }(func() {})\n", id, id)
+				} else {
+					fmt.Fprintf(&b, "\tfunc() { %s := func() {}; %s() }()\n", id, id)
+				}
+				shadowed++
 			}
 			if seed[i] {
 				b.WriteString("\tC.M()\n")
@@ -306,6 +326,9 @@ func TestRowGraphDomain(t *testing.T) {
 	}
 	if cycles < 100 {
 		t.Fatalf("only %d trials held an initialization cycle; the generator misses the domain", cycles)
+	}
+	if shadowed < 500 {
+		t.Fatalf("only %d shadowing statements; the generator misses lexical binding", shadowed)
 	}
 	if groups < 100 {
 		t.Fatalf("only %d trials held a value use inside its group needing a row; the generator misses class G", groups)

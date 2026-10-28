@@ -1,0 +1,4 @@
+package p
+type Cap interface{M()}
+func a(){func(b func()){b()}(func(){});Cap.M()}
+func b(){_ = a}
