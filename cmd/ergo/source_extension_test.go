@@ -1,54 +1,28 @@
 package main
 
-import (
-	"errors"
-	"os"
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
-// TestSourceExtensionRule (#221, #217): a 2026 source ends in .ergo, and the
-// retired .ef spelling gets exactly the refusal of any other extension, from
-// check and from fmt. The legacy edition keeps .ef until retire-ef (#205).
+// TestSourceExtensionRule (#221, #217): a source ends in .ergo, and the
+// retired .ef spelling gets exactly the refusal of any other extension.
 func TestSourceExtensionRule(t *testing.T) {
-	root := t.TempDir()
-	write := func(rel, text string) string {
-		path := filepath.Join(root, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		return path
-	}
-	write("new/ergo.json", `{"edition":"2026"}`)
-	write("old/ergo.json", `{"edition":"legacy"}`)
+	const refusal = "source file must have .ergo extension"
 	for _, c := range []struct {
-		rel  string
-		want error
+		path string
+		ok   bool
 	}{
-		{"new/main.ergo", nil},
-		{"new/main.ef", errSourceExtension},
-		{"new/main.txt", errSourceExtension},
-		{"new/main", errSourceExtension},
-		{"old/main.ef", nil},
-		{"old/main.ergo", nil},
-		{"old/main.txt", errSourceExtension},
+		{"main.ergo", true},
+		{"dir/main.ergo", true},
+		{"main.ef", false},
+		{"main.txt", false},
+		{"main", false},
+		{"main.ergo.ef", false},
 	} {
-		path := write(c.rel, "func main() {}\n")
-		err := checkSourceExtension(path, nil)
-		if err == nil {
-			var admitted interface{ Close() error }
-			if admitted, err = admitSource(path); err == nil {
-				admitted.Close()
-			}
+		err := requireSourceExtension(c.path)
+		if c.ok != (err == nil) {
+			t.Errorf("%s: got %v", c.path, err)
 		}
-		if !errors.Is(err, c.want) {
-			t.Errorf("%s: got %v, want %v", c.rel, err, c.want)
+		if err != nil && err.Error() != refusal {
+			t.Errorf("%s: the refusal reads %q, want %q", c.path, err, refusal)
 		}
-	}
-	if got := errSourceExtension.Error(); got != "source file must have .ergo extension" {
-		t.Fatalf("the refusal reads %q", got)
 	}
 }

@@ -1,5 +1,0 @@
-// A valid program of the earlier language under a malformed edition
-// manifest (a repeated field). Every surface must refuse it with EF144 alone.
-effect fn main() -> void {
-    run Console.log("unreachable").provide<Console>(Stdout)
-}

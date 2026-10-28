@@ -1,6 +1,0 @@
-# The probes of TestJSCleanupProvenanceAtScopeCloseOnBunAndNode. They sit
-# below the repository root so Node and Bun resolve effect from its
-# node_modules, in a directory of their own so that making and removing them
-# changes no directory another test reads.
-*
-!.gitignore

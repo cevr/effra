@@ -1,5 +1,7 @@
 # First-class layers and owned acquisition
 
+> **Status:** describes the retired `.ef` language, removed 2026-10-28 by [#205](https://github.com/cevr/ergo/issues/205); kept as design reference. The [retirement record](../receipts/retire-ef.md) lists what was removed.
+
 > **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
 
 Status: authorized implementation contract, 2026-10-06. This replaces repeated provider wiring with checked declarative composition. The owner syntax below is the intended surface; it is not current compiler support. Read [language abstractions](language-abstractions.md), [owned library contracts](standard-library-capabilities.md), [composition research](../research/layer-composition.md) and [runtime contracts](../runtime.md).

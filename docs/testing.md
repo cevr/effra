@@ -1,5 +1,7 @@
 # Testing with explicit effects
 
+> **Status:** describes the retired `.ef` language, removed 2026-10-28 by [#205](https://github.com/cevr/ergo/issues/205); kept as design reference. The [retirement record](receipts/retire-ef.md) lists what was removed.
+
 `ergo test FILE [--target go] [--live] [--timeout-ms 30000]` discovers top-level `test_` functions in source order. Each must be an effect with no parameters returning `void`. `Assert` is implicit; `Clock`, `Scheduler` and `Sync` are explicit capability rows that receive fresh deterministic fixtures when the test declares them. The test file does not need `main`.
 
 ```rust
@@ -9,7 +11,7 @@ effect fn test_greeting() -> void raises {AssertionFailed, Missing} uses {Assert
 }
 ```
 
-[testing.ef](../examples/testing.ef) defines the service/fixture and tests success, typed recovery and an owned child.
+[testing.ef](https://github.com/cevr/ergo/blob/dbf135bff09901e85385945593113f35b300199c/examples/testing.ef) defines the service/fixture and tests success, typed recovery and an owned child.
 
 ## Supplied guarantees
 
@@ -27,8 +29,8 @@ The runner's real wall-clock watchdog defaults to 30 seconds for the suite proce
 
 ## Causal and time fixtures
 
-`Sync.latch()` creates an opaque one-shot handle. `Sync.signal(latch)` is idempotent and `Sync.await(latch)` can be cancelled for one waiter without completing the shared latch. Use it for readiness and completion instead of fixed wall-clock waits. A signal makes its waiters runnable and returns; the signaller keeps its turn, and each waiter resumes on its own ([latch handoff](runtime.md#lifecycle-contract), pinned by [latch-handoff.ef](../examples/latch-handoff.ef)).
+`Sync.latch()` creates an opaque one-shot handle. `Sync.signal(latch)` is idempotent and `Sync.await(latch)` can be cancelled for one waiter without completing the shared latch. Use it for readiness and completion instead of fixed wall-clock waits. A signal makes its waiters runnable and returns; the signaller keeps its turn, and each waiter resumes on its own ([latch handoff](runtime.md#lifecycle-contract), pinned by [latch-handoff.ef](https://github.com/cevr/ergo/blob/dbf135bff09901e85385945593113f35b300199c/examples/latch-handoff.ef)).
 
-`Clock.sleep(ms)` and `.timeout(ms)` share the case's scheduler-backed virtual time. The timeout driver is the `Scheduler.sleep(ms)` capability; `Scheduler.awaitRegistration()` returns at [quiescence](../GLOSSARY.md#tooling-and-testing): no managed fiber is running or runnable, and a wake in flight, such as a signalled waiter or a cancelled sleeper that has not run again, is not idle. Every timer that managed work can register is then registered. The barrier does not wait for a new registration, so forked work that already completed, or whose timeout timer was cancelled, passes it. The release order of several concurrent waiters is unspecified, and tests must not depend on it ([runtime contract](runtime.md#lifecycle-contract)). `Scheduler.advance(ms)` performs the strong adjustment: it selects and fires intermediate deadlines, each only at quiescence, and commits its target only when no running or runnable managed fiber can register earlier work. Cleanup parked on a registered virtual timer or managed signal may remain pending during a partial adjustment; the next adjustment or signal can finish it. Unmanaged goroutines and foreign blocking calls are not observable by the fixture and may delay completion. A provider that implements only `Clock.sleep` does not control timeout deadlines; timeout's explicit `Scheduler` row is the authority. [quiescence.ef](../examples/quiescence.ef) and [quiescence-wakes.ef](../examples/quiescence-wakes.ef) pin the barrier and `advance`.
+`Clock.sleep(ms)` and `.timeout(ms)` share the case's scheduler-backed virtual time. The timeout driver is the `Scheduler.sleep(ms)` capability; `Scheduler.awaitRegistration()` returns at [quiescence](../GLOSSARY.md#tooling-and-testing): no managed fiber is running or runnable, and a wake in flight, such as a signalled waiter or a cancelled sleeper that has not run again, is not idle. Every timer that managed work can register is then registered. The barrier does not wait for a new registration, so forked work that already completed, or whose timeout timer was cancelled, passes it. The release order of several concurrent waiters is unspecified, and tests must not depend on it ([runtime contract](runtime.md#lifecycle-contract)). `Scheduler.advance(ms)` performs the strong adjustment: it selects and fires intermediate deadlines, each only at quiescence, and commits its target only when no running or runnable managed fiber can register earlier work. Cleanup parked on a registered virtual timer or managed signal may remain pending during a partial adjustment; the next adjustment or signal can finish it. Unmanaged goroutines and foreign blocking calls are not observable by the fixture and may delay completion. A provider that implements only `Clock.sleep` does not control timeout deadlines; timeout's explicit `Scheduler` row is the authority. [quiescence.ef](https://github.com/cevr/ergo/blob/dbf135bff09901e85385945593113f35b300199c/examples/quiescence.ef) and [quiescence-wakes.ef](https://github.com/cevr/ergo/blob/dbf135bff09901e85385945593113f35b300199c/examples/quiescence-wakes.ef) pin the barrier and `advance`.
 
 The real wall-clock watchdog remains independent of these fixtures. Provider substitution does not by itself provide network denial, scratch-directory isolation, process reaping or crash recovery.

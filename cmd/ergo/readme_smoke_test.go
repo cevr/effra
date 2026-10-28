@@ -13,7 +13,7 @@ import (
 )
 
 // TestReadmeSmoke keeps README.md truthful, as Rust doctests and Go Example
-// tests keep documentation executable. The README presents the 2026 edition
+// tests keep documentation executable. The README presents the decided language
 // (docs/spec), whose checker is in progress, so each claim is held to what
 // runs today:
 //
@@ -58,7 +58,7 @@ var (
 // readmeSmokeMinBlocks matches the acceptance check of the README unit.
 const readmeSmokeMinBlocks = 5
 
-// readmeSmokeS102Source is the 2026-edition file behind the README's quoted
+// readmeSmokeS102Source is the source file behind the README's quoted
 // diagnostic: pay calls Gateway, which its needs clause does not list.
 const readmeSmokeS102Source = `package checkout
 
@@ -141,7 +141,7 @@ func readmeProblems(readme string) []string {
 }
 
 // readmeBlockProblem reports why one README go block is not admissible
-// 2026-edition source, or nil when it is.
+// source of the decided language, or nil when it is.
 func readmeBlockProblem(body string) error {
 	const header = "package readme\n\n"
 	source := header + body
@@ -302,12 +302,10 @@ func TestReadmeSmoke(t *testing.T) {
 		}
 		binary := buildTestCLI(t)
 		dir := t.TempDir()
-		for name, content := range map[string]string{"ergo.json": "{\"edition\": \"2026\"}\n", "pay.ergo": readmeSmokeS102Source} {
-			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-				t.Fatal(err)
-			}
+		if err := os.WriteFile(filepath.Join(dir, "pay.ergo"), []byte(readmeSmokeS102Source), 0o644); err != nil {
+			t.Fatal(err)
 		}
-		stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, dir, "", "diagnostics", "pay.ergo")
+		stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, dir, "", "diagnostics", "pay.ergo")
 		if code == 0 {
 			t.Fatalf("ergo diagnostics pay.ergo exited 0\n%s", stdout)
 		}
@@ -323,7 +321,7 @@ func TestReadmeSmoke(t *testing.T) {
 			t.Fatal("README has no sh block under \"Working in this repo\"")
 		}
 		binary := buildTestCLI(t)
-		workspace := smokeWorkspace(t, "examples/editions", "go.mod", "ergo.bindings.json")
+		workspace := smokeWorkspace(t, "examples/editions/sketch", "go.mod")
 		commands := 0
 		for _, line := range strings.Split(block[1], "\n") {
 			command := readmeSmokeCommand.FindStringSubmatch(line)
@@ -331,7 +329,7 @@ func TestReadmeSmoke(t *testing.T) {
 				continue
 			}
 			commands++
-			stdout, stderr, code := runSmokeCLI(t, editionDeadline, binary, workspace, "", strings.Fields(command[1])...)
+			stdout, stderr, code := runSmokeCLI(t, processDeadline, binary, workspace, "", strings.Fields(command[1])...)
 			if code != 0 {
 				t.Errorf("ergo %s: exit %d\n%s%s", command[1], code, stdout, stderr)
 				continue

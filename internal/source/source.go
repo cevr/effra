@@ -1,4 +1,5 @@
-// Package source owns the shared source-file admission used by CLI and MCP.
+// Package source owns source-file admission: every command opens and reads
+// its source through it.
 package source
 
 import (

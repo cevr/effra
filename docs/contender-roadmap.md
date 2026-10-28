@@ -1,5 +1,7 @@
 # What Ergo needs to earn adoption
 
+> **Status:** describes the retired `.ef` language, removed 2026-10-28 by [#205](https://github.com/cevr/ergo/issues/205); kept as design reference. The [retirement record](receipts/retire-ef.md) lists what was removed.
+
 Assessment prepared 2026-10-05 against the checked prototype and the [real-world source review](research/effect-native-showcases.md). This is a proposed build order and set of acceptance gates, not implemented features or a production-readiness claim.
 
 Ergo has a credible semantic core: lazy execution, explicit failure/service contracts, native Go artifacts, owned child/resource cleanup, a lifecycle corpus and compiler-backed inspection. Go is the only target (owner, 2026-10-26). Practical adoption now depends on representing real application data, using real host libraries, constructing real providers and preserving the operational policies those applications need.
@@ -21,7 +23,7 @@ The owner-directed [bundled standard library parity map](standard-library.md) de
 | Application latest-work and process supervision | Owned replacement and native executable entry | Process/pipe/watch adapters, generation-safe publication, restart policy and bounded output | Platform adapters + concurrency library + application policy |
 | Agent-guided maintenance | CLI/MCP contracts, byte-anchor types, lint, static dependency graphs and revisions | Multi-file identities, full expression ranges, imported/native type detail, editor diagnostics and runtime/source correlation | Compiler/workspace tools + runtime instrumentation |
 
-The prototype's remaining barriers are concrete: native imported calls support only restricted free-function shapes; provider constructors accept checked configuration and capture explicit service dependencies, but cannot acquire resources fallibly or memoize scoped initialization; recovery accepts a pure replacement value. See [checker](../internal/compiler/semantic.go), [Go import normalization](../internal/compiler/imports.go), [implemented limits](prototype.md), and [runtime/HTTP contracts](runtime.md).
+The prototype's remaining barriers are concrete: native imported calls support only restricted free-function shapes; provider constructors accept checked configuration and capture explicit service dependencies, but cannot acquire resources fallibly or memoize scoped initialization; recovery accepts a pure replacement value. See [checker](https://github.com/cevr/ergo/blob/dbf135bff09901e85385945593113f35b300199c/internal/compiler/semantic.go), [Go import normalization](https://github.com/cevr/ergo/blob/dbf135bff09901e85385945593113f35b300199c/internal/compiler/imports.go), [implemented limits](prototype.md), and [runtime/HTTP contracts](runtime.md).
 
 ## Build order
 

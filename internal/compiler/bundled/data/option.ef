@@ -1,6 +1,0 @@
-enum Option<T: type> {
-    None,
-    Some {
-        value: T
-    }
-}

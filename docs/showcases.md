@@ -1,5 +1,7 @@
 # An effect-native language in practice
 
+> **Status:** describes the retired `.ef` language, removed 2026-10-28 by [#205](https://github.com/cevr/ergo/issues/205); kept as design reference. The [retirement record](receipts/retire-ef.md) lists what was removed.
+
 Ergo's direction is **Go-like directness, algebraic data types, and explicit Effect-style contracts**. A function tells you what it returns, how it can fail and what services it needs. An owning scope tells you who must finish before it can return.
 
 These examples come from reading real Effect application and infrastructure code. They use generic domains and original examples. The [source review](research/effect-native-showcases.md) records the snapshots, comparisons and boundaries.
@@ -29,7 +31,7 @@ Code below labeled **proposed** remains design notation; the records, enums and 
 
 ## 1. A workflow with readable dependencies
 
-**Runnable:** [workflow.ef](../examples/workflow.ef).
+**Runnable:** [workflow.ef](https://github.com/cevr/ergo/blob/dbf135bff09901e85385945593113f35b300199c/examples/workflow.ef).
 
 ```rust
 effect fn welcome(id: string) -> string
@@ -127,7 +129,7 @@ The wire format also needs a defined discriminator, field names and compatibilit
 
 ## 4. Replacement means completed cleanup
 
-**Runnable:** [latest-task.ef](../examples/latest-task.ef).
+**Runnable:** [latest-task.ef](https://github.com/cevr/ergo/blob/dbf135bff09901e85385945593113f35b300199c/examples/latest-task.ef).
 
 ```rust
 effect fn replacement() -> string uses {Clock} {
@@ -214,7 +216,7 @@ An implementation receipt should include both-target examples, rejection of miss
 
 ## 8. Testing through the same service contract
 
-**Runnable on Go.** [testing.ef](../examples/testing.ef) supplies a fixture `Directory`, exercises success and typed recovery, and joins an owned child. The test runner supplies only `Assert`; fixture provision is ordinary checked language code.
+**Runnable on Go.** [testing.ef](https://github.com/cevr/ergo/blob/dbf135bff09901e85385945593113f35b300199c/examples/testing.ef) supplies a fixture `Directory`, exercises success and typed recovery, and joins an owned child. The test runner supplies only `Assert`; fixture provision is ordinary checked language code.
 
 ```rust
 effect fn test_greeting() -> void raises {AssertionFailed, Missing} uses {Assert} {

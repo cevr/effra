@@ -1,4 +1,0 @@
-record Codec<Domain: type, Wire: type, Decode: callable effect fn(Wire) -> Domain, Encode: callable effect fn(Domain) -> Wire> {
-    decode: Decode,
-    encode: Encode,
-}

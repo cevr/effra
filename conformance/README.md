@@ -6,10 +6,10 @@ Ergo owns these inputs:
 
 | File | Contents |
 | --- | --- |
-| `effect-cases.json` | Selected upstream cases mapped to existing Ergo acceptance tests, with status and limits. `go run ./scripts/conformance check` validates it. |
-| `codecs/` | Codec policy vectors, with the outputs the pinned Effect runtime produced for them (`effect-*comparator.out.jsonl`), frozen on 2026-10-26 as golden files. The Go codec tests check against them; nothing runs Effect. |
-| `http/` | Shared HTTP wire vectors: exact status/body/content-type exchanges, the limits each program declares, and lifecycle cases (body timeout, disconnect, shutdown with active work). `cmd/ergo` `TestHTTPWireVectors` runs every `*-vectors.json` over real sockets on Go. |
+| `effect-cases.json` | Selected upstream cases, each with a status, limits and the Ergo tests that are its evidence. Since [#205](https://github.com/cevr/ergo/issues/205) no case has evidence: every case is `pending` or `unsupported`. `go run ./scripts/conformance check` validates it. |
+| `codecs/` | Codec policy vectors, with the outputs the pinned Effect runtime produced for them (`effect-*comparator.out.jsonl`), frozen on 2026-10-26 as golden files. No test reads them until [#49](https://github.com/cevr/ergo/issues/49): the codec tests that did went with the retired compiler. Nothing runs Effect. |
+| `http/` | Shared HTTP wire vectors: exact status/body/content-type exchanges, the limits each program declares, and lifecycle cases (body timeout, disconnect, shutdown with active work). No test reads them until [#49](https://github.com/cevr/ergo/issues/49): `TestHTTPWireVectors`, which ran them over real sockets, went with the retired compiler. They name example programs removed with it, at commit `dbf135bf`. |
 | `upstream/foldkit-d21db423/` | The pinned Foldkit workspace snapshot, a language-design reference corpus; `go run ./scripts/conformance foldkit --self-check` verifies it offline. |
-| `size/` | Size-conformance fixtures, the Go controls, and recorded application receipts; see [size/README.md](size/README.md). |
+| `size/` | The Go controls and recorded size receipts; the fixtures return with v1 item 5. See [size/README.md](size/README.md). |
 
 [docs/conformance.md](../docs/conformance.md) explains the statuses, commands and pin-update procedure.

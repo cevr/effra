@@ -12,22 +12,42 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf16"
-	"unicode/utf8"
+
+	"ergo.local/prototype/internal/report"
 )
 
-// The process smokes formerly lived in Python scripts and drove bin/ergo
-// from the repository root, writing dist/ there. Their Go ports drive the
-// package's test CLI in a private workspace instead.
+// The process smokes drive the package's test CLI in a private workspace,
+// because run and build write dist/ in the working directory.
+
+// sketchCleanSource checks, formats to itself and prints "ok".
+const sketchCleanSource = `package p
+
+func main() needs Console {
+	Console.Println("ok")
+}
+`
+
+// sketchUnformatted formats to sketchCleanSource.
+const sketchUnformatted = "package p\n\n\n\nfunc main()  needs Console {\n        Console.Println(\"ok\")\n}\n"
+
+// legacyCleanSource is a program of the retired .ef language, which the one
+// front end refuses as a syntax error.
+const legacyCleanSource = `effect fn main() -> void {
+    run Console.log("ok").provide<Console>(Stdout)
+}
+`
+
+// processDeadline bounds one CLI process, a build included.
+const processDeadline = 120 * time.Second
 
 // smokeWorkspace returns a temporary workspace holding copies of the named
 // repository files and directories (relative to the repository root), so no
-// smoke writes into the repository or sees another's files. Go's test cache sees the copies and,
-// through observation (testinputs.Main), everything the CLI reads.
+// smoke writes into the repository or sees another's files. Go's test cache
+// sees the copies and, through observation (testinputs.Main), everything
+// the CLI reads.
 func smokeWorkspace(t *testing.T, paths ...string) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", ".."))
@@ -69,6 +89,41 @@ func smokeWorkspace(t *testing.T, paths ...string) string {
 	return workspace
 }
 
+// smokeDir is a fresh directory with its links resolved, so a path the CLI
+// reports and a path the test builds compare equal.
+func smokeDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// smokeWrite writes content to dir/name, creating its directories, and
+// returns the path.
+func smokeWrite(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// smokeRead reads a file or fails the test.
+func smokeRead(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
 // smokeJSON decodes one JSON document or fails the test.
 func smokeJSON(t *testing.T, data []byte) map[string]any {
 	t.Helper()
@@ -79,62 +134,29 @@ func smokeJSON(t *testing.T, data []byte) map[string]any {
 	return value
 }
 
-// adapterSemantic removes only adapter envelope and byte-charge fields from a
-// report.
-func adapterSemantic(value map[string]any) map[string]any {
-	result := map[string]any{}
-	for key, item := range value {
-		if key != "file" && key != "timings" {
-			result[key] = item
-		}
-	}
-	if usage, ok := result["typeProjectionUsage"].(map[string]any); ok {
-		kept := map[string]any{}
-		for key, item := range usage {
-			if key != "compatibilityBytes" && key != "nameBytes" && key != "responseBytes" {
-				kept[key] = item
-			}
-		}
-		result["typeProjectionUsage"] = kept
-	}
-	return result
-}
-
-// Current wire epochs of a decorated report and of its embedded semantic
-// snapshot; the two advance independently.
-const (
-	defaultReportSchema   = 9
-	defaultSnapshotSchema = 9
-)
-
 var artifactDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
-// producerSnapshot validates one response envelope and its independent
-// snapshot epoch and returns its producer identity, failing the test when the
-// response is malformed. An empty target accepts the response's own.
-func producerSnapshot(t *testing.T, value map[string]any, target string, snapshotSchema int) map[string]any {
+// producerSnapshot validates one qualified envelope (the check envelope or
+// the diagnostic report) and returns its producer identity, failing the test
+// when the envelope is malformed.
+func producerSnapshot(t *testing.T, value map[string]any) map[string]any {
 	t.Helper()
-	producer, err := checkProducerSnapshot(value, target, snapshotSchema)
+	producer, err := checkProducerSnapshot(value)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return producer
 }
 
-// checkProducerSnapshot is producerSnapshot reporting a malformed response as
-// an error, so a control can observe the oracle refusing one.
-func checkProducerSnapshot(value map[string]any, target string, snapshotSchema int) (map[string]any, error) {
+// checkProducerSnapshot is producerSnapshot reporting a malformed envelope
+// as an error, so a control can observe the oracle refusing one. The
+// snapshot qualification carries the check schema version whatever the
+// envelope's own version.
+func checkProducerSnapshot(value map[string]any) (map[string]any, error) {
 	for _, key := range []string{"schemaVersion", "revision", "target", "producer", "snapshot"} {
 		if _, ok := value[key]; !ok {
-			return nil, fmt.Errorf("decorated response lacks %s: %v", key, value)
+			return nil, fmt.Errorf("qualified envelope lacks %s: %v", key, value)
 		}
-	}
-	expectedTarget := value["target"]
-	if target != "" {
-		expectedTarget = target
-	}
-	if value["target"] != expectedTarget {
-		return nil, fmt.Errorf("target = %v, want %v", value["target"], expectedTarget)
 	}
 	producer, ok := value["producer"].(map[string]any)
 	snapshot, ok2 := value["snapshot"].(map[string]any)
@@ -142,10 +164,7 @@ func checkProducerSnapshot(value map[string]any, target string, snapshotSchema i
 		return nil, fmt.Errorf("producer and snapshot must be objects: %v", value)
 	}
 	if !positiveJSONInt(value["schemaVersion"]) {
-		return nil, fmt.Errorf("report schema %#v is not a positive integer", value["schemaVersion"])
-	}
-	if snapshotSchema <= 0 {
-		return nil, fmt.Errorf("expected snapshot schema %d is not positive", snapshotSchema)
+		return nil, fmt.Errorf("envelope schema %#v is not a positive integer", value["schemaVersion"])
 	}
 	for _, key := range []string{"strength", "qualifier", "reuseScope"} {
 		if _, ok := producer[key]; !ok {
@@ -182,13 +201,10 @@ func checkProducerSnapshot(value map[string]any, target string, snapshotSchema i
 	default:
 		return nil, fmt.Errorf("reuse scope %v", scope)
 	}
-	if observed := snapshot["schemaVersion"]; !positiveJSONInt(observed) || observed != float64(snapshotSchema) {
-		return nil, fmt.Errorf("snapshot schema = %#v, want %d", observed, snapshotSchema)
-	}
 	want := map[string]any{
-		"schemaVersion": float64(snapshotSchema),
+		"schemaVersion": float64(report.CheckSchemaVersion),
 		"revision":      value["revision"],
-		"target":        expectedTarget,
+		"target":        value["target"],
 		"producer":      producer["qualifier"],
 		"reuseScope":    scope,
 	}
@@ -205,95 +221,55 @@ func positiveJSONInt(value any) bool {
 	return ok && number > 0 && number == math.Trunc(number)
 }
 
-// parityOptions are assertReportParity's optional projections.
-type parityOptions struct {
-	target         string
-	ignored        []string
-	project        func(map[string]any) map[string]any
-	reportSchema   int // default defaultReportSchema
-	snapshotSchema int // default defaultSnapshotSchema
-}
-
-// assertReportParity compares decorated reports without erasing their
-// producer contract. Artifact-scoped reports are equal after only explicitly
-// named adapter envelope projections; process-scoped reports may differ only
-// in the process qualifier; "none" reports retain exact metadata equality.
-// The outer report and the embedded semantic snapshot have separate epochs.
-func assertReportParity(t *testing.T, actual, expected map[string]any, options parityOptions) {
+// assertReportParity compares two qualified envelopes, from two processes
+// or two spellings, without erasing their producer contract: both must be
+// well formed and carry the schema version want. Artifact-scoped envelopes
+// must be equal; process-scoped ones may differ only in the process
+// qualifier.
+func assertReportParity(t *testing.T, actual, expected map[string]any, want int) {
 	t.Helper()
-	if err := checkReportParity(actual, expected, options); err != nil {
+	if err := checkReportParity(actual, expected, want); err != nil {
 		t.Fatal(err)
 	}
 }
 
 // checkReportParity is assertReportParity reporting a mismatch as an error,
-// so a control can observe the oracle refusing a malformed report.
-func checkReportParity(actual, expected map[string]any, options parityOptions) error {
-	if options.reportSchema == 0 {
-		options.reportSchema = defaultReportSchema
-	}
-	if options.snapshotSchema == 0 {
-		options.snapshotSchema = defaultSnapshotSchema
-	}
-	for _, report := range []map[string]any{actual, expected} {
-		if report["schemaVersion"] != float64(options.reportSchema) {
-			return fmt.Errorf("report schema = %#v, want %d: %v", report["schemaVersion"], options.reportSchema, report)
+// so a control can observe the oracle refusing a malformed envelope.
+func checkReportParity(actual, expected map[string]any, want int) error {
+	for _, envelope := range []map[string]any{actual, expected} {
+		if envelope["schemaVersion"] != float64(want) {
+			return fmt.Errorf("envelope schema = %#v, want %d: %v", envelope["schemaVersion"], want, envelope)
 		}
 	}
-	actualProducer, err := checkProducerSnapshot(actual, options.target, options.snapshotSchema)
+	actualProducer, err := checkProducerSnapshot(actual)
 	if err != nil {
 		return err
 	}
-	expectedProducer, err := checkProducerSnapshot(expected, options.target, options.snapshotSchema)
+	expectedProducer, err := checkProducerSnapshot(expected)
 	if err != nil {
 		return err
-	}
-	for _, key := range []string{"schemaVersion", "revision", "target"} {
-		if !reflect.DeepEqual(actual[key], expected[key]) {
-			return fmt.Errorf("%s: %v != %v", key, actual[key], expected[key])
-		}
-	}
-	for _, key := range []string{"source", "sources"} {
-		left, inLeft := actual[key]
-		right, inRight := expected[key]
-		if inLeft != inRight || !reflect.DeepEqual(left, right) {
-			return fmt.Errorf("%s: %v != %v", key, left, right)
-		}
 	}
 	if actualProducer["reuseScope"] != expectedProducer["reuseScope"] {
 		return fmt.Errorf("reuse scopes differ: %v / %v", actualProducer, expectedProducer)
 	}
-	project := func(value map[string]any) (map[string]any, error) {
-		result, err := copyJSON(value)
-		if err != nil {
-			return nil, err
-		}
-		for _, key := range options.ignored {
-			delete(result, key)
-		}
-		if options.project != nil {
-			result = options.project(result)
-		}
-		return result, nil
-	}
-	left, err := project(actual)
+	left, err := copyJSON(actual)
 	if err != nil {
 		return err
 	}
-	right, err := project(expected)
+	right, err := copyJSON(expected)
 	if err != nil {
 		return err
 	}
 	if actualProducer["reuseScope"] == "process" {
-		for _, report := range []map[string]any{left, right} {
-			report["producer"].(map[string]any)["qualifier"] = "<process>"
-			report["snapshot"].(map[string]any)["producer"] = "<process>"
+		for _, envelope := range []map[string]any{left, right} {
+			envelope["producer"].(map[string]any)["qualifier"] = "<process>"
+			envelope["snapshot"].(map[string]any)["producer"] = "<process>"
 		}
 	}
 	if !reflect.DeepEqual(left, right) {
 		leftJSON, _ := json.Marshal(left)
 		rightJSON, _ := json.Marshal(right)
-		return fmt.Errorf("reports differ:\n%s\n%s", leftJSON, rightJSON)
+		return fmt.Errorf("envelopes differ:\n%s\n%s", leftJSON, rightJSON)
 	}
 	return nil
 }
@@ -311,16 +287,6 @@ func copyJSON(value map[string]any) (map[string]any, error) {
 	return result, nil
 }
 
-// deepCopyJSON copies a decoded JSON object.
-func deepCopyJSON(t *testing.T, value map[string]any) map[string]any {
-	t.Helper()
-	result, err := copyJSON(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return result
-}
-
 // smokeWaitDelay bounds how long a killed or exited smoke child may keep its
 // output pipes open through a surviving grandchild before Wait closes them.
 const smokeWaitDelay = 5 * time.Second
@@ -329,10 +295,9 @@ const smokeWaitDelay = 5 * time.Second
 var errSmokeDeadline = errors.New("smoke process exceeded its deadline")
 
 // runSmokeDeadline runs an unstarted command to completion under a
-// per-operation deadline, as the Python smokes' subprocess.run(timeout=...)
-// did, and returns its output and exit code. On expiry the child is killed
-// and reaped before an errSmokeDeadline error returns. It never touches a
-// testing.T, so concurrent runners may use it.
+// per-operation deadline and returns its output and exit code. On expiry the
+// child is killed and reaped before an errSmokeDeadline error returns. It
+// never touches a testing.T, so concurrent runners may use it.
 func runSmokeDeadline(command *exec.Cmd, timeout time.Duration) ([]byte, []byte, int, error) {
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
@@ -391,122 +356,10 @@ func runSmokeCLI(t *testing.T, timeout time.Duration, binary, directory, input s
 	return runSmokeCommand(t, timeout, command)
 }
 
-// smokeObject is a JSON object whose members keep their written order, as
-// the members of a Python dict literal do, so a request built from it
-// encodes to the exact bytes the Python smoke sent.
-type smokeObject []smokeMember
-
-type smokeMember struct {
-	key   string
-	value any
-}
-
-func (object smokeObject) MarshalJSON() ([]byte, error) {
-	var buffer bytes.Buffer
-	encoder := json.NewEncoder(&buffer)
-	encoder.SetEscapeHTML(false)
-	buffer.WriteByte('{')
-	for index, member := range object {
-		if index > 0 {
-			buffer.WriteByte(',')
-		}
-		if err := encoder.Encode(member.key); err != nil {
-			return nil, err
-		}
-		buffer.Truncate(buffer.Len() - 1)
-		buffer.WriteByte(':')
-		if err := encoder.Encode(member.value); err != nil {
-			return nil, err
-		}
-		buffer.Truncate(buffer.Len() - 1)
+// firstLines shortens a process output for a failure message.
+func firstLines(b []byte) string {
+	if len(b) > 400 {
+		return string(b[:400]) + "…"
 	}
-	buffer.WriteByte('}')
-	return buffer.Bytes(), nil
-}
-
-// smokeDumps encodes a request as Python's json.dumps(value): characters
-// outside printable ASCII as \uXXXX escapes (astral ones as UTF-16 surrogate
-// pairs), <, > and & literal, and ", " and ": " separators. A map's members
-// are ordered by key, which no server's decoding depends on; a smokeObject
-// keeps its written order and so reproduces Python's bytes exactly.
-func smokeDumps(t *testing.T, value any) []byte {
-	t.Helper()
-	return smokePythonJSON(t, value, true, true)
-}
-
-// smokeDumpsUTF8 encodes as json.dumps(value, ensure_ascii=False): text
-// stays literal UTF-8, line and paragraph separators included.
-func smokeDumpsUTF8(t *testing.T, value any) []byte {
-	t.Helper()
-	return smokePythonJSON(t, value, false, true)
-}
-
-// smokeDumpsCompact encodes as json.dumps(value, separators=(",", ":")).
-func smokeDumpsCompact(t *testing.T, value any) []byte {
-	t.Helper()
-	return smokePythonJSON(t, value, true, false)
-}
-
-func smokePythonJSON(t *testing.T, value any, asciiOnly, spaced bool) []byte {
-	t.Helper()
-	var buffer bytes.Buffer
-	encoder := json.NewEncoder(&buffer)
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(value); err != nil {
-		t.Fatal(err)
-	}
-	return pythonJSON(bytes.TrimSuffix(buffer.Bytes(), []byte("\n")), asciiOnly, spaced)
-}
-
-// pythonJSON rewrites Go's compact, HTML-unescaped JSON to Python's
-// spelling. Both escape quote, backslash and C0 controls alike. Go also
-// escapes U+2028 and U+2029, which Python leaves literal unless asciiOnly,
-// where Python escapes every character outside printable ASCII. Python
-// separates members and items with ", " and keys with ": " unless compact.
-func pythonJSON(encoded []byte, asciiOnly, spaced bool) []byte {
-	var out bytes.Buffer
-	inString := false
-	for index := 0; index < len(encoded); {
-		c := encoded[index]
-		switch {
-		case !inString:
-			inString = c == '"'
-			out.WriteByte(c)
-			if spaced && (c == ',' || c == ':') {
-				out.WriteByte(' ')
-			}
-			index++
-		case c == '\\' && encoded[index+1] == 'u':
-			escape := string(encoded[index : index+6])
-			if code, _ := strconv.ParseUint(escape[2:], 16, 16); !asciiOnly && (code == 0x2028 || code == 0x2029) {
-				out.WriteRune(rune(code))
-			} else {
-				out.WriteString(escape)
-			}
-			index += 6
-		case c == '\\':
-			out.Write(encoded[index : index+2])
-			index += 2
-		case c == '"':
-			inString = false
-			out.WriteByte(c)
-			index++
-		case c == 0x7f && asciiOnly:
-			fmt.Fprintf(&out, "\\u%04x", c)
-			index++
-		case c < utf8.RuneSelf || !asciiOnly:
-			out.WriteByte(c)
-			index++
-		default:
-			r, size := utf8.DecodeRune(encoded[index:])
-			if r >= 0x10000 {
-				high, low := utf16.EncodeRune(r)
-				fmt.Fprintf(&out, "\\u%04x\\u%04x", high, low)
-			} else {
-				fmt.Fprintf(&out, "\\u%04x", r)
-			}
-			index += size
-		}
-	}
-	return out.Bytes()
+	return string(b)
 }
