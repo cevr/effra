@@ -53,6 +53,16 @@ Status: **partly implemented in prototype**.
 5. **Stop wins.** When a task is stopped while its body runs, interruption wins over the body's success.
 6. **Entry.** When `main`'s exit is a cause, the program prints each reason and exits with status 130 when every reason is an interruption, and 1 otherwise, as the current [entry failure report](../design.md#entry-failure-report) does. Prototype: an interruption that reaches `main` exits 130; a defect prints `defect: …` and exits 2.
 
+## Exit actions
+
+Status: **designed, not yet implemented**.
+
+1. `scope.OnExit() { … }` at the top level of a function body registers its block. The block runs when the function returns, on every path, and the blocks one call registered run last registered first: Go's `defer` order. Each block runs masked ([I2](#i2-automatic-masks)).
+2. The block reads its variables when it runs. Go evaluates a `defer` call's arguments at the `defer` statement instead, so `scripts/migrate196` rewrites `defer f(x)` only when `f` is a function name and each argument is a literal or a local that nothing writes; any other `defer` is a hand edit.
+3. The meaning of `scope.OnExit` in a nested block or a loop is not decided yet.
+
+*Prior art:* Go `defer` runs at function return, last first; Swift and Zig `defer` run at the end of the enclosing block.
+
 ## Timeouts
 
 Status: **implemented in prototype** as a name-keyed exception (README Gap 31); **designed** as the library function below.
@@ -130,6 +140,7 @@ Status: **designed, not yet implemented** ([#64](https://github.com/cevr/ergo/is
 3. `Push` and `Pop` are interruption points.
 4. A send on a closed channel interrupts the sender instead of panicking. This is Ergo's own policy, not Effect parity: Effect's `Queue.offer` returns `false` after shutdown.
 5. `q.Pop()` returns `Option[T]` when `T` is not defaultable ([types.md](types.md#zero-values-and-definite-initialisation)).
+6. The capacity, close, cancellation and drain semantics of `queue.Queue` belong to [#207](https://github.com/cevr/ergo/issues/207); until it settles them, the rules above are a design, not a contract.
 
 ## Machines and actors
 

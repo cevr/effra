@@ -179,7 +179,7 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Method argument** ([#141](https://github.com/cevr/ergo/issues/141)): The method value the compiler passes for a satisfied constraint in the lowered code. It is the same function value a caller could pass by hand, and Go generics carry it in their dictionaries.
 
-**Law** (designed): A named behavioral obligation that types cannot state, written as a function `LawX(…) bool` and checked like a fuzz target. A refuted law refuses the build. Laws are one general construct with many clients: codecs, providers, schedules, machines and composition algebra ([#125](https://github.com/cevr/ergo/issues/125)).
+**Law** (designed): A named behavioral obligation that types cannot state, written as `law X(…) { … }` in an operation type, with a body that ends in a `bool` expression, and checked like a fuzz target. A refuted law refuses the build. Laws are one general construct with many clients: codecs, providers, schedules, machines and composition algebra ([#125](https://github.com/cevr/ergo/issues/125)).
 
 **Provider law** (designed): A law with a `needs` clause. It is checked against every provider wired for that capability.
 

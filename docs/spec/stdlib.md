@@ -77,19 +77,20 @@ The prelude is in scope in every package without an import: `Option`, `Task`, `D
 import html
 
 func OrderRow(o Order) html.Node {
-	return html.Tr(html.Class(statusClass(o.Status)),
-		html.Td(html.Text(o.Member.Name)),
-		html.Td(html.Int(o.Quantity.Wire())),
-	)
+	return html.Tr([]html.Child{
+		html.Class(statusClass(o.Status)),
+		html.Td([]html.Child{html.Text(o.Member.Name)}),
+		html.Td([]html.Child{html.Int(o.Quantity.Wire())}),
+	})
 }
 ```
 
 1. The `html` package is ordinary functions: elements (`Tr`, `Td`, `P`, …), attributes (`Class`, `Href`, …), `Text`, `Int`, `Each` and `When`. A component is a function that returns `html.Node`.
-2. An element takes `...Child`, where `Child` is the closed union `Attr | Node`. A void element such as `Br` or `Img` takes only `...Attr`, so it cannot get children.
+2. An element takes one slice, `[]Child`, where `Child` is the closed union `Attr | Node`; Ergo has no variadic parameters. A void element such as `Br` or `Img` takes only `[]Attr`, so it cannot get children.
 3. Escaping is decided by type. `Text` escapes its string; only an `html.Node` is inserted as markup. `Href` and `Src` take a `url.Safe`, not a string. `Raw` takes an `html.Trusted`, which only `html.Trust` builds, so `ergo inspect` lists every trust site.
 4. **Lowering.** `html.Node` is a render function that writes to a buffered writer; `Text` escapes at write time, so no intermediate string is built. Folding static subtrees at compile time is a later, measured optimisation. `http.HTML(status, node)` renders a node into a response.
 
-*Prior art:* Gleam Lustre (`html.td([], [text(name)])`), whose surface Ergo takes; Elm `Html`, which escapes by type with separate attribute and child lists, merged here into one `...Child` union to keep Go's call shape; templ (Go), whose render-function representation Ergo takes, not its syntax; Phoenix HEEx (Elixir), whose compile-time validation Ergo gets from closed types instead of a parser.
+*Prior art:* Gleam Lustre (`html.td([], [text(name)])`), whose surface Ergo takes; Elm `Html`, which escapes by type with separate attribute and child lists, merged here into one `[]Child` slice of the union, so an element takes one argument; templ (Go), whose render-function representation Ergo takes, not its syntax; Phoenix HEEx (Elixir), whose compile-time validation Ergo gets from closed types instead of a parser.
 
 ## Host packages
 

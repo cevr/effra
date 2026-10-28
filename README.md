@@ -16,9 +16,12 @@ func Charge(card Card, amount int64) Receipt fails Declined | Frozen | timeout.E
 	}
 }
 
-// A law. It must hold for every Payments provider, and ergo test checks it like a fuzz target.
-func LawRefundNeverExceedsCharge(r Receipt) bool needs Payments {
-	return Payments.Refundable(r) <= r.Amount
+// A law lives in its operation type. It must hold for every Payments provider, and ergo test checks it like a fuzz target.
+type Payments {
+	Charge(lock Lock, amount int64) Receipt fails Declined,
+	Refundable(r Receipt) int64,
+
+	law RefundNeverExceedsCharge(r Receipt) { Refundable(r) <= r.Amount },
 }
 
 // A test with replaced providers and virtual time: no sleeps and no mock framework.
@@ -66,7 +69,7 @@ The "In Ergo" column is the design. The last column says what runs today.
 | **Every cause kept** | When several things fail, you get all of them, with defects kept apart from expected failures. | needs explicit aggregation (`errors.Join`) and recovery code | one cause with every failure, defect and interruption | designed; `runtime/rt` keeps defects, not yet every child failure |
 | **Built-in observability** | Every task and every service call can be traced, keyed to its source, with no code changes. | spans added by hand | trace events named by the compiler; off adds no allocations | `runtime/rt` and the prototype ([#188](https://github.com/cevr/ergo/issues/188)) |
 | **Testable time and effects** | A test swaps any service, the clock included, with no mock framework. | interfaces and hand-written fakes | `replace` in a test wire; `testing.VirtualClock` | designed; `runtime/rt` has a virtual clock |
-| **Laws** | You state what must always hold, and every implementation is checked against it. | comments and example tests | `func LawX`, found like `TestX` | designed ([#162](https://github.com/cevr/ergo/issues/162)) |
+| **Laws** | You state what must always hold, and every implementation is checked against it. | comments and example tests | `law X(…) { … }` in an operation type | designed ([#162](https://github.com/cevr/ergo/issues/162)) |
 
 Ergo keeps Go's spelling, Go's runtime and garbage collector, and single static binaries built by `go build`. The compiler is designed to check the guarantees, erase them and emit ordinary Go, with no wrapper values, so a function is still a function and an error type still implements `error`.
 
@@ -222,24 +225,26 @@ func join(name string) int64 fails RoomFull | actor.Stopped | actor.NoReply {
 *Status:* designed, not built ([types](docs/spec/types.md#laws), [#162](https://github.com/cevr/ergo/issues/162)). The #125 spike built the law check, generators, shrinker and receipts for the earlier language, on a branch that is not merged.
 
 ```go
-// Found by name, like TestX, and run with generated inputs and shrinking.
-func LawRoundTrip(o Order) bool {
-	let decoded = ParseOrder(o.Wire()) catch {
-	case DecodeFailed:
-		return false // a decode failure refutes the law, with the shrunk input
-	}
-	return decoded == o
+// A law lives in the operation type it constrains, and runs with generated
+// inputs and shrinking. A failure that escapes it refutes it.
+type OrderCodec {
+	Encode(o Order) string,
+	Decode(s string) Order fails DecodeFailed,
+
+	law RoundTrip(o Order) { try Decode(Encode(o)) == o },
 }
 
-// A provider law: it is checked against every provider wired for Store.
-func LawFindAfterPut(id string, v Order) bool needs Store {
-	Store.Put(id, v)
-	return Store.Find(id) == v
+// It is checked against every provider wired for Store.
+type Store {
+	Find(id string) Order fails NotFound,
+	Put(id string, o Order),
+
+	law FindAfterPut(id string, o Order) { Put(id, o); try Find(id) == o },
 }
 ```
 
-- A law is a function named `LawX` that returns `bool`. `ergo test` checks it with generated arguments.
-- A law with `needs` applies to every provider of that capability. A new provider must pass the same laws as the old one.
+- A law is `law X(…) { … }` among the operations of a type, and its body ends in a `bool` expression. `ergo test` checks it with generated arguments.
+- A law applies to every provider of its type. A new provider must pass the same laws as the old one.
 - A refuted law fails the build. A passing law is reported as tested, never as proved.
 - Under research: evidence values and a tier of laws that are proved instead of tested ([laws note](docs/research/laws.md)).
 

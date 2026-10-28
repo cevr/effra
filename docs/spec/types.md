@@ -203,20 +203,25 @@ Status: **designed, not yet implemented**, except the timeout result `timeout.Ex
 Status: **designed, not yet implemented** ([#125](https://github.com/cevr/ergo/issues/125), [#170](https://github.com/cevr/ergo/issues/170)).
 
 ```go
-func LawRoundTrip(q Quantity) bool {
-	return ParseQuantity(q.Wire()) == q
+type Codec[T] {
+	Encode(v T) string,
+	Decode(s string) T fails Malformed,
+
+	law RoundTrip(v T) { try Decode(Encode(v)) == v },
 }
 
-func LawFindAfterPut(id string, v Order) bool needs Store {
-	Store.Put(id, v)
-	return Store.Find(id) == v
+type Store {
+	Find(id string) Order fails NotFound,
+	Put(id string, o Order),
+
+	law FindAfterPut(id string, o Order) { Put(id, o); try Find(id) == o },
 }
 ```
 
-1. A function named `LawX` that returns `bool` is a law. `ergo test` checks it like a fuzz target, with generated arguments.
-2. A law with a `needs` clause is a provider law: `ergo test` checks it against every provider wired for that capability.
+1. A law is `law X(params) { … }`, a member of an operation type beside its operations (196l). Its body ends in a `bool` expression, and a failure that escapes the body refutes the law. `ergo test` checks it like a fuzz target, with generated arguments.
+2. Every law is a provider law: `ergo test` checks it against every provider of its type, which the closed world lists.
 3. A refuted law refuses the build. A law that passes a finite suite is reported as tested, never as proved (NORTH_STAR pillar 4).
-4. Laws are found by name, as Go finds `TestX`. The same rule serves every client: codecs, providers, schedules and machines. *Prior art:* Go `TestX`/`FuzzX` discovery; Haskell QuickCheck properties; Elixir `StreamData` properties.
+4. Laws are declared in their type, not found by name; the `LawX` naming rule is gone. The same form serves every client: codecs, providers, schedules and machines. Until laws are implemented, the prototype refuses a law with S109 ([#162](https://github.com/cevr/ergo/issues/162)). *Prior art:* Lean type classes carry their laws as members; Haskell states class laws beside the class and checks them with QuickCheck; Elixir `StreamData` properties.
 
 ## Codecs
 

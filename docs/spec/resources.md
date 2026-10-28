@@ -67,6 +67,8 @@ A task may use a resource that it does not own when the task is certain to be st
 4. **R29.** Inside one composite literal, a field value may be a `task.Go` call that lends a resource given to an earlier field of the same literal. The elements are evaluated in order, and the literal satisfies R27 when it completes.
 
 ```go
+import task
+
 type Postgres {
 	pool    sql.Pool,   // declared first: released last
 	refresh Task[Unit], // declared after pool: stopped and drained first
@@ -85,6 +87,8 @@ func OpenPostgres() Postgres fails ConnectFailed needs Config, Clock, Scheduler 
 Negative examples, each an error:
 
 ```go
+import task
+
 type Bad {
 	refresh Task[Unit], // declared before pool: would be stopped after pool closes
 	pool    sql.Pool,
@@ -120,6 +124,8 @@ func bad() {
 A lent parameter, allowed:
 
 ```go
+import task
+
 func useOnce(p Pool) {
 	let t = task.Go() { poll(p) } // structured lend: t is owned by useOnce's scope, released before useOnce returns
 	t.Stop()
@@ -129,6 +135,8 @@ func useOnce(p Pool) {
 The corrected forms of `bad`, allowed:
 
 ```go
+import task
+
 func good() {
 	with wire {} {
 		let files = []File{open()}
@@ -165,6 +173,8 @@ func goodTask() {
 4. **R33.** Every other escaping capture of a resource is an error. *Prior art:* Swift does not let an escaping closure capture a `borrowing` parameter of non-copyable type; Rust requires `move` closures to own what they capture, or a lifetime that outlives them.
 
 ```go
+import queue
+
 func run(signals queue.Queue[Signal]) needs Probe, Clock, Scheduler {
 	let b = actor.Start(Breaker{}, 16)
 	let set = tasks.Set(tasks.Restart(schedule.Exponential(1s).UpTo(5))) // bound after b
