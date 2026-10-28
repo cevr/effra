@@ -241,8 +241,9 @@ func (c *checker) argValue(a syntax.Expr, hint Type, call *syntax.CallExpr) (ope
 // result is the operand of a call: its value results, its failure row, and
 // the charges of its capability row (rows.md, Capability rows 2).
 func (c *checker) result(x *syntax.CallExpr, sig *Signature) operand {
-	c.chargeRow(x, sig.Uses)
-	op := operand{mode: modeValue, errs: sig.Errors}
+	// An inferred row is read through its variable (class F).
+	c.chargeRow(x, c.types.resolve(sig.Uses))
+	op := operand{mode: modeValue, errs: c.types.resolve(sig.Errors)}
 	switch len(sig.Results) {
 	case 0:
 		op.mode, op.typ = modeNoValue, NoValue

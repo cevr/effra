@@ -244,14 +244,8 @@ func (c *checker) discoverInit() {
 		if f.Sig == nil {
 			continue
 		}
-		if f.inferErrors {
-			f.Sig.Errors = newRow()
-		}
-		if f.inferUses {
-			f.Sig.Uses = newRow()
-		}
+		f.resetRows()
 	}
-	c.types.changed()
 	c.checkInitCycles()
 }
 
@@ -285,20 +279,51 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 			if n.fn == nil || n.fn.Sig == nil {
 				continue
 			}
-			if n.fn.inferErrors {
-				n.fn.Sig.Errors = newRow()
-			}
-			if n.fn.inferUses {
-				n.fn.Sig.Uses = newRow()
-			}
+			n.fn.resetRows()
 		}
-		c.types.changed()
 	}
 	if cyclic && inferred {
 		c.converge(scc)
+		// The fixpoint is reached: the reporting pass below reads the
+		// component's rows as final (class F).
+		c.finalComponent(scc)
 	}
 	for _, n := range scc {
 		c.checkNode(n)
+	}
+	c.finalComponent(scc)
+}
+
+// finalComponent binds the row variables of a component for good and
+// discards its inference context (intern.go): the checker's instances and
+// switch subjects whose ids depended on an unbound variable.
+func (c *checker) finalComponent(scc []*bodyNode) {
+	var vars []*RowVar
+	for _, n := range scc {
+		if n.fn == nil {
+			continue
+		}
+		for _, v := range []*RowVar{n.fn.errVar, n.fn.useVar} {
+			if v != nil && !v.final {
+				vars = append(vars, v)
+			}
+		}
+	}
+	if len(vars) == 0 {
+		return
+	}
+	c.types.final(vars)
+	clear(c.inferInstances)
+	clear(c.inferSubjects)
+}
+
+// resetRows empties the solutions of a function's row variables that are
+// not final (a least fixpoint starts from empty rows).
+func (f *Func) resetRows() {
+	for _, v := range []*RowVar{f.errVar, f.useVar} {
+		if v != nil && !v.final {
+			v.sol = nil
+		}
 	}
 }
 
@@ -524,22 +549,19 @@ func (c *checker) checkFuncBody(f *Func) bool {
 	}
 	c.reportUnused(fc)
 	changed := false
-	if f.inferErrors {
-		if !t.errors.equal(c.types, sig.Errors) {
+	// Inference writes the solved rows into the variables, never into the
+	// signature (class F); a final variable keeps its solution.
+	if v := f.errVar; v != nil && !v.final {
+		if !t.errors.equal(c.types, v.sol) {
 			changed = true
 		}
-		sig.Errors = t.errors
+		v.sol = t.errors
 	}
-	if f.inferUses {
-		if !t.uses.equal(c.types, sig.Uses) {
+	if v := f.useVar; v != nil && !v.final {
+		if !t.uses.equal(c.types, v.sol) {
 			changed = true
 		}
-		sig.Uses = t.uses
-	}
-	if f.inferErrors || f.inferUses {
-		// The rows of an inferred signature changed: identities built on
-		// it held for the previous epoch only (intern.go).
-		c.types.changed()
+		v.sol = t.uses
 	}
 	return changed
 }

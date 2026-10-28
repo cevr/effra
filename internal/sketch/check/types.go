@@ -90,6 +90,10 @@ type Interface struct {
 	Methods    []*Method
 	index      map[string]*Method
 	Comparable bool // the predeclared constraint comparable
+	// byName holds the methods sorted by name, once, when the type is
+	// resolved (go/types NewInterfaceType): identity reads it and never
+	// sorts (round 11 M3).
+	byName []*Method
 }
 
 // Method is a method of an interface.
@@ -147,10 +151,6 @@ type Signature struct {
 	Fallible bool
 	Errors   *Row
 	Uses     *Row
-	// inferred marks a function's signature whose rows are inferred from
-	// its body: they change until inference ends, so an identity built on
-	// it holds for one table epoch only (intern.go).
-	inferred bool
 }
 
 // Kind is the kind of a type parameter (rows-and-constraints §3: by
@@ -185,6 +185,24 @@ type TypeParam struct {
 	id         int
 }
 
+// RowVar is the inferred row of a function that writes no row (class F):
+// the error row or the capability row of an unexported function, one
+// variable each, as the only element of the signature's row. Types never
+// change: inference writes the row it solves into the variable's side slot,
+// never into the signature. While the function's component is inferred the
+// variable is unbound, and a type that holds it keys no cache that outlives
+// the inference (intern.go). When the component is final the variable is
+// bound for good, and resolving a row replaces it by its solution.
+type RowVar struct {
+	Fn    *Func
+	Kind  Kind // KindErrors or KindUses
+	sol   *Row // the solution so far (final when final is set); no variable
+	final bool
+}
+
+// Solution returns the variable's solved row: final after the check.
+func (v *RowVar) Solution() *Row { return v.sol }
+
 // RowArg is a row bound to a row-kinded type parameter: the type argument of
 // E in Task[T, E] or a row inferred for E or R.
 type RowArg struct{ Row *Row }
@@ -215,6 +233,7 @@ func (*TypeParam) aType()   {}
 func (*RowArg) aType()      {}
 func (*Tuple) aType()       {}
 func (*noValue) aType()     {}
+func (*RowVar) aType()      {}
 
 // Typ holds the basic types by kind.
 var Typ = func() []*Basic {
@@ -309,8 +328,8 @@ func (t *Signature) String() string {
 	for _, r := range t.Results {
 		results = append(results, r.String())
 	}
-	if t.Errors != nil && !t.Errors.Empty() || t.Fallible {
-		results = append(results, "error["+t.Errors.String()+"]")
+	if errs := t.Errors.String(); errs != "" || t.Fallible {
+		results = append(results, "error["+errs+"]")
 	}
 	switch {
 	case len(results) == 1 && len(t.Results) == 1:
@@ -318,13 +337,19 @@ func (t *Signature) String() string {
 	case len(results) > 0:
 		b.WriteString(" (" + strings.Join(results, ", ") + ")")
 	}
-	if t.Uses != nil && !t.Uses.Empty() {
-		b.WriteString(" " + requirementKeyword + " " + t.Uses.list(", "))
+	if uses := t.Uses.list(", "); uses != "" {
+		b.WriteString(" " + requirementKeyword + " " + uses)
 	}
 	return b.String()
 }
 func (t *TypeParam) String() string { return t.Name }
-func (t *RowArg) String() string    { return t.Row.String() }
+func (v *RowVar) String() string {
+	if v.sol != nil {
+		return v.sol.String()
+	}
+	return "the inferred row of " + v.Fn.Name
+}
+func (t *RowArg) String() string { return t.Row.String() }
 func (t *Tuple) String() string {
 	parts := make([]string, len(t.Types))
 	for i, x := range t.Types {
@@ -347,7 +372,12 @@ type Row struct {
 	elems []Type
 	ids   []int32
 	tab   *typeTable // the table of ids; nil for an empty row
-	rid   int32      // the row's own id in tab, once computed
+	rid   int32      // the row's own id in tab, once computed and final
+	// vars: an element is a row variable (class F). infer: an element's id
+	// was built while a variable in it was unbound, so it holds only until
+	// that variable's component is final (intern.go local).
+	vars, infer bool
+	gen         int32 // the table's inference generation when the ids were built
 }
 
 func newRow() *Row { return &Row{} }
@@ -374,7 +404,7 @@ func (r *Row) find(id int32) (int, bool) {
 
 // has reports whether t is an element.
 func (r *Row) has(tab *typeTable, t Type) bool {
-	r = tab.local(r)
+	r = tab.set(r)
 	tab.charge(1)
 	_, ok := r.find(tab.id(t))
 	return ok
@@ -385,14 +415,16 @@ func (r *Row) with(tab *typeTable, t Type) *Row {
 		return r.union(tab, ra.Row)
 	}
 	r = tab.local(r)
-	id := tab.id(t)
+	id, inf := tab.intern(t)
 	i, ok := r.find(id)
 	if ok {
 		return r
 	}
 	tab.charge(1 + len(r.Elems()))
-	out := &Row{tab: tab}
+	_, isVar := t.(*RowVar)
+	out := &Row{tab: tab, gen: tab.gen, vars: isVar, infer: inf}
 	if r != nil {
+		out.vars, out.infer = out.vars || r.vars, out.infer || r.infer
 		out.elems = append(append(append(make([]Type, 0, len(r.elems)+1), r.elems[:i]...), t), r.elems[i:]...)
 		out.ids = append(append(append(make([]int32, 0, len(r.ids)+1), r.ids[:i]...), id), r.ids[i:]...)
 	} else {
@@ -413,7 +445,7 @@ func (r *Row) union(tab *typeTable, o *Row) *Row {
 	}
 	r, o = tab.local(r), tab.local(o)
 	tab.charge(len(r.ids) + len(o.ids))
-	out := &Row{tab: tab, elems: make([]Type, 0, len(r.elems)+len(o.elems)), ids: make([]int32, 0, len(r.ids)+len(o.ids))}
+	out := &Row{tab: tab, gen: tab.gen, vars: r.vars || o.vars, infer: r.infer || o.infer, elems: make([]Type, 0, len(r.elems)+len(o.elems)), ids: make([]int32, 0, len(r.ids)+len(o.ids))}
 	i, j := 0, 0
 	for i < len(r.ids) || j < len(o.ids) {
 		switch {
@@ -438,7 +470,7 @@ func (r *Row) minus(tab *typeTable, o *Row) *Row {
 	if r.Empty() {
 		return out
 	}
-	r, o = tab.local(r), tab.local(o)
+	r, o = tab.set(r), tab.set(o)
 	tab.charge(len(r.Elems()) + len(o.Elems()))
 	j := 0
 	for i, id := range r.ids {
@@ -448,7 +480,7 @@ func (r *Row) minus(tab *typeTable, o *Row) *Row {
 		if o != nil && j < len(o.ids) && o.ids[j] == id {
 			continue
 		}
-		out.tab = tab
+		out.tab, out.gen, out.vars, out.infer = tab, tab.gen, r.vars, r.infer
 		out.elems, out.ids = append(out.elems, r.elems[i]), append(out.ids, id)
 	}
 	return out
@@ -460,13 +492,28 @@ func (r *Row) subsetOf(tab *typeTable, o *Row) bool {
 }
 
 func (r *Row) equal(tab *typeTable, o *Row) bool {
+	r, o = tab.set(r), tab.set(o)
 	return len(r.Elems()) == len(o.Elems()) && r.subsetOf(tab, o)
 }
 
 // list prints the elements in typeString order (ties, which only distinct
-// declarations of one name can make, keep the identity order).
+// declarations of one name can make, keep the identity order). A row
+// variable prints as its solution so far.
 func (r *Row) list(sep string) string {
 	elems := r.Elems()
+	if r != nil && r.vars {
+		var flat []Type
+		for _, e := range elems {
+			if v, ok := e.(*RowVar); ok && v.sol != nil {
+				flat = append(flat, v.sol.Elems()...)
+				continue
+			} else if ok && v.final {
+				continue
+			}
+			flat = append(flat, e)
+		}
+		elems = flat
+	}
 	keys := make([]string, len(elems))
 	for i, e := range elems {
 		keys[i] = typeString(e)
@@ -476,9 +523,13 @@ func (r *Row) list(sep string) string {
 		order[i] = i
 	}
 	sort.SliceStable(order, func(a, b int) bool { return keys[order[a]] < keys[order[b]] })
-	parts := make([]string, len(elems))
+	parts := make([]string, 0, len(elems))
 	for i, k := range order {
-		parts[i] = elems[k].String()
+		// A solved variable may repeat an element the row lists.
+		if i > 0 && elems[k] == elems[order[i-1]] {
+			continue
+		}
+		parts = append(parts, elems[k].String())
 	}
 	return strings.Join(parts, sep)
 }

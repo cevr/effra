@@ -45,8 +45,14 @@ func (c *checker) subst(t Type, m map[*TypeParam]Type) Type {
 		return s
 	case *Interface:
 		it := &Interface{Comparable: t.Comparable, Methods: make([]*Method, len(t.Methods))}
+		newOf := make(map[*Method]*Method, len(t.Methods))
 		for i, mt := range t.Methods {
 			it.Methods[i] = &Method{Name: mt.Name, Sig: c.subst(mt.Sig, m).(*Signature), Pos: mt.Pos}
+			newOf[mt] = it.Methods[i]
+		}
+		// The order sorted at resolution carries over (no sort here).
+		for _, mt := range t.byName {
+			it.byName = append(it.byName, newOf[mt])
 		}
 		return it
 	case *Union:

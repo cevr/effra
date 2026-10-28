@@ -36,11 +36,17 @@ func (c *checker) subjectUnion(t Type) *switchUnion {
 	}
 	if n, ok := t.(*Named); ok && n.Orig != nil && n.under == nil {
 		if ou, ok := n.Orig.under.(*Union); ok {
-			if s, ok := c.subjects[n]; ok {
+			// An instance whose id waits on an unbound row variable keeps
+			// its caches for the component's inference only (class F).
+			subjects := c.subjects
+			if _, infer := c.types.intern(n); infer {
+				subjects = c.inferSubjects
+			}
+			if s, ok := subjects[n]; ok {
 				return s
 			}
 			s := &switchUnion{c: c, orig: ou, m: paramMap(n.Orig.TParams, n.TArgs), tps: n.Orig.TParams}
-			c.subjects[n] = s
+			subjects[n] = s
 			return s
 		}
 	}

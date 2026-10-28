@@ -44,6 +44,7 @@ type Func struct {
 	// Inferred rows: true when the row is computed from the body
 	// (rows.md, Capability rows 6; rows-and-constraints §7 amendment 1).
 	inferErrors, inferUses bool
+	errVar, useVar         *RowVar // the inferred rows' variables (class F)
 	called                 bool
 }
 

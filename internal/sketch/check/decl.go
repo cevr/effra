@@ -1,6 +1,7 @@
 package check
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -408,6 +409,9 @@ func (c *checker) interfaceType(spec *syntax.InterfaceType, ctx *typeCtx) *Inter
 		seen[name.Name] = true
 		it.Methods = append(it.Methods, &Method{Name: name.Name, Sig: sig, Pos: name.Pos()})
 	}
+	// Sorted once, here, for identity (intern.go shape; round 11 M3).
+	it.byName = slices.Clone(it.Methods)
+	slices.SortStableFunc(it.byName, func(a, b *Method) int { return strings.Compare(a.Name, b.Name) })
 	return it
 }
 
@@ -739,13 +743,19 @@ func (c *checker) instantiateExprs(n *Named, args []syntax.Expr, at syntax.Node,
 // before anything is built (class E): an argument interned before costs one
 // lookup, however deep it is.
 func (c *checker) instantiate(orig *Named, targs []Type) *Named {
-	key, unstable := c.types.named(orig, targs)
-	if prev, ok := c.instance[key]; ok {
+	key, infer := c.types.named(orig, targs)
+	cache := c.instance
+	if infer {
+		// The id waits on an unbound row variable: the instance is cached
+		// for the component's inference only (class F).
+		cache = c.inferInstances
+	}
+	if prev, ok := cache[key]; ok {
 		return prev
 	}
 	inst := &Named{Obj: orig.Obj, Orig: orig, TArgs: targs, state: 2, ctx: c}
-	c.types.remember(inst, key, unstable)
-	c.instance[key] = inst
+	c.types.remember(inst, key, infer)
+	cache[key] = inst
 	c.instancesMade++
 	return inst
 }
@@ -1191,8 +1201,16 @@ func (c *checker) funcSig(f *Func) *Signature {
 	f.Sig = sig
 	f.state = 2
 	c.inferFlags(f)
-	// Inferred rows change until inference ends (intern.go epochs).
-	sig.inferred = f.inferErrors || f.inferUses
+	// An inferred row is a row variable (class F): the signature never
+	// changes, inference solves the variable.
+	if f.inferErrors {
+		f.errVar = &RowVar{Fn: f, Kind: KindErrors}
+		sig.Errors = c.types.row(f.errVar)
+	}
+	if f.inferUses {
+		f.useVar = &RowVar{Fn: f, Kind: KindUses}
+		sig.Uses = c.types.row(f.useVar)
+	}
 	return sig
 }
 

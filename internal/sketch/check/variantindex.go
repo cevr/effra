@@ -149,7 +149,7 @@ func (ix *variantIndex) insert(n *vnode, t Type) *vnode {
 		return child
 	}
 	if ra, ok := t.(*RowArg); ok && ix.rowMentions(ra.Row) {
-		key := ix.tab.rowID(ra.Row)
+		key, _ := ix.tab.rowID(ra.Row)
 		if n.rows == nil {
 			n.rows = map[int32]*vrow{}
 		}
@@ -248,7 +248,7 @@ func (s *switchUnion) candidates(ix *variantIndex, t Type, b *lookupSteps) ([]vc
 				if !ok {
 					return
 				}
-				id := s.c.types.rowID(ra.Row)
+				id, _ := s.c.types.rowID(ra.Row)
 				if b.over {
 					return
 				}
@@ -278,7 +278,12 @@ func (s *switchUnion) candidates(ix *variantIndex, t Type, b *lookupSteps) ([]vc
 		return nil, false
 	}
 	if len(out) > 1 {
-		sort.Slice(out, func(a, c int) bool { return out[a].i < out[c].i })
+		tab := s.c.types
+		sort.Slice(out, func(a, c int) bool {
+			tab.sortCmps++
+			b.charge(1)
+			return out[a].i < out[c].i
+		})
 	}
 	return out, true
 }
@@ -298,25 +303,21 @@ func (s *switchUnion) boundTo(t Type, b *lookupSteps) ([]*TypeParam, bool) {
 	tab := s.c.types
 	bound := s.bound
 	if bound == nil {
+		// A subject whose instance waits on an unbound row variable lives
+		// in the inference context only (subjectUnion), so the ids hold.
 		bound = map[int32][]*TypeParam{}
-		stable := true
 		for _, tp := range s.tps {
 			a, ok := s.m[tp]
 			if !ok {
 				continue
 			}
-			id, unstable := tab.intern(a)
+			id := tab.id(a)
 			if !b.charge(1) {
 				return nil, false
 			}
-			stable = stable && !unstable
 			bound[id] = append(bound[id], tp)
 		}
-		// An argument that holds a signature under inference has an id for
-		// this epoch only: such an index is not kept.
-		if stable {
-			s.bound = bound
-		}
+		s.bound = bound
 	}
 	id := tab.id(t)
 	if b.over {
@@ -350,7 +351,7 @@ func (s *switchUnion) rowsAt(n *vnode, b *lookupSteps) (map[int32][]*vnode, bool
 		if s.m != nil {
 			r = s.c.substRow(r, s.m)
 		}
-		k := tab.rowID(r)
+		k, _ := tab.rowID(r)
 		if b.over {
 			return nil, false
 		}
@@ -370,7 +371,8 @@ func (s *switchUnion) rowsAt(n *vnode, b *lookupSteps) (map[int32][]*vnode, bool
 // becomes a row-pattern edge when inserted.
 func (tab *typeTable) symOf(t Type) (vsym, []Type, bool) {
 	if ra, ok := t.(*RowArg); ok {
-		return vsym{kind: vRow, n: int64(tab.rowID(ra.Row))}, nil, true
+		id, _ := tab.rowID(ra.Row)
+		return vsym{kind: vRow, n: int64(id)}, nil, true
 	}
 	kind, ref, n, s, kids := shape(t)
 	if kind == vParam || kind == vFresh {

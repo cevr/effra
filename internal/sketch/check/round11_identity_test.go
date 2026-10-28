@@ -104,21 +104,36 @@ func structural(a, b Type) bool {
 	return false
 }
 
-// structuralRow compares two rows as sets, element by element.
+// structuralRow compares two rows as sets, element by element, a final row
+// variable read as its solution (class F) and an unbound one as itself.
 func structuralRow(a, b *Row) bool {
-	in := func(x *Row, t Type) bool {
-		for _, e := range x.Elems() {
+	flat := func(r *Row) []Type {
+		var out []Type
+		for _, e := range r.Elems() {
+			if v, ok := e.(*RowVar); ok && v.final {
+				out = append(out, v.sol.Elems()...)
+				continue
+			}
+			out = append(out, e)
+		}
+		return out
+	}
+	in := func(xs []Type, t Type) bool {
+		for _, e := range xs {
 			if structural(e, t) {
 				return true
 			}
 		}
 		return false
 	}
-	if len(a.Elems()) != len(b.Elems()) {
-		return false
+	fa, fb := flat(a), flat(b)
+	for _, e := range fa {
+		if !in(fb, e) {
+			return false
+		}
 	}
-	for _, e := range a.Elems() {
-		if !in(b, e) {
+	for _, e := range fb {
+		if !in(fa, e) {
 			return false
 		}
 	}
@@ -242,7 +257,7 @@ func l(fn func() needs Store, gn func() needs Store, hn func() needs Log) {}
 // fixture.
 func TestIdentityMatchesStructure(t *testing.T) {
 	sources := map[string]string{"identity": identitySource}
-	for _, dir := range []string{"positive", "spec", "negative"} {
+	for _, dir := range []string{"positive", "spec", "negative", "../classf"} {
 		files, _ := filepath.Glob(filepath.Join("testdata", "fixtures", dir, "*.ef"))
 		for _, file := range files {
 			data, err := os.ReadFile(file)
@@ -348,38 +363,51 @@ func TestTypeStringOnlyPrints(t *testing.T) {
 	}
 }
 
-// TestIdentityEpoch: the rows of a signature under inference change after
-// its identity was built. An identity that depends on it holds for one
-// epoch; the next epoch rebuilds it from the new rows. Identities that
-// depend on no such signature stay memoized.
-func TestIdentityEpoch(t *testing.T) {
-	c, diags := checkFor("package main\ntype Fault struct{}\ntype G[T any] struct{}\nfunc main() {}\n")
-	if len(diags) > 0 {
-		t.Fatal(diags)
+// TestRowVariablesAfterInference: interned types never change (class F).
+// Initializer discovery meets f before its row is inferred, so the old
+// values hold f's row variable: Box[func() ρ_f] and a row
+// error[Fault[func() ρ_f]]. Once f's component is final, they are revisited:
+// each has the id of the same type written with f's solved row, and none
+// has the id of the type written with an empty row.
+func TestRowVariablesAfterInference(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("testdata", "classf", "cache-witness.ef"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	fault := c.pkg.Scope.names["Fault"].(*TypeName).Type
-	g := c.pkg.Scope.names["G"].(*TypeName).Type.(*Named)
-	sig := &Signature{Errors: newRow(), Uses: newRow(), inferred: true}
-	box := c.instantiate(g, []Type{sig})
-	before := c.types.id(box)
-	plain := c.instantiate(g, []Type{Typ[Int]})
-	plainID := c.types.id(plain)
+	c, _ := checkFor(string(src))
+	tn := func(name string) Type { return c.pkg.Scope.names[name].(*TypeName).Type }
+	old := c.pkg.Scope.names["old"].(*Var).Type
+	box, bang := tn("Box").(*Named), tn("Bang")
+	fails := c.instantiate(box, []Type{&Signature{Errors: c.types.row(bang), Uses: newRow()}})
+	empty := c.instantiate(box, []Type{&Signature{Errors: newRow(), Uses: newRow()}})
+	if !c.identical(old, fails) || !structural(old, fails) {
+		t.Errorf("old value %s: not identical to Box[func() error[Bang]]", old)
+	}
+	if c.identical(old, empty) || structural(old, empty) {
+		t.Errorf("old value %s: identical to Box[func()]", old)
+	}
+	if c.instantiate(box, []Type{&Signature{Errors: newRow(), Uses: newRow()}}) != empty {
+		t.Error("the instance cache does not return Box[func()] for its own key")
+	}
 
-	sig.Errors = c.types.row(fault)
-	if c.types.id(box) != before {
-		t.Fatal("an identity changed inside its epoch")
+	src, err = os.ReadFile(filepath.Join("testdata", "classf", "row-gap-witness.ef"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	c.types.changed()
-	after := c.types.id(box)
-	if after == before {
-		t.Fatal("the identity of G[func() error[Fault]] kept the rows of the previous epoch")
+	c, diags := checkFor(string(src))
+	if len(diags) > 0 {
+		t.Fatalf("row-gap witness: %v", diags)
 	}
-	want := c.instantiate(g, []Type{&Signature{Errors: c.types.row(fault), Uses: newRow()}})
-	if c.types.id(want) != after {
-		t.Fatal("the rebuilt identity differs from a fresh G[func() error[Fault]]")
+	tn = func(name string) Type { return c.pkg.Scope.names[name].(*TypeName).Type }
+	held := c.pkg.Scope.names["old"].(*Var).Type.(*Signature)
+	fault, bang := tn("Fault").(*Named), tn("Bang")
+	solved := c.instantiate(fault, []Type{&Signature{Errors: c.types.row(bang), Uses: newRow()}})
+	want := &Signature{Errors: c.types.row(solved), Uses: newRow()}
+	if !c.identical(held, want) || !structural(held, want) {
+		t.Errorf("old row %s: not identical to %s", held, want)
 	}
-	if c.types.id(plain) != plainID {
-		t.Fatal("a stable identity changed with the epoch")
+	if !c.types.row(solved).equal(c.types, held.Errors) {
+		t.Errorf("old row %s: not equal to error[%s]", held.Errors, solved)
 	}
 }
 

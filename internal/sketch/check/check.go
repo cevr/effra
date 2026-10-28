@@ -73,6 +73,11 @@ type checker struct {
 	// instance caches the instances of generic named types by their
 	// interned id: (origin, type argument ids), looked up before building.
 	instance map[int32]*Named
+	// inferInstances and inferSubjects hold the instances and switch
+	// subjects whose ids depend on an unbound row variable: the current
+	// component's inference context, discarded when it is final (class F).
+	inferInstances map[int32]*Named
+	inferSubjects  map[any]*switchUnion
 	// untyped holds the expressions Info records with an untyped type, and
 	// whether each was a constant, until a context converts them
 	// (updateExprType; go/types check.untyped).
@@ -158,16 +163,18 @@ func newChecker(path string, imp Importer, universe *Scope) *checker {
 		Literals: map[syntax.Node]*Signature{},
 	}}
 	return &checker{
-		pkg:        pkg,
-		imp:        imp,
-		universe:   universe,
-		seen:       map[string]bool{},
-		instance:   map[int32]*Named{},
-		types:      newTypeTable(),
-		errorTypes: map[*Named]syntax.Pos{},
-		guarded:    map[*Func]bool{},
-		reach:      map[any]*reachNode{},
-		providers:  map[*Named][]*Named{},
+		pkg:            pkg,
+		imp:            imp,
+		universe:       universe,
+		seen:           map[string]bool{},
+		instance:       map[int32]*Named{},
+		types:          newTypeTable(),
+		inferInstances: map[int32]*Named{},
+		inferSubjects:  map[any]*switchUnion{},
+		errorTypes:     map[*Named]syntax.Pos{},
+		guarded:        map[*Func]bool{},
+		reach:          map[any]*reachNode{},
+		providers:      map[*Named][]*Named{},
 
 		totalSwitch: map[*syntax.TypeSwitchStmt]bool{},
 	}

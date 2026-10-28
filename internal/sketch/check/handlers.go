@@ -232,11 +232,11 @@ func (c *checker) goExpr(x *syntax.GoExpr) operand {
 		errs = op.errs
 	} else {
 		sig := c.blockLit(x.Block, nil, nil)
-		c.chargeRow(x, sig.Uses)
+		c.chargeRow(x, c.types.resolve(sig.Uses))
 		if len(sig.Results) == 1 {
 			value = sig.Results[0]
 		}
-		errs = sig.Errors
+		errs = c.types.resolve(sig.Errors)
 	}
 	task := preludeType("Task")
 	if task == nil {
