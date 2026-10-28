@@ -28,6 +28,7 @@ This directory is the record. A rendered copy, such as a Sideshow post, is a vie
 | 2026-10-27 | [Why did this request time out? An agent reads a trace](2026-10-27-traceability.md) | Checked (prototype), Proposed |
 | 2026-10-27 | [`needs` and `provides`](2026-10-27-needs-provides.md) | Tested candidate, Proposed |
 | 2026-10-27 | [The language is Ergo](2026-10-27-ergo.md) | Tested candidate |
+| 2026-10-28 | [Ergo with and without Go's syntax](2026-10-28-without-go-syntax.md) | Checked, Proposed |
 
 ## Earlier sketches
 
