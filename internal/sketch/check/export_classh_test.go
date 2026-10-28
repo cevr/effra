@@ -3,7 +3,9 @@ package check
 import (
 	"fmt"
 	"math/rand/v2"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"ergo.local/prototype/internal/sketch/syntax"
@@ -13,11 +15,12 @@ import (
 // traced (round 16). It reports every body node the walk did not visit, and
 // every identifier the walk resolved differently from typing: typing
 // resolves a walked identifier to a package function or var exactly when
-// the walk does, and to the same object. An identifier typing resolves to
-// a package function that the walk skipped is reported too, unless the walk
-// saw it in a type or wire position and the checker reports an error there (a
-// function used as a type); a skipped composite-literal key that typing
-// resolves to a package var is a map key (refs.go), not an edge.
+// the walk does, and to the same object, except a composite-literal key the
+// walk took as a value because it could not decide the literal's kind
+// (reflits.go: conservative, an extra edge). An identifier typing resolves
+// to a package function or var that the walk skipped is reported too,
+// unless the walk saw it in a type or wire position and the checker
+// reports an error there (a function used as a type).
 func RefWalkProblems(src string) []string {
 	file, err := syntax.Parse(src)
 	if err != nil {
@@ -64,7 +67,7 @@ func RefWalkProblems(src string) []string {
 			if !ok {
 				continue
 			}
-			if want := pkgObject(u); want != o {
+			if want := pkgObject(u); want != o && !(wk.w.undecided[id] && want == nil) {
 				out = append(out, fmt.Sprintf("%s at %d: the walk resolves %v, typing %v", id.Name, id.Pos(), o, want))
 			}
 		}
@@ -75,8 +78,8 @@ func RefWalkProblems(src string) []string {
 			if _, walked := wk.w.idents[id]; walked {
 				continue
 			}
-			f, ok := pkgObject(u).(*Func)
-			if !ok {
+			o := pkgObject(u)
+			if o == nil {
 				continue
 			}
 			if wk.w.nameIdents[id] && diagnosedAt(c.diags, int(id.Pos())) {
@@ -84,7 +87,7 @@ func RefWalkProblems(src string) []string {
 				// an error there: not a value reference, no edge.
 				continue
 			}
-			out = append(out, fmt.Sprintf("%s at %d: typing resolves the package function %s, the walk skipped it", id.Name, id.Pos(), f.Name))
+			out = append(out, fmt.Sprintf("%s at %d: typing resolves the package object %s, the walk skipped it", id.Name, id.Pos(), id.Name))
 		}
 	}
 	sort.Strings(out)
@@ -172,7 +175,7 @@ func OrderProblems(src string, n int) []string {
 			return nil
 		}
 		_, diags := CheckSource(permuted)
-		want, have := orderKeys(base, origKey), orderKeys(diags, permKey)
+		want, have := orderKeys(base, src, origKey), orderKeys(diags, permuted, permKey)
 		if hasDuplicate(base) {
 			// The kept declaration depends on the order: compare the verdict
 			// and the duplicates only.
@@ -231,7 +234,7 @@ func duplicateName(msg string) (string, bool) {
 	return "", false
 }
 
-func orderKeys(diags []Diagnostic, key func(int) (int, int)) []string {
+func orderKeys(diags []Diagnostic, src string, key func(int) (int, int)) []string {
 	var out []string
 	for _, d := range diags {
 		if d.Code == CodeSyntax {
@@ -255,8 +258,32 @@ func orderKeys(diags []Diagnostic, key func(int) (int, int)) []string {
 			continue
 		}
 		decl, rel := key(d.Offset)
-		out = append(out, fmt.Sprintf("%d+%d %s %s", decl, rel, d.Code, d.Message))
+		out = append(out, fmt.Sprintf("%d+%d %s %s", decl, rel, d.Code, mapUsePosition(d.Message, src, key)))
 	}
 	sort.Strings(out)
 	return out
+}
+
+// usePosition is the value use a class G S108 names (rows.go reportGroup).
+var usePosition = regexp.MustCompile(` at (\d+):(\d+) inside its own recursive group; `)
+
+// mapUsePosition maps the line:column of a class G value use in msg to its
+// declaration and offset, as the diagnostic's own position.
+func mapUsePosition(msg, src string, key func(int) (int, int)) string {
+	m := usePosition.FindStringSubmatchIndex(msg)
+	if m == nil {
+		return msg
+	}
+	line, _ := strconv.Atoi(msg[m[2]:m[3]])
+	col, _ := strconv.Atoi(msg[m[4]:m[5]])
+	off := 0
+	for range line - 1 {
+		nl := strings.IndexByte(src[off:], '\n')
+		if nl < 0 {
+			break
+		}
+		off += nl + 1
+	}
+	decl, rel := key(off + col - 1)
+	return msg[:m[2]] + fmt.Sprintf("%d+%d", decl, rel) + msg[m[5]:]
 }

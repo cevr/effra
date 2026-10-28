@@ -88,14 +88,14 @@ type checker struct {
 	// vars (refs.go, class H): the body graph's edges. valueRefs holds each
 	// body's class G value uses, also lexical (refWalker).
 	refs      map[any]map[any]bool
-	valueRefs map[any]map[*Func][2]bool
+	valueRefs map[any]map[*Func][2]useSite
 	// Class G (rows.go pinGroup): group holds the functions of the
 	// component being checked. groupValue records which rows (errors,
 	// capabilities) of each member with an inferred row have a value use
 	// inside the component; such a row is pinned empty, and grew records
 	// which of them its body exceeds.
 	group      map[*Func]bool
-	groupValue map[*Func][2]bool
+	groupValue map[*Func][2]groupSite
 	lits       []*litFrame // the literal frames being checked, innermost last
 	// building is the named wire whose body checkWires is about to check
 	// (wireBody reads and clears it).

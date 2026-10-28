@@ -121,6 +121,14 @@ type bodyNode struct {
 	onStack    bool
 }
 
+// file is the file of the node's declaration.
+func (n *bodyNode) file() *fileInfo {
+	if n.fn != nil {
+		return n.fn.file
+	}
+	return n.v.file
+}
+
 // checkBodies checks every body, one strongly connected component of the
 // package's reference graph at a time, in reverse topological order: a
 // callee's inferred rows are final before its callers are checked. Inside a
@@ -157,7 +165,7 @@ func (c *checker) checkBodies() {
 	// Class H: the edges come from the lexical walk of every body, before
 	// any body is typed (refs.go).
 	c.refs = make(map[any]map[any]bool, len(nodes))
-	c.valueRefs = make(map[any]map[*Func][2]bool, len(nodes))
+	c.valueRefs = make(map[any]map[*Func][2]useSite, len(nodes))
 	for _, n := range nodes {
 		var owner any = n.v
 		var w *refWalker
@@ -271,7 +279,7 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 			c.group[n.fn] = true
 		}
 	}
-	c.groupValue, c.grew = map[*Func][2]bool{}, map[*Func][2]bool{}
+	c.groupValue, c.grew = map[*Func][2]groupSite{}, map[*Func][2]bool{}
 	defer func() { c.group, c.groupValue, c.grew = nil, nil, nil }()
 	cyclic := len(scc) > 1
 	if !cyclic {
@@ -362,14 +370,14 @@ func (c *checker) endLit(l *litFrame) bool {
 // component's bodies (refWalker.values, class H), so they do not depend on
 // typing: a use that is not a call is a value use of both rows, and a
 // function literal, trailing block or go task that is a value is a value
-// use of each row of the members it refers to that its own row would carry
-// (not written, not called on the spot). A var on an initialization cycle
-// is invalid, so its initializer adds no value use (D3). So no type in the
-// group depends on a row still being inferred, call admission does not
-// depend on the rows, and the rows grow monotonically to their least
-// fixpoint. When the body of a pinned member needs more than the empty
-// row, the member's declaration is S108 (reportGroup), never a chosen
-// fixpoint.
+// use of each row of the members it calls that its own row would carry
+// (not written, not taken from a closed parameter type, not called on the
+// spot). A var on an initialization cycle is invalid, so its initializer
+// adds no value use (D3). So no type in the group depends on a row still
+// being inferred, call admission does not depend on the rows, and the rows
+// grow monotonically to their least fixpoint. When the body of a pinned
+// member needs more than the empty row, the member's declaration is S108
+// (reportGroup), never a chosen fixpoint.
 //
 // Prior art: OCaml's let rec is monomorphic inside its group; Haskell needs
 // a signature for polymorphic recursion; TypeScript reports a name
@@ -378,20 +386,35 @@ func (c *checker) endLit(l *litFrame) bool {
 // choosing a fixpoint.
 func (c *checker) pinGroup(scc []*bodyNode) {
 	for _, n := range scc {
+		site := groupSite{file: n.file()}
 		var owner any = n.fn
 		if n.v != nil {
 			if n.v.initCycle {
 				continue
 			}
 			owner = n.v
+			site.key, site.anchor = "var "+n.v.obj.Name, n.v.obj.Pos
+			if n.v.spec != nil {
+				site.anchor = n.v.spec.Pos()
+			}
+		} else {
+			site.key, site.anchor = "func "+funcKey(n.fn), n.fn.Decl.Pos()
 		}
 		for f, kinds := range c.valueRefs[owner] {
 			if !c.group[f] {
 				continue
 			}
 			uses := c.groupValue[f]
-			uses[0] = uses[0] || kinds[0]
-			uses[1] = uses[1] || kinds[1]
+			for k, u := range kinds {
+				if !u.ok {
+					continue
+				}
+				s := site
+				s.useSite = u
+				if !uses[k].ok || s.before(uses[k]) {
+					uses[k] = s
+				}
+			}
 			c.groupValue[f] = uses
 		}
 	}
@@ -402,7 +425,7 @@ func (c *checker) pinGroup(scc []*bodyNode) {
 		}
 		uses := c.groupValue[n.fn]
 		for k, v := range []*RowVar{n.fn.errVar, n.fn.useVar} {
-			if v != nil && !v.final && uses[k] {
+			if v != nil && !v.final && uses[k].ok {
 				pin = append(pin, v)
 			}
 		}
@@ -411,6 +434,36 @@ func (c *checker) pinGroup(scc []*bodyNode) {
 		c.types.final(pin)
 		c.newSolutions()
 	}
+}
+
+// A groupSite is a class G value use inside a component: the use (where,
+// and through which literal), the body it is in (key: its kind and name)
+// and that body's declaration position (anchor). The use reported for a
+// member is the least by (key, offset from the anchor), which moves with
+// its declaration, so the choice does not depend on declaration order.
+type groupSite struct {
+	useSite
+	key    string
+	anchor syntax.Pos
+	file   *fileInfo
+}
+
+func (s groupSite) before(t groupSite) bool {
+	if s.key != t.key {
+		return s.key < t.key
+	}
+	return s.at-s.anchor < t.at-t.anchor
+}
+
+// funcKey names a function or method for groupSite.
+func funcKey(f *Func) string {
+	if f.Recv != nil {
+		return f.Recv.Obj.Name + "." + f.Name
+	}
+	if f.Decl.Recv != nil && len(f.Decl.Recv.List) > 0 {
+		return exprText(f.Decl.Recv.List[0].Type) + "." + f.Name
+	}
+	return f.Name
 }
 
 // groupRef handles a reference to f while f's component is checked: every
@@ -434,7 +487,7 @@ func (c *checker) groupRef(f *Func) bool {
 // exceeds. The fixpoint decides it; only the reporting pass reads it.
 func (c *checker) exceeded(f *Func) [2]bool {
 	grew, uses := c.grew[f], c.groupValue[f]
-	return [2]bool{grew[0] && uses[0], grew[1] && uses[1]}
+	return [2]bool{grew[0] && uses[0].ok, grew[1] && uses[1].ok}
 }
 
 // refused reports, in the reporting pass, whether f is refused by class G.
@@ -449,7 +502,9 @@ func (c *checker) refused(f *Func) bool {
 // reportGroup reports the class G S108 of each refused member of a
 // component at its declaration, where the row is written: one diagnostic
 // per function, at a position that does not depend on the order of the
-// declarations (round 16).
+// declarations (round 16). The message names the value use (groupSite),
+// or the literal, trailing block or go task that caused it, and the row to
+// write (round 17 m2).
 func (c *checker) reportGroup(scc []*bodyNode) {
 	for _, n := range scc {
 		f := n.fn
@@ -457,18 +512,29 @@ func (c *checker) reportGroup(scc []*bodyNode) {
 			continue
 		}
 		ex := c.exceeded(f)
+		params := "()"
+		if ps := f.Decl.Type.Params; ps != nil && len(ps.List) > 0 {
+			params = "(…)"
+		}
 		var row string
+		site := c.groupValue[f][0]
 		switch {
 		case ex[0] && ex[1]:
-			row = fmt.Sprintf("write its error row and capability row: func %s() error[…] needs …", f.Name)
+			row = fmt.Sprintf("write its error row and capability row: func %s%s error[…] needs …", f.Name, params)
 		case ex[0]:
-			row = fmt.Sprintf("write its error row: func %s() error[…]", f.Name)
+			row = fmt.Sprintf("write its error row: func %s%s error[…]", f.Name, params)
 		default:
-			row = fmt.Sprintf("write its capability row: func %s() needs …", f.Name)
+			row = fmt.Sprintf("write its capability row: func %s%s needs …", f.Name, params)
+			site = c.groupValue[f][1]
+		}
+		line, col := site.file.syntax.Position(site.at)
+		use := fmt.Sprintf("at %d:%d", line, col)
+		if site.via != "" {
+			use = fmt.Sprintf("through %s at %d:%d", site.via, line, col)
 		}
 		saved := c.cur
 		c.cur = f.file
-		c.errorf(f.Decl.Name, CodeType, "%s is used as a value inside its own recursive group, directly or through a function literal or task; %s", f.Name, row)
+		c.errorf(f.Decl.Name, CodeType, "%s is used as a value %s inside its own recursive group; %s", f.Name, use, row)
 		c.cur = saved
 	}
 }

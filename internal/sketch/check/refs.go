@@ -40,23 +40,46 @@ import "ergo.local/prototype/internal/sketch/syntax"
 // is a value; a trailing block of a call other than with is a value; a go
 // expression that is not a statement is a value for errors (its task's
 // type carries them) and passes capabilities on (they are charged at the go
-// site). A with block and a go statement are no frame.
+// site). A with block and a go statement are no frame. A function literal
+// or trailing block passed directly to a declared callee whose parameter
+// has a function type with a closed row (no type parameter in it) takes
+// that row from the parameter (call.go funcLit, blockLit), so the walk
+// stops there for that row (round 17 m1): the callee's signature was
+// resolved before any body (decl.go run), so this is order-invariant.
 type refWalker struct {
 	c      *checker
 	scopes []map[string]bool
 	refs   map[any]bool
 	// values holds the class G value uses: for each package function with
-	// an inferred row, which of its rows (errors, capabilities) the body
-	// uses as a value.
-	values  map[*Func][2]bool
+	// an inferred row, where the body first uses each of its rows (errors,
+	// capabilities) as a value, in the walk's order.
+	values  map[*Func][2]useSite
 	frames  []valueFrame
 	callees map[syntax.Node]bool // callees of calls: identifiers and function literals
+	// argRows marks a function literal passed to a parameter whose function
+	// type closes the row (errors, capabilities): see refWalker.
+	argRows map[syntax.Node][2]bool
+	// tparams are the type parameters of the function walked, which come
+	// before declarations in a written type (localTypeCtx).
+	tparams map[string]bool
 	// Test builds only (refTrace set): the resolution of each walked
 	// identifier (a package object or nil), the identifiers in type
-	// and wire positions (not value references) and every node visited.
+	// and wire positions (not value references), the composite-literal
+	// keys walked as values because the literal's kind is not decided
+	// (reflits.go), and every node visited.
 	idents     map[*syntax.Ident]any
 	nameIdents map[*syntax.Ident]bool
+	undecided  map[*syntax.Ident]bool
 	visited    map[syntax.Node]bool
+}
+
+// A useSite is where a body first uses a row of a function as a value: a
+// reference that is not a call (via "") or the literal, trailing block or
+// go task that carries the row (via names it).
+type useSite struct {
+	ok  bool
+	at  syntax.Pos
+	via string
 }
 
 // A frameMode says what a value frame does with a row of the calls inside
@@ -70,8 +93,12 @@ const (
 )
 
 // A valueFrame is a function literal, trailing block or go expression, with
-// its mode for errors and for capabilities.
-type valueFrame [2]frameMode
+// its mode for errors and for capabilities, its position and its name.
+type valueFrame struct {
+	mode [2]frameMode
+	at   syntax.Pos
+	via  string
+}
 
 // refTrace, when set by a test, receives each body's walk.
 var refTrace func(root syntax.Node, w *refWalker)
@@ -90,6 +117,23 @@ func (c *checker) bodyRefs(f *Func) *refWalker {
 			for _, n := range field.Names {
 				w.bind(n.Name)
 			}
+			// The receiver's type arguments name its type parameters.
+			rt := field.Type
+			if s, ok := rt.(*syntax.StarExpr); ok {
+				rt = s.X
+			}
+			if ix, ok := rt.(*syntax.IndexExpr); ok {
+				for _, a := range ix.Indices {
+					if id, ok := a.(*syntax.Ident); ok {
+						w.tparams[id.Name] = true
+					}
+				}
+			}
+		}
+	}
+	if f.Sig != nil {
+		for _, tp := range f.Sig.TParams {
+			w.tparams[tp.Name] = true
 		}
 	}
 	w.params(d.Type)
@@ -127,10 +171,12 @@ func (c *checker) varRefs(pv *pkgVar) *refWalker {
 }
 
 func (c *checker) newRefWalker() *refWalker {
-	w := &refWalker{c: c, refs: map[any]bool{}, values: map[*Func][2]bool{}, callees: map[syntax.Node]bool{}}
+	w := &refWalker{c: c, refs: map[any]bool{}, values: map[*Func][2]useSite{}, callees: map[syntax.Node]bool{},
+		argRows: map[syntax.Node][2]bool{}, tparams: map[string]bool{}}
 	if refTrace != nil {
 		w.idents = map[*syntax.Ident]any{}
 		w.nameIdents = map[*syntax.Ident]bool{}
+		w.undecided = map[*syntax.Ident]bool{}
 		w.visited = map[syntax.Node]bool{}
 	}
 	return w
@@ -195,25 +241,31 @@ func (w *refWalker) ident(x *syntax.Ident) {
 		w.refs[o] = true
 	}
 	if f, ok := o.(*Func); ok && (f.inferErrors || f.inferUses) {
-		w.valueUse(f, w.callees[x])
+		w.valueUse(f, w.callees[x], x.Pos())
 	}
 	if w.idents != nil {
 		w.idents[x] = o
 	}
 }
 
-// valueUse records the class G value uses of a reference to f: called or
-// not (see refWalker).
-func (w *refWalker) valueUse(f *Func, called bool) {
+// valueUse records the class G value uses of a reference to f at at:
+// called or not (see refWalker). The first site of each row is kept.
+func (w *refWalker) valueUse(f *Func, called bool, at syntax.Pos) {
 	uses := w.values[f]
 	for k := range uses {
+		if uses[k].ok {
+			continue
+		}
 		if !called {
-			uses[k] = true
+			uses[k] = useSite{ok: true, at: at}
 			continue
 		}
 		for i := len(w.frames) - 1; i >= 0; i-- {
-			if m := w.frames[i][k]; m != framePass {
-				uses[k] = uses[k] || m == frameValue
+			fr := w.frames[i]
+			if m := fr.mode[k]; m != framePass {
+				if m == frameValue {
+					uses[k] = useSite{ok: true, at: fr.at, via: fr.via}
+				}
 				break
 			}
 		}
@@ -239,6 +291,59 @@ func (w *refWalker) callee(fun syntax.Expr) {
 	case *syntax.Ident, *syntax.FuncLit:
 		w.callees[x] = true
 	}
+}
+
+// calleeSig returns the signature of a call's callee when it is a declared
+// function: a plain identifier, possibly instantiated, that no local
+// shadows, naming a function of the package or the universe, or a function
+// of an imported package. Signatures are resolved before any body.
+func (w *refWalker) calleeSig(fun syntax.Expr) *Signature {
+	x := unparen(fun)
+	if ix, ok := x.(*syntax.IndexExpr); ok {
+		x = unparen(ix.X)
+	}
+	var o Object
+	switch x := x.(type) {
+	case *syntax.Ident:
+		if w.local(x.Name) {
+			return nil
+		}
+		o = w.c.typeObject(x.Name, w.c.cur)
+	case *syntax.SelectorExpr:
+		id, ok := x.X.(*syntax.Ident)
+		if !ok || w.local(id.Name) {
+			return nil
+		}
+		if pn, ok := w.c.typeObject(id.Name, w.c.cur).(*PkgName); ok && !pn.broken {
+			o = pn.Pkg.Scope.names[x.Sel.Name]
+		}
+	}
+	if f, ok := o.(*Func); ok && f.Recv == nil {
+		return f.Sig
+	}
+	return nil
+}
+
+// closedRows reports which rows (errors, capabilities) of a parameter of
+// function type are closed: written in the signature with no type
+// parameter, so a literal passed there takes the row from it.
+func closedRows(pt Type) [2]bool {
+	ps, ok := under0(pt).(*Signature)
+	if !ok {
+		return [2]bool{}
+	}
+	closed := func(r *Row) bool {
+		if r == nil {
+			return false
+		}
+		for _, e := range r.Elems() {
+			if _, ok := e.(*TypeParam); ok {
+				return false
+			}
+		}
+		return true
+	}
+	return [2]bool{closed(ps.Errors), closed(ps.Uses)}
 }
 
 func (w *refWalker) local(name string) bool {
@@ -292,30 +397,18 @@ func (w *refWalker) expr(x syntax.Expr) {
 		w.expr(x.X)
 		w.visit(x.Sel)
 	case *syntax.CompositeLit:
-		w.typ(x.Type)
-		for _, e := range x.Elts {
-			if kv, ok := e.(*syntax.KeyValueExpr); ok {
-				w.visit(kv)
-				if id, ok := kv.Key.(*syntax.Ident); ok {
-					w.visit(id) // a field name or a map key: see refWalker
-				} else {
-					w.expr(kv.Key)
-				}
-				w.expr(kv.Value)
-				continue
-			}
-			w.expr(e)
-		}
+		w.compositeLit(x, litType{})
 	case *syntax.FuncLit:
-		f := valueFrame{frameValue, frameValue}
+		f := valueFrame{mode: [2]frameMode{frameValue, frameValue}, at: x.Pos(), via: "the function literal"}
 		if w.callees[x] {
-			f = valueFrame{framePass, framePass}
+			f.mode = [2]frameMode{framePass, framePass}
 		}
-		if writesErrors(x.Type) {
-			f[0] = frameStop
+		closed := w.argRows[x]
+		if writesErrors(x.Type) || closed[0] {
+			f.mode[0] = frameStop
 		}
-		if x.Type.Needs != nil {
-			f[1] = frameStop
+		if x.Type.Needs != nil || closed[1] {
+			f.mode[1] = frameStop
 		}
 		w.frame(f, func() {
 			w.push()
@@ -353,13 +446,29 @@ func (w *refWalker) expr(x syntax.Expr) {
 		} else {
 			w.callee(x.Fun)
 			w.expr(x.Fun)
-			w.exprs(x.Args)
+			sig := w.calleeSig(x.Fun)
+			spread := x.Ellipsis.IsValid()
+			for i, a := range x.Args {
+				if lit, ok := unparen(a).(*syntax.FuncLit); ok && sig != nil {
+					w.argRows[lit] = closedRows(paramType(sig, i, spread))
+				}
+				w.expr(a)
+			}
 			if x.Trailing != nil {
-				w.frame(valueFrame{frameValue, frameValue}, func() { w.block(x.Trailing) })
+				f := valueFrame{mode: [2]frameMode{frameValue, frameValue}, at: x.Trailing.Pos(), via: "the trailing block"}
+				if sig != nil {
+					closed := closedRows(paramType(sig, len(x.Args), spread))
+					for k := range closed {
+						if closed[k] {
+							f.mode[k] = frameStop
+						}
+					}
+				}
+				w.frame(f, func() { w.block(x.Trailing) })
 			}
 		}
 	case *syntax.GoExpr:
-		w.frame(valueFrame{frameValue, framePass}, func() { w.goBody(x) })
+		w.frame(valueFrame{mode: [2]frameMode{frameValue, framePass}, at: x.Pos(), via: "the go task"}, func() { w.goBody(x) })
 	case *syntax.CatchExpr:
 		w.expr(x.X)
 		w.visit(x.Bind)

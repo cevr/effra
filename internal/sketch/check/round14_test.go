@@ -313,7 +313,7 @@ func TestRecursiveAdmissionGroups(t *testing.T) {
 			}
 			var have []string
 			for _, d := range diags {
-				if d.Code == CodeType && !strings.Contains(d.Message, "inside its own recursive group, directly or through") {
+				if d.Code == CodeType && !strings.Contains(d.Message, " inside its own recursive group; ") {
 					t.Errorf("seed %d errors=%v: unexpected %s\n%s", seed, errors, d, g.src)
 				}
 				have = append(have, fmt.Sprintf("%s@%d", d.Code, d.Line))

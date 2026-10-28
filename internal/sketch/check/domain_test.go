@@ -305,7 +305,7 @@ func TestRowGraphDomain(t *testing.T) {
 			switch {
 			case d.Code == "S108" && strings.Contains(d.Message, "initialization cycle"):
 				gotS108++
-			case d.Code == "S108" && strings.Contains(d.Message, "used as a value inside its own recursive group"):
+			case d.Code == "S108" && strings.Contains(d.Message, " inside its own recursive group; "):
 				gotG++
 			case d.Code == "S102":
 				gotS102++
