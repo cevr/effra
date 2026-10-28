@@ -58,7 +58,7 @@ func (c *converter) file(f *syntax.File) *File {
 		case *syntax.ImportDecl:
 			for _, s := range d.Specs {
 				if s.Kind != syntax.ImportPlain {
-					c.refuseAt(s.NamePos, "a named, dot or go import")
+					c.refuseAt(s.NamePos, "an aliased or go import")
 					continue
 				}
 				out.Imports = append(out.Imports, strings.Trim(s.Path.Value, "\"`"))
@@ -88,7 +88,7 @@ func (c *converter) file(f *syntax.File) *File {
 			}
 			out.Wires = append(out.Wires, &WireDecl{Pos: c.pos(d.Wire), Name: d.Name.Name, Entries: c.wireEntries(d.Body)})
 		case *syntax.VarDecl:
-			c.refuse(d, "a var declaration")
+			c.refuse(d, "a top-level let that is not a wire")
 		default:
 			c.refuse(d, "this declaration")
 		}
@@ -286,7 +286,7 @@ func (c *converter) funcDecl(d *syntax.FuncDecl) *FuncDecl {
 		return nil
 	}
 	if d.Body == nil {
-		c.refuseAt(d.Func, "a bodiless declaration")
+		c.refuseAt(d.Func, "an extern declaration")
 		return nil
 	}
 	out := &FuncDecl{Sig: Sig{Pos: c.pos(d.Func), Name: d.Name.Name}}
@@ -382,7 +382,7 @@ func (c *converter) stmt(s syntax.Stmt) Stmt {
 				return &ReturnStmt{Pos: c.pos(s.Return), Value: x}
 			}
 		default:
-			c.refuse(s, "a return of several values")
+			c.refuse(s, "a return of a tuple")
 		}
 	case *syntax.IfStmt:
 		return c.ifStmt(s)
@@ -396,13 +396,13 @@ func (c *converter) stmt(s syntax.Stmt) Stmt {
 			}
 			return nil
 		}
-		c.refuse(s, "a local var declaration")
+		c.refuse(s, "a let with a type, several names or no value")
 	case *syntax.ForStmt, *syntax.RangeStmt:
 		c.refuse(s, "a for loop")
 	case *syntax.DeferStmt:
 		c.refuse(s, "a defer statement")
 	case *syntax.SwitchStmt:
-		c.refuse(s, "an expression switch")
+		c.refuse(s, "a match on values")
 	case *syntax.SelectStmt:
 		c.refuse(s, "a select statement")
 	case *syntax.LabeledStmt:
@@ -451,7 +451,7 @@ func (c *converter) typeSwitch(s *syntax.TypeSwitchStmt) Stmt {
 		c.refuse(s.Init, "a switch init statement")
 		return nil
 	case len(s.Subjects) != 1:
-		c.refuseAt(s.Switch, "a multi-subject type switch")
+		c.refuseAt(s.Switch, "a match on a tuple")
 		return nil
 	}
 	// The decided match binds the narrowed value with `case T as p` (#196,
@@ -473,13 +473,13 @@ func (c *converter) typeSwitch(s *syntax.TypeSwitchStmt) Stmt {
 		}
 	}
 	if bind == "" {
-		c.refuseAt(s.Switch, "a type switch without a binding")
+		c.refuseAt(s.Switch, "a match on a union without an `as` binding")
 		return nil
 	}
 	out := &TypeSwitchStmt{Pos: c.pos(s.Switch), Bind: bind, Subject: c.expr(s.Subjects[0].X)}
 	for _, cl := range s.Clauses {
 		if cl.List == nil {
-			c.refuseAt(cl.Case, "a default clause")
+			c.refuseAt(cl.Case, "a `case _` arm")
 			continue
 		}
 		var types []QName
