@@ -78,13 +78,22 @@ type checker struct {
 	// component's inference context, discarded when it is final (class F).
 	inferInstances map[int32]*Named
 	inferSubjects  map[any]*switchUnion
-	// admission collects the diagnostics a settle pass suppresses; settled
-	// marks the functions of a component that settled, whose reporting
-	// pass reads the published solutions; widened records a reporting
-	// pass that computed a wider row (an invariant the tests assert).
-	admission []string
-	settled   map[*Func]bool
-	widened   []string
+	// settled marks the functions of a component that converged, whose
+	// reporting pass reads the published solutions; widened records a
+	// reporting pass that computed a wider row (an invariant the tests
+	// assert).
+	settled map[*Func]bool
+	widened []string
+	// Class G (rows.go pinGroup): group holds the functions of the
+	// component being checked and callee the function expression of the
+	// call being checked. groupValue is the first value use, in source
+	// order, of each member with an inferred row; such a member's inferred
+	// rows are pinned empty, and grew records which of them its body
+	// exceeds (by kind: errors, capabilities).
+	group      map[*Func]bool
+	callee     syntax.Expr
+	groupValue map[*Func]valueUse
+	grew       map[*Func][2]bool
 	// untyped holds the expressions Info records with an untyped type, and
 	// whether each was a constant, until a context converts them
 	// (updateExprType; go/types check.untyped).
@@ -201,15 +210,6 @@ func (c *checker) errorf(n syntax.Node, code, format string, args ...any) {
 
 func (c *checker) errorAt(pos, end syntax.Pos, code, format string, args ...any) {
 	if c.silent > 0 {
-		if c.admission != nil {
-			// What a silent pass would report: which calls it admits
-			// (settle, rows.go).
-			file := -1
-			if c.cur != nil {
-				file = c.cur.index
-			}
-			c.admission = append(c.admission, fmt.Sprintf("%d:%d:%d:%s", file, pos, end, code))
-		}
 		return
 	}
 	d := Diagnostic{Code: code, Message: fmt.Sprintf(format, args...)}

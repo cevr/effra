@@ -2,8 +2,6 @@ package check
 
 import (
 	"fmt"
-	"sort"
-	"strings"
 
 	"ergo.local/prototype/internal/sketch/syntax"
 )
@@ -253,6 +251,15 @@ func (c *checker) discoverInit() {
 }
 
 func (c *checker) checkComponent(scc []*bodyNode) {
+	// The group whose rows are being inferred (class G, pinGroup).
+	c.group = map[*Func]bool{}
+	for _, n := range scc {
+		if n.fn != nil {
+			c.group[n.fn] = true
+		}
+	}
+	c.groupValue, c.grew = map[*Func]valueUse{}, map[*Func][2]bool{}
+	defer func() { c.group, c.groupValue, c.grew = nil, nil, nil }()
 	cyclic := len(scc) > 1
 	if !cyclic {
 		for _, e := range scc[0].edges {
@@ -285,10 +292,16 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 			n.fn.resetRows()
 		}
 		c.newSolutions()
+		c.pinGroup(scc)
 	}
 	if cyclic && inferred {
-		c.converge(scc)
-		c.settle(scc)
+		// A refused component is reported as is: its rows are not settled.
+		settled := c.converge(scc)
+		for _, n := range scc {
+			if settled && n.fn != nil {
+				c.settled[n.fn] = true
+			}
+		}
 	}
 	for _, n := range scc {
 		c.checkNode(n)
@@ -301,51 +314,76 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 	c.finalComponent(scc)
 }
 
-// settle repeats full silent passes over a cyclic component until one pass
-// changes neither a row nor which calls are admitted (the diagnostics the
-// pass would report), so the solutions the reporting pass reads are the
-// fixpoint (round 12 M2). Types that hold the component's variables compare
-// by their current solutions meanwhile (intern.go). Past a bound
-// proportional to the component the rows are refused, not guessed (S108).
-func (c *checker) settle(scc []*bodyNode) {
-	bound := 2*len(scc) + 2
-	prev := "\x00"
-	for range bound {
-		c.silent++
-		saved := c.admission
-		c.admission = []string{}
-		changed := false
-		for _, n := range scc {
-			if c.checkNode(n) {
-				changed = true
-			}
-		}
-		sort.Strings(c.admission)
-		admitted := strings.Join(c.admission, "\n")
-		c.admission = saved
-		c.silent--
-		if !changed && admitted == prev {
-			for _, n := range scc {
-				if n.fn != nil {
-					c.settled[n.fn] = true
-				}
-			}
-			return
-		}
-		prev = admitted
-	}
+// valueUse is a use of a function that is not a call, with the index of its
+// file, so the first one in source order is well defined.
+type valueUse struct {
+	file int
+	x    *syntax.Ident
+}
+
+// pinGroup applies class G to a cyclic component after its silent pass has
+// recorded the value uses (rows.md, Capability rows 6): a member used as a
+// value inside its own group has the rows it writes, and each row it does
+// not write is pinned empty, as for an exported function. So no type in
+// the group depends on a row still being inferred, call admission does not
+// depend on the rows, and the rows grow monotonically to their least
+// fixpoint. When the body of a pinned member needs more than the empty row,
+// its first value use is S108 (groupValueUse), never a chosen fixpoint.
+//
+// Prior art: OCaml's let rec is monomorphic inside its group; Haskell needs
+// a signature for polymorphic recursion; TypeScript reports a name
+// "referenced directly or indirectly in its own initializer"; Go and Rust
+// require every signature. Each refuses the circular case instead of
+// choosing a fixpoint.
+func (c *checker) pinGroup(scc []*bodyNode) {
+	var pin []*RowVar
 	for _, n := range scc {
-		f := n.fn
-		if f == nil || !f.inferErrors && !f.inferUses {
+		if n.fn == nil || c.groupValue[n.fn].x == nil {
 			continue
 		}
-		which := "error row"
-		if !f.inferErrors {
-			which = "capability row"
+		for _, v := range []*RowVar{n.fn.errVar, n.fn.useVar} {
+			if v != nil && !v.final {
+				pin = append(pin, v)
+			}
 		}
-		c.errorf(f.Decl.Name, CodeType, "cannot infer the %s of %s; write it", which, f.Name)
-		c.settled[f] = true
 	}
+	if len(pin) > 0 {
+		c.types.final(pin)
+		c.newSolutions()
+	}
+}
+
+// groupValueUse handles a use of f that is not a call while f's component
+// is checked (class G). It records the first such use in source order, and
+// at that use reports a pinned row that f's body exceeds. It reports
+// whether the use is refused.
+func (c *checker) groupValueUse(f *Func, x *syntax.Ident) bool {
+	if !c.group[f] || !f.inferErrors && !f.inferUses {
+		return false
+	}
+	file := -1
+	if c.cur != nil {
+		file = c.cur.index
+	}
+	first, ok := c.groupValue[f]
+	if !ok || file < first.file || file == first.file && x.Pos() < first.x.Pos() {
+		c.groupValue[f] = valueUse{file, x}
+		first = c.groupValue[f]
+	}
+	grew := c.grew[f]
+	if c.silent > 0 || first.x != x || !grew[0] && !grew[1] {
+		return false
+	}
+	const used = "%s is used as a value inside its own recursive group; "
+	switch {
+	case grew[0] && grew[1]:
+		c.errorf(x, CodeType, used+"write its error row and capability row: func %s() error[…] needs …", f.Name, f.Name)
+	case grew[0]:
+		c.errorf(x, CodeType, used+"write its error row: func %s() error[…]", f.Name, f.Name)
+	default:
+		c.errorf(x, CodeType, used+"write its capability row: func %s() needs …", f.Name, f.Name)
+	}
+	return true
 }
 
 // finalComponent binds the row variables of a component for good and
@@ -378,6 +416,36 @@ func (c *checker) newSolutions() {
 	clear(c.inferSubjects)
 }
 
+// rowSize is the number of elements in a body's inferred rows so far.
+func (n *bodyNode) rowSize() int {
+	if n.fn == nil {
+		return 0
+	}
+	size := 0
+	for _, v := range []*RowVar{n.fn.errVar, n.fn.useVar} {
+		if v != nil {
+			size += len(v.sol.Elems())
+		}
+	}
+	return size
+}
+
+// refuseRows reports the functions of a component whose inferred rows did
+// not reach a fixpoint within the bound (S108: soundness by refusal).
+func (c *checker) refuseRows(scc []*bodyNode) {
+	for _, n := range scc {
+		f := n.fn
+		if f == nil || !f.inferErrors && !f.inferUses {
+			continue
+		}
+		which := "error row"
+		if !f.inferErrors {
+			which = "capability row"
+		}
+		c.errorf(f.Decl.Name, CodeType, "cannot infer the %s of %s; write it", which, f.Name)
+	}
+}
+
 // resetRows empties the solutions of a function's row variables that are
 // not final (a least fixpoint starts from empty rows).
 func (f *Func) resetRows() {
@@ -393,10 +461,16 @@ func (f *Func) resetRows() {
 // body it references grew. Rows are finite sets that only grow (a body's
 // rows are monotone in its callees' rows), so the worklist empties; no row
 // is published to another component before it has converged.
+// They are monotone because no type inside the group depends on a row still
+// being inferred: a member used as a value inside its group has its
+// unwritten rows pinned empty (class G, pinGroup). As a safety net the worklist is
+// bounded by the component and its rows so far: each check that grows a row
+// adds to the bound, so a monotone fixpoint always fits, and a worklist
+// past it refuses the rows (S108) instead of guessing.
 //
 // Prior art: Koka and Gleam infer per strongly connected component; the
 // worklist is the standard chaotic-iteration solver of dataflow analysis.
-func (c *checker) converge(scc []*bodyNode) {
+func (c *checker) converge(scc []*bodyNode) bool {
 	in := make(map[*bodyNode]bool, len(scc))
 	for _, n := range scc {
 		in[n] = true
@@ -415,12 +489,34 @@ func (c *checker) converge(scc []*bodyNode) {
 		queued[n] = true
 	}
 	c.silent++
+	checks, budget, growth := 0, 4*(len(scc)+1), 0
+	lastGrowth := map[*bodyNode]int{}
 	for len(queue) > 0 {
+		if checks > budget {
+			c.silent--
+			c.refuseRows(scc)
+			return false
+		}
+		checks++
 		n := queue[0]
 		queue = queue[1:]
 		queued[n] = false
+		before := n.rowSize()
 		if !c.checkNode(n) {
 			continue
+		}
+		// Only growth extends the bound: each new element pays for one
+		// more check of each body that references n. A row that changes
+		// without growing extends nothing, so a cycle of changes ends in
+		// the refusal.
+		if grown := n.rowSize() - before; grown > 0 {
+			budget += 2 * grown * (len(preds[n]) + 1)
+			growth += grown
+		} else if n.v != nil && growth > lastGrowth[n] {
+			// A var's type follows the rows of the literals it holds: it
+			// may change once per growth elsewhere in the component.
+			budget += 2 * (len(preds[n]) + 1)
+			lastGrowth[n] = growth
 		}
 		for _, p := range preds[n] {
 			if !queued[p] {
@@ -430,6 +526,7 @@ func (c *checker) converge(scc []*bodyNode) {
 		}
 	}
 	c.silent--
+	return true
 }
 
 // checkNode checks one body and reports whether its inferred rows grew.
@@ -619,7 +716,18 @@ func (c *checker) checkFuncBody(f *Func) bool {
 		row *Row
 	}{{f.errVar, t.errors}, {f.useVar, t.uses}} {
 		v := p.v
-		if v == nil || v.final {
+		if v == nil {
+			continue
+		}
+		if v.final {
+			if c.group[f] && c.silent > 0 {
+				// Pinned empty by class G: record whether the body needs more.
+				// The fixpoint decides; the reporting pass, which refuses the
+				// value uses, only reads it.
+				grew := c.grew[f]
+				grew[v.Kind-KindErrors] = !p.row.Empty()
+				c.grew[f] = grew
+			}
 			continue
 		}
 		if c.settled[f] && c.silent == 0 {

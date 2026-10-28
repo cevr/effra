@@ -26,7 +26,14 @@ func (c *checker) call(x *syntax.CallExpr, hint Type) operand {
 			return bad(x)
 		}
 	}
+	// The callee is a call, not a value use (class G, groupValueUse).
+	prev := c.callee
+	c.callee = unparen(x.Fun)
+	if ix, ok := c.callee.(*syntax.IndexExpr); ok {
+		c.callee = unparen(ix.X)
+	}
 	fun := c.expr(x.Fun, nil)
+	c.callee = prev
 	switch fun.mode {
 	case modeInvalid:
 		c.silentArgs(x)
