@@ -1,0 +1,4 @@
+// want S108
+func main() needs Console {
+	Console.Println(Console.Println("inner"), "outer")
+}

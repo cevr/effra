@@ -67,7 +67,22 @@ type File struct {
 	lines    []int
 }
 
-func (f *File) Pos() Pos { return f.Package }
+// Pos is the position of the package clause, which no decided source has
+// (#196); without one it is the first declaration or comment, and the end
+// of an empty file.
+func (f *File) Pos() Pos {
+	if f.Package.IsValid() {
+		return f.Package
+	}
+	pos := f.EOF
+	if len(f.Decls) > 0 {
+		pos = f.Decls[0].Pos()
+	}
+	if len(f.Comments) > 0 && f.Comments[0].Pos() < pos {
+		pos = f.Comments[0].Pos()
+	}
+	return pos
+}
 func (f *File) End() Pos { return f.EOF }
 
 // Position returns the 1-based line and byte column of pos.
@@ -111,22 +126,30 @@ type ImportSpec struct {
 	Path    *BasicLit
 }
 
-// VarDecl is `var x = e`, `var x T` or `var ( … )`.
+// VarDecl is `let [mut] patterns [Type] [= e]` (#196): one VarSpec, no
+// parentheses, Var at `let`. Mut is the position of `mut`, or NoPos.
+// Lparen, Rparen and further specs are never produced by the decided
+// grammar; they stay for the consumers that check-v1 rewrites.
 type VarDecl struct {
 	Doc    *CommentGroup
 	Var    Pos
+	Mut    Pos
 	Lparen Pos
 	Specs  []*VarSpec
 	Rparen Pos
 }
 
-// VarSpec is one `names [Type] [= values]` line.
+// VarSpec is the bound part of a let. Names holds the names of `let x` and
+// `let q, r`; Pattern holds any other pattern (a record pattern, a tuple in
+// parentheses, or several patterns as a TupleExpr without parentheses), and
+// then Names is empty. Values holds the one value, if any.
 type VarSpec struct {
-	Doc    *CommentGroup
-	Names  []*Ident
-	Type   Expr
-	Assign Pos
-	Values []Expr
+	Doc     *CommentGroup
+	Names   []*Ident
+	Pattern Expr
+	Type    Expr
+	Assign  Pos
+	Values  []Expr
 }
 
 // TypeDecl is `type Name[params] Spec`, where Spec is a StructType, an
@@ -139,10 +162,12 @@ type TypeDecl struct {
 	Spec       Expr
 }
 
-// FuncDecl is a function or a method. Body is nil for a bodiless
-// declaration, such as one bound by an //ef:go directive.
+// FuncDecl is a function, or with Extern set and Body nil, the Go binding
+// `extern go path.F func Name(sig)`. Recv is never produced by the decided
+// grammar (receivers are first parameters, #196).
 type FuncDecl struct {
 	Doc        *CommentGroup
+	Extern     *ExternSpec
 	Func       Pos
 	Recv       *FieldList
 	Name       *Ident
@@ -155,8 +180,12 @@ type FuncDecl struct {
 // Provides lists the capabilities the wire exposes; the entries it builds
 // and does not list stay private to its build. Needs lists the capabilities
 // its providers require from the with site. Either clause may be nil.
+//
+// The decided spelling is `let Name = wire [provides …] [needs …] { … }` at
+// package level (#196); Let is the position of `let`.
 type WireDecl struct {
 	Doc      *CommentGroup
+	Let      Pos
 	Wire     Pos
 	Name     *Ident
 	Provides *ProvidesClause
@@ -185,7 +214,12 @@ func (d *VarDecl) End() Pos {
 	}
 	return d.Specs[0].End()
 }
-func (s *VarSpec) Pos() Pos { return s.Names[0].Pos() }
+func (s *VarSpec) Pos() Pos {
+	if s.Pattern != nil {
+		return s.Pattern.Pos()
+	}
+	return s.Names[0].Pos()
+}
 func (s *VarSpec) End() Pos {
 	if len(s.Values) > 0 {
 		return s.Values[len(s.Values)-1].End()
@@ -193,18 +227,31 @@ func (s *VarSpec) End() Pos {
 	if s.Type != nil {
 		return s.Type.End()
 	}
+	if s.Pattern != nil {
+		return s.Pattern.End()
+	}
 	return s.Names[len(s.Names)-1].End()
 }
 func (d *TypeDecl) Pos() Pos { return d.Type }
 func (d *TypeDecl) End() Pos { return d.Spec.End() }
-func (d *FuncDecl) Pos() Pos { return d.Func }
+func (d *FuncDecl) Pos() Pos {
+	if d.Extern != nil {
+		return d.Extern.Pos()
+	}
+	return d.Func
+}
 func (d *FuncDecl) End() Pos {
 	if d.Body != nil {
 		return d.Body.End()
 	}
 	return d.Type.End()
 }
-func (d *WireDecl) Pos() Pos { return d.Wire }
+func (d *WireDecl) Pos() Pos {
+	if d.Let.IsValid() {
+		return d.Let
+	}
+	return d.Wire
+}
 func (d *WireDecl) End() Pos { return d.Body.End() }
 
 func (*ImportDecl) declNode() {}
@@ -405,8 +452,8 @@ type (
 		Rbrack Pos
 	}
 
-	// TypeGuard is `x.(type)`; it appears only as a subject of a
-	// TypeSwitchStmt.
+	// TypeGuard is a subject of a TypeSwitchStmt: the subject of a match,
+	// with Lparen and Rparen NoPos (#196).
 	TypeGuard struct {
 		X      Expr
 		Lparen Pos
@@ -463,10 +510,13 @@ type (
 		Rbrace Pos
 	}
 
-	// WireLit is an inline `wire{ … }`.
+	// WireLit is a wire value `wire [provides …] [needs …] { … }`; either
+	// clause may be nil.
 	WireLit struct {
-		Wire Pos
-		Body *WireBody
+		Wire     Pos
+		Provides *ProvidesClause
+		Needs    *NeedsClause
+		Body     *WireBody
 	}
 
 	// GoExpr is `go f(x)` or `go { … }`: it starts a task. Exactly one of
@@ -492,11 +542,15 @@ type (
 		Elt    Expr
 	}
 
-	// MapType is `map[K]V`.
+	// MapType is `Map[K, V]`: Map is the position of the name, Lbrack and
+	// Rbrack of its brackets (#196, eighth round: a prelude name cannot be
+	// redeclared, so the name always means the map type).
 	MapType struct {
-		Map   Pos
-		Key   Expr
-		Value Expr
+		Map    Pos
+		Lbrack Pos
+		Key    Expr
+		Value  Expr
+		Rbrack Pos
 	}
 
 	// ChanType is `chan T`, `chan<- T` or `<-chan T`.
@@ -508,31 +562,39 @@ type (
 	}
 
 	// FuncType is a signature. Func is NoPos in a declaration or method.
-	// Results is nil without results.
+	// Results is nil without results; otherwise it holds the result type
+	// and, after it, the failures as one Field of type *ErrorRow. Escaping
+	// is the position of `escaping`, or NoPos.
 	FuncType struct {
-		Func    Pos
-		Params  *FieldList
-		Results *FieldList
-		Needs   *NeedsClause
+		Escaping Pos
+		Func     Pos
+		Params   *FieldList
+		Results  *FieldList
+		Needs    *NeedsClause
 	}
 
-	// StructType is `struct{ fields }`.
+	// StructType is the record of `type T { fields }`: Struct is NoPos and
+	// Fields holds the braces.
 	StructType struct {
 		Struct Pos
 		Fields *FieldList
 	}
 
-	// InterfaceType is a capability interface (Methods) or a union
-	// (Union, the variant types). An empty interface has neither.
+	// InterfaceType is an operation type `type T { operations, laws }`
+	// (Methods and Laws, braces set) or a union `type T = A | B{…}` (Union,
+	// each a type name or a *VariantSpec; Interface, Lbrace and Rbrace
+	// NoPos).
 	InterfaceType struct {
 		Interface Pos
 		Lbrace    Pos
 		Methods   []*Field
+		Laws      []*LawDecl
 		Union     []Expr
 		Rbrace    Pos
 	}
 
-	// ErrorRow is `error[A | B]` in a result list.
+	// ErrorRow is the failure row `fails A | B` of a signature: Error is the
+	// position of `fails`; Lbrack and Rbrack are NoPos.
 	ErrorRow struct {
 		Error  Pos
 		Lbrack Pos
@@ -554,7 +616,8 @@ type (
 		Step    Expr
 	}
 
-	// TupleExpr is `(A, B)`, a case of a multi-subject type switch.
+	// TupleExpr is a tuple type or value `(A, B)`, or a tuple pattern; a
+	// let with several patterns holds them in one without parentheses.
 	TupleExpr struct {
 		Lparen Pos
 		Elts   []Expr
@@ -571,11 +634,12 @@ const (
 	ChanRecv         // <-chan T
 )
 
-// MachineEntry is `initial x` or `step f`.
+// MachineEntry is `initial: x` or `step: f`.
 type MachineEntry struct {
 	Doc     *CommentGroup
 	NamePos Pos
 	Name    string // "initial" or "step"
+	Colon   Pos
 	Value   Expr
 }
 
@@ -622,8 +686,13 @@ func (x *IndexExpr) End() Pos    { return x.Rbrack + 1 }
 func (x *SliceExpr) Pos() Pos    { return x.X.Pos() }
 func (x *SliceExpr) End() Pos    { return x.Rbrack + 1 }
 func (x *TypeGuard) Pos() Pos    { return x.X.Pos() }
-func (x *TypeGuard) End() Pos    { return x.Rparen + 1 }
-func (x *CallExpr) Pos() Pos     { return x.Fun.Pos() }
+func (x *TypeGuard) End() Pos {
+	if !x.Rparen.IsValid() {
+		return x.X.End()
+	}
+	return x.Rparen + 1
+}
+func (x *CallExpr) Pos() Pos { return x.Fun.Pos() }
 func (x *CallExpr) End() Pos {
 	if x.Trailing != nil {
 		return x.Trailing.End()
@@ -659,11 +728,19 @@ func (x *Ellipsis) End() Pos {
 func (x *ArrayType) Pos() Pos { return x.Lbrack }
 func (x *ArrayType) End() Pos { return x.Elt.End() }
 func (x *MapType) Pos() Pos   { return x.Map }
-func (x *MapType) End() Pos   { return x.Value.End() }
-func (x *ChanType) Pos() Pos  { return x.Begin }
-func (x *ChanType) End() Pos  { return x.Value.End() }
+func (x *MapType) End() Pos {
+	if x.Rbrack.IsValid() {
+		return x.Rbrack + 1
+	}
+	return x.Value.End()
+}
+func (x *ChanType) Pos() Pos { return x.Begin }
+func (x *ChanType) End() Pos { return x.Value.End() }
 func (x *FuncType) Pos() Pos {
-	if x.Func.IsValid() {
+	switch {
+	case x.Escaping.IsValid():
+		return x.Escaping
+	case x.Func.IsValid():
 		return x.Func
 	}
 	return x.Params.Pos()
@@ -677,16 +754,49 @@ func (x *FuncType) End() Pos {
 	}
 	return x.Params.End()
 }
-func (x *StructType) Pos() Pos    { return x.Struct }
-func (x *StructType) End() Pos    { return x.Fields.End() }
-func (x *InterfaceType) Pos() Pos { return x.Interface }
-func (x *InterfaceType) End() Pos { return x.Rbrace + 1 }
-func (x *ErrorRow) Pos() Pos      { return x.Error }
-func (x *ErrorRow) End() Pos      { return x.Rbrack + 1 }
-func (x *MachineType) Pos() Pos   { return x.Machine }
-func (x *MachineType) End() Pos   { return x.Rbrace + 1 }
-func (x *TupleExpr) Pos() Pos     { return x.Lparen }
-func (x *TupleExpr) End() Pos     { return x.Rparen + 1 }
+func (x *StructType) Pos() Pos {
+	if x.Struct.IsValid() {
+		return x.Struct
+	}
+	return x.Fields.Pos()
+}
+func (x *StructType) End() Pos { return x.Fields.End() }
+func (x *InterfaceType) Pos() Pos {
+	switch {
+	case x.Interface.IsValid():
+		return x.Interface
+	case x.Lbrace.IsValid():
+		return x.Lbrace
+	}
+	return x.Union[0].Pos()
+}
+func (x *InterfaceType) End() Pos {
+	if x.Rbrace.IsValid() {
+		return x.Rbrace + 1
+	}
+	return x.Union[len(x.Union)-1].End()
+}
+func (x *ErrorRow) Pos() Pos { return x.Error }
+func (x *ErrorRow) End() Pos {
+	if x.Rbrack.IsValid() {
+		return x.Rbrack + 1
+	}
+	return x.Types[len(x.Types)-1].End()
+}
+func (x *MachineType) Pos() Pos { return x.Machine }
+func (x *MachineType) End() Pos { return x.Rbrace + 1 }
+func (x *TupleExpr) Pos() Pos {
+	if x.Lparen.IsValid() {
+		return x.Lparen
+	}
+	return x.Elts[0].Pos()
+}
+func (x *TupleExpr) End() Pos {
+	if x.Rparen.IsValid() {
+		return x.Rparen + 1
+	}
+	return x.Elts[len(x.Elts)-1].End()
+}
 
 func (*Ident) exprNode()         {}
 func (*BasicLit) exprNode()      {}
@@ -965,3 +1075,8 @@ func (*TypeSwitchStmt) stmtNode() {}
 func (*SelectStmt) stmtNode()     {}
 func (*ForStmt) stmtNode()        {}
 func (*RangeStmt) stmtNode()      {}
+
+// if and match are expressions in operand position (#196, sixth round).
+func (*IfStmt) exprNode()         {}
+func (*SwitchStmt) exprNode()     {}
+func (*TypeSwitchStmt) exprNode() {}

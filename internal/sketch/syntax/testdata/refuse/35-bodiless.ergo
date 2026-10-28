@@ -1,0 +1,5 @@
+// want: S001 3 -
+//ef:go strings.ToUpper
+func Upper(s string) string
+
+func f() {}

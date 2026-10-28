@@ -1,52 +1,10 @@
 package sketchtest
 
 import (
-	"go/scanner"
 	"go/token"
 	"math/rand/v2"
 	"strings"
 )
-
-// The properties below lex sources with go/scanner, independently of the
-// parser under test: the 2026 lexical grammar is Go's for every token the
-// corpus uses.
-
-type lexeme struct {
-	start, end int
-	tok        token.Token
-	text       string
-}
-
-func lexAll(src string) ([]lexeme, bool) {
-	data := []byte(src)
-	fset := token.NewFileSet()
-	file := fset.AddFile("x", -1, len(data))
-	errs := 0
-	var s scanner.Scanner
-	s.Init(file, data, func(token.Position, string) { errs++ }, scanner.ScanComments)
-	var out []lexeme
-	for {
-		pos, tok, lit := s.Scan()
-		if tok == token.EOF {
-			break
-		}
-		if tok == token.SEMICOLON && lit == "\n" {
-			continue
-		}
-		text := lit
-		if text == "" {
-			text = tok.String()
-		}
-		start := file.Offset(pos)
-		end := start + len(text)
-		if tok == token.COMMENT || tok == token.STRING {
-			end = start + rawLen(src[start:])
-			text = src[start:end]
-		}
-		out = append(out, lexeme{start, end, tok, text})
-	}
-	return out, errs == 0
-}
 
 func rawLen(rest string) int {
 	switch {
@@ -103,6 +61,7 @@ func Comments(src string) ([]string, bool) {
 // comma directly before a closer: what formatting must keep.
 func Tokens(src string) ([]string, bool) {
 	lexemes, ok := lexAll(src)
+	lexemes = normalize(lexemes)
 	var kept []lexeme
 	for _, l := range lexemes {
 		if l.tok != token.COMMENT && l.tok != token.SEMICOLON {
@@ -127,6 +86,7 @@ func Tokens(src string) ([]string, bool) {
 // two tokens, so a comment never crosses a token.
 func Interleaved(src string) ([]string, bool) {
 	lexemes, ok := lexAll(src)
+	lexemes = normalize(lexemes)
 	nextCode := func(i int) token.Token {
 		for j := i + 1; j < len(lexemes); j++ {
 			if t := lexemes[j].tok; t != token.COMMENT && t != token.SEMICOLON {
@@ -161,7 +121,7 @@ func Boundaries(src string) []int {
 	lexemes, _ := lexAll(src)
 	var out []int
 	for _, l := range lexemes {
-		if l.tok != token.SEMICOLON && l.tok != token.COMMENT {
+		if l.tok != token.SEMICOLON && l.tok != token.COMMENT && !l.inner {
 			out = append(out, l.start)
 		}
 	}

@@ -1,0 +1,4 @@
+// want: S001 2 first parameter
+func (o Order) Fee(rate int64) int64 {
+	o.Total * rate / 100
+}

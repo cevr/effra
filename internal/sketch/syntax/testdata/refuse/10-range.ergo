@@ -1,0 +1,6 @@
+// want: S001 3 for x in
+func f(xs []int64) {
+	for _, x := range xs {
+		use(x)
+	}
+}

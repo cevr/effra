@@ -1,0 +1,12 @@
+// A union on several lines continues after the semicolon that Go's rule
+// inserts at a line end, with or without the leading |. ergo fmt writes the
+// leading | on every line of a multi-line union.
+// expect: "\t| Pending{}"
+type Payment =
+	Pending{}
+	| Authorized{AuthID string}
+	| Declined{Reason Reason}
+
+type Option[T] = Some{Value T} | None{}
+
+type ChargeError = Declined | Frozen | timeout.Expired

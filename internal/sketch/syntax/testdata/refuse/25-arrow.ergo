@@ -1,0 +1,5 @@
+// want: S001 3 queue
+func f(q Queue) int64 {
+	let x = <-q
+	x
+}

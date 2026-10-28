@@ -1,0 +1,10 @@
+let Limit = 10      // int: the default
+let Small int8 = 10 // int8: the written type; lowered to `const Small int8 = 10`
+
+func scale() {
+	let b float64 = 2  // accepted: an integer literal may take a float type
+	let c int = 2.0    // S108: a float literal takes only a float type
+	let d = 1 + 2.5    // S108: write 1.0 + 2.5
+	let e = 500ms      // duration
+	let f int8 = Limit // S108: Limit is int; write int8(Limit) or declare Limit int8
+}

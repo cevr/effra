@@ -3,6 +3,8 @@ package format
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -99,10 +101,26 @@ func firstDiffLine(a, b string) int {
 	return 0
 }
 
-func TestPositiveInputs(t *testing.T) {
+// TestFormatIdempotent (D7): over every positive input, the decided and
+// edge fixtures, and whitespace perturbations of each, the output parses,
+// keeps the tree, the tokens and the comments, and formats to itself.
+func TestFormatIdempotent(t *testing.T) {
 	inputs, err := sketchtest.Positive()
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, dir := range []string{"decided", "edge"} {
+		paths, _ := filepath.Glob(filepath.Join("..", "syntax", "testdata", dir, "*.ergo"))
+		if len(paths) == 0 {
+			t.Fatalf("no syntax/testdata/%s fixtures", dir)
+		}
+		for _, p := range paths {
+			data, err := os.ReadFile(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inputs = append(inputs, sketchtest.Input{Name: dir + "/" + filepath.Base(p), Src: string(data)})
+		}
 	}
 	for _, in := range inputs {
 		check(t, in.Name, in.Src, 5)
@@ -125,34 +143,32 @@ func TestSupersededInputs(t *testing.T) {
 // the layout is idempotent and canonical (spec risk 4).
 func TestCommentPositions(t *testing.T) {
 	src := `// file doc
-package p // after the clause
+// after the clause
 
 /* block
    comment */
-import (
-	// before a spec
-	"a" // after a spec
-	/* inline */ "b"
-	// before the paren
-)
 
-type T struct { // after the brace
+// before a spec
+import a // after a spec
+/* inline */ import b
+// before the paren
+
+type T { // after the brace
 	// before a field
-	a int /* mid */ // end
-	b string
+	a int, /* mid */ // end
+	b string,
 	// before the brace
 }
 
-type U interface{ A /* x */ | B }
+type U = A | B
 
 // doc
-//ef:go net/url.Parse
-func parse(raw string) (url.URL, error[go.Error /* row */ | E]) needs go.Foreign
+extern go net/url.Parse func parse[E](raw string) url.URL fails go.Error | E needs go.Foreign
 
 func f(a /* first */ int, // after a
 	b int, /* after b */
 ) ( /* results */ int) {
-	x := g( // after the paren
+	let x = g( // after the paren
 		1, /* one */
 		// own line in the arguments
 		2,
@@ -162,7 +178,7 @@ func f(a /* first */ int, // after a
 	} /* between */ else { // after else
 		z()
 	}
-	switch v := x.(type) { // after switch
+	match x { // after switch
 	// before the first case
 	case A:
 		a()
@@ -171,18 +187,18 @@ func f(a /* first */ int, // after a
 	// about B
 	case B:
 	// still B, empty
-	default:
+	case _:
 		d()
 		// end of default
 
 	// before the closing brace
 	}
-	r := try h() catch e {
-	case E1: // after the case
+	let r = try h() catch {
+	case E1 as e: // after the case
 		log(e)
 		// end of the arm
 	}
-	w := wire{ /* only */ A = X{} }
+	let w = wire { /* only */ A: X{} }
 	return 1 /* after the result */
 	// end of the body
 }
@@ -206,7 +222,7 @@ func f(a /* first */ int, // after a
 // size; and a bound below the output is refused before the text is built,
 // so the allocation stays near the input's size too.
 func TestOutputBound(t *testing.T) {
-	src := "package p\n\ntype Big struct {\n\t" + strings.Repeat("L", 4096) + " int64\n" + strings.Repeat("\tx int64\n", 2000) + "}\n"
+	src := "type Big {\n\t" + strings.Repeat("L", 4096) + " int64,\n" + strings.Repeat("\tx int64,\n", 2000) + "}\n"
 	out, err := SourceBounded(src, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -230,18 +246,16 @@ func TestOutputBound(t *testing.T) {
 	if exact, err := SourceBounded(src, len(out)); err != nil || exact != out {
 		t.Fatalf("bound equal to the output: %v", err)
 	}
-	// Review r2 M1: empty cells (inferred var types) never inherit a long
-	// cell's width, in mixed and wholly inferred neighbourhoods, for every
-	// aligned column: var groups, struct fields with trailing comments,
-	// keyed literals.
+	// Review r2 M1: a short cell never inherits a long cell's width, for
+	// every aligned column: record fields with trailing comments, keyed
+	// literals, wire entries, and trailing comments of consecutive lets.
 	long := strings.Repeat("L", 4096)
 	for _, g := range []struct{ name, src string }{
-		{"typed long then inferred then typed", "package p\n\nvar (\n\ta " + long + " = " + long + "{}\n\tb = 2\n" + strings.Repeat("\tc int = 3\n", 2000) + ")\n"},
-		{"inferred run after a long type", "package p\n\nvar (\n\ta " + long + " = " + long + "{}\n" + strings.Repeat("\tb = 2\n", 2000) + ")\n"},
-		{"inferred run before a long type", "package p\n\nvar (\n" + strings.Repeat("\tb = 2\n", 2000) + "\ta " + long + " = " + long + "{}\n)\n"},
-		{"wholly inferred with a long name", "package p\n\nvar (\n\t" + long + " = 1\n" + strings.Repeat("\tb = 2\n", 2000) + ")\n"},
-		{"trailing comments after a long field", "package p\n\ntype T struct {\n\t" + long + " int // c\n" + strings.Repeat("\tx int // c\n", 2000) + "}\n"},
-		{"keyed literal with a long key", "package p\n\nvar m = M{\n\t" + long + ": 1,\n" + strings.Repeat("\tb: 2,\n", 2000) + "}\n"},
+		{"trailing comments after a long field", "type T {\n\t" + long + " int, // c\n" + strings.Repeat("\tx int, // c\n", 2000) + "}\n"},
+		{"keyed literal with a long key", "let m = M{\n\t" + long + ": 1,\n" + strings.Repeat("\tb: 2,\n", 2000) + "}\n"},
+		{"wire with a long key", "let W = wire {\n\t" + long + ": X{},\n" + strings.Repeat("\tb: Y{},\n", 2000) + "}\n"},
+		{"lets after a long value", "let a = " + long + "{} // c\n" + strings.Repeat("let b = 2 // c\n", 2000)},
+		{"lets before a long value", strings.Repeat("let b = 2 // c\n", 2000) + "let a = " + long + "{} // c\n"},
 	} {
 		out, err := Source(g.src)
 		if err != nil {
@@ -251,150 +265,149 @@ func TestOutputBound(t *testing.T) {
 			t.Errorf("%s: output %d bytes for a %d-byte input", g.name, len(out), len(g.src))
 		}
 	}
-	// gofmt's alignment of a mixed group of narrow cells stays.
-	got, _ := Source("package p\n\nvar (\n\ta int = 1\n\tb = 2\n\tccccc string = \"x\"\n)\n")
-	if want := "package p\n\nvar (\n\ta     int    = 1\n\tb            = 2\n\tccccc string = \"x\"\n)\n"; got != want {
-		t.Fatalf("mixed group alignment\n%s", got)
+	// Consecutive lets are separate statements: their values never align.
+	got, _ := Source("let a int = 1\nlet b = 2\nlet ccccc string = \"x\"\n")
+	if want := "let a int = 1\nlet b = 2\nlet ccccc string = \"x\"\n"; got != want {
+		t.Fatalf("lets\n%s", got)
 	}
 	// Aligned columns of similar widths still align (gofmt).
-	got, _ = Source("package p\n\ntype T struct {\n\tshort int\n\tsomewhatLongerName string\n}\n")
-	if want := "package p\n\ntype T struct {\n\tshort              int\n\tsomewhatLongerName string\n}\n"; got != want {
+	got, _ = Source("type T {\n\tshort int,\n\tsomewhatLongerName string,\n}\n")
+	if want := "type T {\n\tshort              int,\n\tsomewhatLongerName string,\n}\n"; got != want {
 		t.Fatalf("alignment\n%s", got)
 	}
 }
 
+// TestMalformedIsRefused: a malformed input gives no text and its
+// registered code.
 func TestMalformedIsRefused(t *testing.T) {
 	for _, m := range sketchtest.MalformedTable {
 		src := m.Src
 		if m.Generate != nil {
 			src = m.Generate()
 		}
+		code := m.Code
+		if code == "" {
+			code = syntax.CodeSyntax
+		}
 		out, err := Source(src)
 		var e *syntax.Error
-		if out != "" || !errors.As(err, &e) || e.Code != syntax.CodeSyntax {
-			t.Errorf("%s: got %q, %v; want no text and S001", m.Name, out, err)
+		if out != "" || !errors.As(err, &e) || e.Code != code {
+			t.Errorf("%s: got %q, %v; want no text and %s", m.Name, out, err, code)
 		}
 	}
 }
 
-// TestLayout pins the canonical layout of constructs and comment positions.
+// TestLayout pins the canonical layout of constructs and comment positions,
+// and the decided normalisations (D4): the leading `|` of a union exactly
+// when it spans several lines, `with (W)` as `with W`, `match (x)` as
+// `match x`.
 func TestLayout(t *testing.T) {
 	cases := []struct{ name, src, want string }{
 		{
 			"gofmt layout",
-			"package p\n\n\n\nimport (\n\"a\"; . \"b\"\n  go \"c\")\nfunc f( a,b int,\n) (int, error[A|B]) needs X,Y { return a*b+1 }\n",
-			"package p\n\nimport (\n\t\"a\"\n\t. \"b\"\n\tgo \"c\"\n)\nfunc f(a, b int,\n) (int, error[A | B]) needs X, Y { return a*b + 1 }\n",
+			"\n\n\nimport  a\nimport b   c\n  import go d\nfunc f( a,b int,\n) (int, string) fails A|B needs X,Y { return a*b+1 }\n",
+			"import a\nimport b c\nimport go d\nfunc f(a, b int,\n) (int, string) fails A | B needs X, Y { return a*b + 1 }\n",
 		},
 		{
 			"explicit semicolons become line breaks",
-			"package p\n\ntype P struct{ A string; B string }\n\nfunc main() { with(wire{ A = X{}; B = Y{} }) { f() } }\n",
-			"package p\n\ntype P struct {\n\tA string\n\tB string\n}\n\nfunc main() {\n\twith(wire{\n\t\tA = X{}\n\t\tB = Y{}\n\t}) { f() }\n}\n",
+			"func main() {\n\tf(); g()\n}\n",
+			"func main() {\n\tf()\n\tg()\n}\n",
 		},
 		{
 			"alignment",
-			"package p\n\ntype T struct {\n\tn int64 // count\n\tlonger string\n}\n\nvar (\n\tfirst = \"a\"\n\tsecondName = \"b\"\n)\n\nwire W {\n\tA = X{}\n\tLonger = Y{}\n}\n\ntype M machine[S, E] {\n\tinitial Idle{}\n\tstep f\n}\n\nvar routes = R{\n\t\"a\": x,\n\t\"long\": y,\n}\n",
-			"package p\n\ntype T struct {\n\tn      int64 // count\n\tlonger string\n}\n\nvar (\n\tfirst      = \"a\"\n\tsecondName = \"b\"\n)\n\nwire W {\n\tA      = X{}\n\tLonger = Y{}\n}\n\ntype M machine[S, E] {\n\tinitial Idle{}\n\tstep    f\n}\n\nvar routes = R{\n\t\"a\":    x,\n\t\"long\": y,\n}\n",
+			"type T {\n\tn int64, // count\n\tlonger string,\n}\n\nlet first = \"a\"\nlet secondName = \"b\"\n\nlet W = wire {\n\tA: X{},\n\tLonger: Y{},\n}\n\ntype M machine[S, E] {\n\tinitial: Idle{},\n\tstep: f,\n}\n\nlet routes = R{\n\t\"a\": x,\n\t\"long\": y,\n}\n",
+			"type T {\n\tn      int64, // count\n\tlonger string,\n}\n\nlet first = \"a\"\nlet secondName = \"b\"\n\nlet W = wire {\n\tA:      X{},\n\tLonger: Y{},\n}\n\ntype M machine[S, E] {\n\tinitial: Idle{},\n\tstep:    f,\n}\n\nlet routes = R{\n\t\"a\":    x,\n\t\"long\": y,\n}\n",
 		},
 		{
 			"comments take the block's indentation",
-			"package p\n\nfunc f() {\n        x()\n  // before the brace\n}\n",
-			"package p\n\nfunc f() {\n\tx()\n\t// before the brace\n}\n",
+			"func f() {\n        x()\n  // before the brace\n}\n",
+			"func f() {\n\tx()\n\t// before the brace\n}\n",
 		},
 		{
 			"comment before case: blank line decides the clause",
-			"package p\n\nfunc f(v V) {\n\tswitch v {\n\tcase 1:\n\t\ta()\n\t// still case 1\n\n\t// about case 2\n\tcase 2:\n\t\tb()\n\t\t// end of case 2\n\t}\n}\n",
-			"package p\n\nfunc f(v V) {\n\tswitch v {\n\tcase 1:\n\t\ta()\n\t\t// still case 1\n\n\t// about case 2\n\tcase 2:\n\t\tb()\n\t\t// end of case 2\n\t}\n}\n",
+			"func f(v int64) {\n\tmatch v {\n\tcase 1:\n\t\ta()\n\t// still case 1\n\n\t// about case 2\n\tcase 2:\n\t\tb()\n\t\t// end of case 2\n\t}\n}\n",
+			"func f(v int64) {\n\tmatch v {\n\tcase 1:\n\t\ta()\n\t\t// still case 1\n\n\t// about case 2\n\tcase 2:\n\t\tb()\n\t\t// end of case 2\n\t}\n}\n",
 		},
 		{
 			"catch arms are clauses",
-			"package p\n\nfunc f() {\n\tr := g() catch e {\n\t\tcase A: log(e)\n\t\t\tStatus(1)\n\t}\n}\n",
-			"package p\n\nfunc f() {\n\tr := g() catch e {\n\tcase A:\n\t\tlog(e)\n\t\tStatus(1)\n\t}\n}\n",
+			"func f() {\n\tlet r = g() catch {\n\t\tcase A as e: log(e)\n\t\t\tStatus(1)\n\t}\n}\n",
+			"func f() {\n\tlet r = g() catch {\n\tcase A as e:\n\t\tlog(e)\n\t\tStatus(1)\n\t}\n}\n",
 		},
 		{
-			"statement blocks are multi-line, function bodies keep one line",
-			"package p\n\nfunc f() { if x { return } }\nfunc g() {}\n",
-			"package p\n\nfunc f() {\n\tif x {\n\t\treturn\n\t}\n}\nfunc g() {}\n",
+			"short one-line blocks stay on one line",
+			"func f() { if x { return } }\nfunc g() {}\nfunc h(c bool) int64 {\n\tif c { 1 } else { 2 }\n}\n",
+			"func f() { if x { return } }\nfunc g() {}\nfunc h(c bool) int64 {\n\tif c { 1 } else { 2 }\n}\n",
 		},
 		{
 			"continuation lines indent once",
-			"package p\n\nfunc f() {\n\tx := a &&\nb ||\nc\n\tg(1,\n2)\n}\n",
-			"package p\n\nfunc f() {\n\tx := a &&\n\t\tb ||\n\t\tc\n\tg(1,\n\t\t2)\n}\n",
+			"func f() {\n\tlet x = a &&\nb ||\nc\n\tg(1,\n2)\n}\n",
+			"func f() {\n\tlet x = a &&\n\t\tb ||\n\t\tc\n\tg(1,\n\t\t2)\n}\n",
 		},
 		{
-			"labels outdent, raw strings stay",
-			"package p\n\nfunc f() {\nouter:\n\tfor {\n\t\tbreak outer\n\t}\n\ts := `a\n  b`\n}\n",
-			"package p\n\nfunc f() {\nouter:\n\tfor {\n\t\tbreak outer\n\t}\n\ts := `a\n  b`\n}\n",
+			"raw strings stay",
+			"func f() {\n\tlet s = `a\n  b`\n\tuse(s)\n}\n",
+			"func f() {\n\tlet s = `a\n  b`\n\tuse(s)\n}\n",
 		},
 		{
 			"CRLF input gives LF output",
-			"package p\r\n\r\n// c\r\nfunc f() {}\r\n",
-			"package p\n\n// c\nfunc f() {}\n",
+			"// c\r\nfunc f() {}\r\n",
+			"// c\nfunc f() {}\n",
 		},
 		{
-			"directive stays attached",
-			"package p\n\n//ef:go net/url.Parse\nfunc parse(raw string) (url.URL, error[go.Error]) needs go.Foreign\n",
-			"package p\n\n//ef:go net/url.Parse\nfunc parse(raw string) (url.URL, error[go.Error]) needs go.Foreign\n",
+			"extern stays on one line",
+			"extern  go net/url.Parse   func parse(raw string) url.URL fails go.Error needs go.Foreign\n",
+			"extern go net/url.Parse func parse(raw string) url.URL fails go.Error needs go.Foreign\n",
 		},
 		{
 			// Review M1: a comment inside a delimiter stays before its
 			// closer, so no semicolon is inserted after the closer.
 			"comments stay inside delimiters",
-			"package p\nvar xs [ // c\n]int\nvar ys [ /* c\n d */ ]int\nvar m map[ /* k */ string /* v */ ]int\nvar s = a /* x */ .b\nvar c <- /* y */ chan int\n",
-			"package p\nvar xs [ // c\n]int\nvar ys [ /* c\n d */ ]int\nvar m map[ /* k */ string /* v */]int\nvar s = a /* x */ .b\nvar c <- /* y */ chan int\n",
+			"let xs [ // c\n]int\nlet ys [ /* c\n d */ ]int\nlet s = a /* x */ .b\n",
+			"let xs [ // c\n]int\nlet ys [ /* c\n d */ ]int\nlet s = a /* x */ .b\n",
 		},
 		{
 			// go/printer: no blank between a block comment and `,`, nor `)`
 			// unless the comment follows the opener.
 			"block comment before a comma or closer",
-			"package p\nvar x = f(a /* x */ , b)\nvar y = f( /* y */ )\nvar z = f(a /* z */ )\n",
-			"package p\nvar x = f(a /* x */, b)\nvar y = f( /* y */ )\nvar z = f(a /* z */)\n",
+			"let x = f(a /* x */, b)\nlet y = f( /* y */ )\nlet z = f(a /* z */)\n",
+			"let x = f(a /* x */, b)\nlet y = f( /* y */ )\nlet z = f(a /* z */)\n",
 		},
 		{
 			"grouped names keep their line breaks",
-			"package p\nfunc f(a,\nb int) {}\n\ntype T struct {\n\tx,\n\ty int\n}\n",
-			"package p\nfunc f(a,\n\tb int) {}\n\ntype T struct {\n\tx,\n\ty int\n}\n",
+			"func f(a,\nb int) {}\n\ntype T {\n\tx,\ny int,\n}\n",
+			"func f(a,\n\tb int) {}\n\ntype T {\n\tx,\n\ty int,\n}\n",
 		},
 		{
 			// Review r2 m1: grouped names take the enclosing list's or
 			// block's continuation level, and one of their own only where
-			// none exists; gofmt's layouts (gofmt also adds a blank line
-			// after the package clause and opens empty bodies).
+			// none exists.
 			"grouped names take one continuation level",
-			"package p\nfunc f(a,\nb int,\nc,\nd string) {}\nfunc g(\na,\nb int,\nc,\nd string,\n) {}\nfunc h() (a,\nb int,\nc,\nd string) {}\nvar (\nx,\ny int\nz string\n)\nvar u,\nv int\nfunc k() {\n\tvar p,\n\tq int\n}\n",
-			"package p\nfunc f(a,\n\tb int,\n\tc,\n\td string) {}\nfunc g(\n\ta,\n\tb int,\n\tc,\n\td string,\n) {}\nfunc h() (a,\n\tb int,\n\tc,\n\td string) {}\nvar (\n\tx,\n\ty int\n\tz string\n)\nvar u,\n\tv int\nfunc k() {\n\tvar p,\n\t\tq int\n}\n",
+			"func f(a,\nb int,\nc,\nd string) {}\nfunc g(\na,\nb int,\nc,\nd string,\n) {}\n",
+			"func f(a,\n\tb int,\n\tc,\n\td string) {}\nfunc g(\n\ta,\n\tb int,\n\tc,\n\td string,\n) {}\n",
 		},
 		{
 			// Review r3 m1: a list indents at its first line break, as
 			// go/printer's parameters and exprList do, so a nested
 			// parameter list or a multi-line item before that break keeps
-			// the level the list started at. gofmt's layouts (with the same
-			// two deviations as above).
+			// the level the list started at.
 			"lists indent at their first line break",
-			"package p\nfunc f(a,\nb func(x,\ny int),\nc,\nd int) {}\nfunc f4(\na func(x,\ny int),\n) {}\nfunc f7(a,\nb func() func(x,\ny int),\nc int) {}\nfunc g() {\nh(a,\nfunc(x,\ny int) {\nk(p,\nq)\n},\nb)\nf(T{\nA: 1,\n},\nb)\n}\n",
-			"package p\nfunc f(a,\n\tb func(x,\n\ty int),\n\tc,\n\td int) {}\nfunc f4(\n\ta func(x,\n\t\ty int),\n) {}\nfunc f7(a,\n\tb func() func(x,\n\ty int),\n\tc int) {}\nfunc g() {\n\th(a,\n\t\tfunc(x,\n\t\t\ty int) {\n\t\t\tk(p,\n\t\t\t\tq)\n\t\t},\n\t\tb)\n\tf(T{\n\t\tA: 1,\n\t},\n\t\tb)\n}\n",
+			"func f(a,\n\tb func(x,\n\ty int),\n\tc,\n\td int) {}\nfunc f4(\n\ta func(x,\n\t\ty int),\n) {}\nfunc f7(a,\n\tb func() func(x,\n\ty int),\n\tc int) {}\nfunc g() {\n\th(a,\n\t\tfunc(x,\n\t\t\ty int) {\n\t\t\tk(p,\n\t\t\t\tq)\n\t\t},\n\t\tb)\n\tf(T{\n\t\tA: 1,\n\t},\n\t\tb)\n}\n",
+			"func f(a,\n\tb func(x,\n\ty int),\n\tc,\n\td int) {}\nfunc f4(\n\ta func(x,\n\t\ty int),\n) {}\nfunc f7(a,\n\tb func() func(x,\n\ty int),\n\tc int) {}\nfunc g() {\n\th(a,\n\t\tfunc(x,\n\t\t\ty int) {\n\t\t\tk(p,\n\t\t\t\tq)\n\t\t},\n\t\tb)\n\tf(T{\n\t\tA: 1,\n\t},\n\t\tb)\n}\n",
 		},
 		{
-			// Review M9: the explicit empty statement keeps the label; the
-			// loop after it stays unlabelled.
-			"labelled empty statement",
-			"package p\nfunc f() { L:; for {break L} }\n",
-			"package p\nfunc f() {\nL:\n\t;\n\tfor {\n\t\tbreak L\n\t}\n}\n",
+			"header parentheses go",
+			"func f() {\n\tmatch (x) {\n\tcase _:\n\t}\n\twith (W) {\n\t\tg()\n\t}\n\tmatch (a, b) {\n\tcase (_, _):\n\t}\n}\n",
+			"func f() {\n\tmatch x {\n\tcase _:\n\t}\n\twith W {\n\t\tg()\n\t}\n\tmatch (a, b) {\n\tcase (_, _):\n\t}\n}\n",
 		},
 		{
-			// Review M7: gofmt writes an inserted header semicolon as `; `.
-			"header semicolons at line breaks",
-			"package p\nfunc f() { if x := g()\nx {}; switch g()\n{default:}; for i := 0\ni < 3\ni++ {} }\n",
-			"package p\nfunc f() {\n\tif x := g(); x {\n\t}\n\tswitch g(); {\n\tdefault:\n\t}\n\tfor i := 0; i < 3; i++ {\n\t}\n}\n",
-		},
-		{
-			"parenthesised receives and inferred array length",
-			"package p\nfunc f() { select { case (<-ch): case x = (<-ch): } }\nvar x = [...]int{1, 2}\n",
-			"package p\nfunc f() {\n\tselect {\n\tcase (<-ch):\n\tcase x = (<-ch):\n\t}\n}\nvar x = [...]int{1, 2}\n",
+			"a union's leading bar exactly when it spans lines",
+			"type U =\n\tA\n\t| B\n\ntype V = A |\n\tB\n\ntype W =\n\t| C\n\t| D\n\ntype X = E | F\n",
+			"type U =\n\t| A\n\t| B\n\ntype V =\n\t| A\n\t| B\n\ntype W =\n\t| C\n\t| D\n\ntype X = E | F\n",
 		},
 		{
 			"unary operators never merge",
-			"package p\n\nvar x = - -y\nvar z = a - -b\n",
-			"package p\n\nvar x = - -y\nvar z = a - -b\n",
+			"let x = - -y\nlet z = a - -b\n",
+			"let x = - -y\nlet z = a - -b\n",
 		},
 	}
 	for _, c := range cases {

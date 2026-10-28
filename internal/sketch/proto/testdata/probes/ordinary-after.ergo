@@ -1,0 +1,8 @@
+// out: helper ordinary ok
+type Timer { After(value string) string }
+type Plain {}
+func After(_ Plain, value string) string { return "ordinary " + value }
+func Println(value string) string        { return "helper " + value }
+func main() needs Console {
+	with wire { Timer: Plain{} } { Console.Println(Println(Timer.After("ok"))) }
+}

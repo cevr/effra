@@ -1,0 +1,16 @@
+type Card {
+	Number string,
+	Expiry Date,
+}
+
+type Store {
+	Find(id string) Order fails NotFound,
+	Put(id string, o Order),
+
+	law FindAfterPut(id string, o Order) { Put(id, o); try Find(id) == o },
+}
+
+type Pair[A, B] { First A, Second B }
+type Point { X, Y int }
+type Frozen {}
+type Celsius float64

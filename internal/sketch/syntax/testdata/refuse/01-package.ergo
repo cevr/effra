@@ -1,0 +1,4 @@
+// want: S001 2 directory
+package pay
+
+func f() {}

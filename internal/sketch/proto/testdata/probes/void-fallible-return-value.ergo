@@ -1,0 +1,10 @@
+// want S108
+type Fault {}
+func inner() string fails Fault { return "ok" }
+func outer() fails Fault        { return try inner() }
+func main() needs Console {
+	outer() catch {
+	case Fault:
+		Console.Println("handled")
+	}
+}

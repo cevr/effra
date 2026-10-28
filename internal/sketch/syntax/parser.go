@@ -8,15 +8,24 @@ import (
 
 // MaxNesting bounds the height, in levels, of the returned tree: the
 // nesting of expressions, types, statements and blocks in any composition
-// (grammar.md, Parser rule 6). A higher tree is S001 at the first token past
-// the limit, so no input exhausts the stack of the
-// parser or of any consumer of the AST (the printer, the converter, the
-// checker). go/parser bounds nesting at 100 000; 1 000 leaves every
-// consumer a small stack and is far above any program written by hand.
+// (grammar.md, Parser rules). A higher tree is S001 at the first token past
+// the limit, so no input exhausts the stack of the parser or of any consumer
+// of the AST (the printer, the converter, the checker). go/parser bounds
+// nesting at 100 000; 1 000 leaves every consumer a small stack and is far
+// above any program written by hand.
 const MaxNesting = 1000
 
-// Parse parses one source file of the 2026 edition. It returns the first
-// syntax error, an *Error with code S001, and no file; recovery is #38's.
+// CodeMixedMembers is the code of a type declaration that mixes fields with
+// operations or laws (#196, D1.12): the tree cannot hold the mix, so the
+// parser reports it with the checker's code for the rule.
+const CodeMixedMembers = "S108"
+
+// mixedMembers is the message of CodeMixedMembers.
+const mixedMembers = "a record holds data; declare the operations in their own type"
+
+// Parse parses one source file. It returns the first syntax error, an
+// *Error with code S001 (or S108 for a type that mixes fields and
+// operations), and no file; recovery is #38's.
 func Parse(src string) (file *File, err error) {
 	s := scan(src)
 	p := &parser{s: s, src: src, toks: s.toks}
@@ -46,8 +55,8 @@ type parser struct {
 	i    int
 	tok  token
 
-	// exprLev is below zero in the header of if, for and switch, where a
-	// `{` after a type name or a call opens the body, never a composite
+	// exprLev is below zero in the header of if, match, for and with, where
+	// a `{` after a type name or a call opens the body, never a composite
 	// literal or a trailing block (Go's rule); it is above zero inside
 	// parentheses and brackets.
 	exprLev int
@@ -59,15 +68,8 @@ type parser struct {
 	peak int
 	err  *Error
 
-	// guards are the TypeGuards parsed so far; a switch header checks that
-	// its own are all subjects.
-	guards []*TypeGuard
-	// guardOK admits `x.(type)` while a switch header is parsed.
-	guardOK bool
-
-	groups     []*CommentGroup
-	groupOwn   []bool // the group starts on a line with no token before it
-	groupStart []int  // token index of the first token after the group
+	groups   []*CommentGroup
+	groupOwn []bool // the group starts on a line with no token before it
 }
 
 // ---------------------------------------------------------------- tokens and errors
@@ -86,18 +88,59 @@ func (p *parser) peek(n int) token {
 	return p.toks[len(p.toks)-1]
 }
 
+func (p *parser) backtrack(i int) {
+	p.i = i
+	p.tok = p.toks[i]
+}
+
 func (p *parser) errorAt(pos Pos, length int, format string, args ...any) {
+	p.errorCode(CodeSyntax, pos, length, fmt.Sprintf(format, args...))
+}
+
+// errorCode reports the first error and stops the parse. A lexical error
+// at or before pos wins, since the tokens past it are not the source's.
+func (p *parser) errorCode(code string, pos Pos, length int, message string) {
 	if p.s.err != nil && pos >= Pos(p.s.err.Offset) {
 		p.err = p.s.err
 	} else {
-		p.err = newError(p.src, p.s.lines, pos, length, fmt.Sprintf(format, args...))
+		p.err = newError(p.src, p.s.lines, pos, length, message)
+		p.err.Code = code
 	}
 	panic(bailout{})
 }
 
-// errorf reports an error at the current token.
+// errorf reports an error at the current token. A Go token that Ergo does
+// not use (a reserved word or a removed operator) gets its habit message
+// in place of the generic one (#196, D2), wherever the parser meets it.
 func (p *parser) errorf(format string, args ...any) {
+	if h, ok := tokenHabit(p.tok.tok); ok {
+		p.habit(p.tok.pos, int(p.tok.end-p.tok.pos), h)
+	}
 	p.errorAt(p.tok.pos, int(p.tok.end-p.tok.pos), format, args...)
+}
+
+// habit reports the Go habit h at pos.
+func (p *parser) habit(pos Pos, length int, h int) {
+	p.errorAt(pos, length, "%s", habits[h].Message)
+}
+
+// tokenHabit returns the habit a token names on its own: the reserved Go
+// keywords and the removed operators.
+func tokenHabit(t Token) (int, bool) {
+	if h, ok := reservedHabit[t]; ok {
+		return h, true
+	}
+	switch t {
+	case DEFINE:
+		return habitDefine, true
+	case INC, DEC:
+		return habitIncDec, true
+	case ARROW:
+		return habitArrow, true
+	case ELLIPSIS:
+		return habitVariadic, true
+	}
+	return 0, false
 }
 
 // found describes the current token for a message.
@@ -111,7 +154,7 @@ func (p *parser) found() string {
 		return `";"`
 	case EOF:
 		return "end of file"
-	case IDENT, INT, DURATION, STRING, RUNE:
+	case IDENT, INT, FLOAT, DURATION, STRING, RUNE, PATH, STRING_HEAD:
 		return strconv.Quote(t.lit)
 	}
 	return strconv.Quote(t.tok.String())
@@ -134,6 +177,9 @@ func (p *parser) got(tok Token) bool {
 	return false
 }
 
+// atLineEnd reports whether the current token is an inserted semicolon.
+func (p *parser) atLineEnd() bool { return p.tok.tok == SEMICOLON && p.tok.lit == "\n" }
+
 // enter opens one level on the path being parsed; past MaxNesting it is
 // S001 at the current token.
 func (p *parser) enter() {
@@ -149,7 +195,7 @@ func (p *parser) enter() {
 func (p *parser) leave() { p.nest-- }
 
 func (p *parser) tooDeep() {
-	p.errorf("nesting deeper than %d levels", MaxNesting)
+	p.errorAt(p.tok.pos, int(p.tok.end-p.tok.pos), "nesting deeper than %d levels", MaxNesting)
 }
 
 // The binary and postfix loops build a left spine: each operator or link
@@ -181,16 +227,23 @@ func (p *parser) reach(top int) {
 	}
 }
 
-// endStmt consumes the end of a statement, declaration or entry: a
-// semicolon, or nothing before closer.
-func (p *parser) endStmt(closer Token, what string) {
-	switch p.tok.tok {
-	case SEMICOLON:
-		p.next()
-	case closer:
-	default:
-		p.errorf("expected end of %s, found %s", what, p.found())
-	}
+// attempt runs parse and reports whether it succeeded; on failure it
+// restores the parser to where it was, so the caller can try another
+// reading of the same tokens.
+func (p *parser) attempt(parse func()) (ok bool) {
+	i, nest, peak, lev := p.i, p.nest, p.peak, p.exprLev
+	defer func() {
+		if r := recover(); r != nil {
+			if _, isBailout := r.(bailout); !isBailout {
+				panic(r)
+			}
+			p.backtrack(i)
+			p.nest, p.peak, p.exprLev, p.err = nest, peak, lev, nil
+			ok = false
+		}
+	}()
+	parse()
+	return true
 }
 
 // ---------------------------------------------------------------- comments
@@ -205,8 +258,6 @@ func (p *parser) groupComments() {
 	}
 	lines := p.s.lines
 	line := func(pos Pos) int { l, _ := lineColumn(lines, int(pos)); return l }
-	// lastTokenBefore finds, for each comment, the end of the last real token
-	// before it (inserted semicolons are not source tokens).
 	ti := 0
 	lastEnd := Pos(-1)
 	nextToken := func(pos Pos) {
@@ -266,19 +317,28 @@ func (p *parser) leadComment() *CommentGroup {
 	return g
 }
 
+func (p *parser) line(pos Pos) int {
+	l, _ := lineColumn(p.s.lines, int(pos))
+	return l
+}
+
 // ---------------------------------------------------------------- names
 
-// parseIdent parses a name. The removed Go keywords are never names.
+// parseIdent parses a name. A keyword is never a name, and a reserved Go
+// keyword gets its habit message.
 func (p *parser) parseIdent() *Ident {
 	if p.tok.tok != IDENT {
 		p.errorf("expected a name, found %s", p.found())
 	}
-	if msg, ok := removed[p.tok.lit]; ok {
-		p.errorf("%s", msg)
-	}
 	id := &Ident{NamePos: p.tok.pos, Name: p.tok.lit}
 	p.next()
 	return id
+}
+
+// startsTypeName reports whether the current token starts a type name:
+// `name`, `pkg.name` or `go.name`.
+func (p *parser) startsTypeName() bool {
+	return p.tok.tok == IDENT || p.tok.tok == GO && p.peek(1).tok == PERIOD
 }
 
 // parseQualifiedName parses `name`, `pkg.name` or `go.name`.
@@ -296,25 +356,13 @@ func (p *parser) parseQualifiedName() Expr {
 	return x
 }
 
-func (p *parser) parseIdentList() []*Ident {
-	list := []*Ident{p.parseIdent()}
-	for p.got(COMMA) {
-		list = append(list, p.parseIdent())
-	}
-	return list
-}
-
 // ---------------------------------------------------------------- file and declarations
 
 func (p *parser) parseFile() *File {
-	f := &File{}
-	if p.tok.tok != PACKAGE {
-		p.errorf("expected \"package\", found %s", p.found())
+	f := &File{Package: NoPos}
+	for p.tok.tok == SEMICOLON {
+		p.next()
 	}
-	f.Package = p.tok.pos
-	p.next()
-	f.Name = p.parseIdent()
-	p.endDecl()
 	for p.tok.tok == IMPORT {
 		f.Decls = append(f.Decls, p.parseImportDecl())
 		p.endDecl()
@@ -327,19 +375,16 @@ func (p *parser) parseFile() *File {
 			d = p.parseTypeDecl(doc)
 		case FUNC:
 			d = p.parseFuncDecl(doc)
-		case VAR:
-			d = p.parseVarDecl(doc)
-		case WIRE:
-			d = p.parseWireDecl(doc)
+		case EXTERN:
+			d = p.parseExternDecl(doc)
+		case TEST:
+			d = p.parseTestDecl(doc)
+		case LET:
+			d = p.parseLetDecl(doc, true)
 		case IMPORT:
 			p.errorf("an import must come before every other declaration")
-		case IDENT:
-			if msg, ok := removed[p.tok.lit]; ok {
-				p.errorf("%s", msg)
-			}
-			fallthrough
 		default:
-			p.errorf("expected a declaration (type, func, var or wire), found %s", p.found())
+			p.errorf("expected a declaration (type, func, extern, test or let), found %s", p.found())
 		}
 		f.Decls = append(f.Decls, d)
 		p.endDecl()
@@ -358,180 +403,298 @@ func (p *parser) endDecl() {
 	}
 }
 
+// parseImportDecl parses `import [go] [alias] path`, one per line, the path
+// unquoted (#196, D1.6). The scanner lexes the alias and the path as PATH.
 func (p *parser) parseImportDecl() *ImportDecl {
 	d := &ImportDecl{Doc: p.leadComment(), Import: p.want(IMPORT), Lparen: NoPos, Rparen: NoPos}
-	if p.tok.tok == LPAREN {
-		d.Lparen = p.tok.pos
-		p.next()
-		for p.tok.tok != RPAREN {
-			d.Specs = append(d.Specs, p.parseImportSpec())
-			p.endStmt(RPAREN, "import")
-		}
-		d.Rparen = p.want(RPAREN)
-		return d
-	}
-	d.Specs = []*ImportSpec{p.parseImportSpec()}
-	return d
-}
-
-func (p *parser) parseImportSpec() *ImportSpec {
-	s := &ImportSpec{Doc: p.leadComment(), NamePos: NoPos}
 	switch p.tok.tok {
-	case PERIOD:
-		s.Kind, s.NamePos = ImportDot, p.tok.pos
-		p.next()
-	case GO:
+	case LPAREN:
+		p.habit(p.tok.pos, 1, habitImportGroup)
+	case STRING:
+		p.habit(p.tok.pos, int(p.tok.end-p.tok.pos), habitImportQuoted)
+	}
+	s := &ImportSpec{Kind: ImportPlain, NamePos: NoPos}
+	if p.tok.tok == GO {
 		s.Kind, s.NamePos = ImportGo, p.tok.pos
 		p.next()
-	case IDENT:
-		s.Kind, s.NamePos = ImportNamed, p.tok.pos
-		s.Name = p.parseIdent()
 	}
-	if p.tok.tok != STRING {
+	if p.tok.tok != PATH {
 		p.errorf("expected an import path, found %s", p.found())
 	}
-	s.Path = p.basicLit()
-	return s
-}
-
-func (p *parser) basicLit() *BasicLit {
-	x := &BasicLit{ValuePos: p.tok.pos, Kind: p.tok.tok, Value: p.tok.lit, ValueEnd: p.tok.end}
+	first := p.tok
 	p.next()
-	return x
-}
-
-func (p *parser) parseVarDecl(doc *CommentGroup) *VarDecl {
-	d := &VarDecl{Doc: doc, Var: p.want(VAR), Lparen: NoPos, Rparen: NoPos}
-	if p.tok.tok == LPAREN {
-		d.Lparen = p.tok.pos
-		p.next()
-		for p.tok.tok != RPAREN {
-			d.Specs = append(d.Specs, p.parseVarSpec())
-			p.endStmt(RPAREN, "var specification")
+	if p.tok.tok == PATH {
+		if !isIdentifier(first.lit) {
+			p.errorAt(first.pos, int(first.end-first.pos), "an import alias is a name, found %q", first.lit)
 		}
-		d.Rparen = p.want(RPAREN)
-		return d
+		s.Name = &Ident{NamePos: first.pos, Name: first.lit}
+		if s.Kind == ImportPlain {
+			s.Kind, s.NamePos = ImportNamed, first.pos
+		}
+		first = p.tok
+		p.next()
 	}
-	d.Specs = []*VarSpec{p.parseVarSpec()}
+	s.Path = &BasicLit{ValuePos: first.pos, Kind: PATH, Value: first.lit, ValueEnd: first.end}
+	d.Specs = []*ImportSpec{s}
 	return d
 }
 
-func (p *parser) parseVarSpec() *VarSpec {
-	s := &VarSpec{Doc: p.leadComment(), Names: p.parseIdentList(), Assign: NoPos}
-	if p.tok.tok != ASSIGN {
-		s.Type = p.parseType(false)
+// isIdentifier reports whether s is a name: a letter or `_`, then letters,
+// digits and `_`, and not a keyword or reserved word.
+func isIdentifier(s string) bool {
+	if s == "" {
+		return false
 	}
-	if p.tok.tok == ASSIGN {
-		s.Assign = p.tok.pos
-		p.next()
-		s.Values = p.parseExprList()
+	for i, r := range s {
+		if !identRune(r, i == 0) {
+			return false
+		}
 	}
-	return s
+	_, isKeyword := keywords[s]
+	return !isKeyword
 }
 
 func (p *parser) parseTypeDecl(doc *CommentGroup) *TypeDecl {
 	d := &TypeDecl{Doc: doc, Type: p.want(TYPE)}
 	d.Name = p.parseIdent()
-	if p.tok.tok == LBRACK {
+	if p.tok.tok == LBRACK && p.peek(1).tok != RBRACK {
 		d.TypeParams = p.parseTypeParams()
 	}
 	switch p.tok.tok {
-	case STRUCT:
-		d.Spec = p.parseStructType()
-	case INTERFACE:
-		d.Spec = p.parseInterfaceType()
+	case LBRACE:
+		d.Spec = p.parseMembersType()
 	case MACHINE:
 		d.Spec = p.parseMachineType()
 	case ASSIGN:
-		p.errorf("type aliases are not part of the language")
+		p.next()
+		d.Spec = p.parseUnion()
 	default:
-		p.errorf("a type declaration declares a struct, an interface or a machine, found %s", p.found())
+		d.Spec = p.parseType(ctxDecl)
 	}
 	return d
 }
 
+// parseTypeParams parses `[T ordered]`, `[A, B]` or `[K comparable, V]`
+// with Go's grouping: names before a constraint share it, and names at the
+// end without one have none.
 func (p *parser) parseTypeParams() *FieldList {
-	if p.peek(1).tok == RBRACK {
-		p.errorAt(p.tok.pos, 2, "empty type parameter list")
+	l := &FieldList{Opening: p.want(LBRACK)}
+	var pending []*Ident
+	for {
+		pending = append(pending, p.parseIdent())
+		if p.tok.tok != COMMA && p.tok.tok != RBRACK {
+			l.List = append(l.List, &Field{Names: pending, Type: p.parseTypeName("a constraint")})
+			pending = nil
+		}
+		if !p.got(COMMA) || p.tok.tok == RBRACK {
+			break
+		}
 	}
-	list := p.parseParameters(LBRACK, RBRACK, paramType)
-	return list
+	if len(pending) > 0 {
+		l.List = append(l.List, &Field{Names: pending})
+	}
+	if p.tok.tok != RBRACK {
+		p.errorf("expected \"]\" or \",\", found %s", p.found())
+	}
+	l.Closing = p.tok.pos
+	p.next()
+	return l
 }
 
-func (p *parser) parseStructType() *StructType {
-	t := &StructType{Struct: p.want(STRUCT)}
-	fields := &FieldList{Opening: p.want(LBRACE)}
+// memberKind is what a member of a braced type declares.
+type memberKind int
+
+const (
+	memberField memberKind = iota
+	memberOperation
+	memberLaw
+)
+
+// members is the parsed body of `{ … }` in a type declaration or variant.
+type members struct {
+	lbrace, rbrace Pos
+	fields         []*Field
+	ops            []*Field
+	laws           []*LawDecl
+}
+
+// parseMembers parses `{ Member, … }`. A body that mixes fields with
+// operations or laws is S108 at the first member of the second kind.
+func (p *parser) parseMembers() *members {
+	m := &members{lbrace: p.want(LBRACE)}
 	saved := p.exprLev
 	p.exprLev = 0
+	first := memberKind(-1)
 	for p.tok.tok != RBRACE {
 		doc := p.leadComment()
-		names := p.parseIdentList()
-		if p.tok.tok == SEMICOLON || p.tok.tok == RBRACE {
-			p.errorf("a struct field needs a name and a type, found %s", p.found())
+		start := p.tok
+		var kind memberKind
+		switch {
+		case p.tok.tok == LAW:
+			kind = memberLaw
+			law := &LawDecl{Doc: doc, Law: p.tok.pos}
+			p.next()
+			law.Name = p.parseIdent()
+			law.Params = p.parseParameters(paramPlain)
+			law.Body = p.parseBlock()
+			m.laws = append(m.laws, law)
+		case p.tok.tok == IDENT && p.peek(1).tok == LPAREN:
+			kind = memberOperation
+			name := p.parseIdent()
+			m.ops = append(m.ops, &Field{Doc: doc, Names: []*Ident{name}, Type: p.parseSignature(NoPos, ctxMember)})
+		case p.tok.tok == IDENT:
+			kind = memberField
+			f := p.parseFieldDecl()
+			f.Doc = doc
+			m.fields = append(m.fields, f)
+		default:
+			p.errorf("expected a field, an operation or a law, found %s", p.found())
 		}
-		fields.List = append(fields.List, &Field{Doc: doc, Names: names, Type: p.parseType(false)})
-		p.endStmt(RBRACE, "struct field")
+		if first < 0 {
+			first = kind
+		} else if (first == memberField) != (kind == memberField) {
+			p.errorCode(CodeMixedMembers, start.pos, int(start.end-start.pos), mixedMembers)
+		}
+		if !p.got(COMMA) {
+			break
+		}
 	}
 	p.exprLev = saved
-	fields.Closing = p.want(RBRACE)
-	t.Fields = fields
-	return t
+	if p.tok.tok != RBRACE {
+		p.errorf("expected \",\" or \"}\" after a member, found %s", p.found())
+	}
+	m.rbrace = p.tok.pos
+	p.next()
+	return m
 }
 
-func (p *parser) parseInterfaceType() *InterfaceType {
-	t := &InterfaceType{Interface: p.want(INTERFACE)}
-	t.Lbrace = p.want(LBRACE)
-	if p.tok.tok == IDENT && p.peek(1).tok == LPAREN {
-		// A capability: method signatures.
-		for p.tok.tok != RBRACE {
-			doc := p.leadComment()
-			name := p.parseIdent()
-			if p.tok.tok != LPAREN {
-				p.errorf("expected a method signature, found %s", p.found())
-			}
-			sig := p.parseSignature(NoPos, false)
-			t.Methods = append(t.Methods, &Field{Doc: doc, Names: []*Ident{name}, Type: sig})
-			p.endStmt(RBRACE, "method")
-		}
-	} else if p.tok.tok != RBRACE {
-		// A union: one line of variants.
-		t.Union = append(t.Union, p.parseTypeName("a union variant"))
-		for p.tok.tok == OR {
+// parseFieldDecl parses `name {, name} Type`. Names group up to the type,
+// as Go's struct fields do; a member that is a bare name (Go embedding) is
+// S001.
+func (p *parser) parseFieldDecl() *Field {
+	f := &Field{Names: []*Ident{p.parseIdent()}}
+	for p.tok.tok == COMMA && p.peek(1).tok == IDENT && p.groupsName(p.peek(2).tok) {
+		p.next()
+		f.Names = append(f.Names, p.parseIdent())
+	}
+	switch p.tok.tok {
+	case COMMA, RBRACE, SEMICOLON:
+		last := f.Names[len(f.Names)-1]
+		p.errorAt(last.Pos(), len(last.Name), "a member names its type: write `%s Type`; Ergo has no embedding", last.Name)
+	}
+	f.Type = p.parseType(ctxMember)
+	return f
+}
+
+// groupsName reports whether a name followed by t is one more name of a
+// field group: another name, or the group's type.
+func (p *parser) groupsName(t Token) bool {
+	switch t {
+	case COMMA, IDENT, LBRACK, MUL, FUNC, ESCAPING:
+		return true
+	case GO:
+		return true
+	}
+	return false
+}
+
+// parseMembersType parses the braced body of `type T { … }`: a record of
+// fields (StructType, also when empty) or an operation type of operations
+// and laws (InterfaceType).
+func (p *parser) parseMembersType() Expr {
+	m := p.parseMembers()
+	if len(m.ops) > 0 || len(m.laws) > 0 {
+		return &InterfaceType{Interface: NoPos, Lbrace: m.lbrace, Methods: m.ops, Laws: m.laws, Rbrace: m.rbrace}
+	}
+	return &StructType{Struct: NoPos, Fields: &FieldList{Opening: m.lbrace, List: m.fields, Closing: m.rbrace}}
+}
+
+// parseUnion parses `[ "|" ] Variant { "|" Variant }` after `=`. An inserted
+// semicolon before `|` does not end the union (#196, D1.5).
+func (p *parser) parseUnion() *InterfaceType {
+	t := &InterfaceType{Interface: NoPos, Lbrace: NoPos, Rbrace: NoPos}
+	if p.tok.tok == LPAREN {
+		p.errorf("`=` declares a union of variants; a tuple type is written `type Name (A, B)`")
+	}
+	p.got(OR)
+	for {
+		t.Union = append(t.Union, p.parseVariant())
+		if p.tok.tok == OR {
 			p.next()
-			if p.tok.tok == RBRACE || p.tok.tok == SEMICOLON {
-				p.errorf("expected a type after \"|\", found %s", p.found())
-			}
-			t.Union = append(t.Union, p.parseTypeName("a union variant"))
+			continue
 		}
-		p.endStmt(RBRACE, "union")
-		if p.tok.tok != RBRACE {
-			p.errorf("a union is one list of types joined by \"|\"; found %s", p.found())
+		if p.atLineEnd() && p.peek(1).tok == OR {
+			p.next()
+			p.next()
+			continue
+		}
+		return t
+	}
+}
+
+// parseVariant parses `TypeName [TypeArgs] [Members]`. A variant with
+// members declares it in place (VariantSpec); its members are fields.
+func (p *parser) parseVariant() Expr {
+	if !p.startsTypeName() {
+		p.errorf("a union variant is a type name, found %s", p.found())
+	}
+	name := p.parseQualifiedName()
+	var x Expr = name
+	if p.tok.tok == LBRACK {
+		x = p.parseTypeArgs(name)
+	}
+	if p.tok.tok != LBRACE {
+		return x
+	}
+	id, ok := name.(*Ident)
+	if !ok {
+		p.errorf("a variant declared in place has a plain name, found %s", p.found())
+	}
+	v := &VariantSpec{Name: id}
+	if ix, ok := x.(*IndexExpr); ok {
+		v.TypeArgs = &FieldList{Opening: ix.Lbrack, Closing: ix.Rbrack}
+		for _, a := range ix.Indices {
+			v.TypeArgs.List = append(v.TypeArgs.List, &Field{Type: a})
 		}
 	}
-	t.Rbrace = p.want(RBRACE)
-	return t
+	m := p.parseMembers()
+	if len(m.ops) > 0 || len(m.laws) > 0 {
+		var at Node = m.lawsOrOps()
+		p.errorAt(at.Pos(), 1, "a variant holds fields only")
+	}
+	v.Fields = &FieldList{Opening: m.lbrace, List: m.fields, Closing: m.rbrace}
+	return v
 }
 
+func (m *members) lawsOrOps() Node {
+	if len(m.ops) > 0 {
+		return m.ops[0]
+	}
+	return m.laws[0]
+}
+
+// parseMachineType parses `machine[S, E] { initial: x, step: f }`.
 func (p *parser) parseMachineType() *MachineType {
 	t := &MachineType{Machine: p.want(MACHINE)}
 	t.Lbrack = p.want(LBRACK)
-	t.State = p.parseType(true)
+	t.State = p.parseType(ctxList)
 	p.want(COMMA)
-	t.Signal = p.parseType(true)
+	t.Signal = p.parseType(ctxList)
 	t.Rbrack = p.want(RBRACK)
 	t.Lbrace = p.want(LBRACE)
 	saved := p.exprLev
 	p.exprLev = 0
 	for p.tok.tok != RBRACE {
-		doc := p.leadComment()
+		e := &MachineEntry{Doc: p.leadComment(), NamePos: p.tok.pos}
 		if p.tok.tok != IDENT || p.tok.lit != "initial" && p.tok.lit != "step" {
-			p.errorf("a machine has the entries initial and step, found %s", p.found())
+			p.errorf("expected initial or step, found %s", p.found())
 		}
-		e := &MachineEntry{Doc: doc, NamePos: p.tok.pos, Name: p.tok.lit}
+		e.Name = p.tok.lit
 		if e.Name == "initial" && t.Initial != nil || e.Name == "step" && t.Step != nil {
-			p.errorf("duplicate machine entry %s", e.Name)
+			p.errorf("%s is set twice", e.Name)
 		}
 		p.next()
+		e.Colon = p.want(COLON)
 		e.Value = p.parseExpr()
 		if e.Name == "initial" {
 			t.Initial = e.Value
@@ -539,67 +702,525 @@ func (p *parser) parseMachineType() *MachineType {
 			t.Step = e.Value
 		}
 		t.Entries = append(t.Entries, e)
-		p.endStmt(RBRACE, "machine entry")
+		if !p.got(COMMA) {
+			break
+		}
 	}
 	p.exprLev = saved
-	if t.Initial == nil {
-		p.errorf("a machine needs an initial entry")
+	if p.tok.tok != RBRACE {
+		p.errorf("expected \",\" or \"}\" in a machine, found %s", p.found())
 	}
-	if t.Step == nil {
-		p.errorf("a machine needs a step entry")
+	t.Rbrace = p.tok.pos
+	p.next()
+	if t.Initial == nil || t.Step == nil {
+		p.errorAt(t.Machine, len("machine"), "a machine sets initial and step")
 	}
-	t.Rbrace = p.want(RBRACE)
 	return t
 }
 
 func (p *parser) parseFuncDecl(doc *CommentGroup) *FuncDecl {
 	d := &FuncDecl{Doc: doc, Func: p.want(FUNC)}
 	if p.tok.tok == LPAREN {
-		d.Recv = p.parseParameters(LPAREN, RPAREN, paramReceiver)
-		names := 0
-		for _, f := range d.Recv.List {
-			names += max(1, len(f.Names))
-		}
-		if names != 1 {
-			p.errorAt(d.Recv.Opening, int(d.Recv.Closing-d.Recv.Opening)+1, "a method has exactly one receiver")
-		}
+		p.habit(p.tok.pos, 1, habitReceiver)
 	}
 	d.Name = p.parseIdent()
 	if p.tok.tok == LBRACK {
-		if d.Recv != nil {
-			p.errorf("a method cannot have type parameters")
-		}
 		d.TypeParams = p.parseTypeParams()
 	}
 	if p.tok.tok != LPAREN {
 		p.errorf("expected \"(\", found %s", p.found())
 	}
-	d.Type = p.parseSignature(NoPos, false)
-	if p.tok.tok == LBRACE {
-		d.Body = p.parseBlock()
+	d.Type = p.parseSignature(NoPos, ctxDecl)
+	if p.tok.tok != LBRACE {
+		p.errorf("expected the function body \"{\", found %s", p.found())
 	}
+	d.Body = p.parseBlock()
 	return d
 }
 
-func (p *parser) parseWireDecl(doc *CommentGroup) *WireDecl {
-	d := &WireDecl{Doc: doc, Wire: p.want(WIRE)}
-	d.Name = p.parseIdent()
-	if p.tok.tok == PROVIDES {
-		d.Provides = p.parseProvides()
+// parseExternDecl parses `extern go path.F func Name [TypeParams] Sig`.
+func (p *parser) parseExternDecl(doc *CommentGroup) *FuncDecl {
+	x := &ExternSpec{Extern: p.want(EXTERN)}
+	x.Go = p.want(GO)
+	if p.tok.tok != PATH {
+		p.errorf("expected the Go target path.Func, found %s", p.found())
 	}
-	if p.tok.tok == NEEDS {
-		d.Needs = p.parseNeeds(false)
-		if p.tok.tok == PROVIDES {
-			p.errorf("provides comes before needs in a wire header")
-		}
+	x.Target = &BasicLit{ValuePos: p.tok.pos, Kind: PATH, Value: p.tok.lit, ValueEnd: p.tok.end}
+	if path, name := x.Split(); path == "" || !isIdentifier(name) {
+		p.errorf("an extern target is an import path, a dot and a function name, found %s", p.found())
+	}
+	p.next()
+	d := &FuncDecl{Doc: doc, Extern: x, Func: p.want(FUNC)}
+	d.Name = p.parseIdent()
+	if p.tok.tok == LBRACK {
+		d.TypeParams = p.parseTypeParams()
+	}
+	if p.tok.tok != LPAREN {
+		p.errorf("expected \"(\", found %s", p.found())
+	}
+	d.Type = p.parseSignature(NoPos, ctxDecl)
+	return d
+}
+
+// parseTestDecl parses `test Name { … }` or `test Name(x T) { … }`.
+func (p *parser) parseTestDecl(doc *CommentGroup) *TestDecl {
+	d := &TestDecl{Doc: doc, Test: p.want(TEST)}
+	d.Name = p.parseIdent()
+	if p.tok.tok == LPAREN {
+		d.Params = p.parseParameters(paramPlain)
 	}
 	if p.tok.tok != LBRACE {
 		p.errorf("expected \"{\", found %s", p.found())
 	}
-	d.Body = p.parseWireBody()
+	d.Body = p.parseBlock()
 	return d
 }
 
+// parseLetDecl parses `let [mut] Pattern {, Pattern} [Type] [= e]`. At
+// package level, `let Name = wire …` is a named wire (WireDecl).
+func (p *parser) parseLetDecl(doc *CommentGroup, top bool) Decl {
+	d := &VarDecl{Doc: doc, Var: p.want(LET), Mut: NoPos, Lparen: NoPos, Rparen: NoPos}
+	if p.tok.tok == MUT {
+		d.Mut = p.tok.pos
+		p.next()
+	}
+	s := &VarSpec{Assign: NoPos}
+	var pats []Expr
+	for {
+		pats = append(pats, p.parseLetPattern())
+		if !p.got(COMMA) {
+			break
+		}
+	}
+	names := make([]*Ident, 0, len(pats))
+	for _, x := range pats {
+		if id, ok := x.(*Ident); ok {
+			names = append(names, id)
+		}
+	}
+	switch {
+	case len(names) == len(pats):
+		s.Names = names
+	case len(pats) == 1:
+		s.Pattern = pats[0]
+	default:
+		s.Pattern = &TupleExpr{Lparen: NoPos, Elts: pats, Rparen: NoPos}
+	}
+	switch p.tok.tok {
+	case ASSIGN, SEMICOLON, RBRACE, EOF:
+	default:
+		s.Type = p.parseType(ctxDecl)
+	}
+	if p.tok.tok == ASSIGN {
+		s.Assign = p.tok.pos
+		p.next()
+		if top && d.Mut == NoPos && len(s.Names) == 1 && s.Type == nil && p.tok.tok == WIRE {
+			w := p.parseWireLit()
+			return &WireDecl{Doc: doc, Let: d.Var, Wire: w.Wire, Name: s.Names[0], Provides: w.Provides, Needs: w.Needs, Body: w.Body}
+		}
+		s.Values = []Expr{p.parseExpr()}
+	}
+	d.Specs = []*VarSpec{s}
+	return d
+}
+
+// parseLetPattern parses one pattern of a let. A name followed by a type is
+// the name; `name [` starts a type when `]` follows, else type arguments of
+// a record pattern.
+func (p *parser) parseLetPattern() Expr {
+	if p.tok.tok == IDENT && p.peek(1).tok == LBRACK && p.peek(2).tok == RBRACK {
+		return p.parseIdent()
+	}
+	return p.parsePattern()
+}
+
+// ---------------------------------------------------------------- signatures and parameters
+
+// typeCtx is where a type stands, which decides how far an unparenthesised
+// needs clause of a function type reaches.
+type typeCtx int
+
+const (
+	ctxDecl   typeCtx = iota // a declaration: needs A, B up to the body
+	ctxList                  // a comma-separated list: needs takes one name or (A, B)
+	ctxMember                // a member of a braced type: needs A, B stops before the next member
+)
+
+type paramMode int
+
+const (
+	paramPlain paramMode = iota // function parameters, named or not
+	paramLit                    // a function literal: names, all typed or all untyped
+)
+
+// parseSignature parses `Params [Type] [fails …] [needs …]`.
+func (p *parser) parseSignature(funcPos Pos, ctx typeCtx) *FuncType {
+	t := &FuncType{Escaping: NoPos, Func: funcPos}
+	t.Params = p.parseParameters(paramPlain)
+	var results []*Field
+	if p.startsType() {
+		results = append(results, &Field{Type: p.parseResultType(ctx)})
+	}
+	if p.tok.tok == FAILS {
+		results = append(results, &Field{Type: p.parseFails()})
+	}
+	if results != nil {
+		t.Results = &FieldList{Opening: NoPos, List: results, Closing: NoPos}
+	}
+	if p.tok.tok == NEEDS {
+		t.Needs = p.parseNeeds(ctx)
+	}
+	return t
+}
+
+// parseResultType parses the one result type. A tuple ending in `error` is
+// Go's `(T, error)` (#196, D1.13).
+func (p *parser) parseResultType(ctx typeCtx) Expr {
+	t := p.parseType(ctx)
+	if tup, ok := t.(*TupleExpr); ok {
+		last := tup.Elts[len(tup.Elts)-1]
+		if id, ok := last.(*Ident); ok && id.Name == "error" {
+			p.habit(last.Pos(), len("error"), habitErrorResult)
+		}
+	}
+	return t
+}
+
+// parseFails parses `fails A | B[T]`.
+func (p *parser) parseFails() *ErrorRow {
+	r := &ErrorRow{Error: p.want(FAILS), Lbrack: NoPos, Rbrack: NoPos}
+	r.Types = append(r.Types, p.parseTypeName("fails"))
+	for p.got(OR) {
+		r.Types = append(r.Types, p.parseTypeName("fails"))
+	}
+	return r
+}
+
+// startsType reports whether the current token can start a type.
+func (p *parser) startsType() bool {
+	switch p.tok.tok {
+	case IDENT, LBRACK, MUL, FUNC, ESCAPING, LPAREN:
+		return true
+	case GO:
+		return p.peek(1).tok == PERIOD
+	case MAP, CHAN, STRUCT, INTERFACE, ARROW, ELLIPSIS:
+		// Go types: parseType reports their habits.
+		return true
+	}
+	return false
+}
+
+// parseProvides parses a wire's `provides A, B`.
+func (p *parser) parseProvides() *ProvidesClause {
+	u := &ProvidesClause{Provides: p.want(PROVIDES)}
+	u.Names = append(u.Names, p.parseTypeName("provides"))
+	for p.got(COMMA) {
+		u.Names = append(u.Names, p.parseTypeName("provides"))
+	}
+	return u
+}
+
+// parseNeeds parses a needs clause. In a list it takes one name or a
+// parenthesised list; in a member it stops before the next member, an
+// operation `Name(`; elsewhere it takes every comma-separated name.
+func (p *parser) parseNeeds(ctx typeCtx) *NeedsClause {
+	u := &NeedsClause{Needs: p.want(NEEDS), Lparen: NoPos, Rparen: NoPos}
+	if p.tok.tok == LPAREN {
+		if ctx != ctxList {
+			p.errorf("a parenthesised needs list belongs to a function type inside a list")
+		}
+		u.Lparen = p.tok.pos
+		p.next()
+		u.Names = append(u.Names, p.parseTypeName("needs"))
+		for p.got(COMMA) {
+			if p.tok.tok == RPAREN {
+				break
+			}
+			u.Names = append(u.Names, p.parseTypeName("needs"))
+		}
+		u.Rparen = p.want(RPAREN)
+		return u
+	}
+	u.Names = append(u.Names, p.parseTypeName("needs"))
+	switch ctx {
+	case ctxDecl:
+		for p.got(COMMA) {
+			u.Names = append(u.Names, p.parseTypeName("needs"))
+		}
+	case ctxMember:
+		for p.tok.tok == COMMA && p.continuesNeeds() {
+			p.next()
+			u.Names = append(u.Names, p.parseTypeName("needs"))
+		}
+	}
+	return u
+}
+
+// continuesNeeds reports whether the comma at the current token continues
+// a member's needs clause: a type name follows that does not start the next
+// member (an operation `Name(`, a field `Name Type` or a law).
+func (p *parser) continuesNeeds() bool {
+	i := 1
+	t := p.peek(i)
+	if t.tok != IDENT && !(t.tok == GO && p.peek(i+1).tok == PERIOD) {
+		return false
+	}
+	i++
+	if p.peek(i).tok == PERIOD {
+		i += 2
+	}
+	switch p.peek(i).tok {
+	case COMMA, RBRACE, SEMICOLON:
+		return true
+	}
+	return false
+}
+
+type paramEntry struct {
+	name *Ident
+	typ  Expr
+}
+
+// parseParameters parses a parameter list with Go's grouping: either every
+// entry has a name (`a, b T` groups a and b) or none does (`func(int64)`).
+// A list of bare names is a list of types here; a function literal reads
+// it as untyped names (funcLitParams).
+func (p *parser) parseParameters(mode paramMode) *FieldList {
+	l := &FieldList{Opening: p.want(LPAREN)}
+	saved := p.exprLev
+	p.exprLev = 1
+	var entries []paramEntry
+	for p.tok.tok != RPAREN {
+		entries = append(entries, p.parseParamEntry())
+		if !p.got(COMMA) {
+			break
+		}
+	}
+	p.exprLev = saved
+	if p.tok.tok != RPAREN {
+		p.errorf("expected \")\" or \",\", found %s", p.found())
+	}
+	l.Closing = p.tok.pos
+	p.next()
+	named := false
+	for _, e := range entries {
+		named = named || e.name != nil
+	}
+	if !named {
+		for _, e := range entries {
+			l.List = append(l.List, &Field{Type: e.typ})
+		}
+		return l
+	}
+	var pending []*Ident
+	for _, e := range entries {
+		if e.name == nil {
+			id, ok := e.typ.(*Ident)
+			if !ok {
+				p.errorAt(e.typ.Pos(), int(e.typ.End()-e.typ.Pos()), "mixed named and unnamed parameters")
+			}
+			pending = append(pending, id)
+			continue
+		}
+		l.List = append(l.List, &Field{Names: append(pending, e.name), Type: e.typ})
+		pending = nil
+	}
+	if len(pending) > 0 {
+		last := pending[len(pending)-1]
+		p.errorAt(last.Pos(), len(last.Name), "mixed named and unnamed parameters: %s has no type", last.Name)
+	}
+	return l
+}
+
+func (p *parser) parseParamEntry() paramEntry {
+	if p.tok.tok != IDENT {
+		return paramEntry{typ: p.parseType(ctxList)}
+	}
+	start := p.i
+	id := p.parseIdent()
+	switch p.tok.tok {
+	case COMMA, RPAREN:
+		return paramEntry{typ: id}
+	case PERIOD:
+		p.backtrack(start)
+		return paramEntry{typ: p.parseType(ctxList)}
+	case LBRACK:
+		// `name []T` or `name [N]T`, against the instantiation `T[A]`.
+		if next := p.peek(1).tok; next == RBRACK || next == INT {
+			return paramEntry{name: id, typ: p.parseType(ctxList)}
+		}
+		p.backtrack(start)
+		t := p.parseType(ctxList)
+		if p.startsType() {
+			p.backtrack(start)
+			id = p.parseIdent()
+			return paramEntry{name: id, typ: p.parseType(ctxList)}
+		}
+		return paramEntry{typ: t}
+	}
+	return paramEntry{name: id, typ: p.parseType(ctxList)}
+}
+
+// funcLitParams reads the parameters of a function literal: all typed, or
+// all untyped names (#214), each untyped name a Field with a nil Type.
+func (p *parser) funcLitParams(l *FieldList) {
+	for _, f := range l.List {
+		if len(f.Names) > 0 {
+			return
+		}
+	}
+	for _, f := range l.List {
+		id, ok := f.Type.(*Ident)
+		if !ok {
+			p.errorAt(f.Type.Pos(), int(f.Type.End()-f.Type.Pos()), "a function literal names its parameters: write `func(x)` or `func(x T)`")
+		}
+		f.Names, f.Type = []*Ident{id}, nil
+	}
+}
+
+// ---------------------------------------------------------------- types
+
+// parseType parses a type.
+func (p *parser) parseType(ctx typeCtx) Expr {
+	p.enter()
+	defer p.leave()
+	switch p.tok.tok {
+	case IDENT, GO:
+		if p.tok.tok == GO && p.peek(1).tok != PERIOD {
+			p.errorf("expected a type, found %s", p.found())
+		}
+		if p.tok.tok == IDENT && p.tok.lit == "error" && p.peek(1).tok == LBRACK {
+			p.errorAt(p.peek(1).pos, 1, "unexpected \"[\" after error")
+		}
+		x := p.parseQualifiedName()
+		if p.tok.tok == LBRACK {
+			x = p.parseTypeArgs(x)
+		}
+		return mapType(x)
+	case LBRACK:
+		lbrack := p.tok.pos
+		p.next()
+		if p.tok.tok != RBRACK {
+			p.habit(lbrack, 1, habitArray)
+		}
+		p.next()
+		return &ArrayType{Lbrack: lbrack, Elt: p.parseType(ctx)}
+	case MUL:
+		star := p.tok.pos
+		p.next()
+		return &StarExpr{Star: star, X: p.parseType(ctx)}
+	case ESCAPING:
+		pos := p.tok.pos
+		p.next()
+		if p.tok.tok != FUNC {
+			p.errorf("expected \"func\" after escaping, found %s", p.found())
+		}
+		t := p.parseFuncType(ctx)
+		t.Escaping = pos
+		return t
+	case FUNC:
+		return p.parseFuncType(ctx)
+	case LPAREN:
+		lparen := p.tok.pos
+		p.next()
+		saved := p.exprLev
+		p.exprLev = 1
+		first := p.parseType(ctxList)
+		if p.tok.tok != COMMA {
+			p.exprLev = saved
+			return &ParenExpr{Lparen: lparen, X: first, Rparen: p.want(RPAREN)}
+		}
+		t := &TupleExpr{Lparen: lparen, Elts: []Expr{first}}
+		for p.got(COMMA) && p.tok.tok != RPAREN {
+			t.Elts = append(t.Elts, p.parseType(ctxList))
+		}
+		p.exprLev = saved
+		t.Rparen = p.want(RPAREN)
+		return t
+	}
+	p.errorf("expected a type, found %s", p.found())
+	return nil
+}
+
+func (p *parser) parseFuncType(ctx typeCtx) *FuncType {
+	pos := p.want(FUNC)
+	if p.tok.tok != LPAREN {
+		p.errorf("expected \"(\", found %s", p.found())
+	}
+	return p.parseSignature(pos, ctx)
+}
+
+// mapType turns `Map[K, V]` into a MapType: Map is a prelude name that no
+// declaration can take (#196, eighth round), so the name is the map type.
+func mapType(x Expr) Expr {
+	ix, ok := x.(*IndexExpr)
+	if !ok || len(ix.Indices) != 2 {
+		return x
+	}
+	if id, ok := ix.X.(*Ident); !ok || id.Name != "Map" {
+		return x
+	}
+	return &MapType{Map: ix.X.Pos(), Lbrack: ix.Lbrack, Key: ix.Indices[0], Value: ix.Indices[1], Rbrack: ix.Rbrack}
+}
+
+// parseTypeName parses `name`, `pkg.name` or `go.name` with optional type
+// arguments: the types of fails, needs, provides, constraints and catch.
+func (p *parser) parseTypeName(what string) Expr {
+	p.enter()
+	defer p.leave()
+	if !p.startsTypeName() {
+		p.errorf("%s names a type; expected a type name, found %s", what, p.found())
+	}
+	if p.tok.lit == "error" && p.peek(1).tok == LBRACK {
+		p.errorAt(p.peek(1).pos, 1, "unexpected \"[\" after error")
+	}
+	x := p.parseQualifiedName()
+	if p.tok.tok == LBRACK {
+		x = p.parseTypeArgs(x)
+	}
+	return mapType(x)
+}
+
+func (p *parser) parseTypeArgs(x Expr) Expr {
+	ix := &IndexExpr{X: x, Lbrack: p.want(LBRACK)}
+	if p.tok.tok == RBRACK {
+		p.errorf("expected a type argument, found %s", p.found())
+	}
+	saved := p.exprLev
+	p.exprLev = 1
+	for p.tok.tok != RBRACK {
+		ix.Indices = append(ix.Indices, p.parseType(ctxList))
+		if !p.got(COMMA) {
+			break
+		}
+	}
+	p.exprLev = saved
+	ix.Rbrack = p.want(RBRACK)
+	return ix
+}
+
+// ---------------------------------------------------------------- wires
+
+// parseWireLit parses `wire [provides …] [needs …] { entries }`.
+func (p *parser) parseWireLit() *WireLit {
+	w := &WireLit{Wire: p.want(WIRE)}
+	if p.tok.tok == PROVIDES {
+		w.Provides = p.parseProvides()
+	}
+	if p.tok.tok == NEEDS {
+		w.Needs = p.parseNeeds(ctxDecl)
+	}
+	if p.tok.tok != LBRACE {
+		p.errorf("expected \"{\" after wire, found %s", p.found())
+	}
+	w.Body = p.parseWireBody()
+	return w
+}
+
+// parseWireBody parses `{ entry, … }`. An entry binds capabilities to a
+// value (`A: x`, `A, B: x`), replaces an embedded binding (`replace A: x`)
+// or embeds a wire (`W`). Names separated by commas form one entry only
+// when a `:` ends them on the same line.
 func (p *parser) parseWireBody() *WireBody {
 	b := &WireBody{Lbrace: p.want(LBRACE)}
 	saved := p.exprLev
@@ -610,372 +1231,56 @@ func (p *parser) parseWireBody() *WireBody {
 			e.Kind, e.Replace = WireReplace, p.tok.pos
 			p.next()
 		}
-		e.Key = p.parseQualifiedName()
-		for p.tok.tok == COMMA {
-			p.next()
-			e.Keys = append(e.Keys, p.parseQualifiedName())
+		e.Key = p.parseTypeName("a wire entry")
+		if p.keysContinue() {
+			for p.got(COMMA) {
+				e.Keys = append(e.Keys, p.parseTypeName("a wire entry"))
+				if p.tok.tok == COLON {
+					break
+				}
+			}
 		}
-		if len(e.Keys) > 0 && p.tok.tok != ASSIGN {
-			p.errorf("expected \"=\" after the capabilities of a wire entry, found %s", p.found())
-		}
-		if p.tok.tok == ASSIGN {
+		if p.tok.tok == COLON {
 			e.Assign = p.tok.pos
 			p.next()
 			e.Value = p.parseExpr()
 		} else if e.Kind == WireReplace {
-			p.errorf("expected \"=\", found %s", p.found())
+			p.errorf("expected \":\", found %s", p.found())
 		} else {
 			e.Kind = WireEmbed
 		}
 		b.Entries = append(b.Entries, e)
-		p.endStmt(RBRACE, "wire entry")
+		if !p.got(COMMA) {
+			break
+		}
 	}
 	p.exprLev = saved
-	b.Rbrace = p.want(RBRACE)
+	if p.tok.tok != RBRACE {
+		p.errorf("expected \",\" or \"}\" in a wire, found %s", p.found())
+	}
+	b.Rbrace = p.tok.pos
+	p.next()
 	return b
 }
 
-// ---------------------------------------------------------------- signatures and parameters
-
-type paramMode int
-
-const (
-	paramPlain    paramMode = iota // function parameters
-	paramResult                    // a parenthesised result list: error rows allowed
-	paramType                      // a type parameter list: names and constraints
-	paramReceiver                  // a receiver
-)
-
-// parseSignature parses parameters, results and a needs clause. list is true
-// for a function type inside a list, where an unparenthesised needs clause
-// takes one name (grammar.md D8).
-func (p *parser) parseSignature(funcPos Pos, list bool) *FuncType {
-	t := &FuncType{Func: funcPos}
-	t.Params = p.parseParameters(LPAREN, RPAREN, paramPlain)
-	switch {
-	case p.tok.tok == LPAREN:
-		t.Results = p.parseParameters(LPAREN, RPAREN, paramResult)
-	case p.startsType():
-		r := p.parseResultType(list)
-		t.Results = &FieldList{Opening: NoPos, List: []*Field{{Type: r}}, Closing: NoPos}
-	}
-	if p.tok.tok == NEEDS {
-		t.Needs = p.parseNeeds(list)
-	}
-	return t
-}
-
-// startsType reports whether the current token can start a type.
-func (p *parser) startsType() bool {
-	switch p.tok.tok {
-	case IDENT:
-		_, isRemoved := removed[p.tok.lit]
-		return !isRemoved
-	case LBRACK, MUL, ARROW, CHAN, MAP, FUNC, STRUCT, INTERFACE, LPAREN:
-		return true
-	case GO:
-		return p.peek(1).tok == PERIOD
-	}
-	return false
-}
-
-// parseProvides parses a wire's `provides A, B`.
-func (p *parser) parseProvides() *ProvidesClause {
-	u := &ProvidesClause{Provides: p.want(PROVIDES)}
-	u.Names = append(u.Names, p.parseQualifiedName())
-	for p.got(COMMA) {
-		u.Names = append(u.Names, p.parseQualifiedName())
-	}
-	return u
-}
-
-func (p *parser) parseNeeds(list bool) *NeedsClause {
-	u := &NeedsClause{Needs: p.want(NEEDS), Lparen: NoPos, Rparen: NoPos}
-	if p.tok.tok == LPAREN {
-		if !list {
-			p.errorf("a parenthesised needs list belongs to a function type inside a list")
+// keysContinue reports whether the comma at the current token joins more
+// capability names to the entry: `, Name {, Name} :` on this line.
+func (p *parser) keysContinue() bool {
+	line := p.line(p.tok.pos)
+	for i := 0; ; {
+		if p.peek(i).tok != COMMA || p.line(p.peek(i).pos) != line {
+			return false
 		}
-		u.Lparen = p.tok.pos
-		p.next()
-		u.Names = append(u.Names, p.parseQualifiedName())
-		for p.got(COMMA) {
-			if p.tok.tok == RPAREN {
-				break
-			}
-			u.Names = append(u.Names, p.parseQualifiedName())
+		i++
+		if t := p.peek(i); t.tok != IDENT && !(t.tok == GO && p.peek(i+1).tok == PERIOD) {
+			return false
 		}
-		u.Rparen = p.want(RPAREN)
-		return u
-	}
-	u.Names = append(u.Names, p.parseQualifiedName())
-	if !list {
-		for p.got(COMMA) {
-			u.Names = append(u.Names, p.parseQualifiedName())
+		i++
+		if p.peek(i).tok == PERIOD {
+			i += 2
+		}
+		if p.peek(i).tok == COLON {
+			return p.line(p.peek(i).pos) == line
 		}
 	}
-	return u
-}
-
-// parseResultType parses one result type, which may be an error row.
-func (p *parser) parseResultType(list bool) Expr {
-	if p.tok.tok == IDENT && p.tok.lit == "error" && p.peek(1).tok == LBRACK {
-		return p.parseErrorRow()
-	}
-	return p.parseType(list)
-}
-
-func (p *parser) parseErrorRow() *ErrorRow {
-	r := &ErrorRow{Error: p.tok.pos}
-	p.next()
-	r.Lbrack = p.want(LBRACK)
-	r.Types = append(r.Types, p.parseTypeName("an error row"))
-	for p.got(OR) {
-		r.Types = append(r.Types, p.parseTypeName("an error row"))
-	}
-	r.Rbrack = p.want(RBRACK)
-	return r
-}
-
-type paramEntry struct {
-	name *Ident
-	typ  Expr
-}
-
-// parseParameters parses a parameter, result, receiver or type parameter
-// list with Go's grouping: either every entry has a name (`a, b T` groups
-// a and b) or none does (`func(a, b) int` is two type-only parameters).
-func (p *parser) parseParameters(open, close Token, mode paramMode) *FieldList {
-	l := &FieldList{Opening: p.want(open)}
-	saved := p.exprLev
-	p.exprLev = 1
-	var entries []paramEntry
-	for p.tok.tok != close {
-		entries = append(entries, p.parseParamEntry(close, mode))
-		if !p.got(COMMA) {
-			break
-		}
-	}
-	p.exprLev = saved
-	if p.tok.tok != close {
-		p.errorf("expected %q or \",\", found %s", close.String(), p.found())
-	}
-	l.Closing = p.tok.pos
-	p.next()
-	named := false
-	for _, e := range entries {
-		named = named || e.name != nil
-	}
-	if !named {
-		if mode == paramType {
-			// Names without constraints: the list only orders the
-			// parameters a caller supplies (`type Attempt[T]`;
-			// rows-and-constraints §3).
-			var names []*Ident
-			for _, e := range entries {
-				id, ok := e.typ.(*Ident)
-				if !ok {
-					p.errorAt(e.typ.Pos(), int(e.typ.End()-e.typ.Pos()), "a type parameter is a name with an optional constraint")
-				}
-				names = append(names, id)
-			}
-			l.List = []*Field{{Names: names}}
-			return l
-		}
-		for _, e := range entries {
-			l.List = append(l.List, &Field{Type: e.typ})
-		}
-	} else {
-		var pending []*Ident
-		for _, e := range entries {
-			if e.name == nil {
-				id, ok := e.typ.(*Ident)
-				if !ok {
-					p.errorAt(e.typ.Pos(), int(e.typ.End()-e.typ.Pos()), "mixed named and unnamed parameters")
-				}
-				pending = append(pending, id)
-				continue
-			}
-			l.List = append(l.List, &Field{Names: append(pending, e.name), Type: e.typ})
-			pending = nil
-		}
-		if len(pending) > 0 {
-			p.errorAt(pending[len(pending)-1].End(), 1, "missing parameter type after %s", pending[len(pending)-1].Name)
-		}
-	}
-	for i, f := range l.List {
-		if v, ok := f.Type.(*Ellipsis); ok && (mode != paramPlain || i != len(l.List)-1 || len(f.Names) > 1) {
-			p.errorAt(v.Ellipsis, 3, "only the final parameter can be variadic")
-		}
-	}
-	return l
-}
-
-func (p *parser) parseParamEntry(close Token, mode paramMode) paramEntry {
-	typeOf := func() Expr {
-		if p.tok.tok == ELLIPSIS {
-			pos := p.tok.pos
-			p.next()
-			return &Ellipsis{Ellipsis: pos, Elt: p.parseType(true)}
-		}
-		if mode == paramResult {
-			return p.parseResultType(true)
-		}
-		return p.parseType(true)
-	}
-	if p.tok.tok != IDENT {
-		return paramEntry{typ: typeOf()}
-	}
-	if _, isRemoved := removed[p.tok.lit]; isRemoved {
-		p.parseIdent()
-	}
-	// The name `error` before `[` in a result list is an error row.
-	if mode == paramResult && p.tok.lit == "error" && p.peek(1).tok == LBRACK {
-		return paramEntry{typ: p.parseErrorRow()}
-	}
-	start := p.i
-	id := p.parseIdent()
-	switch p.tok.tok {
-	case COMMA, close:
-		return paramEntry{typ: id}
-	case PERIOD:
-		p.backtrack(start)
-		return paramEntry{typ: p.parseType(true)}
-	case LBRACK:
-		// `name []T` or `name [N]T`, against the instantiation `T[A]`.
-		if next := p.peek(1).tok; next == RBRACK || next == INT {
-			return paramEntry{name: id, typ: p.parseType(true)}
-		}
-		p.backtrack(start)
-		t := p.parseType(true)
-		if p.startsType() || p.tok.tok == ELLIPSIS {
-			p.backtrack(start)
-			id = p.parseIdent()
-			return paramEntry{name: id, typ: typeOf()}
-		}
-		return paramEntry{typ: t}
-	}
-	return paramEntry{name: id, typ: typeOf()}
-}
-
-func (p *parser) backtrack(i int) {
-	p.i = i
-	p.tok = p.toks[i]
-}
-
-// ---------------------------------------------------------------- types
-
-// parseType parses a type. list is true inside a comma-separated list, where
-// a function type's unparenthesised needs clause takes one name.
-func (p *parser) parseType(list bool) Expr {
-	p.enter()
-	defer p.leave()
-	switch p.tok.tok {
-	case IDENT, GO:
-		if p.tok.tok == IDENT && p.tok.lit == "error" && p.peek(1).tok == LBRACK {
-			p.errorf("an error row error[…] appears only in a result list")
-		}
-		if p.tok.tok == GO && p.peek(1).tok != PERIOD {
-			p.errorf("expected a type, found %s", p.found())
-		}
-		x := p.parseQualifiedName()
-		if p.tok.tok == LBRACK {
-			x = p.parseTypeArgs(x)
-		}
-		return x
-	case LBRACK:
-		lbrack := p.tok.pos
-		p.next()
-		if p.got(RBRACK) {
-			return &ArrayType{Lbrack: lbrack, Elt: p.parseType(list)}
-		}
-		p.exprLev++
-		n := p.parseExpr()
-		p.exprLev--
-		p.want(RBRACK)
-		return &ArrayType{Lbrack: lbrack, Len: n, Elt: p.parseType(list)}
-	case MUL:
-		star := p.tok.pos
-		p.next()
-		return &StarExpr{Star: star, X: p.parseType(list)}
-	case ARROW:
-		begin := p.tok.pos
-		p.next()
-		if p.tok.tok != CHAN {
-			p.errorf("expected \"chan\", found %s", p.found())
-		}
-		p.next()
-		return &ChanType{Begin: begin, Arrow: begin, Dir: ChanRecv, Value: p.parseType(list)}
-	case CHAN:
-		t := &ChanType{Begin: p.tok.pos, Arrow: NoPos}
-		p.next()
-		if p.tok.tok == ARROW {
-			t.Arrow, t.Dir = p.tok.pos, ChanSend
-			p.next()
-		}
-		t.Value = p.parseType(list)
-		return t
-	case MAP:
-		t := &MapType{Map: p.tok.pos}
-		p.next()
-		p.want(LBRACK)
-		t.Key = p.parseType(false)
-		p.want(RBRACK)
-		t.Value = p.parseType(list)
-		return t
-	case FUNC:
-		pos := p.tok.pos
-		p.next()
-		if p.tok.tok != LPAREN {
-			p.errorf("expected \"(\", found %s", p.found())
-		}
-		return p.parseSignature(pos, list)
-	case STRUCT:
-		return p.parseStructType()
-	case INTERFACE:
-		return p.parseInterfaceType()
-	case LPAREN:
-		lparen := p.tok.pos
-		p.next()
-		x := p.parseType(false)
-		return &ParenExpr{Lparen: lparen, X: x, Rparen: p.want(RPAREN)}
-	}
-	p.errorf("expected a type, found %s", p.found())
-	return nil
-}
-
-// parseTypeName parses a type name: QualifiedName [ TypeArgs ]. Error rows,
-// catch arms and union interfaces name types (grammar.md: QualifiedName,
-// identifier); a row variable is a name, and an instantiated generic type
-// such as `retry.Exhausted[E]` is a name with type arguments. Any other
-// type is S001 at its first token.
-func (p *parser) parseTypeName(what string) Expr {
-	p.enter()
-	defer p.leave()
-	switch {
-	case p.tok.tok == IDENT && p.tok.lit == "error" && p.peek(1).tok == LBRACK:
-		p.errorf("an error row error[…] appears only in a result list")
-	case p.tok.tok == IDENT, p.tok.tok == GO && p.peek(1).tok == PERIOD:
-	default:
-		p.errorf("%s names a type; expected a type name, found %s", what, p.found())
-	}
-	x := p.parseQualifiedName()
-	if p.tok.tok == LBRACK {
-		x = p.parseTypeArgs(x)
-	}
-	return x
-}
-
-func (p *parser) parseTypeArgs(x Expr) Expr {
-	ix := &IndexExpr{X: x, Lbrack: p.want(LBRACK)}
-	if p.tok.tok == RBRACK {
-		p.errorf("expected a type argument, found %s", p.found())
-	}
-	for p.tok.tok != RBRACK {
-		ix.Indices = append(ix.Indices, p.parseType(true))
-		if !p.got(COMMA) {
-			break
-		}
-	}
-	ix.Rbrack = p.want(RBRACK)
-	return ix
 }

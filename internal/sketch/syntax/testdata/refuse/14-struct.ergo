@@ -1,0 +1,4 @@
+// want: S001 2 fields
+type Card struct {
+	Number string
+}

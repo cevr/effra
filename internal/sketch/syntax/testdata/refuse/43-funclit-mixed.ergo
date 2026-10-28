@@ -1,0 +1,4 @@
+// want: S001 3 -
+func f(xs []int64) int64 {
+	xs.Fold(0, func(acc int64, x) { acc + x })
+}

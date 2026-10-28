@@ -1,0 +1,2 @@
+// want: S001 2 = A | B
+type Payment interface{ Pending | Authorized }

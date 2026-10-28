@@ -1,0 +1,10 @@
+// want S109
+type Fault {}
+func panic(message string) {}
+func fail() fails Fault    { return Fault{} }
+func main() needs Console {
+	fail() catch {
+	case Fault:
+		Console.Println("handled")
+	}
+}

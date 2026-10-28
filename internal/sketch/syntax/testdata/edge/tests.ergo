@@ -1,0 +1,14 @@
+test Addition {
+	assert 1 + 1 == 2
+}
+
+test Commutes(a int64, b int64) {
+	assert a + b == b + a
+}
+
+type Codec[T] {
+	Encode(v T) []byte,
+	Decode(b []byte) T fails Malformed,
+
+	law RoundTrip(v T) { try Decode(Encode(v)) == v },
+}

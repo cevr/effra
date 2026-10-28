@@ -1,0 +1,9 @@
+// want: S001 4 -
+func f(x int64, limit int64) string {
+	match x {
+	case limit + 1:
+		"over"
+	case _:
+		"under"
+	}
+}

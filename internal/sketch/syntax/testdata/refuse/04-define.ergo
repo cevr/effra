@@ -1,0 +1,5 @@
+// want: S001 3 let
+func f() int64 {
+	x := 1
+	x
+}

@@ -1,0 +1,11 @@
+func Fee(o Order, rate int64) int64 {
+	o.Total * rate / 100
+}
+
+func Get(_ MemoryOrders, id string) Order fails NotFound {
+	Order{ID: id, Total: 1999}
+}
+
+func total(order Order) int64 {
+	order.Fee(3) // Fee(order, 3)
+}

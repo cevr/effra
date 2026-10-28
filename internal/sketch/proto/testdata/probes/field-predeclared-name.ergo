@@ -1,0 +1,10 @@
+// out: ok 1 field
+type Box {
+	string string,
+	len    int64,
+	init   string,
+}
+func main() needs Console {
+	let value = Box{string: "ok", len: 1, init: "field"}
+	Console.Println(value.string, value.len, value.init)
+}

@@ -1,0 +1,4 @@
+// want S108
+let W = wire {}
+let W = wire {}
+func main() {}

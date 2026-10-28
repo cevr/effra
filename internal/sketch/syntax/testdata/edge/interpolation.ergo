@@ -1,0 +1,7 @@
+func greet(name string, n int64) string {
+	"hello \(name), \(n + 1) tries, \(label("x \(name)")) \\(not interpolated)"
+}
+
+func raw() string {
+	`a \(b) stays raw`
+}

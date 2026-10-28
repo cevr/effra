@@ -1,0 +1,4 @@
+// out:
+type plain {}
+func f() fails plain {}
+func main()          {}

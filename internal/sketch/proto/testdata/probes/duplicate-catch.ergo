@@ -1,0 +1,12 @@
+// want S108
+type Fault {}
+func fail() string fails Fault { return Fault{} }
+func main() needs Console {
+	let value = fail() catch {
+	case Fault:
+		"a"
+	case Fault:
+		"b"
+	}
+	Console.Println(value)
+}

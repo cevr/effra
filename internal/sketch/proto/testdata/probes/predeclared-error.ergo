@@ -1,0 +1,12 @@
+// want S109
+import timeout
+func main() needs Console {
+	let error = "shadow"
+	let x = with wire { Scheduler: LiveScheduler{} } {
+		timeout.After(1s) { "ok" }
+	} catch {
+	case timeout.Expired:
+		"late"
+	}
+	Console.Println(error, x)
+}

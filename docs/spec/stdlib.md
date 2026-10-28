@@ -74,12 +74,12 @@ The prelude is in scope in every package without an import: `Option`, `Task`, `D
 [#212](https://github.com/cevr/ergo/issues/212). Owner decision, 2026-10-26: HTML is "Functions", not markup syntax. There is no markup grammar.
 
 ```go
-import . "html"
+import html
 
-func OrderRow(o Order) Node {
-	return Tr(Class(statusClass(o.Status)),
-		Td(Text(o.Member.Name)),
-		Td(Int(o.Quantity.Wire())),
+func OrderRow(o Order) html.Node {
+	return html.Tr(html.Class(statusClass(o.Status)),
+		html.Td(html.Text(o.Member.Name)),
+		html.Td(html.Int(o.Quantity.Wire())),
 	)
 }
 ```

@@ -55,12 +55,31 @@ func Inspect(n Node, f func(Node) bool) {
 		}
 	case *VarSpec:
 		idents(n.Names)
-		walk(n.Type)
+		walk(n.Pattern, n.Type)
 		exprs(n.Values)
 	case *TypeDecl:
 		walk(n.Name, n.TypeParams, n.Spec)
 	case *FuncDecl:
-		walk(n.Recv, n.Name, n.TypeParams, n.Type, n.Body)
+		walk(n.Extern, n.Recv, n.Name, n.TypeParams, n.Type, n.Body)
+	case *ExternSpec:
+		walk(n.Target)
+	case *TestDecl:
+		walk(n.Name, n.Params, n.Body)
+	case *LawDecl:
+		walk(n.Name, n.Params, n.Body)
+	case *AssertStmt:
+		walk(n.X)
+	case *VariantSpec:
+		walk(n.Name, n.TypeArgs, n.Fields)
+	case *AsPattern:
+		walk(n.X, n.Name)
+	case *InterpolatedString:
+		for i, t := range n.Texts {
+			Inspect(t, f)
+			if i < len(n.Exprs) {
+				Inspect(n.Exprs[i], f)
+			}
+		}
 	case *WireDecl:
 		walk(n.Name, n.Provides, n.Needs, n.Body)
 	case *WireBody:
@@ -119,7 +138,7 @@ func Inspect(n Node, f func(Node) bool) {
 		exprs(n.Types)
 		stmts(n.Body)
 	case *WireLit:
-		walk(n.Body)
+		walk(n.Provides, n.Needs, n.Body)
 	case *GoExpr:
 		walk(n.Call, n.Block)
 	case *Ellipsis:
@@ -137,6 +156,9 @@ func Inspect(n Node, f func(Node) bool) {
 	case *InterfaceType:
 		for _, m := range n.Methods {
 			Inspect(m, f)
+		}
+		for _, l := range n.Laws {
+			Inspect(l, f)
 		}
 		exprs(n.Union)
 	case *ErrorRow:
@@ -226,6 +248,12 @@ func isNilNode(n Node) bool {
 	case *WireBody:
 		return n == nil
 	case *VarDecl:
+		return n == nil
+	case *ExternSpec:
+		return n == nil
+	case *LawDecl:
+		return n == nil
+	case *StructType:
 		return n == nil
 	}
 	return false

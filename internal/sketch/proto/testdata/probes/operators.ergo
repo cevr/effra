@@ -1,0 +1,11 @@
+// want S109
+type Fault {}
+func unused() fails Fault { return Fault{} }
+func tick() bool needs Console {
+	Console.Println("wrong side effect")
+	return "a" == "a"
+}
+func main() needs Console {
+	let x = ("a" == "b") && tick()
+	Console.Println(x)
+}

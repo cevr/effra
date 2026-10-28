@@ -1,0 +1,2 @@
+// out-quoted: "\ufeff\n"
+func main() needs Console { Console.Println("\ufeff") }

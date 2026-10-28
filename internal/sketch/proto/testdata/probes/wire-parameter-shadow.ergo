@@ -1,0 +1,7 @@
+// out: ok
+type Store { Get() string }
+type Holder { Value string }
+func Get(h Holder) string { return h.Value }
+func envc() string        { return "ok" }
+let W = wire { Store: Holder{Value: envc()} }
+func main() needs Console { Console.Println(with W { Store.Get() }) }

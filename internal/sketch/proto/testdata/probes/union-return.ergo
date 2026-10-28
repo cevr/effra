@@ -1,0 +1,13 @@
+// out: {}
+type Item {}
+type Other {}
+type Choice = Item | Other
+type Fault {}
+func inner() Item fails Fault   { return Item{} }
+func outer() Choice fails Fault { return inner() }
+func main() needs Console {
+	Console.Println(outer() catch {
+	case Fault:
+		Other{}
+	})
+}

@@ -3,9 +3,12 @@ package syntax
 import (
 	"errors"
 	gotoken "go/token"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"ergo.local/prototype/internal/sketch/sketchtest"
 )
 
 // TestIdentifierRunesMatchGo sweeps every non-ASCII code point, in the first
@@ -30,11 +33,11 @@ func TestIdentifierRunesMatchGo(t *testing.T) {
 // S001 at the offending byte, wherever it falls in the name.
 func TestIdentifierBytes(t *testing.T) {
 	for _, name := range []string{"x\xff", "\xffx", "x\xe2\xaa", "x\xc0\x80"} {
-		src := "package demo\nfunc main() needs Console {\n  " + name + " := \"ok\"\n}\n"
+		src := "func main() needs Console {\n  let " + name + " = \"ok\"\n}\n"
 		_, err := Parse(src)
 		var e *Error
-		if !errors.As(err, &e) || e.Code != CodeSyntax || e.Line != 3 {
-			t.Fatalf("%q: got %v, want S001 on line 3", name, err)
+		if !errors.As(err, &e) || e.Code != CodeSyntax || e.Line != 2 {
+			t.Fatalf("%q: got %v, want S001 on line 2", name, err)
 		}
 		if bad := strings.IndexFunc(src[e.Offset:], func(r rune) bool { return r == utf8.RuneError }); bad != 0 {
 			t.Fatalf("%q: the error at byte %d is not at the invalid byte", name, e.Offset)
@@ -61,6 +64,11 @@ func TestSemicolonInsertion(t *testing.T) {
 		"a &^= b <<= c":     {IDENT, AND_NOT_ASSIGN, IDENT, SHL_ASSIGN, IDENT, SEMICOLON, EOF},
 		"go.Error":          {GO, PERIOD, IDENT, SEMICOLON, EOF},
 		"initial step":      {IDENT, IDENT, SEMICOLON, EOF},
+		"1..n":              {INT, DOTDOT, IDENT, SEMICOLON, EOF},
+		"2.5 1. 1e9\n":      {FLOAT, FLOAT, FLOAT, SEMICOLON, EOF},
+		"x as y":            {IDENT, AS, IDENT, SEMICOLON, EOF},
+		"x <-y":             {IDENT, ARROW, IDENT, SEMICOLON, EOF},
+		"a...":              {IDENT, ELLIPSIS, EOF},
 	}
 	for src, want := range cases {
 		s := scan(src)
@@ -82,58 +90,135 @@ func TestSemicolonInsertion(t *testing.T) {
 	}
 }
 
-// TestNumberForms: the #81 forms stay S001 with a message that names them.
+// TestNumberForms: decimal floats are literals (`1..n` is a range, never
+// the float `1.`); the other #81 forms and imaginary literals stay S001
+// with a message that names them.
 func TestNumberForms(t *testing.T) {
 	for src, want := range map[string]string{
 		"0x1F":  "hexadecimal",
-		"1.5":   "floating-point",
-		"0.A":   "floating-point",
-		"1.":    "floating-point",
+		"0b1":   "hexadecimal, octal and binary",
 		"1_000": "separators",
 		"5kg":   `unknown number suffix "kg"`,
+		"0.A":   `unknown number suffix "A"`,
+		"2i":    "imaginary",
+		"2.5i":  "imaginary",
 	} {
 		s := scan(src)
 		if s.err == nil || !strings.Contains(s.err.Message, want) {
 			t.Fatalf("%q: %v, want a message with %q", src, s.err, want)
 		}
 	}
+	for src, want := range map[string][]Token{
+		"1.5":    {FLOAT, SEMICOLON, EOF},
+		"1.":     {FLOAT, SEMICOLON, EOF},
+		"2.5e-3": {FLOAT, SEMICOLON, EOF},
+		"1e9":    {FLOAT, SEMICOLON, EOF},
+		"1..9":   {INT, DOTDOT, INT, SEMICOLON, EOF},
+		"1.5..2": {FLOAT, DOTDOT, INT, SEMICOLON, EOF},
+		"500ms":  {DURATION, SEMICOLON, EOF},
+	} {
+		s := scan(src)
+		if s.err != nil {
+			t.Fatalf("%q: %v", src, s.err)
+		}
+		var got []Token
+		for _, tok := range s.toks {
+			got = append(got, tok.tok)
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("%q: tokens %v, want %v", src, got, want)
+		}
+	}
 }
 
-// TestKeywords: 28 keywords; goto, fallthrough and const are not keywords
-// but are never names.
+// TestKeywords: the 27 decided keywords and `as` are keywords, the 15 Go
+// keywords Ergo does not use are reserved, and none of them is a name.
 func TestKeywords(t *testing.T) {
-	if n := len(Keywords()); n != 28 {
-		t.Fatalf("%d keywords, want 28", n)
+	want := strings.Fields("break case continue else for func if import return type try catch needs provides wire machine let mut in match escaping fails test law assert extern with as")
+	got := Keywords()
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("keywords %v, want %v", got, want)
 	}
-	for word := range removed {
-		if _, ok := keywords[word]; ok {
-			t.Fatalf("%s is a keyword", word)
+	reserved := strings.Fields("chan const default defer fallthrough go goto interface map package range select struct switch var")
+	got = Reserved()
+	slices.Sort(got)
+	if !slices.Equal(got, reserved) {
+		t.Fatalf("reserved %v, want %v", got, reserved)
+	}
+	for _, word := range append(want, reserved...) {
+		if !IsKeyword(word) {
+			t.Fatalf("%s is not reserved", word)
 		}
-		if _, err := Parse("package p\n\nvar " + word + " = 1\n"); err == nil {
+		if _, err := Parse("let " + word + " = 1\n"); err == nil {
 			t.Fatalf("%s is a name", word)
 		}
 	}
 }
 
-// TestPositions: a CRLF source keeps byte offsets, and a span at the end of
-// the file is empty.
+// TestPositions: a CRLF source keeps byte offsets, a span at the end of the
+// file is empty, and a file without a package clause starts at its first
+// comment or declaration.
 func TestPositions(t *testing.T) {
-	_, err := Parse("package p\r\n\r\nfunc f() {\r\n\tg(\r\n")
+	_, err := Parse("// c\r\n\r\nfunc f() {\r\n\tg(\r\n")
 	var e *Error
 	if !errors.As(err, &e) || e.Line != 5 || e.Length != 0 {
 		t.Fatalf("got %+v, want an empty span on line 5", err)
 	}
-	f, err := Parse("package p\r\n\r\n// é\r\nfunc f() {}\r\n")
+	f, err := Parse("\r\n\r\n// é\r\nfunc f() {}\r\n")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if line, column := f.Position(f.Decls[0].Pos()); line != 4 || column != 1 {
 		t.Fatalf("func at %d:%d, want 4:1", line, column)
 	}
+	if line, _ := f.Position(f.Pos()); line != 3 {
+		t.Fatalf("file at line %d, want the comment's 3", line)
+	}
 	if text := f.Comments[0].List[0].Text; text != "// é" {
 		t.Fatalf("comment text %q keeps its carriage return", text)
 	}
 	if doc := f.Decls[0].(*FuncDecl).Doc; doc == nil || doc.List[0].Text != "// é" {
 		t.Fatalf("the func has no doc comment")
+	}
+}
+
+// TestNodeSpans: every node of every positive input has a span inside its
+// source, Pos <= End, nested inside its parent's span: no NoPos leaks from a
+// desugared node (a TypeGuard without parentheses, a File without a package
+// clause, an extern FuncDecl) into a span.
+func TestNodeSpans(t *testing.T) {
+	inputs, err := sketchtest.Positive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range inputs {
+		f, err := Parse(in.Src)
+		if err != nil {
+			t.Errorf("%s: %v", in.Name, err)
+			continue
+		}
+		// check visits the children of parent, each inside its parent's
+		// span (the File's span may start after a leading comment).
+		var check func(parent Node)
+		check = func(parent Node) {
+			Inspect(parent, func(n Node) bool {
+				if n == parent {
+					return true
+				}
+				pos, end := n.Pos(), n.End()
+				if pos < 0 || end < pos || int(end) > len(in.Src) {
+					t.Errorf("%s: %T spans %d..%d in a %d-byte source", in.Name, n, pos, end, len(in.Src))
+					return false
+				}
+				if _, isFile := parent.(*File); !isFile && (pos < parent.Pos() || end > parent.End()) {
+					t.Errorf("%s: %T %d..%d outside its parent %T %d..%d", in.Name, n, pos, end, parent, parent.Pos(), parent.End())
+				}
+				check(n)
+				return false
+			})
+		}
+		check(f)
 	}
 }

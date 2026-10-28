@@ -11,48 +11,46 @@ import (
 )
 
 // base declares the types most cases share.
-const base = `package demo
+const base = `import timeout
 
-import "timeout"
+type NotFound { ID string }
+type Down {}
 
-type NotFound struct{ ID string }
-type Down struct{}
-
-type Store interface {
-	Get(id string) (string, error[NotFound])
+type Store {
+	Get(id string) string fails NotFound,
 }
 
-type Net interface {
-	Send(msg string) error[Down]
+type Net {
+	Send(msg string) fails Down,
 }
 
-type MemStore struct{}
+type MemStore {}
 
-func (MemStore) Get(id string) (string, error[NotFound]) {
+func Get(_ MemStore, id string) string fails NotFound {
 	if id == "1" {
 		return "one"
 	}
 	return NotFound{ID: id}
 }
 
-type OkNet struct{}
+type OkNet {}
 
-func (OkNet) Send(msg string) error[Down] {
+func Send(_ OkNet, msg string) fails Down {
 	return
 }
 `
 
 // both fails with two errors, so a catch can handle one and pass the other on.
 const both = `
-func both(id string) (string, error[NotFound | Down]) needs Store, Net {
-	v := try Store.Get(id)
+func both(id string) string fails NotFound | Down needs Store, Net {
+	let v = try Store.Get(id)
 	try Net.Send(v)
 	return v
 }`
 
 func codes(t *testing.T, src string) []string {
 	t.Helper()
-	f, err := Parse("demo.sketch", src)
+	f, err := Parse("demo.ergo", src)
 	if err != nil {
 		return []string{strings.Fields(strings.SplitN(err.Error(), ": ", 2)[1])[0]}
 	}
@@ -70,14 +68,14 @@ func TestCheck(t *testing.T) {
 		want       string // "" means accepted
 	}{
 		{"accepts try under a declared row", `
-func get(id string) (string, error[NotFound]) needs Store {
-	v := try Store.Get(id)
+func get(id string) string fails NotFound needs Store {
+	let v = try Store.Get(id)
 	return v
 }
 func main() needs Console { Console.Println("x") }`, ""},
 		{"partial catch under try passes the rest on", both + `
-func partial(id string) (string, error[Down]) needs Store, Net {
-	v := try both(id) catch {
+func partial(id string) string fails Down needs Store, Net {
+	let v = try both(id) catch {
 	case NotFound:
 		"none"
 	}
@@ -85,8 +83,8 @@ func partial(id string) (string, error[Down]) needs Store, Net {
 }
 func main() needs Console { Console.Println("x") }`, ""},
 		{"partial catch under try still needs the rest declared", both + `
-func partial(id string) (string, error[NotFound]) needs Store, Net {
-	v := try both(id) catch {
+func partial(id string) string fails NotFound needs Store, Net {
+	let v = try both(id) catch {
 	case NotFound:
 		"none"
 	}
@@ -95,21 +93,21 @@ func partial(id string) (string, error[NotFound]) needs Store, Net {
 func main() needs Console { Console.Println("x") }`, "S101"},
 		{"an unhandled fallible call", `
 func get(id string) string needs Store {
-	v := Store.Get(id)
+	let v = Store.Get(id)
 	return v
 }
 func main() needs Console { Console.Println("x") }`, "S105"},
 		{"a provider without the method", `
-type Empty struct{}
+type Empty {}
 func main() needs Console {
-	v := with(wire{ Store = Empty{} }) { "x" }
+	let v = with wire { Store: Empty{} } { "x" }
 	Console.Println(v)
 }`, "S106"},
 		{"a provider whose row is wider", `
-type Loose struct{}
-func (Loose) Get(id string) (string, error[NotFound | Down]) { return "x" }
+type Loose {}
+func Get(_ Loose, id string) string fails NotFound | Down { return "x" }
 func main() needs Console {
-	v := with(wire{ Store = Loose{} }) { "x" }
+	let v = with wire { Store: Loose{} } { "x" }
 	Console.Println(v)
 }`, "S106"},
 		{"a missing return", `
@@ -121,12 +119,12 @@ func pick(id string) string {
 func main() needs Console { Console.Println(pick("1")) }`, "S107"},
 		{"an unused variable", `
 func main() needs Console {
-	x := "unused"
+	let x = "unused"
 	Console.Println("y")
 }`, "S110"},
 		{"timeout requires Scheduler", `
-func slow(id string) (string, error[NotFound | timeout.Expired]) needs Store {
-	v := try timeout.After(1s) { Store.Get(id) }
+func slow(id string) string fails NotFound | timeout.Expired needs Store {
+	let v = try timeout.After(1s) { Store.Get(id) }
 	return v
 }
 func main() needs Console { Console.Println("x") }`, "S102"},
@@ -134,7 +132,7 @@ func main() needs Console { Console.Println("x") }`, "S102"},
 func main() needs Console, Store { Console.Println("x") }`, "S102"},
 		{"a reserved name", `
 func main() needs Console {
-	string := "x"
+	let string = "x"
 	Console.Println(string)
 }`, "S109"},
 		{"a parse error", `
@@ -158,8 +156,8 @@ func TestBuildAndRun(t *testing.T) {
 		t.Skip("no go tool")
 	}
 	src := base + `
-func lookup(id string) (string, error[Down | timeout.Expired]) needs Store, Net, Scheduler {
-	v := try timeout.After(1s) { Store.Get(id) } catch {
+func lookup(id string) string fails Down | timeout.Expired needs Store, Net, Scheduler {
+	let v = try timeout.After(1s) { Store.Get(id) } catch {
 	case NotFound:
 		"missing " + id
 	}
@@ -168,7 +166,7 @@ func lookup(id string) (string, error[Down | timeout.Expired]) needs Store, Net,
 }
 
 func show(id string) needs Console, Store, Net, Scheduler {
-	v := lookup(id) catch {
+	let v = lookup(id) catch {
 	case Down:
 		"down"
 	case timeout.Expired:
@@ -178,8 +176,8 @@ func show(id string) needs Console, Store, Net, Scheduler {
 }
 
 func main() needs Console {
-	with(wire{ Store = MemStore{}; Scheduler = LiveScheduler{} }) {
-		with(wire{ Net = OkNet{} }) {
+	with wire { Store: MemStore{}, Scheduler: LiveScheduler{} } {
+		with wire { Net: OkNet{} } {
 			show("1")
 			show("2")
 		}
@@ -195,7 +193,7 @@ func main() needs Console {
 // buildRun checks, emits and runs src through go run, and returns its output.
 func buildRun(t *testing.T, src string) string {
 	t.Helper()
-	f, err := Parse("demo.sketch", src)
+	f, err := Parse("demo.ergo", src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +237,7 @@ func TestProbes(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("no go tool")
 	}
-	files, err := filepath.Glob("testdata/probes/*.sketch")
+	files, err := filepath.Glob("testdata/probes/*.ergo")
 	if err != nil || len(files) == 0 {
 		t.Fatalf("no probes: %v", err)
 	}
@@ -268,8 +266,9 @@ func TestProbes(t *testing.T) {
 				if got := buildRun(t, src); got != want {
 					t.Fatalf("got %q, want %q", got, want)
 				}
-			case strings.HasPrefix(head, "// out: "):
-				want := strings.ReplaceAll(strings.TrimPrefix(head, "// out: "), "|", "\n")
+			case head == "// out:" || strings.HasPrefix(head, "// out: "):
+				// The formatter drops the trailing space of "// out: " (no output).
+				want := strings.ReplaceAll(strings.TrimPrefix(strings.TrimPrefix(head, "// out:"), " "), "|", "\n")
 				if want != "" {
 					want += "\n"
 				}

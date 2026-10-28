@@ -1,0 +1,71 @@
+type NotFound { ID string }
+type Declined { Reason string }
+
+type Order {
+	ID    string,
+	Total int64,
+}
+
+type Receipt { ID string }
+
+type Orders {
+	Get(id string) Order fails NotFound,
+}
+
+type Payments {
+	Authorize(order Order) Receipt fails Declined,
+}
+
+func Checkout(id string) Receipt fails NotFound | Declined needs Orders, Payments {
+	let order = try Orders.Get(id)
+	Payments.Authorize(order)
+}
+
+// Partial: Declined is handled here, and NotFound escapes into the row of Settle.
+func Settle(id string) string fails NotFound needs Orders, Payments {
+	let receipt = try Checkout(id) catch {
+	case Declined:
+		Receipt{ID: "none"}
+	}
+	receipt.ID
+}
+
+// Total: every failure is handled, so Quote has no error row.
+func Quote(id string) string needs Orders, Payments {
+	let receipt = Checkout(id) catch {
+	case NotFound:
+		Receipt{ID: "missing"}
+	case Declined:
+		Receipt{ID: "declined"}
+	}
+	receipt.ID
+}
+
+type MemoryOrders {}
+
+func Get(_ MemoryOrders, id string) Order fails NotFound {
+	if id != "42" {
+		return NotFound{ID: id}
+	}
+	Order{ID: id, Total: 1999}
+}
+
+type FakePayments {}
+
+func Authorize(_ FakePayments, order Order) Receipt fails Declined {
+	Receipt{ID: "auth-\(order.ID)"}
+}
+
+let Live = wire {
+	Orders:   MemoryOrders,
+	Payments: FakePayments,
+}
+
+func main() needs Console {
+	let settled = with Live { Settle("42") } catch {
+	case NotFound:
+		"missing"
+	}
+	Console.Println(settled)
+	Console.Println(with Live { Quote("7") })
+}

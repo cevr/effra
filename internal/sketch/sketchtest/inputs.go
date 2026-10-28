@@ -78,9 +78,9 @@ func Repository() ([]Input, error) {
 var fenceStart = regexp.MustCompile("^```go\\s*$")
 
 // SpecFences returns every ```go fence of docs/spec/*.md, split into chunks
-// at blank lines outside brackets. A chunk that starts with `package` is a
-// file; one that starts with import, type, func, var or wire is wrapped in
-// `package snippet`; any other is the body of `func snippet()`.
+// at blank lines outside brackets (#196, D8). A chunk that starts with
+// import, type, func, let, test or extern is a file; any other is the body
+// of `func snippet()`.
 func SpecFences() ([]Input, error) {
 	paths, _ := filepath.Glob(filepath.Join(root(), "docs", "spec", "*.md"))
 	var inputs []Input
@@ -155,22 +155,12 @@ func splitChunks(text string) []string {
 }
 
 func wrapChunk(chunk string) string {
-	first := ""
-	for _, line := range strings.Split(chunk, "\n") {
-		t := strings.TrimSpace(line)
-		if t == "" || strings.HasPrefix(t, "//") {
-			continue
-		}
-		first = strings.FieldsFunc(t, func(r rune) bool { return r == ' ' || r == '\t' || r == '(' || r == '{' })[0]
-		break
-	}
+	first := firstWord(chunk)
 	switch first {
-	case "package":
+	case "import", "type", "func", "let", "test", "extern":
 		return chunk + "\n"
-	case "import", "type", "func", "var", "wire":
-		return "package snippet\n\n" + chunk + "\n"
 	}
-	return "package snippet\n\nfunc snippet() {\n" + chunk + "\n}\n"
+	return "func snippet() {\n" + chunk + "\n}\n"
 }
 
 // Positive returns every input that must parse and format: the v0 corpus,
@@ -193,4 +183,20 @@ func Positive() ([]Input, error) {
 		inputs = append(inputs, Input{Name: "grammar/" + g.Name, Src: g.Src})
 	}
 	return inputs, nil
+}
+
+// firstWord is the first word of the first line of text that is neither
+// blank nor a line comment, up to a blank, ( or {; "" when there is none.
+func firstWord(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "//") {
+			continue
+		}
+		if words := strings.FieldsFunc(t, func(r rune) bool { return r == ' ' || r == '\t' || r == '(' || r == '{' }); len(words) > 0 {
+			return words[0]
+		}
+		return ""
+	}
+	return ""
 }

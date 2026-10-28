@@ -1,0 +1,7 @@
+// want S110
+type Fault {}
+func unused() fails Fault { return Fault{} }
+func main() {
+	let x = "used?"
+	x
+}

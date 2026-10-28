@@ -1,0 +1,8 @@
+// want: S001 3 match
+func f(pay Payment) string {
+	switch p := pay.(type) {
+	case Authorized:
+		return p.AuthID
+	}
+	"none"
+}

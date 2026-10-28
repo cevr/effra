@@ -1,66 +1,65 @@
 // Hand migration of examples/checkout.ef to the 2026 edition (docs/spec/ v0).
-package main
 
-import "timeout"
+import timeout
 
-type OrderNotFound struct{ id string }
-type GatewayDown struct{}
+type OrderNotFound { id string }
+type GatewayDown {}
 
-type Order struct {
-	id    string
-	total int64
+type Order {
+	id    string,
+	total int64,
 }
 
-type Payment interface{ Pending | Authorized | Declined }
+type Payment = Pending | Authorized | Declined
 
-type Pending struct{}
-type Authorized struct{ authId string }
-type Declined struct{ reason string }
+type Pending {}
+type Authorized { authId string }
+type Declined { reason string }
 
-type Orders interface {
-	Find(id string) (Order, error[OrderNotFound])
+type Orders {
+	Find(id string) Order fails OrderNotFound,
 }
 
-type Gateway interface {
-	Authorize(order Order) (Payment, error[GatewayDown])
+type Gateway {
+	Authorize(order Order) Payment fails GatewayDown,
 }
 
-func checkout(id string) (string, error[OrderNotFound | GatewayDown | timeout.Expired]) needs Orders, Gateway, Scheduler {
-	order := try Orders.Find(id)
-	payment := try timeout.After(500ms) { Gateway.Authorize(order) }
-	switch p := payment.(type) {
+func checkout(id string) string fails OrderNotFound | GatewayDown | timeout.Expired needs Orders, Gateway, Scheduler {
+	let order = try Orders.Find(id)
+	let payment = try timeout.After(500ms) { Gateway.Authorize(order) }
+	match payment {
 	case Pending:
 		return "pending"
-	case Authorized:
+	case Authorized as p:
 		return "paid " + p.authId
-	case Declined:
+	case Declined as p:
 		return "declined: " + p.reason
 	}
 }
 
-type MemoryOrders struct{}
+type MemoryOrders {}
 
-func (MemoryOrders) Find(id string) (Order, error[OrderNotFound]) {
+func Find(_ MemoryOrders, id string) Order fails OrderNotFound {
 	if id == "42" {
 		return Order{id: id, total: 1999}
 	}
 	return OrderNotFound{id: id}
 }
 
-type FakeGateway struct{ authId string }
+type FakeGateway { authId string }
 
-func (g FakeGateway) Authorize(order Order) (Payment, error[GatewayDown]) {
+func Authorize(g FakeGateway, order Order) Payment fails GatewayDown {
 	return Authorized{authId: g.authId}
 }
 
-wire Live {
-	Orders    = MemoryOrders{}
-	Gateway   = FakeGateway{authId: "auth-7"}
-	Scheduler = LiveScheduler{}
+let Live = wire {
+	Orders:    MemoryOrders{},
+	Gateway:   FakeGateway{authId: "auth-7"},
+	Scheduler: LiveScheduler{},
 }
 
 func report(id string) needs Console {
-	outcome := with(Live) { checkout(id) } catch {
+	let outcome = with Live { checkout(id) } catch {
 	case OrderNotFound:
 		"no such order"
 	case GatewayDown:

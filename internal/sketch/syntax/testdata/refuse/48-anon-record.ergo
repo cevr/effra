@@ -1,0 +1,5 @@
+// want: S001 3 -
+func f() {
+	let p = struct{ X int64 }{1}
+	use(p)
+}

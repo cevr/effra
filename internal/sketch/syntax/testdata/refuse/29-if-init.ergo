@@ -1,0 +1,6 @@
+// want: S001 3 let
+func f() {
+	if x := g(); x > 0 {
+		use(x)
+	}
+}

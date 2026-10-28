@@ -1,0 +1,12 @@
+// out: left|right|LR
+type Fault {}
+func unused() fails Fault { return Fault{} }
+func left() string needs Console {
+	Console.Println("left")
+	return "L"
+}
+func right() string needs Console {
+	Console.Println("right")
+	return "R"
+}
+func main() needs Console { Console.Println(left() + right()) }

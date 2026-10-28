@@ -1,0 +1,41 @@
+func status(code int64) string {
+	match code {
+	case 200, 204:
+		"ok"
+	case -1:
+		"unknown"
+	case _:
+		"error"
+	}
+}
+
+func step(s State, sig Signal) State {
+	match (s, sig) {
+	case (Closed{Failures: n}, Failure{e}):
+		Open{e}
+	case (_, Retry):
+		s
+	case (_, _):
+		s
+	}
+}
+
+func handle(r Request) string {
+	let text = Fetch(r) catch {
+	case NotFound{ID: id}:
+		"missing \(id)"
+	case err:
+		"failed"
+	}
+	for x in r.Items {
+		match x {
+		case Skip:
+			continue
+		case Stop:
+			break
+		case _:
+			use(x)
+		}
+	}
+	text
+}

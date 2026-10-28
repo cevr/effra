@@ -1,0 +1,8 @@
+// want S110
+type Store { Get() string }
+type Holder { Value string }
+func Get(h Holder) string { return h.Value }
+func main() needs Console {
+	let Store = Holder{Value: "local"}
+	Console.Println(Store.Value)
+}

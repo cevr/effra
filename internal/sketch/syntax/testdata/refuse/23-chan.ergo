@@ -1,0 +1,4 @@
+// want: S001 2 queue
+func f(ch chan int64) {
+	use(ch)
+}

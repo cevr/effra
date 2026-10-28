@@ -1,0 +1,5 @@
+// want S108
+type Holder {}
+func Get(_ Holder) string { return "a" }
+func Get(_ Holder) string { return "b" }
+func main()               {}

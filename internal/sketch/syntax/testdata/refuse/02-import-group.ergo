@@ -1,0 +1,4 @@
+// want: S001 2 one import per line
+import (
+	fmt
+)

@@ -1,0 +1,48 @@
+type Transient {}
+
+type Attempt[T] {
+	Label string,
+	Work  func() T fails Transient needs Console, // a recipe: runs fresh on every call
+}
+
+type RetryPolicy[T] {
+	Primary Attempt[T],
+	Backup  Option[Attempt[T]],
+}
+
+func probe(name string) string fails Transient needs Console {
+	Console.Println("probe " + name)
+	if name == "flaky" {
+		return Transient{}
+	}
+	return name + " ok"
+}
+
+func attempt(step Attempt[string]) string needs Console {
+	return step.Work() catch {
+	case Transient:
+		step.Label + " failed"
+	}
+}
+
+func retry(policy RetryPolicy[string]) string needs Console {
+	let first = attempt(policy.Primary)
+	match policy.Backup {
+	case None:
+		return first
+	case Some as b:
+		return first + "; " + attempt(b.V)
+	}
+}
+
+func main() needs Console {
+	let policy = RetryPolicy[string]{
+		Primary: Attempt[string]{Label: "flaky", Work: func() { return probe("flaky") }},
+		Backup:  Some{Attempt[string]{Label: "stable", Work: func() { return probe("stable") }}},
+	}
+	Console.Println("constructed")
+	let once = retry(policy)
+	let again = retry(policy)
+	Console.Println(once)
+	Console.Println(again)
+}

@@ -1,0 +1,35 @@
+import cmp
+import fs
+import os
+import slices
+import strings
+
+type WordCount {
+	Word  string,
+	Count int,
+}
+
+// Lines opens the file and closes it when the loop ends, on every exit.
+func topWords(path string, n int) []WordCount fails fs.NotFound | fs.ReadFailed needs fs.Files {
+	let mut counts Map[string, int]
+	for line in try Files.Lines(path) {
+		for w in strings.Fields(strings.ToLower(line)) {
+			counts[w] += 1
+		}
+	}
+	let mut words []WordCount
+	for w, c in counts {
+		words = words.Append(WordCount{w, c})
+	}
+	slices.SortFunc(words, func(a, b) int {
+		return cmp.Or(cmp.Compare(b.Count, a.Count), strings.Compare(a.Word, b.Word))
+	})
+	return words[:min(n, len(words))]
+}
+
+func main() fails fs.NotFound | fs.ReadFailed needs fs.Files, os.Args, Console {
+	let words = try topWords(Args.Get(1), 5)
+	for w in words {
+		Console.Println(w.Word, w.Count)
+	}
+}

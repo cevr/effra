@@ -1,0 +1,26 @@
+// Map is library code, not a construct. It keeps input order and runs at
+// most limit calls at once. It waits for whichever task finishes first, so a
+// failure is seen as soon as it happens. Map then exits, and the exit stops
+// and drains every task still running.
+func Map[A, B, E, R](xs []A, limit int, f func(A) B fails E needs R) []B fails E needs R {
+	let mut out = slice.Repeat[B](zero.Of[B](), len(xs))
+	let mut running = Map[int, Task[B, E]]{}
+	let done = queue.New[int](len(xs))
+	for i, x in xs {
+		if len(running) == limit {
+			let j = done.Pop()
+			out[j] = try running[j].Wait()
+			running.Delete(j)
+		}
+		running[i] = task.Go() {
+			scope.OnExit() { done.Push(i) }
+			f(x)
+		}
+	}
+	for len(running) > 0 {
+		let j2 = done.Pop()
+		out[j2] = try running[j2].Wait()
+		running.Delete(j2)
+	}
+	return out
+}

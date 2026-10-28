@@ -1,0 +1,5 @@
+// want: S001 3 task.Race
+func f() {
+	select {
+	}
+}

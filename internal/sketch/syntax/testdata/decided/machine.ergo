@@ -1,0 +1,20 @@
+type State = Closed{Failures int64} | Open{Endpoint string} | HalfOpen{}
+type Signal = Failure{Endpoint string} | Success{} | Retry{}
+
+func Step(s State, sig Signal) Decision[State, string] fails ProbeDown needs Probe {
+	match (s, sig) {
+	case (Closed, Failure{e}):
+		Enter{Open{e}}
+	case (HalfOpen, Success):
+		Enter{Closed{0}}
+	case _:
+		Ignore
+	}
+}
+
+type Breaker machine[State, Signal] { initial: Closed{0}, step: Step }
+
+func trip(endpoint string) fails actor.Stopped needs Probe {
+	let b = actor.StartMachine(Breaker, 16)
+	try b.Send(Failure{Endpoint: endpoint})
+}

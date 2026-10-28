@@ -1,0 +1,5 @@
+// want: S001 3 match
+func f(x Payment) {
+	let c = x.(Authorized)
+	use(c)
+}

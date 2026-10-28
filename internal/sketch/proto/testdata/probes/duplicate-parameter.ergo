@@ -1,0 +1,3 @@
+// want S108
+func f(x string, x string) {}
+func main()                {}

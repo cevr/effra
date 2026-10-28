@@ -1,0 +1,11 @@
+// out: {one} {two}
+type Fault {}
+func unused() fails Fault { return Fault{} }
+type A { Value string }
+type B {}
+type C {}
+type Sum = A | B
+type Other = A | C
+func one() Sum            { return A{Value: "one"} }
+func two() Other          { return A{Value: "two"} }
+func main() needs Console { Console.Println(one(), two()) }

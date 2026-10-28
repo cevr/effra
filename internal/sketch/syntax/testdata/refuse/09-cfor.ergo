@@ -1,0 +1,6 @@
+// want: S001 3 0..n
+func f(n int) {
+	for i := 0; i < n; i++ {
+		use(i)
+	}
+}

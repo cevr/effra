@@ -1,0 +1,4 @@
+// want S108
+type Holder { Get string }
+func Get(h Holder) string { return h.Get }
+func main()               {}

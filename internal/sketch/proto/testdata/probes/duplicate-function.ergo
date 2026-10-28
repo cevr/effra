@@ -1,0 +1,4 @@
+// want S108
+func f()    {}
+func f()    {}
+func main() {}

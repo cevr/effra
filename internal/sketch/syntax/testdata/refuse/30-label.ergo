@@ -1,0 +1,7 @@
+// want: S001 3 label
+func f(xs []int64) {
+outer:
+	for x in xs {
+		use(x)
+	}
+}

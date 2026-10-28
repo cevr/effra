@@ -1,0 +1,27 @@
+func doubled(xs []int64) []int64 {
+	xs.Transform(func(x) { x * 2 })
+}
+
+func pairs(xs []int64) []int64 {
+	xs.Fold(0, func(acc, x) { acc + x })
+}
+
+func typed() func(int64) int64 {
+	func(a int64) int64 { a + 1 }
+}
+
+func keep(f escaping func(int64) int64) Holder {
+	Holder{Run: f}
+}
+
+func early(n int64) int64 {
+	if n < 0 {
+		return 0
+	}
+	n
+}
+
+func point(p *Point) {
+	p.X = 1
+	use(&p.Y)
+}

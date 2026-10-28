@@ -1,0 +1,4 @@
+// want: S001 2 slice
+func Sum(xs ...int64) int64 {
+	0
+}

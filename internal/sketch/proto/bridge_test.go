@@ -58,30 +58,30 @@ func TestBridgeRefusesOutsideTheSubset(t *testing.T) {
 // source parses, and the bridge refuses it with S109 on the marked line.
 func TestBridgeRefusals(t *testing.T) {
 	for name, src := range map[string]string{
-		"wire needs":        "package p\nwire App needs A {\n\tStore = M{}\n}\n// LINE 2",
-		"wire provides":     "package p\nwire App provides A {\n\tStore = M{}\n}\n// LINE 2",
-		"wire both":         "package p\nwire App provides A needs B {\n\tStore = M{}\n}\n// LINE 2",
-		"wire two keys":     "package p\nwire App {\n\tA, B = M{}\n}\n// LINE 3",
-		"wire embed":        "package p\nwire App {\n\tShared\n}\n// LINE 3",
-		"wire replace":      "package p\nwire App {\n\treplace A = M{}\n}\n// LINE 3",
-		"trailing block":    "package p\nfunc main() {\n\tf() { g() }\n}\n// LINE 3",
-		"statement arm":     "package p\nfunc main() {\n\tx := f() catch {\n\tcase E:\n\t\treturn\n\t}\n}\n// LINE 4",
-		"named import":      "package p\nimport u \"net/url\"\n// LINE 2",
-		"go import":         "package p\nimport go \"net/url\"\n// LINE 2",
-		"bodiless":          "package p\nfunc f()\n// LINE 2",
-		"unary":             "package p\nfunc main() {\n\tx := !y\n}\n// LINE 3",
-		"index":             "package p\nfunc main() {\n\tx := y[0]\n}\n// LINE 3",
-		"rune":              "package p\nfunc main() {\n\tx := 'r'\n}\n// LINE 3",
-		"remainder":         "package p\nfunc main() {\n\tx := 1 % 2\n}\n// LINE 3",
-		"increment":         "package p\nfunc main() {\n\tx++\n}\n// LINE 3",
-		"default clause":    "package p\nfunc f(u U) {\n\tswitch x := u.(type) {\n\tdefault:\n\t}\n}\n// LINE 4",
-		"pointer receiver":  "package p\nfunc (t *T) M() {}\n// LINE 2",
-		"variadic":          "package p\nfunc f(xs ...int64) {}\n// LINE 2",
-		"slice type":        "package p\nfunc f(xs []int64) {}\n// LINE 2",
-		"generic type":      "package p\ntype Box[T] struct{ v T }\n// LINE 2",
-		"qualified literal": "package p\nfunc main() {\n\tx := pkg.T{}\n}\n// LINE 3",
-		"if init":           "package p\nfunc main() {\n\tif x := f(); x {\n\t}\n}\n// LINE 3",
-		"var":               "package p\nvar x = 1\n// LINE 2",
+		"wire needs":          "let App = wire needs A {\n\tStore: M{},\n}\n// LINE 1\n",
+		"wire provides":       "let App = wire provides A {\n\tStore: M{},\n}\n// LINE 1\n",
+		"wire both":           "let App = wire provides A needs B {\n\tStore: M{},\n}\n// LINE 1\n",
+		"wire two keys":       "let App = wire {\n\tA, B: M{},\n}\n// LINE 2\n",
+		"wire embed":          "let App = wire {\n\tShared,\n}\n// LINE 2\n",
+		"wire replace":        "let App = wire {\n\treplace A: M{},\n}\n// LINE 2\n",
+		"wire value needs":    "func main() {\n\twith wire needs A { Store: M{} } {\n\t\tf()\n\t}\n}\n// LINE 2\n",
+		"wire value provides": "func main() {\n\twith wire provides A { Store: M{} } {\n\t\tf()\n\t}\n}\n// LINE 2\n",
+		"trailing block":      "func main() {\n\tf() { g() }\n}\n// LINE 2\n",
+		"statement arm":       "func main() {\n\tlet x = f() catch {\n\tcase E:\n\t\treturn\n\t}\n}\n// LINE 3\n",
+		"named import":        "import u net/url\n// LINE 1\n",
+		"go import":           "import go net/url\n// LINE 1\n",
+		"extern":              "extern go strings.ToUpper func up(s string) string\n// LINE 1\n",
+		"unary":               "func main() {\n\tlet x = !y\n}\n// LINE 2\n",
+		"index":               "func main() {\n\tlet x = y[0]\n}\n// LINE 2\n",
+		"rune":                "func main() {\n\tlet x = 'r'\n}\n// LINE 2\n",
+		"remainder":           "func main() {\n\tlet x = 1 % 2\n}\n// LINE 2\n",
+		"increment":           "func main() {\n\tx += 1\n}\n// LINE 2\n",
+		"default clause":      "func f(u Union) {\n\tmatch u {\n\tcase _:\n\t}\n}\n// LINE 2\n",
+		"pointer parameter":   "func M(t *Thing) {}\n// LINE 1\n",
+		"slice type":          "func f(xs []int64) {}\n// LINE 1\n",
+		"generic type":        "type Box[T] { v T }\n// LINE 1\n",
+		"qualified literal":   "func main() {\n\tlet x = pkg.T{}\n}\n// LINE 2\n",
+		"package let":         "let x = 1\n// LINE 1\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			var line int
@@ -95,7 +95,7 @@ func TestBridgeRefusals(t *testing.T) {
 				t.Fatalf("got %v, want S109 on line %d", diags, line)
 			}
 			// A wire header's meaning belongs to the checker of #196.
-			if strings.Contains(src, "wire App provides") || strings.Contains(src, "wire App needs") {
+			if strings.Contains(src, "wire provides") || strings.Contains(src, "wire needs") {
 				for _, d := range diags {
 					if !strings.Contains(d.Msg, "#196") {
 						t.Fatalf("%+v does not name #196", d)
@@ -108,12 +108,12 @@ func TestBridgeRefusals(t *testing.T) {
 
 // TestBridgeDesugars: else if and grouped names convert exactly.
 func TestBridgeDesugars(t *testing.T) {
-	src := "package p\ntype P struct {\n\tA, B string\n}\nfunc f(a, b string) string {\n\tif a == b {\n\t\treturn a\n\t} else if a == \"x\" {\n\t\treturn b\n\t} else {\n\t\treturn \"\"\n\t}\n}\n"
-	f, err := Parse("d.sketch", src)
+	src := "type P {\n\tA, B string,\n}\nfunc f(a, b string) string {\n\tif a == b {\n\t\treturn a\n\t} else if a == \"x\" {\n\t\treturn b\n\t} else {\n\t\treturn \"\"\n\t}\n}\n"
+	f, err := Parse("d.ergo", src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fields := f.Types[0].Fields; len(fields) != 2 || fields[1].Name != "B" || fields[1].Type != "string" || fields[1].Pos != (Pos{3, 5}) {
+	if fields := f.Types[0].Fields; len(fields) != 2 || fields[1].Name != "B" || fields[1].Type != "string" || fields[1].Pos != (Pos{2, 5}) {
 		t.Fatalf("fields %+v", fields)
 	}
 	if params := f.Funcs[0].Params; len(params) != 2 || params[1].Name != "b" || params[1].Type != "string" {
@@ -121,7 +121,7 @@ func TestBridgeDesugars(t *testing.T) {
 	}
 	outer := f.Funcs[0].Body.Stmts[0].(*IfStmt)
 	nested, ok := outer.Else.Stmts[0].(*IfStmt)
-	if !ok || len(outer.Else.Stmts) != 1 || nested.Else == nil || nested.Pos != (Pos{8, 9}) {
+	if !ok || len(outer.Else.Stmts) != 1 || nested.Else == nil || nested.Pos != (Pos{7, 9}) {
 		t.Fatalf("else if converted to %+v", outer.Else)
 	}
 }
@@ -135,14 +135,14 @@ var bridgeTable = []struct {
 	src  string
 	line int
 }{
-	{"for-loop", "package p\n\nfunc main() needs Console {\n\tfor i := 0; i < 3; i++ {\n\t\tConsole.Println(\"x\")\n\t}\n}\n", 4},
-	{"defer", "package p\n\nfunc main() needs Console {\n\tdefer Console.Println(\"done\")\n\tConsole.Println(\"x\")\n}\n", 4},
-	{"local-var", "package p\n\nfunc main() needs Console {\n\tvar s = \"x\"\n\tConsole.Println(s)\n}\n", 4},
-	{"go-task", "package p\n\nfunc work() needs Console {\n\tConsole.Println(\"w\")\n}\n\nfunc main() needs Console {\n\tt := go work()\n\tt.Stop()\n}\n", 8},
-	{"generic-function", "package p\n\nfunc same[T comparable](x T) T {\n\treturn x\n}\n\nfunc main() needs Console {\n\tConsole.Println(same(\"x\"))\n}\n", 3},
-	{"machine", "package p\n\ntype State interface{ Idle | Busy }\ntype Idle struct{}\ntype Busy struct{}\ntype Event interface{ Start | Halt }\ntype Start struct{}\ntype Halt struct{}\n\nfunc step(s State, e Event) string {\n\treturn \"x\"\n}\n\ntype M machine[State, Event] {\n\tinitial Idle{}\n\tstep    step\n}\n\nfunc main() needs Console {\n\tConsole.Println(\"x\")\n}\n", 14},
-	{"catch-binding", "package p\n\ntype NotFound struct{ Name string }\n\nfunc find() (string, error[NotFound]) {\n\treturn NotFound{Name: \"x\"}\n}\n\nfunc main() needs Console {\n\tline := find() catch e {\n\tcase NotFound:\n\t\te.Name\n\t}\n\tConsole.Println(line)\n}\n", 10},
-	{"func-literal", "package p\n\nfunc main() needs Console {\n\tf := func() string { return \"x\" }\n\tConsole.Println(f())\n}\n", 4},
-	{"assignment", "package p\n\nfunc main() needs Console {\n\ts := \"a\"\n\ts = \"b\"\n\tConsole.Println(s)\n}\n", 5},
-	{"multi-subject-switch", "package p\n\ntype A interface{ X | Y }\ntype X struct{}\ntype Y struct{}\n\nfunc pair(a A, b A) string {\n\tswitch p, q := a.(type), b.(type) {\n\tcase (X, X):\n\t\treturn \"xx\"\n\tcase (_, _):\n\t\treturn \"other\"\n\t}\n}\n\nfunc main() needs Console {\n\tConsole.Println(pair(X{}, Y{}))\n}\n", 8},
+	{"for-loop", "func main() needs Console {\n\tfor i in 0..3 {\n\t\tConsole.Println(\"x\")\n\t}\n}\n", 2},
+	{"defer", "func main() needs Console {\n\tscope.OnExit() { Console.Println(\"done\") }\n\tConsole.Println(\"x\")\n}\n", 2},
+	{"typed-let", "func main() needs Console {\n\tlet s string = \"x\"\n\tConsole.Println(s)\n}\n", 2},
+	{"go-task", "func work() needs Console {\n\tConsole.Println(\"w\")\n}\n\nfunc main() needs Console {\n\tlet t = task.Go() { work() }\n\tt.Stop()\n}\n", 6},
+	{"generic-function", "func same[T comparable](x T) T {\n\treturn x\n}\n\nfunc main() needs Console {\n\tConsole.Println(same(\"x\"))\n}\n", 1},
+	{"machine", "type State = Idle | Busy\ntype Idle {}\ntype Busy {}\ntype Event = Start | Halt\ntype Start {}\ntype Halt {}\n\nfunc step(s State, e Event) string {\n\treturn \"x\"\n}\n\ntype M machine[State, Event] {\n\tinitial: Idle{},\n\tstep:    step,\n}\n\nfunc main() needs Console {\n\tConsole.Println(\"x\")\n}\n", 12},
+	{"catch-binding", "type NotFound { Name string }\n\nfunc find() string fails NotFound {\n\treturn NotFound{Name: \"x\"}\n}\n\nfunc main() needs Console {\n\tlet line = find() catch {\n\tcase NotFound as e:\n\t\te.Name\n\t}\n\tConsole.Println(line)\n}\n", 9},
+	{"func-literal", "func main() needs Console {\n\tlet f = func() string { return \"x\" }\n\tConsole.Println(f())\n}\n", 2},
+	{"assignment", "func main() needs Console {\n\tlet mut s = \"a\"\n\ts = \"b\"\n\tConsole.Println(s)\n}\n", 3},
+	{"multi-subject-switch", "type A = X | Y\ntype X {}\ntype Y {}\n\nfunc pair(a A, b A) string {\n\tmatch (a, b) {\n\tcase (X, X):\n\t\treturn \"xx\"\n\tcase (_, _):\n\t\treturn \"other\"\n\t}\n}\n\nfunc main() needs Console {\n\tConsole.Println(pair(X{}, Y{}))\n}\n", 6},
 }

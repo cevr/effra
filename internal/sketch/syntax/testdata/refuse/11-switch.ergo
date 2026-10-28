@@ -1,0 +1,8 @@
+// want: S001 3 match
+func f(code int64) string {
+	switch code {
+	case 404:
+		return "missing"
+	}
+	"ok"
+}

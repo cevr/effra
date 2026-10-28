@@ -1,0 +1,48 @@
+// want S102
+
+type OrderNotFound { ID string }
+type GatewayDown {}
+
+type Order {
+	ID    string,
+	Total int64,
+}
+
+type Orders {
+	Find(id string) Order fails OrderNotFound,
+}
+
+type Gateway {
+	Charge(order Order) string fails GatewayDown,
+}
+
+type MemoryOrders {}
+
+func Find(_ MemoryOrders, id string) Order fails OrderNotFound {
+	if id == "42" {
+		return Order{ID: id, Total: 1999}
+	}
+	return OrderNotFound{ID: id}
+}
+
+type FakeGateway {}
+
+func Charge(_ FakeGateway, order Order) string fails GatewayDown {
+	return "auth-7"
+}
+
+func pay(id string) string fails OrderNotFound | GatewayDown needs Orders, Gateway {
+	let order = try Orders.Find(id)
+	return Gateway.Charge(order)
+}
+
+// main supplies Orders but not Gateway, and main's needs clause has only Console.
+func main() needs Console {
+	let outcome = with wire { Orders: MemoryOrders{} } { pay("42") } catch {
+	case OrderNotFound:
+		"no such order"
+	case GatewayDown:
+		"gateway down"
+	}
+	Console.Println(outcome)
+}

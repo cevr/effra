@@ -1,0 +1,10 @@
+// out: Console Scheduler LiveScheduler Println After with
+func main() needs Console {
+	let Console = "Console"
+	let Scheduler = "Scheduler"
+	let LiveScheduler = "LiveScheduler"
+	let Println = "Println"
+	let After = "After"
+	let with2 = "with"
+	Console.Println(Console, Scheduler, LiveScheduler, Println, After, with2)
+}

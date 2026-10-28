@@ -1,0 +1,12 @@
+// want S106
+import timeout
+type Mem {}
+func main() needs Console {
+	let x = with wire { Scheduler: Mem{} } {
+		timeout.After(1s) { "ok" }
+	} catch {
+	case timeout.Expired:
+		"late"
+	}
+	Console.Println(x)
+}

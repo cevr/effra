@@ -10,9 +10,14 @@ import (
 	"ergo.local/prototype/internal/sketch/sketchtest"
 )
 
-// TestMalformed: every malformed input is a located S001 on its line, never
-// a passthrough.
+// TestMalformed: every malformed input is a located diagnostic with its code
+// (S001 unless the row names another) on one of its lines, never a
+// passthrough, and a Go habit carries the message that names the Ergo form.
 func TestMalformed(t *testing.T) {
+	messages := map[string]string{}
+	for _, h := range Habits() {
+		messages[h.Spelling] = h.Message
+	}
 	for _, m := range sketchtest.MalformedTable {
 		t.Run(m.Name, func(t *testing.T) {
 			src := m.Src
@@ -27,8 +32,21 @@ func TestMalformed(t *testing.T) {
 			if !errors.As(err, &e) {
 				t.Fatalf("%T is not *Error", err)
 			}
-			if e.Code != CodeSyntax || !slices.Contains(m.Lines, e.Line) {
-				t.Fatalf("%v: want S001 on line %v", e, m.Lines)
+			code := m.Code
+			if code == "" {
+				code = CodeSyntax
+			}
+			if e.Code != code || !slices.Contains(m.Lines, e.Line) {
+				t.Fatalf("%v: want %s on line %v", e, code, m.Lines)
+			}
+			if m.Habit != "" {
+				want, ok := messages[m.Habit]
+				if !ok {
+					t.Fatalf("no habit %q", m.Habit)
+				}
+				if e.Message != want {
+					t.Fatalf("message %q, want the habit's %q", e.Message, want)
+				}
 			}
 			if e.Offset < 0 || e.Offset+e.Length > len(src) {
 				t.Fatalf("span %d+%d outside the %d-byte source", e.Offset, e.Length, len(src))
@@ -42,97 +60,74 @@ func TestMalformed(t *testing.T) {
 	}
 }
 
-// TestUsesIsAnIdentifier (#217): `uses` is not a keyword and has no
-// compatibility path (owner, 2026-10-27: "We don't need to give backwards
-// compatible syntax parsing. This is still a prototype"). It is an ordinary
-// name, so the old spelling of a needs clause gets the plain S001 any stray
-// identifier gets, never a dedicated hint.
-func TestUsesIsAnIdentifier(t *testing.T) {
-	for _, c := range []struct {
-		src, message string
-		line, column int
-	}{
-		// `uses` parses as the result type, so the error is at A.
-		{"package p\nfunc f() uses A {}\n", `expected end of declaration, found "A"`, 2, 15},
-		{"package p\nwire W uses A {\n}\n", `expected "{", found "uses"`, 2, 8},
-	} {
-		_, err := Parse(c.src)
-		var e *Error
-		if !errors.As(err, &e) || e.Code != CodeSyntax || e.Message != c.message || e.Line != c.line || e.Column != c.column {
-			t.Errorf("%q: got %v, want %d:%d S001 %s", c.src, err, c.line, c.column, c.message)
+// TestEveryHabitHasAFixture: each Go habit of the message table has a
+// malformed row (D7: every D2 diagnostic has a malformed fixture), and each
+// message names the Ergo form as code in backticks, except the three whose
+// Ergo form is a rule rather than a spelling.
+func TestEveryHabitHasAFixture(t *testing.T) {
+	covered := map[string]bool{}
+	for _, m := range sketchtest.MalformedTable {
+		covered[m.Habit] = true
+	}
+	for _, h := range Habits() {
+		if !covered[h.Spelling] {
+			t.Errorf("habit %q has no malformed fixture", h.Spelling)
+		}
+		switch h.Spelling {
+		case "chan T", "<-ch", "L:", "goto", "fallthrough", "package p":
+		default:
+			if !strings.Contains(h.Message, "`") {
+				t.Errorf("habit %q: message %q names no Ergo form in backticks", h.Spelling, h.Message)
+			}
 		}
 	}
-	if _, err := Parse("package p\n\nvar uses = 1\n"); err != nil {
+}
+
+// TestUsesIsAnIdentifier (#217): `uses` is not a keyword and has no
+// compatibility path, so the old spelling of a needs clause gets the plain
+// S001 any stray identifier gets, never a dedicated hint.
+func TestUsesIsAnIdentifier(t *testing.T) {
+	_, err := Parse("func f() uses A {}\n")
+	var e *Error
+	if !errors.As(err, &e) || e.Code != CodeSyntax || e.Line != 1 || strings.Contains(e.Message, "needs") {
+		t.Errorf("got %v, want a plain S001 on line 1", err)
+	}
+	if _, err := Parse("let uses = 1\n"); err != nil {
 		t.Fatalf("uses is not a name: %v", err)
 	}
-	// needs and provides are keywords, so neither is a name.
-	for _, word := range []string{"needs", "provides"} {
-		if _, err := Parse("package p\n\nvar " + word + " = 1\n"); err == nil {
-			t.Fatalf("%s is a name", word)
+}
+
+// TestKeywordsAreNotNames: no keyword or reserved word is a name, in a let,
+// a parameter, a field or a type; a contextual word is.
+func TestKeywordsAreNotNames(t *testing.T) {
+	words := append(Keywords(), Reserved()...)
+	if n := len(Keywords()); n != 28 {
+		t.Fatalf("%d keywords, want the 27 decided ones and as", n)
+	}
+	if n := len(Reserved()); n != 15 {
+		t.Fatalf("%d reserved words, want 15", n)
+	}
+	for _, word := range words {
+		for _, src := range []string{
+			"let " + word + " = 1\n",
+			"func f(" + word + " int64) {}\n",
+			"type T { " + word + " int64 }\n",
+			"type " + word + " {}\n",
+		} {
+			if _, err := Parse(src); err == nil {
+				t.Errorf("%q parsed: %s is a name", src, word)
+			}
+		}
+	}
+	for _, word := range []string{"replace", "initial", "step", "uses", "Map"} {
+		if _, err := Parse("func f() {\n\tlet " + word + " = 1\n\tuse(" + word + ")\n}\n"); err != nil {
+			t.Errorf("%s is not a name: %v", word, err)
 		}
 	}
 }
 
-// TestRefusedForms: Go forms outside the language, and ambiguities that
-// must resolve one way, each give S001 with a message naming the problem.
-func TestRefusedForms(t *testing.T) {
-	cases := []struct{ name, src, message string }{
-		{"type alias", "package p\ntype A = B\n", "type aliases"},
-		{"defined type", "package p\ntype A B\n", "struct, an interface or a machine"},
-		{"slice type declaration", "package p\ntype A []T\n", "type parameter"},
-		{"array type declaration", "package p\ntype A [4]int\n", "type"},
-		{"method type parameters", "package p\nfunc (r R) M[T any]() {}\n", "method cannot have type parameters"},
-		{"type assertion", "package p\nfunc f() {\n\tx := v.(T)\n}\n", "type assertions"},
-		{"guard in an argument", "package p\nfunc f() {\n\tswitch g(v.(type)) {\n\t}\n}\n", "subject of a type switch"},
-		{"guard in init", "package p\nfunc f() {\n\tswitch x := v.(type); x {\n\t}\n}\n", "subject of a type switch"},
-		{"multi-subject without bindings", "package p\nfunc f() {\n\tswitch a.(type), b.(type) {\n\t}\n}\n", "expected"},
-		{"tuple arity", "package p\nfunc f() {\n\tswitch x, y := a.(type), b.(type) {\n\tcase (A, B, C):\n\t}\n}\n", "3 types for 2"},
-		{"single case in multi switch", "package p\nfunc f() {\n\tswitch x, y := a.(type), b.(type) {\n\tcase A:\n\t}\n}\n", "tuple"},
-		{"local type", "package p\nfunc f() {\n\ttype T struct{}\n}\n", "package level"},
-		{"catch default", "package p\nfunc f() {\n\tx := g() catch {\n\tdefault:\n\t}\n}\n", "default is not allowed"},
-		{"error row as a parameter", "package p\nfunc f(e error[E]) {}\n", "result list"},
-		{"paren needs on a declaration", "package p\nfunc f() needs (A, B) {}\n", "inside a list"},
-		{"unparenthesised needs in a list", "package p\nfunc f(g func() needs A, B) {}\n", "parameter type"},
-		{"variadic result", "package p\nfunc f() (...int) {}\n", "variadic"},
-		{"variadic not last", "package p\nfunc f(a ...int, b int) {}\n", "variadic"},
-		{"if header newline", "package p\nfunc f() {\n\tif x\n\t{\n\t}\n}\n", "newline"},
-		{"trailing block in if header", "package p\nfunc f() {\n\tif g() { h() } {\n\t}\n}\n", "end of statement"},
-		{"duplicate machine entry", "package p\ntype M machine[S, E] {\n\tinitial A{}\n\tinitial B{}\n\tstep f\n}\n", "duplicate"},
-		{"missing step", "package p\ntype M machine[S, E] {\n\tinitial A{}\n}\n", "step entry"},
-		{"union and method", "package p\ntype U interface{ A | B; M() }\n", "one list of types"},
-		{"tilde constraint", "package p\nfunc f[T ~int]() {}\n", "unexpected character"},
-		{"else without block", "package p\nfunc f() {\n\tif x {\n\t} else g()\n}\n", "else must be followed"},
-		{"go keyword name", "package p\nfunc f() {\n\tgo := 1\n}\n", "expected an expression"},
-		{"machine keyword name", "package p\nfunc f() {\n\tmachine := 1\n}\n", "expected an expression"},
-		{"embedded struct field", "package p\ntype S struct {\n\tT\n}\n", "name and a type"},
-		{"select case", "package p\nfunc f() {\n\tselect {\n\tcase x:\n\t}\n}\n", "send or a receive"},
-		{"empty type arguments", "package p\nvar x T[]\n", "type argument"},
-		{"three-index slice without max", "package p\nvar x = s[1:2:]\n", "final index"},
-		// Review M4: Go's IdentifierList ":=" holds in a range clause too.
-		{"range define of a selector", "package p\nfunc f() { for a.x := range xs {} }\n", "non-name on the left side of :="},
-		{"range define of a parenthesised name", "package p\nfunc f() { for (i) := range xs {} }\n", "non-name on the left side of :="},
-		// Review M5: error rows, catch arms and unions name types.
-		{"error row of a slice type", "package p\nfunc f() error[[]int | *E] {}\n", "an error row names a type"},
-		{"error row of a pointer", "package p\nfunc f() error[E | *F] {}\n", "an error row names a type"},
-		{"union of composite types", "package p\ntype U interface { []int | map[string]int }\n", "a union variant names a type"},
-		{"union variant pointer", "package p\ntype U interface { A | *B }\n", "a union variant names a type"},
-		{"catch arm of a slice type", "package p\nfunc f() { g() catch { case []int: 1 } }\n", "a catch arm names a type"},
-		// Review M6: [...] only as a composite literal's type.
-		{"inferred length as a parameter type", "package p\nfunc f(a [...]int) {}\n", "expected a type"},
-		{"inferred length without a literal", "package p\nvar x = [...]int\n", "array composite literal only"},
-		// Review M7: an inserted semicolon before `{` leaves no condition.
-		{"if condition then newline", "package p\nfunc f() {\n\tif x := g(); x\n\t{\n\t}\n}\n", "newline"},
-	}
-	for _, c := range cases {
-		_, err := Parse(c.src)
-		var e *Error
-		if !errors.As(err, &e) || e.Code != CodeSyntax || !strings.Contains(e.Message, c.message) {
-			t.Errorf("%s: got %v, want S001 with %q", c.name, err, c.message)
-		}
-	}
-}
-
-// TestAdmittedForms: forms that parse, with the shape the checker needs.
+// TestAdmittedForms: decided forms parse into the trees of D3, the shapes
+// the 196a checker and the prototype bridge read.
 func TestAdmittedForms(t *testing.T) {
 	parse := func(src string) *File {
 		t.Helper()
@@ -144,153 +139,192 @@ func TestAdmittedForms(t *testing.T) {
 	}
 	body := func(src string) []Stmt {
 		t.Helper()
-		f := parse("package p\nfunc f() {\n" + src + "\n}\n")
-		return f.Decls[0].(*FuncDecl).Body.List
+		return parse("func f() {\n" + src + "\n}\n").Decls[0].(*FuncDecl).Body.List
 	}
 
-	// A composite literal in an if header needs parentheses (Go).
-	if s := body("if x == (T{}) {\n}")[0].(*IfStmt); s.Body == nil {
-		t.Fatal("no body")
+	// No package clause; File.Pos falls back to the first declaration.
+	f := parse("// c\nimport strings\n")
+	if f.Package.IsValid() || f.Name != nil || f.Pos() != 0 {
+		t.Fatalf("file %+v at %d", f, f.Pos())
 	}
-	// A trailing block after a call in a statement.
-	call := body("with(Test) {\n\tserve()\n}")[0].(*ExprStmt).X.(*CallExpr)
-	if call.Trailing == nil || len(call.Trailing.List) != 1 {
-		t.Fatal("no trailing block")
-	}
-	// try in operand position extends to the right over the binary rest.
-	ret := body("return a + try b * c")[0].(*ReturnStmt)
-	sum := ret.Results[0].(*BinaryExpr)
-	if try, ok := sum.Y.(*TryExpr); !ok || try.X.(*BinaryExpr).Op != MUL {
-		t.Fatalf("try operand %#v", sum.Y)
-	}
-	// try … catch is one partial catch.
-	def := body("x := try f() catch {\ncase A:\n\t0\n}")[0].(*AssignStmt)
-	if _, ok := def.Rhs[0].(*TryExpr).X.(*CatchExpr); !ok {
-		t.Fatal("try does not hold the catch")
-	}
-	// catch e with statement arms.
-	c := body("r := f() catch e {\ncase A:\n\tlog(e)\n\treturn 1\n}")[0].(*AssignStmt).Rhs[0].(*CatchExpr)
-	if c.Bind.Name != "e" || len(c.Arms[0].Body) != 2 {
-		t.Fatalf("catch %#v", c)
-	}
-	// case (x): in an expression switch is an expression.
-	sw := body("switch v {\ncase (x):\n}")[0].(*SwitchStmt)
-	if _, ok := sw.Clauses[0].List[0].(*ParenExpr); !ok {
-		t.Fatal("not a parenthesised expression")
-	}
-	// Multi-subject type switch with tuples, _ and default.
-	ts := body("switch a, b := x.(type), y.(type) {\ncase (A, _), (B, C):\ndefault:\n}")[0].(*TypeSwitchStmt)
-	if len(ts.Binds) != 2 || len(ts.Clauses[0].List) != 2 || ts.Clauses[1].List != nil {
-		t.Fatalf("type switch %#v", ts)
-	}
-	// go as statement, block, qualifier.
-	stmts := body("go f(x)\nt := go {\n\twork()\n}\ne := go.Error{}")
-	if g := stmts[0].(*ExprStmt).X.(*GoExpr); g.Call == nil {
-		t.Fatal("go call")
-	}
-	if g := stmts[1].(*AssignStmt).Rhs[0].(*GoExpr); g.Block == nil {
-		t.Fatal("go block")
-	}
-	if sel := stmts[2].(*AssignStmt).Rhs[0].(*CompositeLit).Type.(*SelectorExpr); sel.X.(*Ident).Name != "go" {
-		t.Fatal("go qualifier")
-	}
-	// func(a, b) int keeps two type-only parameters.
-	lit := body("f(func(a, b) int { return 0 })")[0].(*ExprStmt).X.(*CallExpr).Args[0].(*FuncLit)
-	if params := lit.Type.Params.List; len(params) != 2 || params[0].Names != nil {
-		t.Fatalf("params %#v", params)
-	}
-	// Bodiless declaration and the go import.
-	f := parse("package p\nimport (\n\tgo \"net/url\"\n\t. \"html\"\n)\n//ef:go net/url.Parse\nfunc parse(raw string) (url.URL, error[go.Error]) needs go.Foreign\n")
-	imp := f.Decls[0].(*ImportDecl)
-	if imp.Specs[0].Kind != ImportGo || imp.Specs[1].Kind != ImportDot {
-		t.Fatal("import kinds")
-	}
-	fn := f.Decls[1].(*FuncDecl)
-	if fn.Body != nil || fn.Doc == nil || fn.Doc.List[0].Text != "//ef:go net/url.Parse" {
-		t.Fatal("bodiless declaration or directive")
-	}
-	if _, ok := fn.Type.Results.List[1].Type.(*ErrorRow); !ok {
-		t.Fatal("error row")
-	}
-	// needs (A, B) in a function type inside a parameter list.
-	run := parse("package p\nfunc run(f func() needs (A, B), g func() needs R) needs A, B, R {}\n").Decls[0].(*FuncDecl)
-	if u := run.Type.Params.List[0].Type.(*FuncType).Needs; len(u.Names) != 2 || !u.Lparen.IsValid() {
-		t.Fatal("parenthesised needs")
-	}
-	if len(run.Type.Needs.Names) != 3 {
-		t.Fatal("declaration needs")
-	}
-	// A wire header: provides, needs, both in that order, or neither.
-	wires := parse("package p\nwire A provides X, y.Y {\n\tS = M{}\n}\nwire B needs C {\n\tS = M{}\n}\nwire D provides X needs C, E {\n\tS = M{}\n}\nwire F {\n\tS = M{}\n}\n").Decls
-	for i, want := range []struct{ provides, needs int }{{2, 0}, {0, 1}, {1, 2}, {0, 0}} {
-		w := wires[i].(*WireDecl)
-		provides, needs := 0, 0
-		if w.Provides != nil {
-			provides = len(w.Provides.Names)
-		}
-		if w.Needs != nil {
-			needs = len(w.Needs.Names)
-		}
-		if provides != want.provides || needs != want.needs {
-			t.Fatalf("wire %s: provides %d, needs %d; want %d and %d", w.Name.Name, provides, needs, want.provides, want.needs)
+	// import [go] [alias] path, unquoted, one per line.
+	f = parse("import strings\nimport go net/http\nimport ourjson example.com/json\nimport go gohttp net/http\n")
+	kinds := []ImportKind{ImportPlain, ImportGo, ImportNamed, ImportGo}
+	paths := []string{"strings", "net/http", "example.com/json", "net/http"}
+	for i, d := range f.Decls {
+		imp := d.(*ImportDecl)
+		s := imp.Specs[0]
+		if len(imp.Specs) != 1 || imp.Lparen.IsValid() || s.Kind != kinds[i] || s.Path.Kind != PATH || s.Path.Value != paths[i] {
+			t.Fatalf("import %d: %+v %+v", i, imp, s)
 		}
 	}
-	// Grouped struct fields, several wire keys, an unconstrained parameter.
-	g := parse("package p\ntype P[T] struct {\n\tA, B T\n}\nwire W {\n\tC, D = X{}\n\treplace E = Y{}\n\tShared\n}\n")
-	if tp := g.Decls[0].(*TypeDecl).TypeParams.List[0]; tp.Type != nil || tp.Names[0].Name != "T" {
-		t.Fatal("unconstrained type parameter")
+	if s := f.Decls[3].(*ImportDecl).Specs[0]; s.Name == nil || s.Name.Name != "gohttp" {
+		t.Fatalf("aliased go import %+v", s)
 	}
-	entries := g.Decls[1].(*WireDecl).Body.Entries
-	if len(entries[0].Keys) != 1 || entries[1].Kind != WireReplace || entries[2].Kind != WireEmbed {
-		t.Fatal("wire entries")
+	// let, let mut, a typed let without a value, a tuple and a record pattern.
+	stmts := body("let x = 1\nlet mut y int64 = 2\nlet z string\nlet q, r = divide(7, 2)\nlet Point{X: px} = p")
+	for i, want := range []struct {
+		mut, typed bool
+		names      int
+		pattern    bool
+	}{{false, false, 1, false}, {true, true, 1, false}, {false, true, 1, false}, {false, false, 2, false}, {false, false, 0, true}} {
+		d := stmts[i].(*DeclStmt).Decl
+		s := d.Specs[0]
+		if len(d.Specs) != 1 || d.Lparen.IsValid() || d.Mut.IsValid() != want.mut || (s.Type != nil) != want.typed ||
+			len(s.Names) != want.names || (s.Pattern != nil) != want.pattern {
+			t.Fatalf("let %d: %+v %+v", i, d, s)
+		}
 	}
-	// Review M5: a name with type arguments is still a type name.
-	row := parse("package p\nfunc f() error[retry.Exhausted[E] | go.Error | E] {}\n").Decls[0].(*FuncDecl).Type.Results.List[0].Type.(*ErrorRow)
-	if _, ok := row.Types[0].(*IndexExpr); !ok || len(row.Types) != 3 {
-		t.Fatalf("error row %#v", row.Types)
+	// A package-level wire is a WireDecl; a wire elsewhere is a WireLit.
+	f = parse("let App = wire provides A needs B {\n\tC, D:      X{},\n\treplace E: Y{},\n\tShared,\n}\n\nfunc main() {\n\twith wire { A: M{} } {\n\t\trun()\n\t}\n}\n")
+	w := f.Decls[0].(*WireDecl)
+	if !w.Let.IsValid() || w.Pos() != w.Let || w.Provides == nil || w.Needs == nil || len(w.Body.Entries) != 3 {
+		t.Fatalf("wire %+v", w)
 	}
-	// Review M6: `[...]T{…}` has an Ellipsis length.
-	arrLit := parse("package p\nvar x = [...]int{1, 2}\n").Decls[0].(*VarDecl).Specs[0].Values[0].(*CompositeLit)
-	if arr, ok := arrLit.Type.(*ArrayType); !ok || arr.Len.(*Ellipsis).Elt != nil || len(arrLit.Elts) != 2 {
-		t.Fatalf("inferred length %#v", arrLit.Type)
+	if e := w.Body.Entries; e[0].Kind != WireBind || len(e[0].Keys) != 1 || e[1].Kind != WireReplace || e[2].Kind != WireEmbed {
+		t.Fatalf("wire entries %+v %+v %+v", e[0], e[1], e[2])
 	}
-	// Review M7: inserted header semicolons, as go/parser reads them.
-	hs := body("if x := g()\nx {\n}\nswitch g()\n{\ndefault:\n}\nfor i := 0\ni < 3\ni++ {\n}")
-	if s := hs[0].(*IfStmt); s.Init == nil || s.Cond.(*Ident).Name != "x" {
-		t.Fatalf("if header %#v", s)
+	with := f.Decls[1].(*FuncDecl).Body.List[0].(*ExprStmt).X.(*CallExpr)
+	if id, ok := with.Fun.(*Ident); !ok || id.Name != "with" || len(with.Args) != 1 || with.Trailing == nil {
+		t.Fatalf("with %+v", with)
 	}
-	if s := hs[1].(*SwitchStmt); s.Init == nil || s.Tag != nil {
-		t.Fatalf("switch header %#v", s)
+	if _, ok := with.Args[0].(*WireLit); !ok {
+		t.Fatalf("with argument %T", with.Args[0])
 	}
-	if s := hs[2].(*ForStmt); s.Init == nil || s.Cond == nil || s.Post == nil {
-		t.Fatalf("for header %#v", s)
+	// Records, operation types with laws, unions with inline variants,
+	// machines and defined types.
+	f = parse("type Card { Number string, Expiry Date }\ntype Empty {}\ntype Store {\n\tFind(id string) Order fails NotFound,\n\n\tlaw Found(id string) { true },\n}\ntype Payment = Pending | Paid{ID string}\ntype M machine[S, E] { initial: Idle{}, step: Step }\ntype Celsius float64\n")
+	if s := f.Decls[0].(*TypeDecl).Spec.(*StructType); s.Struct.IsValid() || len(s.Fields.List) != 2 {
+		t.Fatalf("record %+v", s)
 	}
-	// Review M8: a parenthesised receive is a receive; the parentheses stay.
-	sel := body("select {\ncase (<-ch):\ncase x = (<-ch):\n}")[0].(*SelectStmt)
-	if _, ok := sel.Clauses[0].Comm.(*ExprStmt).X.(*ParenExpr); !ok {
-		t.Fatal("parenthesised receive")
+	if _, ok := f.Decls[1].(*TypeDecl).Spec.(*StructType); !ok {
+		t.Fatal("empty record")
 	}
-	if _, ok := sel.Clauses[1].Comm.(*AssignStmt).Rhs[0].(*ParenExpr); !ok {
-		t.Fatal("assigned parenthesised receive")
+	if s := f.Decls[2].(*TypeDecl).Spec.(*InterfaceType); len(s.Methods) != 1 || len(s.Laws) != 1 || s.Laws[0].Name.Name != "Found" {
+		t.Fatalf("operation type %+v", s)
 	}
-	// Review M9: `L: ;` labels the empty statement, as in go/ast; the loop
-	// after it is not labelled. `L: }` labels an implicit one.
-	ls := body("L:;\nfor {\n\tbreak L\n}")
-	if l, ok := ls[0].(*LabeledStmt); !ok || l.Stmt.(*EmptyStmt).Implicit {
-		t.Fatalf("labelled empty statement %#v", ls[0])
+	union := f.Decls[3].(*TypeDecl).Spec.(*InterfaceType).Union
+	if _, ok := union[0].(*Ident); !ok || len(union) != 2 {
+		t.Fatalf("union %+v", union)
 	}
-	if _, ok := ls[1].(*ForStmt); !ok || len(ls) != 2 {
-		t.Fatalf("the loop after the label: %#v", ls)
+	if v, ok := union[1].(*VariantSpec); !ok || v.Name.Name != "Paid" || len(v.Fields.List) != 1 {
+		t.Fatalf("variant %+v", union[1])
 	}
-	if l := body("M:")[0].(*LabeledStmt); !l.Stmt.(*EmptyStmt).Implicit {
-		t.Fatal("implicit empty statement")
+	if m := f.Decls[4].(*TypeDecl).Spec.(*MachineType); len(m.Entries) != 2 || !m.Entries[0].Colon.IsValid() {
+		t.Fatalf("machine %+v", m)
+	}
+	if id, ok := f.Decls[5].(*TypeDecl).Spec.(*Ident); !ok || id.Name != "float64" {
+		t.Fatalf("defined type %+v", f.Decls[5].(*TypeDecl).Spec)
+	}
+	// R fails A | B needs S is the result plus the old row; escaping;
+	// a tuple result; Map[K, V].
+	fn := parse("func f(g escaping func() int64) (int64, string) fails A | B needs S {}\n").Decls[0].(*FuncDecl)
+	res := fn.Type.Results
+	if res.Opening.IsValid() || len(res.List) != 2 {
+		t.Fatalf("results %+v", res)
+	}
+	if _, ok := res.List[0].Type.(*TupleExpr); !ok {
+		t.Fatalf("tuple result %T", res.List[0].Type)
+	}
+	if row := res.List[1].Type.(*ErrorRow); len(row.Types) != 2 || !row.Error.IsValid() {
+		t.Fatalf("row %+v", row)
+	}
+	if fn.Type.Needs == nil || !fn.Type.Params.List[0].Type.(*FuncType).Escaping.IsValid() {
+		t.Fatal("needs or escaping")
+	}
+	if m, ok := parse("let m Map[string, int64]\n").Decls[0].(*VarDecl).Specs[0].Type.(*MapType); !ok || m.Key.(*Ident).Name != "string" {
+		t.Fatal("Map[K, V] is not a MapType")
+	}
+	// extern, test, assert.
+	f = parse("extern go example.com/json.Valid func Valid(b []byte) bool\n\ntest Works {\n\tassert 1 + 1 == 2\n}\n\ntest Prop(x int64) {\n\tassert x == x\n}\n")
+	ext := f.Decls[0].(*FuncDecl)
+	if path, name := ext.Extern.Split(); ext.Body != nil || ext.Pos() != 0 || path != "example.com/json" || name != "Valid" {
+		t.Fatalf("extern %+v: %s %s", ext.Extern, path, name)
+	}
+	if td := f.Decls[1].(*TestDecl); td.Params != nil || td.Body.List[0].(*AssertStmt).X == nil {
+		t.Fatalf("test %+v", td)
+	}
+	if td := f.Decls[2].(*TestDecl); td.Params == nil || len(td.Params.List) != 1 {
+		t.Fatalf("property %+v", td)
+	}
+	// if as an expression; match on literals is a value switch, any other
+	// match a type switch; tuple subjects; as-patterns; case _.
+	stmts = body("let v = if a { 1 } else { 2 }\nmatch n {\ncase 1, -2:\ncase _:\n}\nmatch p {\ncase Declined as d:\n\tuse(d)\ncase Pending:\n}\nmatch (a, b) {\ncase (X, _):\n}")
+	if _, ok := stmts[0].(*DeclStmt).Decl.Specs[0].Values[0].(*IfStmt); !ok {
+		t.Fatal("if expression")
+	}
+	if sw := stmts[1].(*SwitchStmt); sw.Tag == nil || len(sw.Clauses) != 2 || sw.Clauses[1].List != nil || sw.Init != nil {
+		t.Fatalf("value match %+v", sw)
+	}
+	ts := stmts[2].(*TypeSwitchStmt)
+	if len(ts.Subjects) != 1 || ts.Binds != nil || ts.Subjects[0].Lparen.IsValid() || ts.Subjects[0].End() != ts.Subjects[0].X.End() {
+		t.Fatalf("type match %+v", ts)
+	}
+	if as, ok := ts.Clauses[0].List[0].(*AsPattern); !ok || as.Name.Name != "d" {
+		t.Fatalf("as-pattern %T", ts.Clauses[0].List[0])
+	}
+	if ts := stmts[3].(*TypeSwitchStmt); len(ts.Subjects) != 2 {
+		t.Fatalf("tuple match %+v", ts)
+	}
+	// catch without a binding, patterns in the arms.
+	c := body("let r = f() catch {\ncase NotFound as e:\n\tlog(e)\n\t0\ncase A, B:\n\t1\n}")[0].(*DeclStmt).Decl.Specs[0].Values[0].(*CatchExpr)
+	if c.Bind != nil || len(c.Arms) != 2 || len(c.Arms[1].Types) != 2 {
+		t.Fatalf("catch %+v", c)
+	}
+	// for x in xs, for i, x in xs, for i in a..b, for cond, for.
+	stmts = body("for x in xs {\n}\nfor i, x in xs {\n}\nfor i in 0..n {\n}\nfor ok {\n}\nfor {\n}")
+	if r := stmts[0].(*RangeStmt); r.Key != nil || r.Value == nil || r.Tok != DEFINE {
+		t.Fatalf("for in %+v", r)
+	}
+	if r := stmts[1].(*RangeStmt); r.Key == nil || r.Value == nil {
+		t.Fatalf("for i, x in %+v", r)
+	}
+	if r := stmts[2].(*RangeStmt); r.X.(*BinaryExpr).Op != DOTDOT {
+		t.Fatalf("for range %+v", r)
+	}
+	if l := stmts[3].(*ForStmt); l.Cond == nil || l.Init != nil || l.Post != nil {
+		t.Fatalf("for cond %+v", l)
+	}
+	if l := stmts[4].(*ForStmt); l.Cond != nil {
+		t.Fatalf("for %+v", l)
+	}
+	// `..` binds looser than `||` and every other operator.
+	r := body("for i in 1..len(xs)-1 {\n}")[0].(*RangeStmt).X.(*BinaryExpr)
+	if r.Op != DOTDOT || r.Y.(*BinaryExpr).Op != SUB {
+		t.Fatalf("1..len(xs)-1 is %+v", r)
+	}
+	// Untyped and typed function literals; a function type without a block.
+	stmts = body("xs.Fold(0, func(acc, x) { acc + x })\nlet g = func(a, b int64) int64 { a + b }\nlet h func(x) = nil")
+	lit := stmts[0].(*ExprStmt).X.(*CallExpr).Args[1].(*FuncLit)
+	if ps := lit.Type.Params.List; len(ps) != 2 || ps[0].Type != nil {
+		t.Fatalf("untyped literal %+v", ps)
+	}
+	if ps := stmts[1].(*DeclStmt).Decl.Specs[0].Values[0].(*FuncLit).Type.Params.List; len(ps) != 1 || len(ps[0].Names) != 2 {
+		t.Fatalf("typed literal %+v", ps)
+	}
+	if ft := stmts[2].(*DeclStmt).Decl.Specs[0].Type.(*FuncType); ft.Params.List[0].Type.(*Ident).Name != "x" {
+		t.Fatalf("function type %+v", ft.Params.List[0])
+	}
+	// Interpolation with a nested string; a float literal.
+	stmts = body("let s = \"a \\(f(\"b\")) c \\(x)\"\nlet z = 2.5")
+	if is := stmts[0].(*DeclStmt).Decl.Specs[0].Values[0].(*InterpolatedString); len(is.Exprs) != 2 || len(is.Texts) != 3 {
+		t.Fatalf("interpolation %+v", is)
+	}
+	if lit := stmts[1].(*DeclStmt).Decl.Specs[0].Values[0].(*BasicLit); lit.Kind != FLOAT {
+		t.Fatalf("float %+v", lit)
+	}
+	// A union may continue on the next line with or without a leading |.
+	for _, src := range []string{"type U =\n\t| A\n\t| B\n", "type U = A\n\t| B\n", "type U = A |\n\tB\n"} {
+		if u := parse(src).Decls[0].(*TypeDecl).Spec.(*InterfaceType).Union; len(u) != 2 {
+			t.Fatalf("%q: union %+v", src, u)
+		}
 	}
 }
 
 // TestNestingLimit: every recursive construct, and every chain that
 // deepens the tree (selectors, calls, indexes, binary operators, else if),
 // charges the nesting limit, so a tree deeper than MaxNesting is S001
-// before any consumer walks it (review M3; go/parser charges the same).
+// before any consumer walks it (go/parser charges the same).
 func TestNestingLimit(t *testing.T) {
 	chains := []struct {
 		name       string
@@ -298,20 +332,20 @@ func TestNestingLimit(t *testing.T) {
 		deep, flat int
 	}{
 		{"parentheses", func(n int) string {
-			return "package p\nvar x = " + strings.Repeat("(", n) + "1" + strings.Repeat(")", n) + "\n"
+			return "let x = " + strings.Repeat("(", n) + "1" + strings.Repeat(")", n) + "\n"
 		}, MaxNesting, 400},
-		{"selectors", func(n int) string { return "package p\nvar x = a" + strings.Repeat(".a", n) + "\n" }, MaxNesting, 900},
-		{"calls", func(n int) string { return "package p\nvar x = f" + strings.Repeat("()", n) + "\n" }, MaxNesting, 900},
-		{"indexes", func(n int) string { return "package p\nvar x = a" + strings.Repeat("[0]", n) + "\n" }, MaxNesting, 900},
-		{"binary operators", func(n int) string { return "package p\nvar x = 1" + strings.Repeat(" + 1", n) + "\n" }, MaxNesting, 900},
-		{"unary operators", func(n int) string { return "package p\nvar x = " + strings.Repeat("!", n) + "x\n" }, MaxNesting, 900},
+		{"selectors", func(n int) string { return "let x = a" + strings.Repeat(".a", n) + "\n" }, MaxNesting, 900},
+		{"calls", func(n int) string { return "let x = f" + strings.Repeat("()", n) + "\n" }, MaxNesting, 900},
+		{"indexes", func(n int) string { return "let x = a" + strings.Repeat("[0]", n) + "\n" }, MaxNesting, 900},
+		{"binary operators", func(n int) string { return "let x = 1" + strings.Repeat(" + 1", n) + "\n" }, MaxNesting, 900},
+		{"unary operators", func(n int) string { return "let x = " + strings.Repeat("!", n) + "x\n" }, MaxNesting, 900},
 		{"else if", func(n int) string {
-			return "package p\nfunc f() {\n\tif x {\n\t}" + strings.Repeat(" else if x {\n\t}", n) + "\n}\n"
+			return "func f() {\n\tif x {\n\t}" + strings.Repeat(" else if x {\n\t}", n) + "\n}\n"
 		}, MaxNesting, 900},
 		{"blocks", func(n int) string {
-			return "package p\nfunc f() " + strings.Repeat("{", n) + strings.Repeat("}", n) + "\n"
-		}, MaxNesting, 400},
-		{"slice types", func(n int) string { return "package p\nvar x " + strings.Repeat("[]", n) + "int\n" }, MaxNesting, 900},
+			return "func f() {" + strings.Repeat(" if x {", n) + strings.Repeat(" }", n) + " }\n"
+		}, MaxNesting, 300},
+		{"slice types", func(n int) string { return "let x " + strings.Repeat("[]", n) + "int\n" }, MaxNesting, 900},
 	}
 	for _, c := range chains {
 		if _, err := Parse(c.src(c.flat)); err != nil {
@@ -340,15 +374,15 @@ func nestingAt(t *testing.T, src string) int {
 	return e.Offset
 }
 
-// TestNestingLimitBoundsTheTree (review r2 M2): the limit bounds the height
-// of the returned tree, not only the path the parser has open. A chain whose
+// TestNestingLimitBoundsTheTree: the limit bounds the height of the
+// returned tree, not only the path the parser has open. A chain whose
 // operand is itself deep counts the operand in full, and the S001 is at the
 // first token past the limit.
 func TestNestingLimitBoundsTheTree(t *testing.T) {
-	// `var x = E` opens one level for E; `( … )` opens two (the operand and
+	// `let x = E` opens one level for E; `( … )` opens two (the operand and
 	// the expression inside). So `(a` + 900 links + `)` + k links is
 	// 1 + 2 + 900 + k levels: k = 97 is exactly the limit.
-	chain := "package p\nvar x = (a" + strings.Repeat(".a", 900) + ")"
+	chain := "let x = (a" + strings.Repeat(".a", 900) + ")"
 	if at := nestingAt(t, chain+strings.Repeat(".a", 97)+"\n"); at != -1 {
 		t.Fatalf("1000 levels: S001 at %d", at)
 	}
@@ -356,21 +390,20 @@ func TestNestingLimitBoundsTheTree(t *testing.T) {
 		t.Fatalf("1803 levels: S001 at %d, want %d (the 98th link after the parenthesis)", at, want)
 	}
 
-	// The reviewer's layered input: 32 groups of 900 links, each wrapped in
-	// parentheses and extended (round-2-receipts/mixed-depth.ef).
+	// 32 groups of 900 links, each wrapped in parentheses and extended.
 	x := "a" + strings.Repeat(".a", 900)
 	for range 31 {
 		x = "(" + x + ")" + strings.Repeat(".a", 900)
 	}
-	if at := nestingAt(t, "package p\nvar x = "+x+"\n"); at == -1 {
+	if at := nestingAt(t, "let x = "+x+"\n"); at == -1 {
 		t.Fatal("the 32-group mixed chain parsed")
 	}
 
 	// A binary operand counts in full too, and so does a deep argument.
 	for _, src := range []string{
-		"package p\nvar x = (" + strings.Repeat("!", 600) + "a)" + strings.Repeat(" + a", 600) + "\n",
-		"package p\nvar x = f(" + strings.Repeat("(", 300) + "a" + strings.Repeat(")", 300) + ")" + strings.Repeat("[0]", 500) + "\n",
-		"package p\nvar x = " + strings.Repeat("!", 500) + "(a" + strings.Repeat(" + a", 500) + ")\n",
+		"let x = (" + strings.Repeat("!", 600) + "a)" + strings.Repeat(" + a", 600) + "\n",
+		"let x = f(" + strings.Repeat("(", 300) + "a" + strings.Repeat(")", 300) + ")" + strings.Repeat("[0]", 500) + "\n",
+		"let x = " + strings.Repeat("!", 500) + "(a" + strings.Repeat(" + a", 500) + ")\n",
 	} {
 		if nestingAt(t, src) == -1 {
 			t.Errorf("parsed: %.60s…", src)
@@ -379,20 +412,20 @@ func TestNestingLimitBoundsTheTree(t *testing.T) {
 
 	// The open path alone never refuses a tree within the limit: the
 	// argument of the last of 900 links sits one level below the call.
-	shallow := "package p\nvar x = a" + strings.Repeat(".a", 900) + "(" + strings.Repeat("(", 200) + "a" + strings.Repeat(")", 200) + ")\n"
+	shallow := "let x = a" + strings.Repeat(".a", 900) + "(" + strings.Repeat("(", 200) + "a" + strings.Repeat(")", 200) + ")\n"
 	if at := nestingAt(t, shallow); at != -1 {
 		t.Fatalf("a 902-level tree: S001 at %d", at)
 	}
 }
 
-// TestNestingLimitAtHeadersAndOperators (review r3 M2, m2): the body brace
-// of a control clause is a sibling of its header, never a link of the
-// header's chain; a prefix operator past the limit is the S001's token.
+// TestNestingLimitAtHeadersAndOperators: the body brace of a control clause
+// is a sibling of its header, never a link of the header's chain; a prefix
+// operator past the limit is the S001's token.
 func TestNestingLimitAtHeadersAndOperators(t *testing.T) {
 	// The block, the statement and the header expression are 3 levels, so
 	// 997 links are exactly the limit and the 998th link is past it.
-	for _, keyword := range []string{"if", "switch", "for"} {
-		prefix := "package p\nfunc f() { " + keyword + " a"
+	for _, keyword := range []string{"if", "match", "for"} {
+		prefix := "func f() { " + keyword + " a"
 		for _, links := range []int{996, 997} {
 			if at := nestingAt(t, prefix+strings.Repeat(".a", links)+" {} }\n"); at != -1 {
 				t.Errorf("%s with %d links: S001 at %d", keyword, links, at)
@@ -402,10 +435,10 @@ func TestNestingLimitAtHeadersAndOperators(t *testing.T) {
 			t.Errorf("%s with 998 links: S001 at %d, want %d (the 998th link)", keyword, at, want)
 		}
 	}
-	// `var x = E` opens 1 level and each prefix operator 1, so the 1000th
+	// `let x = E` opens 1 level and each prefix operator 1, so the 1000th
 	// operator is past the limit.
-	prefix := "package p\nvar x = "
-	for _, op := range []string{"! ", "- ", "+ ", "^ ", "* ", "& ", "<- ", "try "} {
+	prefix := "let x = "
+	for _, op := range []string{"! ", "- ", "+ ", "^ ", "* ", "& "} {
 		if at := nestingAt(t, prefix+strings.Repeat(op, 999)+"a\n"); at != -1 {
 			t.Errorf("%q × 999: S001 at %d", op, at)
 		}
@@ -418,7 +451,7 @@ func TestNestingLimitAtHeadersAndOperators(t *testing.T) {
 // genNested renders a random expression of postfix links, binary and unary
 // operators and parentheses, and returns its height in levels: a link,
 // operator or unary operator is one level, parentheses are two, and an
-// argument or index is one more below its link (grammar.md, Parser rule 6).
+// argument or index is one more below its link (grammar.md, Parser rules).
 // class is 0 for a primary expression, 1 for a unary one, 2 for a binary
 // one; a lower class is needed in some operand positions.
 func genNested(r *rand.Rand, budget int) (src string, height, class int) {
@@ -482,10 +515,10 @@ func TestNestingLimitOnCompositions(t *testing.T) {
 		open, close string
 		above       int
 	}{
-		{"package p\nvar x = ", "\n", 1},
-		{"package p\nfunc f() { if ", " {} }\n", 3},
-		{"package p\nfunc f() { switch ", " {} }\n", 3},
-		{"package p\nfunc f() { for ", " {} }\n", 3},
+		{"let x = ", "\n", 1},
+		{"func f() { if ", " {} }\n", 3},
+		{"func f() { match ", " {} }\n", 3},
+		{"func f() { for ", " {} }\n", 3},
 	}
 	for i := range 400 {
 		ctx := contexts[i%len(contexts)]

@@ -1,50 +1,68 @@
 package format
 
 import (
-	"strings"
-
 	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // ---------------------------------------------------------------- file and declarations
 
 func (p *printer) printFile(f *syntax.File) {
-	p.token(f.Package, "package")
-	p.space()
-	p.ident(f.Name)
-	for _, d := range f.Decls {
-		p.newline()
+	for i, d := range f.Decls {
+		if i > 0 {
+			p.newline()
+		}
 		p.decl(d)
 	}
 }
 
 func (p *printer) ident(x *syntax.Ident) { p.token(x.NamePos, x.Name) }
 
+// tok prints a token at pos, or a synthesized one when the tree has no
+// position for it.
+func (p *printer) tok(pos syntax.Pos, text string) {
+	if pos.IsValid() {
+		p.token(pos, text)
+		return
+	}
+	p.synth(text)
+}
+
 func (p *printer) decl(d syntax.Decl) {
 	switch d := d.(type) {
 	case *syntax.ImportDecl:
 		p.importDecl(d)
 	case *syntax.VarDecl:
-		p.varDecl(d)
+		p.letDecl(d)
 	case *syntax.TypeDecl:
 		p.token(d.Type, "type")
 		p.space()
 		p.ident(d.Name)
 		if d.TypeParams != nil {
-			p.fieldList(d.TypeParams, "[", "]", false)
+			p.fieldList(d.TypeParams, "[", "]")
 		}
 		p.space()
+		switch t := d.Spec.(type) {
+		case *syntax.InterfaceType:
+			if t.Union != nil {
+				p.union(t)
+				return
+			}
+		}
 		p.expr(d.Spec)
 	case *syntax.FuncDecl:
-		p.token(d.Func, "func")
-		p.space()
-		if d.Recv != nil {
-			p.fieldList(d.Recv, "(", ")", true)
+		if x := d.Extern; x != nil {
+			p.token(x.Extern, "extern")
+			p.space()
+			p.token(x.Go, "go")
+			p.space()
+			p.basicLit(x.Target)
 			p.space()
 		}
+		p.token(d.Func, "func")
+		p.space()
 		p.ident(d.Name)
 		if d.TypeParams != nil {
-			p.fieldList(d.TypeParams, "[", "]", false)
+			p.fieldList(d.TypeParams, "[", "]")
 		}
 		p.signature(d.Type)
 		if d.Body != nil {
@@ -56,44 +74,23 @@ func (p *printer) decl(d syntax.Decl) {
 			p.block(d.Body, true)
 		}
 	case *syntax.WireDecl:
-		p.token(d.Wire, "wire")
+		p.tok(d.Let, "let")
 		p.space()
 		p.ident(d.Name)
-		if d.Provides != nil {
-			p.space()
-			p.token(d.Provides.Provides, "provides")
-			p.space()
-			p.exprList(d.Provides.Names, 1)
-		}
-		if d.Needs != nil {
-			p.space()
-			p.needs(d.Needs)
+		p.space()
+		p.synth("=")
+		p.space()
+		p.wire(d.Wire, d.Provides, d.Needs, d.Body)
+	case *syntax.TestDecl:
+		p.token(d.Test, "test")
+		p.space()
+		p.ident(d.Name)
+		if d.Params != nil {
+			p.fieldList(d.Params, "(", ")")
 		}
 		p.space()
-		p.wireBody(d.Body)
+		p.block(d.Body, true)
 	}
-}
-
-// group prints the parenthesised specs of an import or var declaration,
-// one per line.
-func (p *printer) group(lparen, rparen syntax.Pos, n int, spec func(i int)) {
-	p.space()
-	p.token(lparen, "(")
-	if n == 0 && p.line(lparen) == p.line(rparen) {
-		p.token(rparen, ")")
-		return
-	}
-	p.indent++
-	p.noBlank = true
-	for i := 0; i < n; i++ {
-		if i == 0 {
-			p.newlineNoBlank()
-		} else {
-			p.newline()
-		}
-		spec(i)
-	}
-	p.closeBody(rparen, ")")
 }
 
 // closeBody ends a multi-line body: comments before the closer at the
@@ -106,64 +103,42 @@ func (p *printer) closeBody(closePos syntax.Pos, close string) {
 	p.token(closePos, close)
 }
 
+// importDecl prints `import [go] [alias] path`.
 func (p *printer) importDecl(d *syntax.ImportDecl) {
 	p.token(d.Import, "import")
-	if !d.Lparen.IsValid() {
-		p.space()
-		p.importSpec(d.Specs[0])
-		return
-	}
-	p.group(d.Lparen, d.Rparen, len(d.Specs), func(i int) { p.importSpec(d.Specs[i]) })
-}
-
-func (p *printer) importSpec(s *syntax.ImportSpec) {
-	switch s.Kind {
-	case syntax.ImportNamed:
-		p.ident(s.Name)
-		p.space()
-	case syntax.ImportDot:
-		p.token(s.NamePos, ".")
-		p.space()
-	case syntax.ImportGo:
+	s := d.Specs[0]
+	p.space()
+	if s.Kind == syntax.ImportGo {
 		p.token(s.NamePos, "go")
+		p.space()
+	}
+	if s.Name != nil {
+		p.ident(s.Name)
 		p.space()
 	}
 	p.basicLit(s.Path)
 }
 
-func (p *printer) varDecl(d *syntax.VarDecl) {
-	p.token(d.Var, "var")
-	if !d.Lparen.IsValid() {
+// letDecl prints `let [mut] patterns [Type] [= value]`.
+func (p *printer) letDecl(d *syntax.VarDecl) {
+	p.token(d.Var, "let")
+	p.space()
+	if d.Mut.IsValid() {
+		p.token(d.Mut, "mut")
 		p.space()
-		p.varSpec(d.Specs[0], false, false)
-		return
 	}
-	typed := false
-	for _, s := range d.Specs {
-		typed = typed || s.Type != nil
-	}
-	p.group(d.Lparen, d.Rparen, len(d.Specs), func(i int) { p.varSpec(d.Specs[i], true, typed) })
-}
-
-// varSpec prints `names [Type] [= values]`; in a group the names, types and
-// `=` align in columns.
-func (p *printer) varSpec(s *syntax.VarSpec, aligned, typeColumn bool) {
-	p.identList(s.Names, !aligned)
-	if aligned && (typeColumn || s.Type != nil || len(s.Values) > 0) {
-		p.sep()
+	s := d.Specs[0]
+	if s.Pattern != nil {
+		p.expr(s.Pattern)
+	} else {
+		p.identList(s.Names, true)
 	}
 	if s.Type != nil {
-		if !aligned {
-			p.space()
-		}
+		p.space()
 		p.typ(s.Type)
 	}
 	if len(s.Values) > 0 {
-		if aligned && typeColumn {
-			p.sep()
-		} else if !aligned || s.Type != nil {
-			p.space()
-		}
+		p.space()
 		p.token(s.Assign, "=")
 		p.assignRHS(s.Values)
 	}
@@ -171,9 +146,8 @@ func (p *printer) varSpec(s *syntax.VarSpec, aligned, typeColumn bool) {
 
 // identList prints grouped names; a line break after a comma follows the
 // source. With indent, the names after the break take one continuation
-// level (an unparenthesised var spec, the first parameter of a list that
-// does not break, a switch binding); without it they take the level the
-// enclosing list or block gives, as go/printer's identList(…, indent).
+// level; without it they take the level the enclosing list or block gives,
+// as go/printer's identList(…, indent).
 func (p *printer) identList(list []*syntax.Ident, indent bool) {
 	broken := false
 	for i, x := range list {
@@ -191,7 +165,7 @@ func (p *printer) identList(list []*syntax.Ident, indent bool) {
 	}
 }
 
-// assignRHS prints the right side of an assignment or var spec after its
+// assignRHS prints the right side of an assignment or let after its
 // operator; a line break after the operator follows the source.
 func (p *printer) assignRHS(values []syntax.Expr) {
 	broken := p.gap(values[0].Pos(), true)
@@ -211,20 +185,14 @@ func (p *printer) assignRHS(values []syntax.Expr) {
 // the source; with any of them, the items indent one level and a closer on
 // its own line follows a comma.
 func (p *printer) list(openPos syntax.Pos, open string, items []syntax.Node, item func(i int), closePos syntax.Pos, close string) {
-	if openPos.IsValid() {
-		p.token(openPos, open)
-	} else {
-		p.synth(open)
-	}
+	p.tok(openPos, open)
 	n := len(items)
 	if n == 0 {
-		p.token(closePos, close)
+		p.tok(closePos, close)
 		return
 	}
 	// The items indent at the list's first line break, not before it, as
-	// go/printer's exprList and parameters do: an item that spans lines
-	// before that break (a function literal, a nested parameter list) takes
-	// the level the list started at.
+	// go/printer's exprList and parameters do.
 	indented := false
 	savedIndented := p.listIndented
 	for i := range items {
@@ -245,7 +213,7 @@ func (p *printer) list(openPos syntax.Pos, open string, items []syntax.Node, ite
 		item(i)
 	}
 	p.listIndented = savedIndented
-	if p.breakBefore(closePos) {
+	if closePos.IsValid() && p.breakBefore(closePos) {
 		if !indented {
 			p.indent++
 		}
@@ -256,7 +224,7 @@ func (p *printer) list(openPos syntax.Pos, open string, items []syntax.Node, ite
 	if indented {
 		p.indent--
 	}
-	p.token(closePos, close)
+	p.tok(closePos, close)
 }
 
 // exprList prints an unbracketed expression list; a line break after a
@@ -288,8 +256,8 @@ func nodes[T syntax.Node](list []T) []syntax.Node {
 
 // ---------------------------------------------------------------- signatures and fields
 
-// fieldList prints a parameter, result, receiver or type parameter list.
-func (p *printer) fieldList(l *syntax.FieldList, open, close string, trailingComma bool) {
+// fieldList prints a parameter or type parameter list.
+func (p *printer) fieldList(l *syntax.FieldList, open, close string) {
 	p.list(l.Opening, open, nodes(l.List), func(i int) {
 		f := l.List[i]
 		p.identList(f.Names, !p.listIndented)
@@ -302,14 +270,13 @@ func (p *printer) fieldList(l *syntax.FieldList, open, close string, trailingCom
 	}, l.Closing, close)
 }
 
+// signature prints `(params) [Result] [fails …] [needs …]`.
 func (p *printer) signature(t *syntax.FuncType) {
-	p.fieldList(t.Params, "(", ")", true)
+	p.fieldList(t.Params, "(", ")")
 	if r := t.Results; r != nil {
-		p.space()
-		if r.Opening.IsValid() {
-			p.fieldList(r, "(", ")", true)
-		} else {
-			p.typ(r.List[0].Type)
+		for _, f := range r.List {
+			p.space()
+			p.typ(f.Type)
 		}
 	}
 	if t.Needs != nil {
@@ -320,12 +287,11 @@ func (p *printer) signature(t *syntax.FuncType) {
 
 func (p *printer) needs(u *syntax.NeedsClause) {
 	p.token(u.Needs, "needs")
+	p.space()
 	if u.Lparen.IsValid() {
-		p.space()
 		p.list(u.Lparen, "(", nodes(u.Names), func(i int) { p.typ(u.Names[i]) }, u.Rparen, ")")
 		return
 	}
-	p.space()
 	p.exprList(u.Names, 1)
 }
 
@@ -333,9 +299,49 @@ func (p *printer) needs(u *syntax.NeedsClause) {
 
 func (p *printer) typ(x syntax.Expr) { p.expr1(x, 1) }
 
-func (p *printer) structType(t *syntax.StructType) {
-	fl := t.Fields
-	field := func(f *syntax.Field, aligned bool) {
+// member is one member of a braced type body, in source order.
+type member struct {
+	node  syntax.Node
+	print func(aligned bool)
+}
+
+// members prints `{ m, m }` on one line when the source has the braces on
+// one line and no member prints on several; otherwise one member per line
+// with a trailing comma, field types aligned in a column (gofmt's struct
+// rule). tight drops the blanks inside one-line braces (a union variant).
+func (p *printer) members(lbrace, rbrace syntax.Pos, list []member, tight bool) {
+	oneLine := p.line(lbrace) == p.line(rbrace)
+	for _, m := range list {
+		oneLine = oneLine && !forcesBreak(m.node)
+	}
+	if oneLine {
+		p.token(lbrace, "{")
+		for i, m := range list {
+			if i > 0 {
+				p.synth(",")
+				p.space()
+			} else if !tight {
+				p.space()
+			}
+			m.print(false)
+		}
+		if len(list) > 0 && !tight {
+			p.space()
+		}
+		p.token(rbrace, "}")
+		return
+	}
+	p.openBody(lbrace)
+	for i, m := range list {
+		p.bodyLine(i)
+		m.print(true)
+		p.synth(",")
+	}
+	p.closeBody(rbrace, "}")
+}
+
+func (p *printer) fieldMember(f *syntax.Field) member {
+	return member{f, func(aligned bool) {
 		p.identList(f.Names, false)
 		if aligned {
 			p.sep()
@@ -343,26 +349,184 @@ func (p *printer) structType(t *syntax.StructType) {
 			p.space()
 		}
 		p.typ(f.Type)
+	}}
+}
+
+func (p *printer) fieldMembers(fl *syntax.FieldList) []member {
+	var list []member
+	for _, f := range fl.List {
+		list = append(list, p.fieldMember(f))
 	}
-	if p.oneLine(fl.Opening, fl.Closing, nodes(fl.List)...) {
+	return list
+}
+
+func (p *printer) structType(t *syntax.StructType) {
+	if t.Struct.IsValid() {
 		p.token(t.Struct, "struct")
-		p.token(fl.Opening, "{")
-		if len(fl.List) == 1 {
-			p.space()
-			field(fl.List[0], false)
-			p.space()
+	}
+	p.members(t.Fields.Opening, t.Fields.Closing, p.fieldMembers(t.Fields), false)
+}
+
+// operationType prints the operations and laws of an operation type in
+// source order.
+func (p *printer) operationType(t *syntax.InterfaceType) {
+	var list []member
+	i, j := 0, 0
+	for i < len(t.Methods) || j < len(t.Laws) {
+		if j == len(t.Laws) || i < len(t.Methods) && t.Methods[i].Pos() < t.Laws[j].Pos() {
+			m := t.Methods[i]
+			list = append(list, member{m, func(bool) {
+				p.ident(m.Names[0])
+				p.signature(m.Type.(*syntax.FuncType))
+			}})
+			i++
+			continue
 		}
-		p.token(fl.Closing, "}")
+		l := t.Laws[j]
+		list = append(list, member{l, func(bool) {
+			p.token(l.Law, "law")
+			p.space()
+			p.ident(l.Name)
+			p.fieldList(l.Params, "(", ")")
+			p.space()
+			p.lawBody(l.Body)
+		}})
+		j++
+	}
+	p.members(t.Lbrace, t.Rbrace, list, false)
+}
+
+// lawBody prints a law's block. A law is usually one equation after its
+// setup, so a body written on one line stays on one line with its
+// statements separated by `;` when nothing in it breaks.
+func (p *printer) lawBody(b *syntax.BlockStmt) {
+	list := nonEmpty(b.List)
+	oneLine := p.line(b.Lbrace) == p.line(b.Rbrace)
+	for _, s := range list {
+		oneLine = oneLine && !forcesBreak(s)
+	}
+	if !oneLine || len(list) < 2 {
+		p.block(b, true)
 		return
 	}
-	p.token(t.Struct, "struct")
-	p.space()
-	p.openBody(fl.Opening)
-	for i, f := range fl.List {
-		p.bodyLine(i)
-		field(f, true)
+	p.token(b.Lbrace, "{")
+	for i, s := range list {
+		if i > 0 {
+			p.synth(";")
+		}
+		p.space()
+		p.stmt(s)
 	}
-	p.closeBody(fl.Closing, "}")
+	p.space()
+	p.token(b.Rbrace, "}")
+}
+
+// union prints `= A | B{…}`: on one line when the variants are on one line
+// in the source, else one variant per line, each after a leading `|`
+// (#196, D4).
+func (p *printer) union(t *syntax.InterfaceType) {
+	p.synth("=")
+	first := t.Union[0]
+	multi := false
+	for _, v := range t.Union {
+		multi = multi || p.line(v.Pos()) != p.line(first.Pos()) || p.line(v.End()) != p.line(v.Pos())
+	}
+	if !multi {
+		for i, v := range t.Union {
+			p.space()
+			if i > 0 {
+				p.synth("|")
+				p.space()
+			}
+			p.variant(v)
+		}
+		return
+	}
+	p.indent++
+	for _, v := range t.Union {
+		p.newlineNoBlank()
+		p.synth("|")
+		p.space()
+		p.variant(v)
+	}
+	p.indent--
+}
+
+func (p *printer) variant(x syntax.Expr) {
+	v, ok := x.(*syntax.VariantSpec)
+	if !ok {
+		p.typ(x)
+		return
+	}
+	p.ident(v.Name)
+	if v.TypeArgs != nil {
+		p.fieldList(v.TypeArgs, "[", "]")
+	}
+	p.members(v.Fields.Opening, v.Fields.Closing, p.fieldMembers(v.Fields), true)
+}
+
+func (p *printer) machineType(t *syntax.MachineType) {
+	p.token(t.Machine, "machine")
+	p.list(t.Lbrack, "[", []syntax.Node{t.State, t.Signal}, func(i int) {
+		p.typ([]syntax.Expr{t.State, t.Signal}[i])
+	}, t.Rbrack, "]")
+	p.space()
+	var list []member
+	for _, e := range t.Entries {
+		list = append(list, member{e, func(aligned bool) {
+			p.token(e.NamePos, e.Name)
+			p.tok(e.Colon, ":")
+			if aligned {
+				p.sep()
+			} else {
+				p.space()
+			}
+			p.expr(e.Value)
+		}})
+	}
+	p.members(t.Lbrace, t.Rbrace, list, false)
+}
+
+// wire prints `wire [provides …] [needs …] { entries }`.
+func (p *printer) wire(pos syntax.Pos, provides *syntax.ProvidesClause, needs *syntax.NeedsClause, b *syntax.WireBody) {
+	p.token(pos, "wire")
+	if provides != nil {
+		p.space()
+		p.token(provides.Provides, "provides")
+		p.space()
+		p.exprList(provides.Names, 1)
+	}
+	if needs != nil {
+		p.space()
+		p.needs(needs)
+	}
+	p.space()
+	var list []member
+	for _, e := range b.Entries {
+		list = append(list, member{e, func(aligned bool) {
+			if e.Kind == syntax.WireReplace {
+				p.token(e.Replace, "replace")
+				p.space()
+			}
+			p.typ(e.Key)
+			for _, k := range e.Keys {
+				p.synth(",")
+				p.space()
+				p.typ(k)
+			}
+			if e.Kind == syntax.WireEmbed {
+				return
+			}
+			p.tok(e.Assign, ":")
+			if aligned {
+				p.sep()
+			} else {
+				p.space()
+			}
+			p.expr(e.Value)
+		}})
+	}
+	p.members(b.Lbrace, b.Rbrace, list, false)
 }
 
 // oneLine reports whether a braced body stays on one line: the source has
@@ -382,36 +546,16 @@ func (p *printer) oneLine(lbrace, rbrace syntax.Pos, contents ...syntax.Node) bo
 }
 
 // forcesBreak reports whether n prints on several lines even when its
-// source is on one line: statement blocks, clauses, machines, and bodies
-// with more than one element.
+// source is on one line: clauses (match, catch) and statement blocks with
+// more than one statement.
 func forcesBreak(n syntax.Node) bool {
-	if _, ok := n.(*syntax.BlockStmt); ok {
-		return true // an element that is a block is a bare block statement
-	}
 	forced := false
 	syntax.Inspect(n, func(n syntax.Node) bool {
 		switch n := n.(type) {
-		case *syntax.IfStmt, *syntax.ForStmt, *syntax.RangeStmt, *syntax.SwitchStmt, *syntax.TypeSwitchStmt,
-			*syntax.SelectStmt, *syntax.CatchExpr, *syntax.MachineType, *syntax.LabeledStmt:
+		case *syntax.SwitchStmt, *syntax.TypeSwitchStmt, *syntax.CatchExpr:
 			forced = true
 		case *syntax.BlockStmt:
-			list := nonEmpty(n.List)
-			if len(list) > 1 {
-				forced = true
-			}
-			for _, s := range list {
-				if _, ok := s.(*syntax.BlockStmt); ok {
-					forced = true
-				}
-			}
-		case *syntax.StructType:
-			forced = forced || len(n.Fields.List) > 1
-		case *syntax.InterfaceType:
-			forced = forced || len(n.Methods) > 1
-		case *syntax.WireBody:
-			forced = forced || len(n.Entries) > 1
-		case *syntax.VarDecl:
-			forced = forced || n.Lparen.IsValid() && len(n.Specs) > 0
+			forced = forced || len(nonEmpty(n.List)) > 1
 		}
 		return !forced
 	})
@@ -432,133 +576,11 @@ func (p *printer) bodyLine(i int) {
 	}
 }
 
-func (p *printer) interfaceType(t *syntax.InterfaceType) {
-	n := len(t.Methods)
-	oneLine := p.oneLine(t.Lbrace, t.Rbrace, nodes(t.Methods)...)
-	if t.Union != nil {
-		n = 1
-		oneLine = p.oneLine(t.Lbrace, t.Rbrace)
-		for _, x := range t.Union {
-			oneLine = oneLine && !forcesBreak(x)
-		}
-	}
-	method := func(m *syntax.Field) {
-		p.ident(m.Names[0])
-		p.signature(m.Type.(*syntax.FuncType))
-	}
-	if oneLine {
-		p.token(t.Interface, "interface")
-		p.token(t.Lbrace, "{")
-		switch {
-		case t.Union != nil:
-			p.space()
-			p.union(t.Union)
-			p.space()
-		case n == 1:
-			p.space()
-			method(t.Methods[0])
-			p.space()
-		}
-		p.token(t.Rbrace, "}")
-		return
-	}
-	p.token(t.Interface, "interface")
-	p.space()
-	p.openBody(t.Lbrace)
-	if t.Union != nil {
-		p.bodyLine(0)
-		p.union(t.Union)
-	}
-	for i, m := range t.Methods {
-		p.bodyLine(i)
-		method(m)
-	}
-	p.closeBody(t.Rbrace, "}")
-}
-
-// union prints `A | B`; a line break after `|` follows the source.
-func (p *printer) union(list []syntax.Expr) {
-	broken := false
-	for i, x := range list {
-		if i > 0 {
-			p.space()
-			p.synth("|")
-			if p.gap(x.Pos(), true) && !broken {
-				broken = true
-				p.indent++
-			}
-		}
-		p.typ(x)
-	}
-	if broken {
-		p.indent--
-	}
-}
-
-func (p *printer) machineType(t *syntax.MachineType) {
-	p.token(t.Machine, "machine")
-	p.list(t.Lbrack, "[", []syntax.Node{t.State, t.Signal}, func(i int) {
-		p.typ([]syntax.Expr{t.State, t.Signal}[i])
-	}, t.Rbrack, "]")
-	p.space()
-	p.openBody(t.Lbrace)
-	for i, e := range t.Entries {
-		p.bodyLine(i)
-		p.token(e.NamePos, e.Name)
-		p.sep()
-		p.expr(e.Value)
-	}
-	p.closeBody(t.Rbrace, "}")
-}
-
-func (p *printer) wireBody(b *syntax.WireBody) {
-	entry := func(e *syntax.WireEntry, aligned bool) {
-		if e.Kind == syntax.WireReplace {
-			p.token(e.Replace, "replace")
-			p.space()
-		}
-		p.typ(e.Key)
-		for _, k := range e.Keys {
-			p.synth(",")
-			p.space()
-			p.typ(k)
-		}
-		if e.Kind == syntax.WireEmbed {
-			return
-		}
-		if aligned {
-			p.sep()
-		} else {
-			p.space()
-		}
-		p.token(e.Assign, "=")
-		p.space()
-		p.expr(e.Value)
-	}
-	if p.oneLine(b.Lbrace, b.Rbrace, nodes(b.Entries)...) {
-		p.token(b.Lbrace, "{")
-		if len(b.Entries) == 1 {
-			p.space()
-			entry(b.Entries[0], false)
-			p.space()
-		}
-		p.token(b.Rbrace, "}")
-		return
-	}
-	p.openBody(b.Lbrace)
-	for i, e := range b.Entries {
-		p.bodyLine(i)
-		entry(e, true)
-	}
-	p.closeBody(b.Rbrace, "}")
-}
-
 // ---------------------------------------------------------------- statements
 
-// block prints a braced statement list. A function body, function literal,
-// trailing block or go block stays on one line when the source has it on
-// one line with at most one statement (gofmt's function-body rule); a
-// statement block is always multi-line.
+// block prints a braced statement list. With oneLineOK, a block the source
+// has on one line with at most one statement stays on one line (gofmt's
+// function-body rule).
 func (p *printer) block(b *syntax.BlockStmt, oneLineOK bool) {
 	list := nonEmpty(b.List)
 	if oneLineOK && p.oneLine(b.Lbrace, b.Rbrace, nodes(list)...) {
@@ -582,8 +604,7 @@ func (p *printer) blockOneLine(b *syntax.BlockStmt) bool {
 }
 
 // indexDepth is the depth of an index element: gofmt's depth+1, except for
-// a union of types (`retry.On[Failed | timeout.Expired]`), which keeps its
-// blanks as an error row does.
+// a union of types, which keeps its blanks as a failure row does.
 func indexDepth(x syntax.Expr, depth int) int {
 	if b, ok := x.(*syntax.BinaryExpr); ok && b.Op == syntax.OR {
 		return 1
@@ -608,47 +629,21 @@ func (p *printer) stmtList(list []syntax.Stmt) {
 	}
 }
 
+// sameLine reports whether the source has n on one line: an if or for
+// written on one line keeps its one-statement blocks on that line.
+func (p *printer) sameLine(n syntax.Node) bool { return p.line(n.Pos()) == p.line(n.End()) }
+
 func (p *printer) stmt(s syntax.Stmt) {
 	switch s := s.(type) {
 	case *syntax.ExprStmt:
 		p.expr(s.X)
 	case *syntax.DeclStmt:
-		p.varDecl(s.Decl)
-	case *syntax.LabeledStmt:
-		p.indent--
-		p.ident(s.Label)
-		p.token(s.Colon, ":")
-		p.indent++
-		switch body := s.Stmt.(type) {
-		case *syntax.EmptyStmt:
-			// gofmt: an explicit empty statement stays, on its own line,
-			// so the statement after it stays unlabelled.
-			if !body.Implicit {
-				p.newline()
-				p.token(body.Semicolon, ";")
-			}
-		default:
-			p.newline()
-			p.stmt(s.Stmt)
-		}
-	case *syntax.SendStmt:
-		p.expr(s.Chan)
-		p.space()
-		p.token(s.Arrow, "<-")
-		p.space()
-		p.expr(s.Value)
-	case *syntax.IncDecStmt:
-		p.expr(s.X)
-		p.token(s.TokPos, s.Tok.String())
+		p.letDecl(s.Decl)
 	case *syntax.AssignStmt:
 		p.exprList(s.Lhs, 1)
 		p.space()
 		p.token(s.TokPos, s.Tok.String())
 		p.assignRHS(s.Rhs)
-	case *syntax.DeferStmt:
-		p.token(s.Defer, "defer")
-		p.space()
-		p.stmt(s.Stmt)
 	case *syntax.ReturnStmt:
 		p.token(s.Return, "return")
 		if len(s.Results) > 0 {
@@ -657,141 +652,84 @@ func (p *printer) stmt(s syntax.Stmt) {
 		}
 	case *syntax.BranchStmt:
 		p.token(s.TokPos, s.Tok.String())
-		if s.Label != nil {
-			p.space()
-			p.ident(s.Label)
-		}
+	case *syntax.AssertStmt:
+		p.token(s.Assert, "assert")
+		p.space()
+		p.expr(s.X)
 	case *syntax.BlockStmt:
 		p.block(s, false)
 	case *syntax.IfStmt:
-		p.ifStmt(s)
+		p.ifStmt(s, p.sameLine(s))
 	case *syntax.SwitchStmt:
-		p.token(s.Switch, "switch")
-		p.header(s.Init, func() {
-			if s.Tag != nil {
-				p.expr(s.Tag)
-			}
-		}, s.Tag != nil)
-		p.caseClauses(s.Lbrace, s.Clauses, s.Rbrace, 1)
+		p.token(s.Switch, "match")
+		p.space()
+		p.expr(s.Tag)
+		p.space()
+		p.caseClauses(s.Lbrace, s.Clauses, s.Rbrace)
 	case *syntax.TypeSwitchStmt:
-		p.token(s.Switch, "switch")
-		p.header(s.Init, func() {
-			if len(s.Binds) > 0 {
-				p.identList(s.Binds, true)
-				p.space()
-				p.token(s.Define, ":=")
-				p.space()
-			}
+		p.token(s.Switch, "match")
+		p.space()
+		if len(s.Subjects) == 1 {
+			p.expr(s.Subjects[0].X)
+		} else {
+			p.synth("(")
 			for i, g := range s.Subjects {
 				if i > 0 {
 					p.synth(",")
 					p.space()
 				}
-				p.expr(g)
+				p.expr(g.X)
 			}
-		}, true)
-		p.caseClauses(s.Lbrace, s.Clauses, s.Rbrace, len(s.Subjects))
-	case *syntax.SelectStmt:
-		p.token(s.Select, "select")
+			p.synth(")")
+		}
 		p.space()
-		p.clauses(s.Lbrace, len(s.Clauses), func(i int) syntax.Pos { return s.Clauses[i].Case }, func(i int) {
-			c := s.Clauses[i]
-			if c.Comm == nil {
-				p.token(c.Case, "default")
-			} else {
-				p.token(c.Case, "case")
-				p.space()
-				p.stmt(c.Comm)
-			}
-			p.token(c.Colon, ":")
-		}, func(i int) []syntax.Stmt { return s.Clauses[i].Body }, s.Rbrace)
+		p.caseClauses(s.Lbrace, s.Clauses, s.Rbrace)
 	case *syntax.ForStmt:
 		p.token(s.For, "for")
-		switch {
-		case s.Init != nil || s.Post != nil:
-			p.space()
-			if s.Init != nil {
-				p.stmt(s.Init)
-			}
-			p.synth(";")
-			if s.Cond != nil {
-				p.space()
-				p.expr(s.Cond)
-			}
-			p.synth(";")
-			if s.Post != nil {
-				p.space()
-				p.stmt(s.Post)
-			}
-		case s.Cond != nil:
+		if s.Cond != nil {
 			p.space()
 			p.expr(s.Cond)
 		}
 		p.space()
-		p.block(s.Body, false)
+		p.block(s.Body, p.sameLine(s))
 	case *syntax.RangeStmt:
 		p.token(s.For, "for")
 		p.space()
 		if s.Key != nil {
 			p.expr(s.Key)
-			if s.Value != nil {
-				p.synth(",")
-				p.space()
-				p.expr(s.Value)
-			}
-			p.space()
-			p.token(s.TokPos, s.Tok.String())
+			p.synth(",")
 			p.space()
 		}
-		p.token(s.Range, "range")
+		p.expr(s.Value)
+		p.space()
+		p.token(s.Range, "in")
 		p.space()
 		p.expr(s.X)
 		p.space()
-		p.block(s.Body, false)
+		p.block(s.Body, p.sameLine(s))
 	}
 }
 
-// header prints `[init; ]x ` of a switch.
-func (p *printer) header(init syntax.Stmt, x func(), hasX bool) {
-	p.space()
-	if init != nil {
-		p.stmt(init)
-		p.synth(";")
-		if hasX {
-			p.space()
-		}
-	}
-	x()
-	if init != nil || hasX {
-		p.space()
-	}
-}
-
-func (p *printer) ifStmt(s *syntax.IfStmt) {
+func (p *printer) ifStmt(s *syntax.IfStmt, oneLineOK bool) {
 	p.token(s.If, "if")
 	p.space()
-	if s.Init != nil {
-		p.stmt(s.Init)
-		p.synth(";")
-		p.space()
-	}
 	p.expr(s.Cond)
 	p.space()
-	p.block(s.Body, false)
+	p.block(s.Body, oneLineOK)
 	if s.Else != nil {
 		p.space()
 		p.token(s.ElsePos, "else")
 		p.space()
 		if e, ok := s.Else.(*syntax.IfStmt); ok {
-			p.ifStmt(e)
+			p.ifStmt(e, oneLineOK)
 		} else {
-			p.block(s.Else.(*syntax.BlockStmt), false)
+			p.block(s.Else.(*syntax.BlockStmt), oneLineOK)
 		}
 	}
 }
 
-// clauses prints the clause list of a switch, select or catch: each case
-// at the statement's indentation, its body one level in (D6 comment rule).
+// clauses prints the clause list of a match or catch: each case at the
+// statement's indentation, its body one level in.
 func (p *printer) clauses(lbrace syntax.Pos, n int, casePos func(i int) syntax.Pos, head func(i int), body func(i int) []syntax.Stmt, rbrace syntax.Pos) {
 	base := p.indent
 	p.token(lbrace, "{")
@@ -820,17 +758,21 @@ func (p *printer) clauses(lbrace syntax.Pos, n int, casePos func(i int) syntax.P
 	p.token(rbrace, "}")
 }
 
-func (p *printer) caseClauses(lbrace syntax.Pos, list []*syntax.CaseClause, rbrace syntax.Pos, subjects int) {
+// caseHead prints `case P, Q:`, or `case _:` for an empty list.
+func (p *printer) caseHead(pos syntax.Pos, list []syntax.Expr, colon syntax.Pos) {
+	p.token(pos, "case")
+	p.space()
+	if list == nil {
+		p.synth("_")
+	} else {
+		p.exprList(list, 1)
+	}
+	p.token(colon, ":")
+}
+
+func (p *printer) caseClauses(lbrace syntax.Pos, list []*syntax.CaseClause, rbrace syntax.Pos) {
 	p.clauses(lbrace, len(list), func(i int) syntax.Pos { return list[i].Case }, func(i int) {
-		c := list[i]
-		if c.List == nil {
-			p.token(c.Case, "default")
-		} else {
-			p.token(c.Case, "case")
-			p.space()
-			p.exprList(c.List, 1)
-		}
-		p.token(c.Colon, ":")
+		p.caseHead(list[i].Case, list[i].List, list[i].Colon)
 	}, func(i int) []syntax.Stmt { return list[i].Body }, rbrace)
 }
 
@@ -846,7 +788,22 @@ func (p *printer) expr1(x syntax.Expr, depth int) {
 		p.ident(x)
 	case *syntax.BasicLit:
 		p.basicLit(x)
+	case *syntax.InterpolatedString:
+		for i, t := range x.Texts {
+			p.basicLit(t)
+			if i < len(x.Exprs) {
+				p.expr(x.Exprs[i])
+			}
+		}
 	case *syntax.BinaryExpr:
+		if x.Op == syntax.DOTDOT {
+			// `a..b` is written without blanks, its bounds as operands
+			// of a nested binary expression (Rust's rustfmt: `0..n`).
+			p.binaryOperand(x.X, depth+1)
+			p.token(x.OpPos, "..")
+			p.binaryOperand(x.Y, depth+1)
+			return
+		}
 		// A line break after an operator indents the rest of the binary
 		// expression once (gofmt).
 		indented := binaryBreaks(p, x)
@@ -878,7 +835,7 @@ func (p *printer) expr1(x syntax.Expr, depth int) {
 		p.token(x.Rparen, ")")
 	case *syntax.SelectorExpr:
 		p.expr1(x.X, depth)
-		if lit, ok := x.X.(*syntax.BasicLit); ok && lit.Kind == syntax.INT {
+		if lit, ok := x.X.(*syntax.BasicLit); ok && (lit.Kind == syntax.INT || lit.Kind == syntax.FLOAT) {
 			// `0 .A` printed as `0.A` would scan as the number `0.`; a
 			// blank keeps the tokens apart (go/printer's mayCombine).
 			p.space()
@@ -902,22 +859,23 @@ func (p *printer) expr1(x syntax.Expr, depth int) {
 		p.token(x.Rbrack, "]")
 	case *syntax.TypeGuard:
 		p.expr1(x.X, depth)
-		p.synth(".")
-		p.token(x.Lparen, "(")
-		p.synth("type")
-		p.token(x.Rparen, ")")
 	case *syntax.CallExpr:
+		if id, ok := x.Fun.(*syntax.Ident); ok && id.Name == "with" && !x.Lparen.IsValid() {
+			// `with E, F { body }`, the call shape of the with form; one
+			// argument prints without parentheses (#196, D4).
+			p.token(id.NamePos, "with")
+			p.space()
+			p.exprList(x.Args, 1)
+			p.space()
+			p.block(x.Trailing, true)
+			return
+		}
 		p.expr1(x.Fun, depth)
 		argDepth := depth
 		if len(x.Args) > 1 {
 			argDepth++
 		}
-		p.list(x.Lparen, "(", nodes(x.Args), func(i int) {
-			p.expr1(x.Args[i], argDepth)
-			if i == len(x.Args)-1 && x.Ellipsis.IsValid() {
-				p.token(x.Ellipsis, "...")
-			}
-		}, x.Rparen, ")")
+		p.list(x.Lparen, "(", nodes(x.Args), func(i int) { p.expr1(x.Args[i], argDepth) }, x.Rparen, ")")
 		if x.Trailing != nil {
 			p.space()
 			p.block(x.Trailing, true)
@@ -929,6 +887,12 @@ func (p *printer) expr1(x syntax.Expr, depth int) {
 		p.list(x.Lbrace, "{", nodes(x.Elts), func(i int) { p.element(x.Elts[i]) }, x.Rbrace, "}")
 	case *syntax.KeyValueExpr:
 		p.element(x)
+	case *syntax.AsPattern:
+		p.expr1(x.X, depth)
+		p.space()
+		p.token(x.As, "as")
+		p.space()
+		p.ident(x.Name)
 	case *syntax.FuncLit:
 		p.funcType(x.Type)
 		p.space()
@@ -941,77 +905,62 @@ func (p *printer) expr1(x syntax.Expr, depth int) {
 		p.expr1(x.X, depth)
 		p.space()
 		p.token(x.Catch, "catch")
-		if x.Bind != nil {
-			p.space()
-			p.ident(x.Bind)
-		}
 		p.space()
 		p.clauses(x.Lbrace, len(x.Arms), func(i int) syntax.Pos { return x.Arms[i].Case }, func(i int) {
 			a := x.Arms[i]
-			p.token(a.Case, "case")
-			p.space()
-			p.exprList(a.Types, 1)
-			p.token(a.Colon, ":")
+			p.caseHead(a.Case, a.Types, a.Colon)
 		}, func(i int) []syntax.Stmt { return x.Arms[i].Body }, x.Rbrace)
 	case *syntax.WireLit:
-		p.token(x.Wire, "wire")
-		p.wireBody(x.Body)
-	case *syntax.GoExpr:
-		p.token(x.Go, "go")
-		p.space()
-		if x.Block != nil {
-			p.block(x.Block, true)
-		} else {
-			p.expr1(x.Call, depth)
-		}
-	case *syntax.Ellipsis:
-		p.token(x.Ellipsis, "...")
-		p.typ(x.Elt)
+		p.wire(x.Wire, x.Provides, x.Needs, x.Body)
+	case *syntax.IfStmt:
+		p.ifStmt(x, p.sameLine(x))
+	case *syntax.SwitchStmt, *syntax.TypeSwitchStmt:
+		p.stmt(x.(syntax.Stmt))
 	case *syntax.ArrayType:
 		p.token(x.Lbrack, "[")
-		if x.Len != nil {
-			p.expr(x.Len)
-		}
 		p.synth("]")
 		p.typ(x.Elt)
 	case *syntax.MapType:
-		p.token(x.Map, "map")
-		p.synth("[")
-		p.typ(x.Key)
-		p.synth("]")
-		p.typ(x.Value)
-	case *syntax.ChanType:
-		switch x.Dir {
-		case syntax.ChanRecv:
-			p.token(x.Begin, "<-")
-			p.synth("chan")
-		case syntax.ChanSend:
-			p.token(x.Begin, "chan")
-			p.token(x.Arrow, "<-")
-		default:
-			p.token(x.Begin, "chan")
-		}
-		p.space()
-		p.typ(x.Value)
+		p.token(x.Map, "Map")
+		p.list(x.Lbrack, "[", []syntax.Node{x.Key, x.Value}, func(i int) {
+			p.typ([]syntax.Expr{x.Key, x.Value}[i])
+		}, x.Rbrack, "]")
 	case *syntax.FuncType:
 		p.funcType(x)
 	case *syntax.StructType:
 		p.structType(x)
 	case *syntax.InterfaceType:
-		p.interfaceType(x)
+		if x.Union != nil {
+			p.union(x)
+			return
+		}
+		p.operationType(x)
 	case *syntax.MachineType:
 		p.machineType(x)
 	case *syntax.ErrorRow:
-		p.token(x.Error, "error")
-		p.token(x.Lbrack, "[")
-		p.union(x.Types)
-		p.token(x.Rbrack, "]")
+		p.token(x.Error, "fails")
+		for i, t := range x.Types {
+			p.space()
+			if i > 0 {
+				p.synth("|")
+				p.space()
+			}
+			p.typ(t)
+		}
 	case *syntax.TupleExpr:
-		p.list(x.Lparen, "(", nodes(x.Elts), func(i int) { p.typ(x.Elts[i]) }, x.Rparen, ")")
+		if !x.Lparen.IsValid() {
+			p.exprList(x.Elts, depth)
+			return
+		}
+		p.list(x.Lparen, "(", nodes(x.Elts), func(i int) { p.expr(x.Elts[i]) }, x.Rparen, ")")
 	}
 }
 
 func (p *printer) funcType(t *syntax.FuncType) {
+	if t.Escaping.IsValid() {
+		p.token(t.Escaping, "escaping")
+		p.space()
+	}
 	if t.Func.IsValid() {
 		p.token(t.Func, "func")
 	}
@@ -1095,7 +1044,7 @@ func (p *printer) binary(x *syntax.BinaryExpr, depth int) {
 }
 
 func (p *printer) binaryOperand(x syntax.Expr, depth int) {
-	if b, ok := x.(*syntax.BinaryExpr); ok {
+	if b, ok := x.(*syntax.BinaryExpr); ok && b.Op != syntax.DOTDOT {
 		p.binary(b, depth)
 		return
 	}
@@ -1178,5 +1127,3 @@ func (p *printer) walkBinary(e *syntax.BinaryExpr) (has4, has5 bool, maxProblem 
 	}
 	return
 }
-
-var _ = strings.TrimSpace

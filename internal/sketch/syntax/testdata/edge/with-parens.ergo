@@ -1,0 +1,6 @@
+// with takes an expression, so with (Live) parses as a parenthesized
+// expression; ergo fmt strips the parentheses (eighth round).
+// expect: "with Live {"
+func run() needs Console {
+	with (Live) { Console.Println("x") }
+}

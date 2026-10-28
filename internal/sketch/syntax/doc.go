@@ -1,12 +1,19 @@
-// Package syntax is the lexer, AST and parser of the 2026 edition: the full
-// grammar of docs/spec/ v0 (docs/spec/grammar.md is normative). Where
-// grammar.md is silent, or marks a production "prototype", the parser takes
-// Go's production for that form, without goto, fallthrough and const.
+// Package syntax is the lexer, AST and parser of Ergo: the decided grammar
+// of #196 (docs/spec/grammar.md is normative). The parser accepts that
+// grammar and nothing else; an old Go-shaped spelling is a diagnostic, and a
+// Go habit's message names the Ergo form (habits.go).
+//
+// A decided form that means the same as a Go-shaped node becomes that node
+// (`let` a VarDecl, `match` a SwitchStmt or TypeSwitchStmt, `fails` an
+// ErrorRow), so the consumers keep reading one tree; nodes no decided form
+// produces stay declared until their consumers are rewritten, and the
+// parser never builds them (TestDecidedOnly).
 //
 // The package resolves no names; the checker (#196), the LSP (#38) and the
 // formatter (internal/sketch/format) consume its AST. Every syntax error is
-// S001 (docs/spec/diagnostics.md) with a byte span, line and byte column;
-// Parse reports the first error and returns no file.
+// S001 (docs/spec/diagnostics.md), or S108 for a type that mixes fields and
+// operations, with a byte span, line and byte column; Parse reports the
+// first error and returns no file.
 //
 // Prior art, where the package chooses between options:
 //   - go/ast, go/parser: types are expressions, every node has Pos and End,
@@ -15,6 +22,9 @@
 //     clause headers; parameter grouping; nesting is bounded.
 //   - cmd/compile/internal/syntax: one package for tokens, scanner and parser;
 //     positions are byte offsets resolved through a line table.
+//   - ReScript's parser maps a new surface onto the tree the old front end
+//     produced, so the checker stays unchanged; rustc names other
+//     languages' habits ("Rust has no postfix increment operator").
 //   - The printer lives apart (internal/sketch/format), as go/printer does,
 //     so no checker or lowering code depends on layout.
 package syntax

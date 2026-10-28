@@ -1,0 +1,2 @@
+// want: S001 2 -
+type Opt = Some{T} | None{}

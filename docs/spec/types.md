@@ -30,13 +30,16 @@ Status: **implemented in prototype** for struct literals; **designed** for the r
    Inside the declaring package, the construction-authority restriction is lifted, and the ordinary rules 1 to 4 still apply. A struct with an unexported field of a non-defaultable type stays non-defaultable in its own package:
 
    ```go
-   type State interface{ Idle | Running }
-   type Idle struct{}
-   type Running struct{ Since int64 }
-   type Box struct{ state State }
+   type State = Idle | Running
+   type Idle {}
+   type Running { Since int64 }
+   type Box { state State }
 
    func newBox() Box { return Box{state: Idle{}} } // allowed: a literal inside the package
-   func zeroBox() Box { var b Box; return b }       // error even inside the package: State is a union, so Box is not defaultable (rule 3)
+   func zeroBox() Box {
+   	let b Box
+   	return b
+   } // error even inside the package: State is a union, so Box is not defaultable (rule 3)
    ```
 
    Values from outside come only from the functions the package exports, so `ParseQuantity` is the only way to build a `Quantity` and its check cannot be bypassed. Exports stay by capitalisation. *Prior art:* Rust forbids constructing a struct with private fields outside its module and gives it no `Default` unless the module derives or implements one; Gleam's `opaque` types hide constructors; Go leaves this hole open: a two-package probe builds `Quantity{}` and `make([]Quantity, 1)` from another package and reads `units=0` for both (review round 2 receipt).
@@ -46,13 +49,13 @@ Status: **implemented in prototype** for struct literals; **designed** for the r
 Status: **implemented in prototype**.
 
 ```go
-type Order struct {
-	ID    string
-	Total int64
+type Order {
+	ID    string,
+	Total int64,
 }
 
-order := Order{ID: "42", Total: 1999}
-same := Order{"42", 1999}
+let order = Order{ID: "42", Total: 1999}
+let same = Order{"42", 1999}
 ```
 
 1. Field names in one struct are distinct (S108). A field and a method of the same type cannot share a name (S108).
@@ -67,11 +70,11 @@ same := Order{"42", 1999}
 Status: **implemented in prototype**.
 
 ```go
-type Payment interface{ Pending | Authorized | Declined }
+type Payment = Pending | Authorized | Declined
 
-type Pending struct{}
-type Authorized struct{ AuthID string }
-type Declined struct{ Reason string }
+type Pending {}
+type Authorized { AuthID string }
+type Declined { Reason string }
 ```
 
 1. A union lists one or more variants. Each variant must be a struct type declared in the package (S108); the prototype requires the same file. A variant may not be listed twice (S108).
@@ -86,8 +89,8 @@ type Declined struct{ Reason string }
 Status: **implemented in prototype**.
 
 ```go
-type Orders interface {
-	Find(id string) (Order, error[OrderNotFound])
+type Orders {
+	Find(id string) Order fails OrderNotFound,
 }
 ```
 
@@ -117,11 +120,11 @@ Status: **partly implemented in prototype**: value-receiver methods are declared
 Status: **designed, not yet implemented**. The prototype reports S108 for assigning a struct value to an interface type, a prototype limit (README Gap 29).
 
 ```go
-type Store interface{ Get() string }
-type Mem struct{}
+type Store { Get() string }
+type Mem {}
 
-func (Mem) Get() string { return "ok" }
-func NewStore() Store { return Mem{} } // Mem implements Store
+func Get(_ Mem) string { return "ok" }
+func NewStore() Store  { return Mem{} } // Mem implements Store
 ```
 
 1. A value of type `T` is assignable to an interface type `I` when `T`'s method set has every method of `I`, and for each such method:
@@ -172,14 +175,16 @@ Status: **designed, not yet implemented**.
 
 ## Generics
 
-Status: **designed, not yet implemented**. The spelling is provisional until [#135](https://github.com/cevr/ergo/issues/135) decides it (README Gap 23).
+Status: **designed, not yet implemented**. The spelling is decided on [#196](https://github.com/cevr/ergo/issues/196) (196g as amended, sixth round); the checker implements it in check-v1.
 
 ```go
-func Map(xs []A, limit int64, f func(A) (B, error[E]) needs R) ([]B, error[E]) needs R
+func Transform[A, B, E, R](xs []A, limit int64, f func(A) B fails E needs R) []B fails E needs R {
+	// designed
+}
 ```
 
-1. Type parameters are implicit. `[T any]` is not written. A parameter may range over types (`A`, `B`), error rows (`E`) or `needs` rows (`R`).
-2. Constraints are named interfaces such as `comparable` and `cmp.Ordered`, or interfaces with methods. Method constraints resolve through the type's owner package, with one answer per type.
+1. Type parameters are declared in brackets after the name, `[A, B, E, R]`; a bare upper-case letter is not a parameter by itself. The kinds stay implicit: a parameter may range over types (`A`, `B`), failure rows (`E`, after `fails`) or service rows (`R`, after `needs`). `[T any]` is written `[T]`.
+2. A constraint follows its parameter inline, `[T ordered]`: a method set, or one of the predeclared `comparable`, `ordered` and `number`. There is no `where` clause. Method constraints resolve through the type's owner package, with one answer per type.
 3. Rows in a generic signature may be elided only where they pass through unchanged. A declared requirement is never elided.
 4. Exported signatures spell their rows and type parameters, so clients check against interface summaries, Go's export-data model.
 5. **Lowering.** Generics emit as Go generics, which Go compiles by GC shape. Specialised copies need a measured win under [#190](https://github.com/cevr/ergo/issues/190). *Prior art:* Go GC-shape stenciling; MoonBit and Rust monomorphise; Ergo's earlier measurements refused frontend monomorphisation ([design.md](../design.md#compile-speed-is-a-language-constraint)).

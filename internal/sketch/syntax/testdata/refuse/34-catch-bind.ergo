@@ -1,0 +1,8 @@
+// want: S001 3 -
+func f() string {
+	let r = g() catch err {
+	case NotFound:
+		"missing"
+	}
+	r
+}

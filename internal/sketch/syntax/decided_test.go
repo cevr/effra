@@ -1,0 +1,442 @@
+package syntax_test
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"testing"
+
+	"ergo.local/prototype/internal/migrate196"
+	"ergo.local/prototype/internal/sketch/format"
+	"ergo.local/prototype/internal/sketch/sketchtest"
+	"ergo.local/prototype/internal/sketch/syntax"
+)
+
+// The decided grammar's own fixtures (#196, D7): testdata/decided holds the
+// preview's Decided blocks, testdata/edge the edge forms, testdata/refuse
+// one old spelling per file. They are copies of the acceptance inputs of
+// the parse-v1 unit.
+const previewPath = "../../../docs/previews/2026-10-28-without-go-syntax.md"
+
+func readDir(t *testing.T, dir string) []sketchtest.Input {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join("testdata", dir, "*.ergo"))
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no testdata/%s: %v", dir, err)
+	}
+	var out []sketchtest.Input
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, sketchtest.Input{Name: dir + "/" + filepath.Base(p), Src: string(data)})
+	}
+	return out
+}
+
+// decidedInputs is every input that must parse under the decided grammar:
+// sketchtest.Positive (the translated v0 corpus, the repository inputs, the
+// spec fences and the grammar fixtures), the decided and edge fixtures, and
+// the translated prototype fixtures that are not syntax refusals.
+func decidedInputs(t *testing.T) []sketchtest.Input {
+	t.Helper()
+	inputs, err := sketchtest.Positive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs = append(inputs, readDir(t, "decided")...)
+	inputs = append(inputs, readDir(t, "edge")...)
+	protos, _ := filepath.Glob("../proto/testdata/*.ergo")
+	more, _ := filepath.Glob("../proto/testdata/*/*.ergo")
+	for _, p := range append(protos, more...) {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(string(data), "// want S001") {
+			continue
+		}
+		inputs = append(inputs, sketchtest.Input{Name: p, Src: string(data)})
+	}
+	return inputs
+}
+
+// TestDecidedFixtures: every decided and edge fixture parses and formats to
+// a fixpoint; a decided fixture is already canonical, and an edge fixture's
+// `// expect:` lines hold in its formatted output.
+func TestDecidedFixtures(t *testing.T) {
+	for _, dir := range []string{"decided", "edge"} {
+		for _, in := range readDir(t, dir) {
+			out, err := format.Source(in.Src)
+			if err != nil {
+				t.Errorf("%s: %v", in.Name, err)
+				continue
+			}
+			if dir == "decided" && out != in.Src {
+				t.Errorf("%s: not canonical:\n%s", in.Name, out)
+			}
+			if again, err := format.Source(out); err != nil || again != out {
+				t.Errorf("%s: the output is not a fixpoint (%v)", in.Name, err)
+			}
+			for _, line := range strings.Split(in.Src, "\n") {
+				if want, ok := strings.CutPrefix(line, "// expect: "); ok {
+					want, err := strconv.Unquote(want)
+					if err != nil {
+						t.Fatalf("%s: %q: %v", in.Name, line, err)
+					}
+					if !strings.Contains(out, want) {
+						t.Errorf("%s: output lacks %q", in.Name, want)
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestRefusedFixtures: each old spelling is refused with the code and line
+// of its first line (`// want: CODE LINE TEXT`), and a Go habit's message
+// holds TEXT (D2).
+func TestRefusedFixtures(t *testing.T) {
+	for _, in := range readDir(t, "refuse") {
+		head, _, _ := strings.Cut(in.Src, "\n")
+		fields := strings.SplitN(strings.TrimPrefix(head, "// want: "), " ", 3)
+		if len(fields) != 3 {
+			t.Fatalf("%s: bad header %q", in.Name, head)
+		}
+		_, err := syntax.Parse(in.Src)
+		var e *syntax.Error
+		if !errors.As(err, &e) {
+			t.Errorf("%s: got %v, want %s", in.Name, err, head)
+			continue
+		}
+		if e.Code != fields[0] || strconv.Itoa(e.Line) != fields[1] || fields[2] != "-" && !strings.Contains(e.Message, fields[2]) {
+			t.Errorf("%s: got %v, want %s", in.Name, err, head)
+		}
+	}
+}
+
+// TestDecidedOnly: no positive input produces a node or field that no
+// decided form produces (D3, D7). Those nodes stay declared for the
+// consumers that check-v1 and lower-v1 rewrite; the parser never builds
+// them.
+func TestDecidedOnly(t *testing.T) {
+	for _, in := range decidedInputs(t) {
+		f, err := syntax.Parse(in.Src)
+		if err != nil {
+			t.Errorf("%s: %v", in.Name, err)
+			continue
+		}
+		syntax.Inspect(f, func(n syntax.Node) bool {
+			if why := undecided(n); why != "" {
+				line, col := f.Position(n.Pos())
+				t.Errorf("%s:%d:%d: %s", in.Name, line, col, why)
+			}
+			return true
+		})
+	}
+}
+
+// undecided names the undecided node or field n holds, or returns "".
+func undecided(n syntax.Node) string {
+	switch n := n.(type) {
+	case *syntax.GoExpr, *syntax.SelectStmt, *syntax.SendStmt, *syntax.ChanType, *syntax.DeferStmt,
+		*syntax.LabeledStmt, *syntax.IncDecStmt, *syntax.EmptyStmt, *syntax.Ellipsis:
+		return strings.TrimPrefix(fmt.Sprintf("%T", n), "*syntax.")
+	case *syntax.ArrayType:
+		if n.Len != nil {
+			return "an ArrayType with Len"
+		}
+	case *syntax.IfStmt:
+		if n.Init != nil {
+			return "IfStmt.Init"
+		}
+	case *syntax.SwitchStmt:
+		if n.Init != nil {
+			return "SwitchStmt.Init"
+		}
+	case *syntax.TypeSwitchStmt:
+		if n.Init != nil || n.Binds != nil || n.Define.IsValid() {
+			return "TypeSwitchStmt.Init, Binds or Define"
+		}
+	case *syntax.ForStmt:
+		if n.Init != nil || n.Post != nil {
+			return "ForStmt.Init or Post"
+		}
+	case *syntax.CatchExpr:
+		if n.Bind != nil {
+			return "CatchExpr.Bind"
+		}
+	case *syntax.FuncDecl:
+		if n.Recv != nil {
+			return "FuncDecl.Recv"
+		}
+		if n.Body == nil && n.Extern == nil {
+			return "a bodiless FuncDecl without extern"
+		}
+	case *syntax.BranchStmt:
+		if n.Label != nil {
+			return "BranchStmt.Label"
+		}
+	case *syntax.ImportDecl:
+		if len(n.Specs) != 1 || n.Lparen.IsValid() {
+			return "a grouped ImportDecl"
+		}
+		if n.Specs[0].Kind == syntax.ImportDot {
+			return "ImportDot"
+		}
+	case *syntax.VarDecl:
+		if len(n.Specs) != 1 || n.Lparen.IsValid() {
+			return "a grouped VarDecl"
+		}
+	case *syntax.AssignStmt:
+		if n.Tok == syntax.DEFINE || len(n.Lhs) != 1 || len(n.Rhs) != 1 {
+			return "an AssignStmt with := or several sides"
+		}
+	case *syntax.CallExpr:
+		if n.Ellipsis.IsValid() {
+			return "CallExpr.Ellipsis"
+		}
+	case *syntax.File:
+		if n.Package.IsValid() || n.Name != nil {
+			return "a package clause"
+		}
+	case *syntax.StructType:
+		if n.Struct.IsValid() {
+			return "a struct keyword"
+		}
+	}
+	return ""
+}
+
+// oldInputs is the old domain of TestOldCorpusRefusedOrSame: the frozen
+// old inputs of the translator (the v0 corpus, the prototype fixtures and
+// the repository inputs at 92fac236), the superseded corpus, and hand-made
+// old files aimed at the spellings that the decided grammar also parses
+// with another meaning (risk 1 of the parse-v1 spec).
+func oldInputs(t *testing.T) []sketchtest.Input {
+	t.Helper()
+	var inputs []sketchtest.Input
+	root := "../../migrate196/testdata/old"
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".sketch") {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		inputs = append(inputs, sketchtest.Input{Name: path, Src: string(data)})
+		return nil
+	})
+	if err != nil || len(inputs) < 140 {
+		t.Fatalf("frozen old inputs: %d, %v", len(inputs), err)
+	}
+	_, superseded, err := sketchtest.Corpus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs = append(inputs, superseded...)
+	for i, src := range handMadeOld {
+		inputs = append(inputs, sketchtest.Input{Name: "hand-made/" + strconv.Itoa(i), Src: src})
+	}
+	return inputs
+}
+
+// handMadeOld are old files whose spellings come closest to a decided form:
+// each must be refused, or parse to exactly its translation.
+var handMadeOld = []string{
+	"package p\n\nfunc f(x int64, y int64) bool {\n\treturn x <-y\n}\n",
+	"package p\n\nfunc f(x int64) int64 {\n\tx--\n\treturn x\n}\n",
+	"package p\n\nfunc f() (Order, error) {\n\treturn Order{}\n}\n",
+	"package p\n\nfunc f() needs Console {\n\twith(W) {\n\t\tConsole.Println(\"x\")\n\t}\n}\n",
+	"package p\n\nfunc f(xs []int64) {\n\tfor i := range xs {\n\t\tuse(i)\n\t}\n}\n",
+	"package p\n\nfunc f() {\n\tif x := g(); x > 0 {\n\t}\n}\n",
+	"package p\n\nfunc f(v Value) {\n\tswitch v.(type) {\n\tdefault:\n\t}\n}\n",
+	"package p\n\nfunc f() {\n\tvar x = 1\n\tuse(x)\n}\n",
+	"package p\n\nfunc f(x int64) int64 {\n\tswitch x {\n\tcase 1:\n\t\treturn 2\n\tdefault:\n\t\treturn 3\n\t}\n}\n",
+	"package p\n\nfunc f() {\n\tx := 1\n\tuse(x)\n}\n",
+	"package p\n\ntype T struct {\n\tA int64\n}\n",
+	"package p\n\ntype S interface {\n\tGet() int64\n}\n",
+	"package p\n\nfunc (t T) Get() int64 {\n\treturn 1\n}\n",
+	"package p\n\nfunc f(m map[string]int64) {}\n",
+	"package p\n\nfunc f() {\n\tgo work()\n}\n",
+	"package p\n\nfunc f() {\n\tdefer done()\n}\n",
+	"package p\n\nwire W {\n\tClock = Fixed{}\n}\n",
+	"package p\n\nfunc f() {\n\tg() catch e {\n\tcase E:\n\t\tuse(e)\n\t}\n}\n",
+	"package p\n\nimport \"strings\"\n",
+	"package p\n\nimport (\n\t\"strings\"\n)\n",
+	"package p\n\nfunc f() error[NotFound] {\n\treturn NotFound{}\n}\n",
+	"package p\n\nfunc f() {\n\tfor i := 0; i < 3; i++ {\n\t}\n}\n",
+	"package p\n\nfunc f() uses Clock {}\n",
+	"package p\n\nfunc f(xs ...int64) {}\n",
+	"package p\n\nfunc f() {\n\tx := [3]int64{1, 2, 3}\n\tuse(x)\n}\n",
+	"package p\n\nfunc f(x int64) int64 {\n\treturn x\n}\n",
+}
+
+// dropBlankLines removes the blank lines of src: removing the package
+// clause can join two comment groups that the translation keeps apart, and
+// a blank line is never meaning.
+func dropBlankLines(src string) string {
+	var out []string
+	for _, line := range strings.Split(src, "\n") {
+		if strings.TrimSpace(line) != "" {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// packageClause is an old file's package clause line.
+var packageClause = regexp.MustCompile(`(?m)^package [A-Za-z_][A-Za-z_0-9]*[ \t]*\n(\n)?`)
+
+// TestOldCorpusRefusedOrSame: for every old input, the decided parser
+// either refuses it with a located S001, or accepts it and its canonical
+// form equals its translation: an old file that still parses means what its
+// translation means (D7; Done rule 1, "nothing else"). Every old file
+// starts with a package clause, which alone refuses it; so the property is
+// checked a second time on the file without that line, where the rest of
+// its spellings decide.
+func TestOldCorpusRefusedOrSame(t *testing.T) {
+	refused, same := 0, 0
+	for _, in := range oldInputs(t) {
+		for _, src := range []string{in.Src, packageClause.ReplaceAllString(in.Src, "")} {
+			_, err := syntax.Parse(src)
+			if err != nil {
+				var e *syntax.Error
+				if !errors.As(err, &e) || e.Code != syntax.CodeSyntax || e.Line < 1 || e.Offset < 0 || e.Offset > len(src) {
+					t.Errorf("%s: %v is not a located S001", in.Name, err)
+				}
+				refused++
+				continue
+			}
+			got, err := format.Source(src)
+			if err != nil {
+				t.Errorf("%s: parses but does not format: %v", in.Name, err)
+				continue
+			}
+			want, notes, err := migrate196.Translate(in.Src)
+			if err != nil || len(notes) > 0 {
+				t.Errorf("%s: parses as decided syntax, but the translator gives %v %v", in.Name, err, notes)
+				continue
+			}
+			if dropBlankLines(got) != dropBlankLines(want) {
+				t.Errorf("%s: parses as decided syntax with another meaning:\nformatted:\n%s\ntranslated:\n%s", in.Name, got, want)
+				continue
+			}
+			same++
+		}
+	}
+	t.Logf("%d refused, %d parse to their translation", refused, same)
+	if same == 0 {
+		t.Error("no old input parsed: the property was never exercised")
+	}
+}
+
+// previewDecidedBlocks extracts the go block that follows each **Decided.**
+// paragraph of the preview, with the heading it is under.
+func previewDecidedBlocks(t *testing.T) map[string]string {
+	t.Helper()
+	data, err := os.ReadFile(previewPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := map[string]string{}
+	heading := ""
+	lines := strings.Split(string(data), "\n")
+	for i := 0; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "### ") {
+			heading = strings.TrimPrefix(lines[i], "### ")
+		}
+		if !strings.HasPrefix(lines[i], "**Decided.**") {
+			continue
+		}
+		for i++; i < len(lines) && lines[i] != "```go"; i++ {
+			if strings.HasPrefix(lines[i], "### ") || strings.HasPrefix(lines[i], "**") {
+				t.Fatalf("%s: a Decided paragraph without a go block", heading)
+			}
+		}
+		var body []string
+		for i++; i < len(lines) && lines[i] != "```"; i++ {
+			body = append(body, lines[i])
+		}
+		blocks[heading] = strings.Join(body, "\n") + "\n"
+	}
+	return blocks
+}
+
+// commentGap is the run of blanks before a trailing line comment.
+var commentGap = regexp.MustCompile(`[ \t]+//`)
+
+// TestPreviewDecidedBlocksCanonical: every Decided block of the preview
+// parses, and the formatter returns it unchanged up to the alignment of
+// trailing comments (the preview misaligns one comment; D4). The signature
+// block is a list of bodiless lines, not a program, and is checked through
+// its adapted fixture testdata/decided/signatures.ergo.
+func TestPreviewDecidedBlocksCanonical(t *testing.T) {
+	blocks := previewDecidedBlocks(t)
+	if len(blocks) != 13 {
+		t.Fatalf("%d Decided blocks, want 13", len(blocks))
+	}
+	for heading, src := range blocks {
+		if heading == "A signature with failures and services" {
+			continue
+		}
+		out, err := format.Source(src)
+		if err != nil {
+			t.Errorf("%s: %v", heading, err)
+			continue
+		}
+		if commentGap.ReplaceAllString(out, " //") != commentGap.ReplaceAllString(src, " //") {
+			t.Errorf("%s: not canonical:\n%s", heading, out)
+		}
+	}
+}
+
+// TestGrammarFixtures: every production of the preview's decided sketch,
+// and PatternCore, has a grammar fixture named after it; each fixture
+// parses and is canonical.
+func TestGrammarFixtures(t *testing.T) {
+	data, err := os.ReadFile(previewPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	start := strings.Index(text, "<!-- count: grammar/decided -->")
+	if start < 0 {
+		t.Fatal("no decided sketch in the preview")
+	}
+	text = text[start:]
+	open := strings.Index(text, "```ebnf\n")
+	close := strings.Index(text[open+8:], "\n```")
+	production := regexp.MustCompile(`(?m)^([A-Za-z]+) *=`)
+	var names []string
+	for _, m := range production.FindAllStringSubmatch(text[open+8:open+8+close], -1) {
+		names = append(names, m[1])
+	}
+	if len(names) != 62 {
+		t.Fatalf("%d productions in the decided sketch, want 62", len(names))
+	}
+	names = append(names, "PatternCore")
+	have := map[string]bool{}
+	for _, g := range sketchtest.GrammarFixtures {
+		have[g.Name] = true
+		out, err := format.Source(g.Src)
+		if err != nil {
+			t.Errorf("%s: %v", g.Name, err)
+			continue
+		}
+		if out != g.Src {
+			t.Errorf("%s: not canonical:\n%s", g.Name, out)
+		}
+	}
+	for _, name := range names {
+		if !have[name] {
+			t.Errorf("production %s has no grammar fixture", name)
+		}
+	}
+}

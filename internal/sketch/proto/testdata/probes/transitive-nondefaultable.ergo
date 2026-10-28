@@ -1,0 +1,7 @@
+// want S108
+type A {}
+type B {}
+type Choice = A | B
+type Inner { Value Choice }
+type Outer { Inner Inner }
+func main() needs Console { Console.Println(Outer{}) }

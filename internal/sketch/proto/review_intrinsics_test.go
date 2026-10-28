@@ -8,26 +8,27 @@ import (
 )
 
 // These public Parse/Check probes cover each intrinsic name in declaration
-// positions; safe qualified fields are exercised by intrinsic-fields.sketch.
+// positions; safe qualified fields are exercised by intrinsic-fields.ergo.
 func TestRound5IntrinsicDeclarations(t *testing.T) {
 	positions := []struct{ name, body string }{
-		{"type", `type NAME struct{};func main(){}`},
+		{"type", `type NAME {};func main(){}`},
 		{"function", `func NAME(){};func main(){}`},
-		{"method", `type Box struct{};func(Box) NAME(){};func main(){}`},
-		{"cap-method", `type Cap interface{NAME()};func main(){}`},
-		{"wire", `wire NAME{};func main(){}`},
+		{"method", `type Box {};func NAME(_ Box){};func main(){}`},
+		{"cap-method", `type Cap {NAME()};func main(){}`},
+		{"wire", `let NAME = wire {};func main(){}`},
 		{"param", `func f(NAME string){};func main(){}`},
-		{"receiver", `type Box struct{};func(NAME Box) F(){};func main(){}`},
-		{"local", `func main()needs Console{NAME:="ok";Console.Println(NAME)}`},
-		{"switch", `type A struct{Value string};type U interface{A};func value()U{return A{Value:"ok"}};func main()needs Console{switch NAME:=value().(type){case A:Console.Println(NAME)}}`},
+		{"receiver", `type Box {};func F(NAME Box){};func main(){}`},
+		{"local", `func main()needs Console{let NAME = "ok";Console.Println(NAME)}`},
+		{"switch", `type A {Value string};type U = A;func value()U{return A{Value:"ok"}};func main()needs Console{match value() {case A as NAME:Console.Println(NAME)}}`},
 	}
 	for _, name := range []string{"Console", "Println", "with", "wire", "timeout", "After", "duration", "LiveScheduler", "Scheduler"} {
 		for _, pos := range positions {
 			t.Run(name+"/"+pos.name, func(t *testing.T) {
-				src := "package demo\n" + strings.ReplaceAll(pos.body, "NAME", name)
-				reject := name == "wire" || name == "timeout" || name == "duration" ||
+				src := "" + strings.ReplaceAll(pos.body, "NAME", name)
+				// with and wire are keywords: no declaration may use them.
+				reject := name == "with" || name == "wire" || name == "timeout" || name == "duration" ||
 					((pos.name == "type" || pos.name == "function") && (name == "Console" || name == "Scheduler" || name == "LiveScheduler"))
-				f, err := Parse("intrinsics.sketch", src)
+				f, err := Parse("intrinsics.ergo", src)
 				var c *Checked
 				var ds []Diagnostic
 				if err == nil {
@@ -57,8 +58,8 @@ func TestRound5StringRepresentations(t *testing.T) {
 		for _, quote := range []string{"\"", "`"} {
 			t.Run(fmt.Sprintf("%s/%q", tc.name, quote), func(t *testing.T) {
 				literal := quote + tc.value + quote
-				src := "package demo\nfunc main() needs Console{Console.Println(" + literal + ")}\n"
-				f, err := Parse("string.sketch", src)
+				src := "func main() needs Console{Console.Println(" + literal + ")}\n"
+				f, err := Parse("string.ergo", src)
 				if err != nil {
 					t.Logf("parse rejects: %v", err)
 					return

@@ -1,0 +1,25 @@
+func loops(xs []int64, m Map[string, int64]) int64 {
+	let mut total int64 = 0
+	for x in xs {
+		total += x
+	}
+	for i, x in xs {
+		total += int64(i) * x
+	}
+	for k, v in m {
+		total += v + int64(len(k))
+	}
+	for i in 0..len(xs) {
+		total += xs[i]
+	}
+	for i in 1..len(xs)-1 {
+		continue
+	}
+	for total < 100 {
+		total *= 2
+	}
+	for {
+		break
+	}
+	total
+}

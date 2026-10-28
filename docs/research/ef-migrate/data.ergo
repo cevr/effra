@@ -1,32 +1,31 @@
 // Hand migration of examples/data.ef to the 2026 edition (docs/spec/ v0).
-package main
 
-type Request struct {
-	id   string
-	name string
+type Request {
+	id   string,
+	name string,
 }
 
-type State interface{ Idle | Running | Done }
+type State = Idle | Running | Done
 
-type Idle struct{}
-type Running struct{ requestId string }
-type Done struct{ requestId string }
+type Idle {}
+type Running { requestId string }
+type Done { requestId string }
 
-type Invalid struct{ message string }
+type Invalid { message string }
 
 func describe(state State) string {
-	switch s := state.(type) {
+	match state {
 	case Idle:
 		return "idle"
-	case Running:
+	case Running as s:
 		return "running " + s.requestId
-	case Done:
+	case Done as s:
 		return "done " + s.requestId
 	}
 }
 
 func main() needs Console {
-	request := Request{id: "42", name: "Ada"}
-	state := Running{requestId: request.id}
+	let request = Request{id: "42", name: "Ada"}
+	let state = Running{requestId: request.id}
 	Console.Println(describe(state))
 }

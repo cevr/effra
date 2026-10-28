@@ -1,0 +1,4 @@
+// want: S001 2 operations
+type Store interface {
+	Find(id string) Order fails NotFound
+}

@@ -24,19 +24,19 @@ func TestSketchCheckReportsPrototypeDiagnostics(t *testing.T) {
 		{
 			// The lexer refuses `$` after non-ASCII text on its line.
 			name:   "lexer S001",
-			source: "package p\n\n// héllo 🌍\nfunc main() needs Console {\n\tConsole.Println(\"日本🌍\") $\n}\n",
+			source: "// héllo 🌍\nfunc main() needs Console {\n\tConsole.Println(\"日本🌍\") $\n}\n",
 			code:   "S001", at: "$", token: "$",
 		},
 		{
 			// The parser refuses the second, stray `)` after non-ASCII text.
 			name:   "parser S001",
-			source: "package p\n\nfunc main() needs Console {\n\tConsole.Println(\"ü€\"))\n}\n",
+			source: "func main() needs Console {\n\tConsole.Println(\"ü€\"))\n}\n",
 			code:   "S001", at: ")\n}", token: ")",
 		},
 		{
 			// The checker reports an unknown name after an astral character.
 			name:   "checker S104",
-			source: "package p\n\nfunc main() needs Console {\n\tConsole.Println(\"🌍🌍\" + mïssing)\n}\n",
+			source: "func main() needs Console {\n\tConsole.Println(\"🌍🌍\" + mïssing)\n}\n",
 			code:   "S104", at: "mïssing", token: "mïssing",
 		},
 	}
@@ -104,8 +104,8 @@ func TestSketchCheckReportsPrototypeDiagnostics(t *testing.T) {
 // TestFormat: the 2026 formatter keeps the legacy result shape, reports a
 // syntax error as a located S001 failure, and honours the output limit.
 func TestFormat(t *testing.T) {
-	source := "package p\n\nfunc main()  needs Console {\nConsole.Println(\"a\")\n}\n"
-	want := "package p\n\nfunc main() needs Console {\n\tConsole.Println(\"a\")\n}\n"
+	source := "func main()  needs Console {\nConsole.Println(\"a\")\n}\n"
+	want := "func main() needs Console {\n\tConsole.Println(\"a\")\n}\n"
 	result, err := Format(source, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -122,15 +122,15 @@ func TestFormat(t *testing.T) {
 		t.Fatalf("identity %q", FormatterIdentity)
 	}
 
-	_, err = Format("package p\n\nfunc main() {\n\tx := )\n}\n", 0)
+	_, err = Format("func main() {\n\tlet x = )\n}\n", 0)
 	var failure compiler.FormatFailure
 	if !errors.As(err, &failure) || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code != "S001" {
 		t.Fatalf("syntax error gave %v", err)
 	}
-	if d := failure.Diagnostics[0]; d.Span.Line != 4 || d.Span.Column != 7 {
-		t.Fatalf("span %+v, want 4:7", d.Span)
+	if d := failure.Diagnostics[0]; d.Span.Line != 2 || d.Span.Column != 10 {
+		t.Fatalf("span %+v, want 2:10", d.Span)
 	}
-	if msg := FailureMessage(failure); !strings.HasPrefix(msg, "source cannot be formatted: S001 at 4:7: ") {
+	if msg := FailureMessage(failure); !strings.HasPrefix(msg, "source cannot be formatted: S001 at 2:10: ") {
 		t.Fatalf("message %q", msg)
 	}
 
@@ -171,7 +171,7 @@ func TestSketchBuildRunsProgram(t *testing.T) {
 		t.Fatalf("stdout %q, want %q", got, expected)
 	}
 	// An analysis with diagnostics never builds.
-	if err := Build(Check("package p\n$"), "bad.ergo", filepath.Join(t.TempDir(), "bad"), &stderr); err == nil {
+	if err := Build(Check("func main() {}\n$"), "bad.ergo", filepath.Join(t.TempDir(), "bad"), &stderr); err == nil {
 		t.Fatal("an analysis with diagnostics built")
 	}
 }

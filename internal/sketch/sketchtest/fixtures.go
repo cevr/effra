@@ -2,287 +2,183 @@ package sketchtest
 
 import "strings"
 
-// The tables below mirror the acceptance tables of unit parser-195
-// (grammar fixtures and malformed inputs), so the parser and printer tests
-// run them at the public seam without the CLI.
+// GrammarFixture is a positive input named after the production of
+// docs/spec/grammar.md it exercises (#196, D7: every production has one).
+type GrammarFixture struct{ Name, Src string }
 
-// GrammarFixtures are designed forms of docs/spec/grammar.md, the Go
-// fallback and the decided extensions (spec D8) that the corpus and the
-// spec fences do not all cover. Each must parse, format idempotently and
-// canonically, and keep its comments and tokens.
-var GrammarFixtures = []struct{ Name, Src string }{
-	{"constraints-and-instantiation", `package p
-
-import "cmp"
-
-// Max keeps a named constraint in the bracket list.
-func Max[T cmp.Ordered](a, b T) T {
-	if a > b {
-		return a
-	}
-	return b
+// GrammarFixtures are decided forms of docs/spec/grammar.md, one or more per
+// production. Each must parse, format canonically (the formatter returns it
+// unchanged) and idempotently, and keep its comments and tokens.
+var GrammarFixtures = []GrammarFixture{
+	{"SourceFile", "import strings\n\nfunc main() needs Console {\n\tConsole.Println(strings.ToUpper(\"a\"))\n}\n"},
+	{"ImportDecl", "import strings\nimport go net/http\nimport ourjson example.com/json\nimport go gohttp net/http\n"},
+	{"TopLevelDecl", "type T {}\n\nfunc F() {}\n\nextern go strings.ToUpper func Upper(s string) string\n\ntest Works {\n\tassert true\n}\n\nlet Limit = 3\n"},
+	{"TypeDecl", "type Celsius float64\n\ntype Card { Number string }\n\ntype Payment = Pending{} | Paid{ID string}\n"},
+	{"TypeParams", "type Pair[A, B] { First A, Second B }\n\nfunc Max[T ordered](a, b T) T {\n\tif a > b { a } else { b }\n}\n"},
+	{"TypeParam", "type Table[K comparable, V] { Rows Map[K, V] }\n\ntype Both[A, B ordered] { X A, Y B }\n"},
+	{"Members", "type Card {\n\tNumber string,\n\tExpiry Date,\n}\n\ntype Empty {}\n"},
+	{"Member", "type Store {\n\tFind(id string) Order fails NotFound,\n\n\tlaw Found(id string) { try Find(id) == Find(id) },\n}\n"},
+	{"FieldDecl", "type Point { X, Y int64 }\n"},
+	{"LawDecl", "type Codec[T] {\n\tEncode(v T) []byte,\n\tDecode(b []byte) T fails Malformed,\n\n\tlaw RoundTrip(v T) { try Decode(Encode(v)) == v },\n}\n"},
+	{"UnionType", "type Reason =\n\t| Fraud{Rule string}\n\t| Expired{}\n\ntype Short = A | B\n"},
+	{"Variant", "type Option[T] = Some{Value T} | None{}\n\ntype ChargeError = Declined | timeout.Expired\n"},
+	{"MachineType", "type Breaker machine[State, Signal] { initial: Closed{0}, step: Step }\n"},
+	{"MachineEntry", "type Door machine[State, Event] {\n\tinitial: Shut{},\n\tstep:    Move,\n}\n"},
+	{"Type", "func f(a int64, b []string, c *Node, d func(int64) bool, e (int64, string), m Map[string, int64]) {}\n"},
+	{"TypeName", "func f(a Order, b time.Duration, c go.Error) {}\n"},
+	{"TypeArgs", "func f(r Result[Order, string], xs []Pair[int64, bool]) {}\n"},
+	{"SliceType", "func f(xs [][]byte) []string {\n\t[]string{}\n}\n"},
+	{"PointerType", "func bump(p *Counter) {\n\tp.N += 1\n}\n"},
+	{"FuncType", "func apply(f func(int64) int64 fails E needs (Clock, Console), g escaping func()) {}\n"},
+	{"FuncDecl", "func Fee(o Order, rate int64) int64 {\n\to.Total * rate / 100\n}\n"},
+	{"ExternDecl", "extern go example.com/json.Valid func Valid(b []byte) bool\n\nextern go net/http.Get func Fetch(url string) Response fails go.Error\n"},
+	{"TestDecl", "test Addition {\n\tassert 1+1 == 2\n}\n\ntest Commutes(a int64, b int64) {\n\tassert a+b == b+a\n}\n"},
+	{"Signature", "func Checkout(id string) Receipt fails NotFound | Declined needs Orders, Payments {\n\ttry Orders.Get(id)\n}\n"},
+	{"Params", "func f(a, b int64, s string) {}\n"},
+	{"Param", "func f(_ Store, id string) {}\n"},
+	{"FailsClause", "func f() fails NotFound | Unavailable | retry.Exhausted[E] {}\n"},
+	{"NeedsClause", "func f() needs Clock, go.Foreign {}\n"},
+	{"LetDecl", "let Names = []string{\"ada\"}\n\nfunc f(order Order) int64 {\n\tlet x = 1\n\tlet mut y int64 = 2\n\tlet q, r = DivMod(7, 2)\n\tlet (n, d) = DivMod(9, 4)\n\tlet Order{Total: t} = order\n\ty += x + q + r + n + d + t\n\ty\n}\n"},
+	{"ExpressionList", "func f() {\n\tuse(1, 2, 3)\n\twith A, B { run() }\n}\n"},
+	{"ProvidesClause", "let App = wire provides Accounts, Ledger needs Clock {\n\tAccounts: Memory{},\n\tLedger:   Memory{},\n}\n"},
+	{"WireBody", "let Live = wire {\n\tBase,\n\treplace Clock: Fixed{},\n\tLedger, Audit: Recorder{},\n}\n"},
+	{"WireEntry", "func f() {\n\tlet w = wire { Clock: Fixed{} }\n\tuse(w)\n}\n"},
+	{"Block", "func f() {\n\tg()\n\th()\n}\n"},
+	{"Statement", "func f(xs []int64) int64 {\n\tlet mut n = 0\n\tn = n + 1\n\tfor x in xs {\n\t\tif x < 0 {\n\t\t\tbreak\n\t\t}\n\t\tcontinue\n\t}\n\tassert n > 0\n\treturn n\n}\n"},
+	{"Assignment", "func f(p *Point) {\n\tp.X = 1\n\tp.Y *= 2\n\tp.Z <<= 1\n}\n"},
+	{"ReturnStmt", "func f(n int64) int64 {\n\tif n < 0 {\n\t\treturn 0\n\t}\n\treturn n\n}\n\nfunc g() {\n\treturn\n}\n"},
+	{"ForStmt", "func f(xs []int64, m Map[string, int64]) {\n\tfor {\n\t\tbreak\n\t}\n\tfor len(xs) > 0 {\n\t\tbreak\n\t}\n\tfor x in xs {\n\t\tuse(x)\n\t}\n\tfor i, x in xs {\n\t\tuse(i, x)\n\t}\n\tfor k, v in m {\n\t\tuse(k, v)\n\t}\n\tfor i in 0..len(xs) {\n\t\tuse(i)\n\t}\n}\n"},
+	{"Expression", "func f() int64 fails E {\n\tlet a = try g()\n\tlet b = try g() catch {\n\tcase E:\n\t\t0\n\t}\n\ta + b\n}\n"},
+	{"CatchExpr", "func f(id string) string {\n\tFetch(id) catch {\n\tcase NotFound{ID: x}:\n\t\t\"missing \\(x)\"\n\tcase Timeout as t:\n\t\tt.Reason\n\tcase err:\n\t\t\"failed\"\n\t}\n}\n"},
+	{"Binary", "func f(a, b int64, ok bool) bool {\n\ta*b+1 > a-b || !ok && a%2 == 0\n}\n"},
+	{"Unary", "func f(a int64, p *Point, ok bool) {\n\tuse(-a, !ok, ^a, &p.X, *p)\n}\n"},
+	{"Postfix", "func f(m Market) {\n\tm.Orders[0].Lines[1:3].Len()\n}\n"},
+	{"Selector", "func f(o Order) string {\n\to.Customer.Name\n}\n"},
+	{"Index", "func f(xs []int64, m Map[string, int64]) int64 {\n\txs[0] + m[\"a\"] + slice.WithCapacity[int64](4)[0]\n}\n"},
+	{"Slice", "func f(xs []int64) {\n\tuse(xs[1:], xs[:2], xs[1:2], xs[1:2:3])\n}\n"},
+	{"Call", "func f() {\n\tg(1, 2)\n\ttask.Go() { work() }\n\ttimeout.After(2s) {\n\t\twork()\n\t}\n}\n"},
+	{"Primary", "func f(x int64) {\n\tuse(x, 1, Order{}, func(y) { y }, (x, x), (x))\n}\n"},
+	{"Literal", "func f() {\n\tuse(42, 2.5, 'a', \"s\", `raw`, 500ms, 1e9, .5)\n}\n"},
+	{"CompositeLit", "func f() {\n\tuse(Order{ID: \"1\", Total: 2}, []int64{1, 2}, Map[string, int64]{\"a\": 1}, Pair[int64, bool]{1, true})\n}\n"},
+	{"LiteralType", "func f() {\n\tuse(json.Codec[Order]{MaxBytes: 4096}, [][]int64{{1}, {2, 3}})\n}\n"},
+	{"LiteralValue", "func f() {\n\tlet o = Order{\n\t\tID:    \"1\",\n\t\tTotal: 2,\n\t}\n\tuse(o)\n}\n"},
+	{"Element", "func f() {\n\tuse([]Pair{{1, 2}, {First: 3, Second: 4}})\n}\n"},
+	{"FuncLit", "func f(xs []int64) {\n\tuse(xs.Fold(0, func(acc, x) { acc + x }), func(a int64) int64 { a + 1 })\n}\n"},
+	{"LitParam", "func f() {\n\tuse(func(x) { x }, func(a, b int64) int64 { a * b })\n}\n"},
+	{"IfExpr", "func fee(gold bool, total int64) int64 {\n\tlet rate int64 = if gold { 0 } else { 3 }\n\tif total > 100 {\n\t\ttotal * rate\n\t} else if total > 10 {\n\t\ttotal\n\t} else {\n\t\t0\n\t}\n}\n"},
+	{"MatchExpr", "func status(code int64) string {\n\tmatch code {\n\tcase 200, 204:\n\t\t\"ok\"\n\tcase -1:\n\t\t\"unknown\"\n\tcase _:\n\t\t\"error\"\n\t}\n}\n"},
+	{"CaseClause", "func step(s State, e Event) State {\n\tmatch (s, e) {\n\tcase (Closed{Failures: n}, Failure{err}):\n\t\tOpen{err}\n\tcase (_, Retry):\n\t\ts\n\tcase _:\n\t\ts\n\t}\n}\n"},
+	{"WithExpr", "func main() needs Console {\n\twith Live { run() }\n\tlet r = with Live, Test { run() } catch {\n\tcase E:\n\t\t0\n\t}\n\tuse(r)\n}\n"},
+	{"WireLit", "func f() {\n\twith wire provides Clock needs Console { Clock: Fixed{} } { run() }\n}\n"},
+	{"Pattern", "func f(p Payment) string {\n\tmatch p {\n\tcase Declined{Reason: Fraud{Rule: r} as f}:\n\t\tr\n\tcase Authorized as a:\n\t\ta.ID\n\tcase _:\n\t\t\"\"\n\t}\n}\n"},
+	{"PatternCore", "func f(x Value) string {\n\tmatch x {\n\tcase Pending:\n\t\t\"p\"\n\tcase result.Ok[int64]{v}:\n\t\t\"ok\"\n\tcase (Box{1}):\n\t\t\"one\"\n\tcase other:\n\t\t\"other\"\n\t}\n}\n"},
+	{"FieldPattern", "func f(o Order) int64 {\n\tlet Order{Total: t, Lines: ls} = o\n\tlet Some{v} = lookup()\n\tt + v + len(ls)\n}\n"},
+	// Lexical additions (#196, D1.3, D1.7).
+	{"interpolation", "func greet(name string, n int64) string {\n\t\"hello \\(name), \\(n + 1) tries, \\(label(\"x \\(name)\")) \\\\(not interpolated)\"\n}\n"},
+	{"comments", "// Package doc.\n\n// F does nothing.\nfunc F() {} // trailing\n\n/* block */\nfunc G() {\n\tlet x = 1 // x\n\tuse(x)    // used\n}\n"},
 }
 
-func On[F error](n int64) int64 { return n }
-
-type Set[K comparable] struct {
-	items map[K]bool
-}
-
-func use() int64 {
-	return Max[int64](1, 2) + On[Failed | timeout.Expired](3)
-}
-`},
-	{"function-type-needs-row", `package p
-
-func run(f func() needs (Clock, Console), g func(), h func(int64) (int64, error[E]) needs R) error[E] needs Clock, Console, R {
-	f()
-	g()
-	try h(1)
-}
-`},
-	{"wire-forms", `package p
-
-wire Test {
-	Live
-	replace Orders = MemoryOrders{}
-	Gateway = OpenGateway
-}
-
-wire App provides Account, Invoice {
-	Store = MemoryStore{}
-}
-
-wire Live provides Orders needs Config, Clock {
-	Orders = OpenOrders
-}
-
-func main() needs Console {
-	with(wire{ http.Client = FakeClient{} }) { serve() }
-	with(Test, trace.Span("t")) {
-		serve()
-	}
-}
-`},
-	{"control-flow", `package p
-
-func loop(xs []int64, ch chan int64, done <-chan struct{}) int64 {
-	var total int64
-	a, b := 1, 2
-	a, b = b, a
-	for i := 0; i < len(xs); i++ {
-		total += xs[i]
-	}
-	for _, x := range xs {
-		if x > 10 {
-			break
-		} else if x < 0 {
-			continue
-		} else {
-			total++
-		}
-	}
-	for range 3 {
-		total--
-	}
-	for total < 100 {
-		total *= 2
-	}
-outer:
-	for {
-		select {
-		case v := <-ch:
-			total = total + v
-		case <-done:
-			break outer
-		default:
-			continue outer
-		}
-	}
-	switch {
-	case total == 0 || a == b:
-		return 0
-	}
-	switch total {
-	case 0, 1:
-		return 0
-	default:
-		return total % 7
-	}
-}
-`},
-	{"catch-binding-and-try-operands", `package p
-
-func handle(req Request) (Response, error[Fatal]) {
-	r := created(req) catch e {
-	case Invalid:
-		log(e)
-		Status(422)
-	case Missing:
-		return Status(404)
-	}
-	if !try ok(req) {
-		return r
-	}
-	return label(r) + " " + try render(r)
-}
-`},
-	{"tasks-defer-channels", `package p
-
-func work(done chan<- int64, in <-chan int64) {
-	t := go {
-		compute()
-	}
-	defer t.Stop()
-	defer done <- 1
-	for v := range in {
-		go process(v)
-	}
-	running := map[int64]Task[struct{}]{}
-	running[0] = go read()
-}
-`},
-	{"type-switches", `package p
-
-func step(s State, e Event) Decision[State, string] {
-	switch s, e := s.(type), e.(type) {
-	case (Idle, Start):
-		return Enter{Running{}}
-	case (Running, Stop), (Paused, Stop):
-		return Done{"stopped"}
-	case (_, _):
-		return Ignore{}
-	}
-}
-
-func kind(v Value) string {
-	switch v.(type) {
-	case A, B:
-		return "ab"
-	default:
-		return "other"
-	}
-}
-
-func bind(v Value) string {
-	switch x := v.(type) {
-	case A:
-		return x.Name
-	case _:
-		return ""
-	}
-}
-`},
-	{"declarations", `package p
-
-import (
-	"strings"
-	. "html"
-	go "net/url"
-)
-
-var limit = 3
-
-var (
-	first  = "a"
-	second = "b"
-)
-
-type Tally struct {
-	n    int64 // the count
-	name string
-}
-
-type Counter machine[State, Event] {
-	initial Idle{}
-	step    step
-}
-
-type Shape interface{ Circle | Square }
-
-type Store interface {
-	Get(key string) (string, error[NotFound])
-	Put(key string, v string) needs Clock
-}
-
-//ef:go net/url.Parse
-func parseURL(raw string) (url.URL, error[go.Error]) needs go.Foreign
-
-func (t *Tally) Bump(xs ...int64) (int64, bool) {
-	r := 'x' /* a rune */
-	return int64(len(xs)), r == 'x' && true
-}
-
-func (Tally) Name() string { return strings.ToUpper("t") }
-`},
-	{"literals-and-calls", `package p
-
-var routes = http.Routes{
-	"POST /orders": place,
-	"GET /health":  health,
-}
-
-func build() {
-	m := map[string][]int64{"a": {1, 2}, "b": nil}
-	s := []Pair{{1, 2}, {First: 3, Second: 4}}
-	t := s[1:]
-	c := json.Codec[Order]{MaxBytes: 4096, MaxDepth: 3}
-	n := try retry.On[Failed](retry.Exponential(100ms).Times(3)) { fetch() } catch {
-	case Failed:
-		0
-	}
-	slices.SortFunc(t, func(a, b) int { return cmp.Compare(a.First, b.First) })
-	v := sync.Atomically() {
-		move(m, n)
-	}
-	w := -n * (2 + 3) / 4
-	use(m, t, c, n, v, w, ` + "`raw\n// not a comment`" + `)
-}
-`},
-}
-
+// Malformed is an input that must give a located syntax diagnostic: Code
+// on one of Lines, and, for a Go habit, the habit's message (Habit holds
+// the habit's Go spelling, as syntax.Habits lists it).
 type Malformed struct {
 	Name     string
 	Src      string
 	Generate func() string
-	Lines    []int // acceptable lines of the first diagnostic
+	Code     string // "" means S001
+	Lines    []int
+	Habit    string
 }
 
 // MalformedTable: each input must give a located, registered syntax
-// diagnostic (S0xx in docs/spec/diagnostics.md) on one of the listed lines;
-// ergo fmt must exit 2, name the code and leave the file unchanged.
+// diagnostic on one of the listed lines; ergo fmt must exit 2, name the
+// code and leave the file unchanged. Every Go habit of syntax.Habits has at
+// least one row.
 var MalformedTable = []Malformed{
-	{Name: "enum-type", Src: "package p\n\ntype Payment enum {\n\tPending\n}\n", Lines: []int{3}},
-	{Name: "const-removed", Src: "package p\n\nconst limit = 3\n", Lines: []int{3}},
-	{Name: "goto-removed", Src: "package p\n\nfunc f() {\nagain:\n\tgoto again\n}\n", Lines: []int{5}},
-	{Name: "fallthrough-removed", Src: "package p\n\nfunc f(x int64) {\n\tswitch x {\n\tcase 1:\n\t\tfallthrough\n\tdefault:\n\t}\n}\n", Lines: []int{6}},
-	{Name: "unterminated-string", Src: "package p\n\nfunc f() {\n\tx := \"abc\n}\n", Lines: []int{4}},
-	{Name: "unterminated-raw-string", Src: "package p\n\nvar s = `abc\n", Lines: []int{3}},
-	{Name: "unterminated-block-comment", Src: "package p\n\n/* open\nfunc f() {}\n", Lines: []int{3}},
-	{Name: "nonletter-identifier", Src: "package p\n\nfunc f() {\n\tx⪪ := 1\n}\n", Lines: []int{4}},
-	{Name: "invalid-utf8", Src: "package p\n\nfunc f() {\n\t\xff := 1\n}\n", Lines: []int{4}},
-	{Name: "unknown-number-suffix", Src: "package p\n\nvar d = 5kg\n", Lines: []int{3}},
-	{Name: "mixed-keyed-positional", Src: "package p\n\nvar o = Order{ID: \"1\", 2}\n", Lines: []int{3}},
-	{Name: "missing-package", Src: "func f() {}\n", Lines: []int{1}},
-	{Name: "import-after-declaration", Src: "package p\n\nfunc f() {}\n\nimport \"strings\"\n", Lines: []int{5}},
-	{Name: "unclosed-brace", Src: "package p\n\nfunc f() {\n\tg()\n", Lines: []int{4, 5}},
-	{Name: "stray-paren", Src: "package p\n\nfunc f() {\n\tg())\n}\n", Lines: []int{4}},
-	{Name: "union-trailing-bar", Src: "package p\n\ntype U interface{ A | }\n", Lines: []int{3}},
-	{Name: "multi-subject-arity", Src: "package p\n\nfunc f(a A, b B) {\n\tswitch x, y := a.(type) {\n\tcase (A, B):\n\t}\n}\n", Lines: []int{4}},
-	{Name: "tuple-case-in-single-switch", Src: "package p\n\nfunc f(a A) {\n\tswitch x := a.(type) {\n\tcase (A, B):\n\t\tuse(x)\n\t}\n}\n", Lines: []int{5}},
-	{Name: "machine-unknown-entry", Src: "package p\n\ntype M machine[S, E] {\n\tinitial Idle{}\n\tstart step\n}\n", Lines: []int{5}},
-	{Name: "go-without-call", Src: "package p\n\nfunc f() {\n\tgo x\n}\n", Lines: []int{4}},
-	{Name: "type-guard-outside-switch", Src: "package p\n\nfunc f(v V) {\n\tt := v.(type)\n\tuse(t)\n}\n", Lines: []int{4}},
-	{Name: "bare-try", Src: "package p\n\nfunc f() {\n\tx := try\n}\n", Lines: []int{4, 5}},
-	{Name: "catch-binding-not-a-name", Src: "package p\n\nfunc f() {\n\tx := g() catch 1 {\n\t}\n}\n", Lines: []int{4}},
-	{Name: "end-of-statement", Src: "package p\n\nfunc f() {\n\tx := 1 2\n}\n", Lines: []int{4}},
-	{Name: "two-receivers", Src: "package p\n\nfunc (a A, b B) M() {}\n", Lines: []int{3}},
-	{Name: "unexpected-character", Src: "package p\n\nfunc f() {\n\tx := 1 # 2\n}\n", Lines: []int{4}},
-	{Name: "defer-non-simple", Src: "package p\n\nfunc f() {\n\tdefer if true {}\n}\n", Lines: []int{4}},
-	{Name: "empty-type-parameters", Src: "package p\n\nfunc f[]() {}\n", Lines: []int{3}},
-	{Name: "parenless-trailing-block", Src: "package p\n\nfunc f() {\n\tsync.Atomically {\n\t\tmove()\n\t}\n}\n", Lines: []int{5}},
-	{Name: "wire-needs-before-provides", Src: "package p\n\nwire App needs Config provides Account {\n\tStore = M{}\n}\n", Lines: []int{3}},
+	{Name: "package", Src: "package main\n\nfunc main() {}\n", Lines: []int{1}, Habit: "package p"},
+	{Name: "import-group", Src: "import (\n\t\"strings\"\n)\n", Lines: []int{1}, Habit: "import ( … )"},
+	{Name: "import-quoted", Src: "import \"strings\"\n", Lines: []int{1}, Habit: `import "p"`},
+	{Name: "define", Src: "func f() {\n\tx := 1\n\tuse(x)\n}\n", Lines: []int{2}, Habit: "x := e"},
+	{Name: "var", Src: "var x = 1\n", Lines: []int{1}, Habit: "var x T"},
+	{Name: "var-local", Src: "func f() {\n\tvar x int64\n}\n", Lines: []int{2}, Habit: "var x T"},
+	{Name: "const", Src: "const limit = 3\n", Lines: []int{1}, Habit: "const x = e"},
+	{Name: "if-init", Src: "func f() {\n\tif x := g(); x > 0 {\n\t}\n}\n", Lines: []int{2}, Habit: "if x := f(); c"},
+	{Name: "inc", Src: "func f(n int64) {\n\tn++\n}\n", Lines: []int{2}, Habit: "x++, x--"},
+	{Name: "dec", Src: "func f(n int64) {\n\tn--\n}\n", Lines: []int{2}, Habit: "x++, x--"},
+	{Name: "for-clause", Src: "func f() {\n\tfor i := 0; i < 3; i += 1 {\n\t}\n}\n", Lines: []int{2}, Habit: "for i := 0; i < n; i++"},
+	{Name: "range", Src: "func f(xs []int64) {\n\tfor _, x := range xs {\n\t\tuse(x)\n\t}\n}\n", Lines: []int{2}, Habit: "for k, v := range xs"},
+	{Name: "switch", Src: "func f(x int64) {\n\tswitch x {\n\t}\n}\n", Lines: []int{2}, Habit: "switch"},
+	{Name: "type-switch", Src: "func f(v Value) {\n\tmatch v.(type) {\n\t}\n}\n", Lines: []int{2}, Habit: "x.(type)"},
+	{Name: "type-assert", Src: "func f(v Value) {\n\tuse(v.(Order))\n}\n", Lines: []int{2}, Habit: "x.(T)"},
+	{Name: "default", Src: "func f(x int64) {\n\tmatch x {\n\tdefault:\n\t}\n}\n", Lines: []int{3}, Habit: "default:"},
+	{Name: "struct", Src: "type T struct {\n\tX int64\n}\n", Lines: []int{1}, Habit: "struct"},
+	{Name: "interface", Src: "type S interface {\n\tGet() int64\n}\n", Lines: []int{1}, Habit: "interface"},
+	{Name: "receiver", Src: "func (o Order) Fee() int64 { 0 }\n", Lines: []int{1}, Habit: "func (r T) M()"},
+	{Name: "error-result", Src: "func f() (Order, error) {\n\tOrder{}\n}\n", Lines: []int{1}, Habit: "(T, error)"},
+	{Name: "go", Src: "func f() {\n\tgo work()\n}\n", Lines: []int{2}, Habit: "go f()"},
+	{Name: "defer", Src: "func f() {\n\tdefer close()\n}\n", Lines: []int{2}, Habit: "defer f()"},
+	{Name: "chan", Src: "func f(c chan int64) {}\n", Lines: []int{1}, Habit: "chan T"},
+	{Name: "arrow", Src: "func f(c Queue) {\n\tuse(<-c)\n}\n", Lines: []int{2}, Habit: "<-ch"},
+	{Name: "arrow-not-less-minus", Src: "func f(x int64, y int64) bool {\n\tx <-y\n}\n", Lines: []int{2}, Habit: "<-ch"},
+	{Name: "select", Src: "func f() {\n\tselect {\n\t}\n}\n", Lines: []int{2}, Habit: "select"},
+	{Name: "map", Src: "func f(m map[string]int64) {}\n", Lines: []int{1}, Habit: "map[K]V"},
+	{Name: "variadic", Src: "func f(xs ...int64) {}\n", Lines: []int{1}, Habit: "...T"},
+	{Name: "array", Src: "func f(xs [4]int64) {}\n", Lines: []int{1}, Habit: "[N]T"},
+	{Name: "label", Src: "func f(xs []int64) {\nouter:\n\tfor x in xs {\n\t\tbreak outer\n\t}\n}\n", Lines: []int{2}, Habit: "L:"},
+	{Name: "goto", Src: "func f() {\n\tgoto done\n}\n", Lines: []int{2}, Habit: "goto"},
+	{Name: "fallthrough", Src: "func f(x int64) {\n\tmatch x {\n\tcase 1:\n\t\tfallthrough\n\t}\n}\n", Lines: []int{4}, Habit: "fallthrough"},
+	// Old Ergo-only spellings: the plain S001 (#217).
+	{Name: "error-row", Src: "func f() (Order, error[NotFound]) {\n\tOrder{}\n}\n", Lines: []int{1}},
+	{Name: "error-row-only", Src: "func f() error[NotFound] {}\n", Lines: []int{1}},
+	{Name: "wire-decl", Src: "wire Live {\n\tClock = Fixed{}\n}\n", Lines: []int{1}},
+	{Name: "wire-entry-assign", Src: "let Live = wire {\n\tClock = Fixed{},\n}\n", Lines: []int{2}},
+	{Name: "catch-bind", Src: "func f() {\n\tg() catch e {\n\tcase E:\n\t}\n}\n", Lines: []int{2}},
+	{Name: "bodiless", Src: "//ef:go strings.ToUpper\nfunc Upper(s string) string\n", Lines: []int{2}},
+	{Name: "try-operand", Src: "func f(a int64) int64 fails E {\n\ta + try g()\n}\n", Lines: []int{2}},
+	{Name: "uses", Src: "func f() uses Clock {}\n", Lines: []int{1}},
+	// Decided-grammar rules (#196, D1).
+	{Name: "mixed-members", Src: "type Card { Number string, Valid() bool }\n", Code: "S108", Lines: []int{1}},
+	{Name: "law-among-fields", Src: "type Card {\n\tNumber string,\n\tlaw L() { true },\n}\n", Code: "S108", Lines: []int{3}},
+	{Name: "embedded-member", Src: "type Account { Balance int64, Base }\n", Lines: []int{1}},
+	{Name: "variant-unnamed-field", Src: "type Opt = Some{T} | None{}\n", Lines: []int{1}},
+	{Name: "union-tuple", Src: "type Pairs = (int64, string)\n", Lines: []int{1}},
+	{Name: "union-trailing-bar", Src: "type U = A |\n", Lines: []int{1, 2}},
+	{Name: "funclit-mixed", Src: "func f(xs []int64) int64 {\n\txs.Fold(0, func(acc int64, x) { acc + x })\n}\n", Lines: []int{2}},
+	{Name: "funclit-unnamed-type", Src: "func f() {\n\tuse(func([]int64) { 1 })\n}\n", Lines: []int{2}},
+	{Name: "multi-assign", Src: "func f() {\n\tlet mut a, b = (1, 2)\n\ta, b = b, a\n}\n", Lines: []int{3}},
+	{Name: "return-list", Src: "func f(a, b int64) (int64, int64) {\n\treturn a, b\n}\n", Lines: []int{2}},
+	{Name: "spread-call", Src: "func f(xs []int64) {\n\tSum(xs...)\n}\n", Lines: []int{2}},
+	{Name: "case-expression", Src: "func f(x, limit int64) {\n\tmatch x {\n\tcase limit + 1:\n\t}\n}\n", Lines: []int{3}},
+	{Name: "range-chain", Src: "func f() {\n\tuse(1..2..3)\n}\n", Lines: []int{2}},
+	{Name: "bare-block", Src: "func f() {\n\t{\n\t\tg()\n\t}\n}\n", Lines: []int{2}},
+	{Name: "dot-import", Src: "import . strings\n", Lines: []int{1}},
+	{Name: "extern-without-function", Src: "extern go strings func Upper(s string) string\n", Lines: []int{1}},
+	{Name: "machine-unknown-entry", Src: "type M machine[S, E] { initial: Idle{}, start: Step }\n", Lines: []int{1}},
+	{Name: "needs-parens-outside-list", Src: "func f() needs (A, B) {}\n", Lines: []int{1}},
+	{Name: "anon-record", Src: "func f() {\n\tuse(struct{ X int64 }{1})\n}\n", Lines: []int{2}},
+	{Name: "statement-match-continued", Src: "func f(x int64) {\n\tmatch x {\n\tcase _:\n\t}.String()\n}\n", Lines: []int{4}},
+	// Lexical errors.
+	{Name: "unterminated-string", Src: "func f() {\n\tlet x = \"abc\n}\n", Lines: []int{2}},
+	{Name: "unterminated-interpolation", Src: "func f(x int64) {\n\tuse(\"a \\(x\")\n}\n", Lines: []int{2}},
+	{Name: "comment-in-interpolation", Src: "func f(x int64) {\n\tuse(\"a \\(x /* c */)\")\n}\n", Lines: []int{2}},
+	{Name: "unterminated-raw-string", Src: "let s = `abc\n", Lines: []int{1}},
+	{Name: "unterminated-block-comment", Src: "/* open\nfunc f() {}\n", Lines: []int{1}},
+	{Name: "nonletter-identifier", Src: "func f() {\n\tlet x⪪ = 1\n}\n", Lines: []int{2}},
+	{Name: "invalid-utf8", Src: "func f() {\n\tlet \xff = 1\n}\n", Lines: []int{2}},
+	{Name: "unknown-number-suffix", Src: "let d = 5kg\n", Lines: []int{1}},
+	{Name: "imaginary", Src: "let d = 2i\n", Lines: []int{1}},
+	{Name: "hex", Src: "let d = 0xff\n", Lines: []int{1}},
+	{Name: "tilde", Src: "func f[T ~int]() {}\n", Lines: []int{1}},
+	{Name: "mixed-keyed-positional", Src: "let o = Order{ID: \"1\", 2}\n", Lines: []int{1}},
+	{Name: "import-after-declaration", Src: "func f() {}\n\nimport strings\n", Lines: []int{3}},
+	{Name: "unclosed-brace", Src: "func f() {\n\tg()\n", Lines: []int{2, 3}},
+	{Name: "stray-paren", Src: "func f() {\n\tg())\n}\n", Lines: []int{2}},
+	{Name: "bare-try", Src: "func f() {\n\tlet x = try\n}\n", Lines: []int{2, 3}},
+	{Name: "end-of-statement", Src: "func f() {\n\tlet x = 1 2\n}\n", Lines: []int{2}},
+	{Name: "unexpected-character", Src: "func f() {\n\tlet x = 1 # 2\n}\n", Lines: []int{2}},
+	{Name: "empty-type-parameters", Src: "func f[]() {}\n", Lines: []int{1}},
+	{Name: "wire-needs-before-provides", Src: "let App = wire needs Config provides Account {\n\tStore: M{},\n}\n", Lines: []int{1}},
 	{Name: "deep-nesting", Generate: func() string {
-		return "package p\n\nvar x = " + strings.Repeat("(", 200000) + "1" + strings.Repeat(")", 200000) + "\n"
-	}, Lines: []int{3}},
+		return "let x = " + strings.Repeat("(", 200000) + "1" + strings.Repeat(")", 200000) + "\n"
+	}, Lines: []int{1}},
 }

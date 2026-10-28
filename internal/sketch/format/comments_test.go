@@ -10,20 +10,20 @@ import (
 
 // nestedChains are small programs that nest every construct with
 // punctuation the tree does not record as a position (commas, `|`, the `]`
-// of an array type, the `[` and `]` of a map type, the `.` of a selector,
-// `chan`, slice colons) inside chains of selectors, calls, indexes and
-// literals.
+// of a slice type, the `[` and `]` of a map type, the `.` of a selector,
+// `..`, slice colons, interpolation delimiters) inside chains of selectors,
+// calls, indexes and literals.
 var nestedChains = []struct{ name, src string }{
-	{"selector call index chain", "package p\n\nfunc f() {\n\tx := a.b(c, d)[e].g(h...)[i:j].k[l:m:n]\n}\n"},
-	{"array, map and chan types", "package p\n\nvar xs [N][]map[string][2]chan<- <-chan int\n\nvar ys = [...]int{1, 2}\n"},
-	{"nested literals", "package p\n\nvar m = map[string][]T{\"a\": {{X: 1, Y: []int{2, 3}}, {X: 4}}, \"b\": nil}\n"},
-	{"func types and results", "package p\n\nfunc f(a, b int, g func(x, y int) (int, error[E | go.Error]) needs (A, B)) (r int, e error[E]) needs C, D {\n\treturn g(a, b)\n}\n"},
-	{"union and error rows", "package p\n\ntype U interface{ A | b.B | C[T, U] }\n\nfunc f() error[A | b.B] { return nil }\n"},
-	{"type params and instantiation", "package p\n\ntype Pair[K comparable, V any] struct {\n\tk, l K\n\tv    V\n}\n\nvar p = Pair[string, int]{k: \"a\", v: 1}\n"},
-	{"catch and type switch tuples", "package p\n\nfunc f() {\n\tr := try g(a, b) catch e {\n\tcase A, b.B:\n\t\tlog(e)\n\t}\n\tswitch x, y := r.(type), s.(type) {\n\tcase (A, _), (B, C):\n\tdefault:\n\t}\n}\n"},
-	{"statements", "package p\n\nfunc f() {\nL:\n\tfor i := 0; i < n; i++ {\n\t\tif a, b := g(); a {\n\t\t\tcontinue L\n\t\t} else if b {\n\t\t\tbreak\n\t\t}\n\t}\n\tfor k, v := range m {\n\t\tch <- k\n\t\tx += v\n\t}\n\tselect {\n\tcase v, ok := <-ch:\n\t\t_ = v\n\tcase (<-done):\n\t}\n\tdefer close(ch)\n\tgo f(x)\n}\n"},
-	{"wire and machine", "package p\n\nwire W provides A, B needs C {\n\tC, D = X{}\n\treplace e.E = Y{a, b}\n\tShared\n}\n\ntype M machine[S, E] {\n\tinitial Idle{}\n\tstep f\n}\n"},
-	{"imports and vars", "package p\n\nimport (\n\t\"a\"\n\tb \"c\"\n\t. \"d\"\n\tgo \"net/url\"\n)\n\nvar (\n\tx, y = 1, 2\n\tz    = f(x, y)\n)\n"},
+	{"selector call index chain", "func f() {\n\tlet x = a.b(c, d)[e].g(h)[i:j].k[l:m:n]\n}\n"},
+	{"slice and map types", "let xs [][]Map[string, []int]\n\nlet ys = []int{1, 2}\n"},
+	{"nested literals", "let m = Map[string, []T]{\"a\": {{X: 1, Y: []int{2, 3}}, {X: 4}}, \"b\": nil}\n"},
+	{"func types and results", "func f[E](a, b int, g func(x, y int) (int, string) fails E | go.Error needs (A, B)) int fails E needs C, D {\n\treturn g(a, b)\n}\n"},
+	{"union and error rows", "type U[C, T] = A | b.B | C[T, U]\n\nfunc f[A]() fails A | b.B { return nil }\n"},
+	{"type params and instantiation", "type Pair[K comparable, V] {\n\tk, l K,\n\tv    V,\n}\n\nlet p = Pair[string, int]{k: \"a\", v: 1}\n"},
+	{"catch and match tuples", "func f() {\n\tlet r = try g(a, b) catch {\n\tcase A as e, b.B:\n\t\tlog(e)\n\t}\n\tmatch (r, s) {\n\tcase (A, _), (B{X: x} as b, C):\n\tcase _:\n\t}\n}\n"},
+	{"statements", "func f() {\n\tfor i in 0..n {\n\t\tif g() {\n\t\t\tcontinue\n\t\t} else if b {\n\t\t\tbreak\n\t\t}\n\t}\n\tfor k, v in m {\n\t\tx += v\n\t}\n\tlet mut (q, r) = (1, \"\\(k) of \\(f(\"n\"))\")\n\tassert q == 1\n}\n"},
+	{"wire and machine", "let W = wire provides A, B needs C {\n\tC, D:        X{},\n\treplace e.E: Y{a, b},\n\tShared,\n}\n\ntype M machine[S, E] {\n\tinitial: Idle{},\n\tstep:    f,\n}\n"},
+	{"imports and declarations", "import a\nimport b c\nimport go net/url\n\nextern go example.com/x.F func F(a int64) (int64, bool)\n\ntest T(x int64) {\n\tassert x == x\n}\n\ntype Codec {\n\tEncode(v int64) []byte,\n\n\tlaw RoundTrip(v int64) { Encode(v) == Encode(v) },\n}\n"},
 }
 
 // TestCommentsAtEveryBoundary inserts each comment kind before every token

@@ -1,0 +1,11 @@
+// want S108
+type Fault {}
+type Box { Value string }
+func fail() fails Fault { return Fault{} }
+func word() string      { return "word" }
+func main() {
+	fail() catch {
+	case Fault:
+		Box{Value: word()}
+	}
+}

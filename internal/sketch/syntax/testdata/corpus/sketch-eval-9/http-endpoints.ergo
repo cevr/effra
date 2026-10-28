@@ -1,0 +1,176 @@
+import http
+import json
+import testing
+
+type UnknownMember { ID string }
+type OutOfStock { Item string }
+type Unpublishable { Cents int64 }
+type NothingToCancel {}
+
+// A member is resolved through Directory while decoding: the wire carries
+// only its identifier.
+type Member {
+	ID   string,
+	Name string,
+}
+
+type Directory {
+	Find(id string) Member fails UnknownMember,
+}
+
+func ParseMember(id string) Member fails UnknownMember needs Directory {
+	return Directory.Find(id)
+}
+
+func Wire(m Member) string { return m.ID }
+
+type Order {
+	Member   Member,
+	Item     string,
+	Quantity int64,
+}
+
+// A total is published through Ledger while encoding, which refuses large
+// totals: the success encoder itself can fail with a named failure.
+type Total { Cents int64 }
+
+type Ledger {
+	Publish(cents int64) int64 fails Unpublishable,
+}
+
+func ParseTotal(cents int64) Total { return Total{cents} }
+
+func Wire(t Total) int64 fails Unpublishable needs Ledger {
+	return Ledger.Publish(t.Cents)
+}
+
+type Receipt {
+	Item  string,
+	Total Total,
+}
+
+type Inventory {
+	Reserve(item string, quantity int64) int64 fails OutOfStock,
+}
+
+func place(order Order) Receipt fails OutOfStock needs Inventory {
+	let cents = try Inventory.Reserve(order.Item, order.Quantity)
+	return Receipt{order.Item, Total{cents}}
+}
+
+// A handler is an ordinary function from Request to Response. A catch with
+// no try must cover every error, so the checker rejects a handler that
+// leaves a decode, handler or encode failure without a status.
+func placeOrder(req http.Request) http.Response needs Directory, Inventory, Ledger {
+	return created(req) catch {
+	case http.UnsupportedMediaType:
+		http.Status(415)
+	case json.DecodeFailed:
+		http.Status(400)
+	case UnknownMember as e:
+		http.Fail(422, e)
+	case OutOfStock as e:
+		http.Fail(409, e)
+	case Unpublishable:
+		http.Status(502)
+	}
+}
+
+func created(req http.Request) http.Response fails http.UnsupportedMediaType | json.DecodeFailed | UnknownMember | OutOfStock | Unpublishable needs Directory, Inventory, Ledger {
+	let order = try http.ReadJSON[Order](req, 256)
+	return http.JSON(201, try place(order))
+}
+
+func cancelOrder(req http.Request) http.Response {
+	return http.Status(409) // empty body, as in Effra
+}
+
+func health(req http.Request) http.Response {
+	return http.Status(204)
+}
+
+// Go 1.22 ServeMux patterns. The checker parses each pattern.
+let api = http.Routes{
+	"POST /orders":   placeOrder,
+	"DELETE /orders": cancelOrder,
+	"GET /health":    health,
+}
+
+type Members {}
+
+func Find(_ Members, id string) Member fails UnknownMember {
+	if id == "m-1" {
+		return Member{id, "Ada"}
+	}
+	return UnknownMember{id}
+}
+
+type Stock {}
+
+func Reserve(_ Stock, item string, quantity int64) int64 fails OutOfStock {
+	if quantity > 4 {
+		return OutOfStock{item}
+	}
+	return quantity + 250
+}
+
+type Books {}
+
+func Publish(_ Books, cents int64) int64 fails Unpublishable {
+	if cents > 252 {
+		return Unpublishable{cents}
+	}
+	return cents
+}
+
+let Shop = wire {
+	Directory: Members{},
+	Inventory: Stock{},
+	Ledger:    Books{},
+}
+
+// A stored-data caller decodes with the same wire forms outside HTTP.
+func restoreOrder(stored string) Order fails json.DecodeFailed | UnknownMember needs Directory {
+	return json.Decode[Order](stored)
+}
+
+// Calling the route table directly needs no server. Every failure is
+// mapped, so the result has no error row.
+func order(contentType string, body string) int needs Directory, Inventory, Ledger {
+	return api.Serve(http.Request{Method: "POST", Path: "/orders", ContentType: contentType, Body: body}).Status
+}
+
+test OrderIsCreated {
+	with Shop {
+		assert order("application/json", `{"member":"m-1","item":"tea","quantity":"2"}`) == 201
+	}
+}
+
+test UnknownMemberIsNotMalformedInput {
+	with Shop {
+		assert order("application/json", `{"member":"m-9","item":"tea","quantity":"2"}`) == 422
+		assert order("application/json", `{"member":"m-1"}`) == 400
+	}
+}
+
+test HandlerFailureAnswersItsStatus {
+	with Shop {
+		assert order("application/json", `{"member":"m-1","item":"tea","quantity":"9"}`) == 409
+	}
+}
+
+test UnsupportedMediaType {
+	with Shop {
+		assert order("text/plain", "{}") == 415
+	}
+}
+
+test StoredOrderSharesTheWireForms {
+	let order = try with Shop { restoreOrder(`{"member":"m-1","item":"tea","quantity":"1"}`) }
+	assert order.Member.Name == "Ada"
+}
+
+func main() fails http.ListenFailed needs http.Server {
+	let limits = http.Limits{MaxBodyBytes: 256, ReadHeader: 1s, ReadBody: 1s, Idle: 1s, MaxActive: 8}
+	return with Shop { Server.Listen("127.0.0.1:0", limits, api) }
+}

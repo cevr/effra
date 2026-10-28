@@ -1,0 +1,3 @@
+// want S109
+type Store { Get(t_ string) string }
+func main() {}

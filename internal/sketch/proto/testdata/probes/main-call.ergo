@@ -1,0 +1,3 @@
+// want S109
+func helper() { main() }
+func main()   {}

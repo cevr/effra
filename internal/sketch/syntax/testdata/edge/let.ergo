@@ -1,0 +1,17 @@
+func DivMod(a, b int64) (int64, int64) {
+	(a / b, a % b)
+}
+
+func use(order Order) int64 {
+	let q, r = DivMod(7, 2)
+	let (n, d) = DivMod(9, 4)
+	let Order{Total: base} = order
+	let Some{v} = lookup()
+	let mut sum = base + q + r + n + d + v
+	sum = sum + 1
+	sum -= 2
+	sum
+}
+
+let Counts = Map[string, int64]{"a": 1, "b": 2}
+let Names = []string{"ada", "bob"}

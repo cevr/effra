@@ -1,0 +1,3 @@
+// want S108
+func Extra(_ LiveScheduler) {}
+func main()                 {}

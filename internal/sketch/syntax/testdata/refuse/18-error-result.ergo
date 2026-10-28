@@ -1,0 +1,4 @@
+// want: S001 2 fails
+func Find(id string) (Order, error) {
+	Order{ID: id}
+}

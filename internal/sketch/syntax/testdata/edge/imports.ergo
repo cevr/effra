@@ -1,0 +1,12 @@
+import go net/http
+import go strconv
+import json
+import ourjson example.com/json
+
+func get(url string) fails go.Error needs go.Foreign {
+	http.Get(url)
+}
+
+extern go net/http.Get func Fetch(url string) Response fails go.Error
+
+extern go example.com/json.Valid func Valid(b []byte) bool

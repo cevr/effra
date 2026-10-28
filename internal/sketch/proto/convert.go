@@ -28,6 +28,10 @@ func FromSyntax(f *syntax.File) (*File, []Diagnostic) {
 type converter struct {
 	src   *syntax.File
 	diags []Diagnostic
+	// methods are the functions the bridge reads as methods of their first
+	// parameter's type (#196, 196m: receivers are first parameters).
+	methods     map[*syntax.FuncDecl]bool
+	methodNames map[string]bool
 }
 
 func (c *converter) pos(p syntax.Pos) Pos {
@@ -44,7 +48,11 @@ func (c *converter) refuseAt(p syntax.Pos, what string) {
 }
 
 func (c *converter) file(f *syntax.File) *File {
-	out := &File{Package: f.Name.Name}
+	out := &File{Package: "main"}
+	if f.Name != nil {
+		out.Package = f.Name.Name
+	}
+	c.findMethods(f)
 	for _, d := range f.Decls {
 		switch d := d.(type) {
 		case *syntax.ImportDecl:
@@ -86,6 +94,52 @@ func (c *converter) file(f *syntax.File) *File {
 		}
 	}
 	return out
+}
+
+// findMethods picks the functions the prototype reads as methods: the
+// first parameter's type is a record declared in the file, and the name is
+// an operation of an operation type in the file or is never called by name
+// (`f(x)`), so every use is `x.f(…)` (#196, 196m). The prototype has
+// methods, not first-parameter dispatch.
+func (c *converter) findMethods(f *syntax.File) {
+	c.methods, c.methodNames = map[*syntax.FuncDecl]bool{}, map[string]bool{}
+	records, ops, called := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for _, d := range f.Decls {
+		if t, ok := d.(*syntax.TypeDecl); ok {
+			switch s := t.Spec.(type) {
+			case *syntax.StructType:
+				records[t.Name.Name] = true
+			case *syntax.InterfaceType:
+				for _, m := range s.Methods {
+					ops[m.Names[0].Name] = true
+				}
+			}
+		}
+	}
+	syntax.Inspect(f, func(n syntax.Node) bool {
+		if call, ok := n.(*syntax.CallExpr); ok {
+			if id, ok := call.Fun.(*syntax.Ident); ok {
+				called[id.Name] = true
+			}
+		}
+		return true
+	})
+	for _, d := range f.Decls {
+		fn, ok := d.(*syntax.FuncDecl)
+		if !ok || fn.Recv != nil || fn.Body == nil || len(fn.Type.Params.List) == 0 {
+			continue
+		}
+		first := fn.Type.Params.List[0]
+		id, ok := first.Type.(*syntax.Ident)
+		unnamed := len(first.Names) == 1 && first.Names[0].Name == "_"
+		if !ok || !records[id.Name] && !unnamed || len(first.Names) > 1 {
+			continue
+		}
+		if ops[fn.Name.Name] || !called[fn.Name.Name] {
+			c.methods[fn] = true
+			c.methodNames[fn.Name.Name] = true
+		}
+	}
 }
 
 // typeName converts a type that is a name or a qualified name.
@@ -248,6 +302,14 @@ func (c *converter) funcDecl(d *syntax.FuncDecl) *FuncDecl {
 		}
 	}
 	c.signature(&out.Sig, d.Type)
+	if c.methods[d] && len(out.Sig.Params) > 0 {
+		recv := out.Sig.Params[0]
+		if recv.Name == "_" {
+			recv.Name = ""
+		}
+		out.Recv = &recv
+		out.Sig.Params = out.Sig.Params[1:]
+	}
 	out.Body = c.block(d.Body)
 	return out
 }
@@ -327,6 +389,13 @@ func (c *converter) stmt(s syntax.Stmt) Stmt {
 	case *syntax.TypeSwitchStmt:
 		return c.typeSwitch(s)
 	case *syntax.DeclStmt:
+		// `let x = e` (and `let mut x = e`) is the prototype's `x := e`.
+		if sp := s.Decl.Specs[0]; len(s.Decl.Specs) == 1 && len(sp.Names) == 1 && sp.Type == nil && len(sp.Values) == 1 {
+			if x := c.expr(sp.Values[0]); x != nil {
+				return &DefineStmt{Pos: c.pos(sp.Names[0].Pos()), Name: sp.Names[0].Name, Value: x}
+			}
+			return nil
+		}
 		c.refuse(s, "a local var declaration")
 	case *syntax.ForStmt, *syntax.RangeStmt:
 		c.refuse(s, "a for loop")
@@ -384,11 +453,30 @@ func (c *converter) typeSwitch(s *syntax.TypeSwitchStmt) Stmt {
 	case len(s.Subjects) != 1:
 		c.refuseAt(s.Switch, "a multi-subject type switch")
 		return nil
-	case len(s.Binds) != 1:
+	}
+	// The decided match binds the narrowed value with `case T as p` (#196,
+	// ninth round); the prototype's type switch has one binding shared by
+	// every case, so every `as` must name the same binding.
+	bind := ""
+	if len(s.Binds) == 1 {
+		bind = s.Binds[0].Name
+	}
+	for _, cl := range s.Clauses {
+		for _, t := range cl.List {
+			if as, ok := t.(*syntax.AsPattern); ok {
+				if bind != "" && bind != as.Name.Name {
+					c.refuse(as, "a second binding name in one match")
+					return nil
+				}
+				bind = as.Name.Name
+			}
+		}
+	}
+	if bind == "" {
 		c.refuseAt(s.Switch, "a type switch without a binding")
 		return nil
 	}
-	out := &TypeSwitchStmt{Pos: c.pos(s.Switch), Bind: s.Binds[0].Name, Subject: c.expr(s.Subjects[0].X)}
+	out := &TypeSwitchStmt{Pos: c.pos(s.Switch), Bind: bind, Subject: c.expr(s.Subjects[0].X)}
 	for _, cl := range s.Clauses {
 		if cl.List == nil {
 			c.refuseAt(cl.Case, "a default clause")
@@ -396,6 +484,9 @@ func (c *converter) typeSwitch(s *syntax.TypeSwitchStmt) Stmt {
 		}
 		var types []QName
 		for _, t := range cl.List {
+			if as, ok := t.(*syntax.AsPattern); ok {
+				t = as.X
+			}
 			q, ok := c.qname(t)
 			if !ok || q.Pkg == "" && q.Name == "_" {
 				c.refuse(t, "this case")
@@ -463,6 +554,16 @@ func (c *converter) expr(x syntax.Expr) Expr {
 	case *syntax.CatchExpr:
 		return c.catch(x)
 	case *syntax.WireLit:
+		// As for a named wire, the header's meaning is the checker's (#196).
+		if x.Provides != nil || x.Needs != nil {
+			if x.Provides != nil {
+				c.refuse(x.Provides, "a wire's provides clause (checked by #196)")
+			}
+			if x.Needs != nil {
+				c.refuse(x.Needs, "a wire's needs clause (checked by #196)")
+			}
+			return nil
+		}
 		return &WireLit{Pos: c.pos(x.Wire), Entries: c.wireEntries(x.Body)}
 	case *syntax.FuncLit:
 		c.refuse(x, "a function literal")
@@ -505,10 +606,25 @@ func (c *converter) call(x *syntax.CallExpr) Expr {
 		c.refuse(x.Trailing, "a trailing block on this call")
 		return nil
 	}
-	fun := c.expr(x.Fun)
-	out := &Call{Pos: c.pos(x.Lparen), Fun: fun}
+	args := x.Args
+	var fun Expr
+	if id, ok := x.Fun.(*syntax.Ident); ok && c.methodNames[id.Name] && len(args) > 0 {
+		// A call by name of a function read as a method: `f(x, a)` is
+		// `x.f(a)` (196m).
+		if recv := c.expr(args[0]); recv != nil {
+			fun = &Selector{Pos: c.pos(id.Pos()), X: recv, Sel: id.Name}
+		}
+		args = args[1:]
+	} else {
+		fun = c.expr(x.Fun)
+	}
+	lparen := x.Lparen
+	if !lparen.IsValid() {
+		lparen = x.Fun.End() // the with form has no parentheses
+	}
+	out := &Call{Pos: c.pos(lparen), Fun: fun}
 	ok := fun != nil
-	for _, a := range x.Args {
+	for _, a := range args {
 		v := c.expr(a)
 		ok = ok && v != nil
 		out.Args = append(out.Args, v)

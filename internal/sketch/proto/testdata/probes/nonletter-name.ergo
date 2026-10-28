@@ -1,0 +1,5 @@
+// want S001
+func main() needs Console {
+	let x⪪ = "ok"
+	Console.Println(x⪪)
+}

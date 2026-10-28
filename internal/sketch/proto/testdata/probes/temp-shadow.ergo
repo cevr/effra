@@ -1,0 +1,9 @@
+// out: outer inner
+type Fault {}
+func unused() fails Fault { return Fault{} }
+func val() string         { return "inner" }
+func main() needs Console {
+	let v_1 = "outer"
+	let x = val()
+	Console.Println(v_1, x)
+}

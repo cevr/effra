@@ -1,0 +1,39 @@
+import sync
+import testing
+
+type Recorded {
+	Sizes() []int,
+}
+
+type Constant { Value float64 }
+
+func Read(c Constant) float64 fails SourceDown {
+	return c.Value
+}
+
+// sync.Ref is a shareable mutable cell; each wire build gets a fresh one.
+type Recorder { sizes sync.Ref[[]int] }
+
+func Flush(r Recorder, batch []Reading) fails FlushFailed {
+	r.sizes.Update(func(s *[]int) { *s = *s.Append(len(batch)) })
+}
+
+func Sizes(r Recorder) []int {
+	return r.sizes.Load()
+}
+
+// VirtualClock provides Clock and Scheduler. Virtual time jumps to the next
+// timer when every task waits, as Go's testing/synctest does.
+let TestLive = wire {
+	Clock, Scheduler: testing.VirtualClock{},
+	Source:           Constant{Value: 1},
+	Sink, Recorded:   Recorder{},
+	Console:          testing.Discard{},
+}
+
+test RunBatches {
+	with TestLive {
+		try Run(10500ms)
+		assert Recorded.Sizes() == []int{5, 5}
+	}
+}

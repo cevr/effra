@@ -1,0 +1,4 @@
+// want S108
+type Item {}
+func Item() {}
+func main() {}

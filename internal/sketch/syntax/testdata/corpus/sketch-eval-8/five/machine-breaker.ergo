@@ -1,0 +1,96 @@
+type ProbeUnavailable {}
+
+type Probe {
+	Healthy(endpoint string) bool fails ProbeUnavailable,
+}
+
+type HealthyProbe {}
+
+func Healthy(_ HealthyProbe, endpoint string) bool fails ProbeUnavailable {
+	return endpoint == "primary"
+}
+
+type Breaker = Closed | Open | HalfOpen
+
+type Closed { Failures int64 }
+type Open { Endpoint string }
+type HalfOpen { Endpoint string }
+
+type Signal = Failure | Success | Retry | Retire
+
+type Failure { Endpoint string }
+type Success {}
+type Retry {}
+type Retire {}
+
+func tripped(endpoint string) Breaker {
+	return Open{endpoint}
+}
+
+func breakerStep(state Breaker, signal Signal) Decision[Breaker, string] fails ProbeUnavailable needs Probe {
+	match (state, signal) {
+	case (Closed, Failure):
+		if state.Failures >= 2 {
+			return Enter{tripped(signal.Endpoint)}
+		}
+		return Stay{Closed{state.Failures + 1}}
+	case (Closed, Success):
+		return Stay{Closed{0}}
+	case (Closed, Retry), (HalfOpen, Retry):
+		return Ignore{}
+	case (Open, Retry):
+		if try Probe.Healthy(state.Endpoint) {
+			return Enter{HalfOpen{state.Endpoint}}
+		}
+		return Stay{state}
+	case (Open, Failure), (HalfOpen, Failure):
+		return Enter{tripped(signal.Endpoint)}
+	case (HalfOpen, Success):
+		return Enter{Closed{0}}
+	case (Open, Success):
+		return Reject{}
+	case (_, Retire):
+		return Done{"retired"}
+	}
+}
+
+type CircuitBreaker machine[Breaker, Signal] {
+	initial: Closed{0},
+	step:    breakerStep,
+}
+
+func describe(d Decision[Breaker, string]) string {
+	match d {
+	case Enter as d:
+		return "enter " + label(d.Next)
+	case Stay as d:
+		return "stay " + label(d.Next)
+	case Ignore:
+		return "ignore"
+	case Reject:
+		return "reject"
+	case Done as d:
+		return "done " + d.Output
+	}
+}
+
+func label(state Breaker) string {
+	match state {
+	case Closed:
+		return "closed"
+	case Open as s:
+		return "open " + s.Endpoint
+	case HalfOpen as s:
+		return "half-open " + s.Endpoint
+	}
+}
+
+func main() string fails ProbeUnavailable {
+	return with wire { Probe: HealthyProbe{} } {
+		let open = tripped("primary")
+		let retried = try breakerStep(open, Retry{})
+		let failed = try breakerStep(Closed{2}, Failure{"primary"})
+		let retired = try breakerStep(open, Retire{})
+		describe(retried) + "; " + describe(failed) + "; " + describe(retired)
+	}
+}

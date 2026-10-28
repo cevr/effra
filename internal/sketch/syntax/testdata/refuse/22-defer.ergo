@@ -1,0 +1,4 @@
+// want: S001 3 scope.OnExit
+func f() {
+	defer cleanup()
+}

@@ -1,0 +1,3 @@
+// want S109
+func init() {}
+func main() {}

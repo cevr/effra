@@ -1,0 +1,4 @@
+// want: S001 3 -
+func DivMod(a, b int64) (int64, int64) {
+	return a / b, a % b
+}

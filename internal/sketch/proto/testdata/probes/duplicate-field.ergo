@@ -1,0 +1,3 @@
+// want S108
+type Box { Value string }
+func main() needs Console { Console.Println(Box{Value: "a", Value: "b"}) }

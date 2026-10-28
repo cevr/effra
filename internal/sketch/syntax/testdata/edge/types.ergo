@@ -1,0 +1,18 @@
+type Celsius float64
+
+type Handler { Run func(Request) Response fails Fatal }
+
+type Counts { Totals Map[string, int64], Names []string }
+
+type Ordered[T ordered] { Items []T }
+
+type Pool[T Resource] { Items []T, Size int }
+
+type Span (int64, int64)
+
+type Empty {}
+
+type Store {
+	Find(id string) Order fails NotFound | Unavailable needs Clock,
+	Put(id string, o Order),
+}

@@ -2,16 +2,49 @@ package syntax
 
 // ---------------------------------------------------------------- expressions
 
-// parseExpr parses an expression: a binary expression with an optional
-// catch (grammar.md, Expressions: Expression = [ "try" ] CatchExpr).
+// parseExpr parses `[ try ] CatchExpr` (#196 sketch: Expression). try
+// stands only here, at the start of an expression, and covers the whole
+// expression to its right, a catch included.
 func (p *parser) parseExpr() Expr {
 	p.enter()
 	defer p.leave()
-	x := p.parseBinary(1)
+	if p.tok.tok == TRY {
+		pos := p.tok.pos
+		p.next()
+		switch p.tok.tok {
+		case SEMICOLON, RBRACE, RPAREN, RBRACK, COMMA, COLON, EOF, CATCH:
+			p.errorAt(pos, 3, "try needs an operand")
+		}
+		return &TryExpr{Try: pos, X: p.parseCatchExpr()}
+	}
+	return p.parseCatchExpr()
+}
+
+// parseCatchExpr parses `Range [ catch { cases } ]`.
+func (p *parser) parseCatchExpr() Expr {
+	x := p.parseRange()
 	if p.tok.tok == CATCH {
-		x = p.parseCatch(x)
+		return p.parseCatch(x)
 	}
 	return x
+}
+
+// parseRange parses `Binary [ .. Binary ]`: `..` binds looser than `||`
+// and does not chain (Rust's rule; #196, D1.4).
+func (p *parser) parseRange() Expr {
+	x := p.parseBinary(1)
+	if p.tok.tok != DOTDOT {
+		return x
+	}
+	pos := p.tok.pos
+	p.enter()
+	defer p.leave()
+	p.next()
+	y := p.parseBinary(1)
+	if p.tok.tok == DOTDOT {
+		p.errorf("a range does not chain: write the bounds of one range")
+	}
+	return &BinaryExpr{X: x, OpPos: pos, Op: DOTDOT, Y: y}
 }
 
 // parseBinary parses a binary expression of precedence prec or tighter. Each
@@ -28,7 +61,7 @@ func (p *parser) parseBinary(prec int) Expr {
 	for {
 		op := p.tok.tok
 		opPrec := op.Precedence()
-		if opPrec < prec {
+		if opPrec < prec || opPrec == 0 {
 			return x
 		}
 		if o+h+1 > MaxNesting {
@@ -56,18 +89,6 @@ func (p *parser) parseUnary() Expr {
 		x := p.parseUnary()
 		p.leave()
 		return &UnaryExpr{OpPos: pos, Op: op, X: x}
-	case ARROW:
-		pos := p.tok.pos
-		if p.peek(1).tok == CHAN {
-			p.next()
-			p.next()
-			return &ChanType{Begin: pos, Arrow: pos, Dir: ChanRecv, Value: p.parseType(false)}
-		}
-		p.enter()
-		p.next()
-		x := p.parseUnary()
-		p.leave()
-		return &UnaryExpr{OpPos: pos, Op: ARROW, X: x}
 	case MUL:
 		pos := p.tok.pos
 		p.enter()
@@ -76,53 +97,30 @@ func (p *parser) parseUnary() Expr {
 		p.leave()
 		return &StarExpr{Star: pos, X: x}
 	case TRY:
-		// try extends over the rest of the binary expression to its right,
-		// so it binds looser than every binary operator in operand position
-		// too (grammar.md D8).
-		pos := p.tok.pos
-		p.enter()
-		p.next()
-		switch p.tok.tok {
-		case SEMICOLON, RBRACE, RPAREN, RBRACK, COMMA, COLON, EOF, CATCH:
-			p.errorAt(pos, 3, "try needs an operand")
-		}
-		x := p.parseBinary(1)
-		if p.tok.tok == CATCH {
-			x = p.parseCatch(x)
-		}
-		p.leave()
-		return &TryExpr{Try: pos, X: x}
+		p.errorf("unexpected \"try\": try stands at the start of an expression")
 	}
 	return p.parsePrimaryExpr()
 }
 
+// parseCatch parses `catch { case P, Q: … }`.
 func (p *parser) parseCatch(x Expr) *CatchExpr {
 	c := &CatchExpr{X: x, Catch: p.want(CATCH)}
-	if p.tok.tok == IDENT {
-		c.Bind = p.parseIdent()
-	}
 	if p.tok.tok != LBRACE {
-		p.errorf("expected \"{\" or a name after catch, found %s", p.found())
+		p.errorf("expected \"{\" after catch, found %s", p.found())
 	}
 	c.Lbrace = p.tok.pos
 	p.next()
-	saved, savedGuard := p.exprLev, p.guardOK
-	p.exprLev, p.guardOK = 0, false
+	saved := p.exprLev
+	p.exprLev = 0
 	for p.tok.tok == CASE {
 		arm := &CatchArm{Case: p.tok.pos}
 		p.next()
-		arm.Types = append(arm.Types, p.parseTypeName("a catch arm"))
-		for p.got(COMMA) {
-			arm.Types = append(arm.Types, p.parseTypeName("a catch arm"))
-		}
+		arm.Types = p.parseCaseList()
 		arm.Colon = p.want(COLON)
 		arm.Body = p.parseStmtList()
 		c.Arms = append(c.Arms, arm)
 	}
-	p.exprLev, p.guardOK = saved, savedGuard
-	if p.tok.tok == DEFAULT {
-		p.errorf("a catch arm names the error types it handles; default is not allowed")
-	}
+	p.exprLev = saved
 	if p.tok.tok != RBRACE {
 		p.errorf("expected \"case\" or \"}\", found %s", p.found())
 	}
@@ -149,8 +147,7 @@ func (p *parser) parsePrimaryExpr() Expr {
 		}
 		if p.tok.tok == LBRACE && !p.isLiteralType(x) {
 			// The brace opens a body (a control clause header, a block
-			// after a statement): it is a sibling, never a link, and the
-			// statement parser charges it as a block.
+			// after a statement): it is a sibling, never a link.
 			return x
 		}
 		switch p.tok.tok {
@@ -168,18 +165,10 @@ func (p *parser) parsePrimaryExpr() Expr {
 			case IDENT:
 				x = &SelectorExpr{X: x, Sel: p.parseIdent()}
 			case LPAREN:
-				lparen := p.tok.pos
-				p.next()
-				if p.tok.tok != TYPE {
-					p.errorAt(lparen, 1, "type assertions are not part of the language; use a type switch")
+				if p.peek(1).tok == TYPE {
+					p.habit(p.tok.pos, 1, habitTypeSwitch)
 				}
-				if !p.guardOK {
-					p.errorAt(lparen, 1, "x.(type) is allowed only as the subject of a type switch")
-				}
-				p.next()
-				g := &TypeGuard{X: x, Lparen: lparen, Rparen: p.want(RPAREN)}
-				p.guards = append(p.guards, g)
-				x = g
+				p.habit(p.tok.pos, 1, habitTypeAssert)
 			default:
 				p.errorf("expected a name after \".\", found %s", p.found())
 			}
@@ -188,7 +177,7 @@ func (p *parser) parsePrimaryExpr() Expr {
 		case LPAREN:
 			x = p.parseCall(x)
 		case LBRACE:
-			x = p.parseCompositeLit(x)
+			x = p.parseCompositeLit(mapType(x))
 		default:
 			return x
 		}
@@ -207,7 +196,7 @@ func (p *parser) isLiteralType(x Expr) bool {
 			}
 		}
 		return p.exprLev >= 0
-	case *ArrayType, *StructType, *MapType:
+	case *ArrayType, *MapType:
 		return true
 	}
 	return false
@@ -217,8 +206,16 @@ func (p *parser) parseOperand() Expr {
 	switch p.tok.tok {
 	case IDENT:
 		return p.parseIdent()
-	case INT, DURATION, STRING, RUNE:
+	case GO:
+		if p.peek(1).tok == PERIOD {
+			id := &Ident{NamePos: p.tok.pos, Name: "go"}
+			p.next()
+			return id
+		}
+	case INT, FLOAT, DURATION, STRING, RUNE:
 		return p.basicLit()
+	case STRING_HEAD:
+		return p.parseInterpolated()
 	case LPAREN:
 		p.enter()
 		defer p.leave()
@@ -226,66 +223,63 @@ func (p *parser) parseOperand() Expr {
 		p.next()
 		p.exprLev++
 		x := p.parseExpr()
-		p.exprLev--
-		return &ParenExpr{Lparen: lparen, X: x, Rparen: p.want(RPAREN)}
-	case FUNC:
-		pos := p.tok.pos
-		p.next()
-		if p.tok.tok != LPAREN {
-			p.errorf("expected \"(\", found %s", p.found())
+		if p.tok.tok != COMMA {
+			p.exprLev--
+			return &ParenExpr{Lparen: lparen, X: x, Rparen: p.want(RPAREN)}
 		}
-		t := p.parseSignature(pos, false)
+		t := &TupleExpr{Lparen: lparen, Elts: []Expr{x}}
+		for p.got(COMMA) && p.tok.tok != RPAREN {
+			t.Elts = append(t.Elts, p.parseExpr())
+		}
+		p.exprLev--
+		t.Rparen = p.want(RPAREN)
+		return t
+	case FUNC:
+		t := p.parseFuncType(ctxList)
 		if p.tok.tok == LBRACE {
+			p.funcLitParams(t.Params)
 			return &FuncLit{Type: t, Body: p.parseBlock()}
 		}
 		return t
-	case LBRACK, MAP, CHAN, STRUCT, INTERFACE:
-		if p.tok.tok == LBRACK && p.peek(1).tok == ELLIPSIS {
-			// `[...]T{…}`: the length is the number of elements. It is
-			// the type of a composite literal only, never a type of its
-			// own (go/types rejects it elsewhere; here it is S001).
-			lbrack := p.tok.pos
-			p.next()
-			ellipsis := p.tok.pos
-			p.next()
-			p.want(RBRACK)
-			t := &ArrayType{Lbrack: lbrack, Len: &Ellipsis{Ellipsis: ellipsis}, Elt: p.parseType(false)}
-			if p.tok.tok != LBRACE {
-				p.errorAt(ellipsis, 3, "[...] is the length of an array composite literal only; expected \"{\" after the type, found %s", p.found())
-			}
-			return t
-		}
-		return p.parseType(false)
+	case LBRACK, ESCAPING:
+		return p.parseType(ctxList)
+	case IF:
+		return p.parseIf()
+	case MATCH:
+		return p.parseMatch().(Expr)
+	case WITH:
+		return p.parseWith()
 	case WIRE:
-		pos := p.tok.pos
-		p.next()
-		if p.tok.tok != LBRACE {
-			p.errorf("expected \"{\" after wire, found %s", p.found())
-		}
-		return &WireLit{Wire: pos, Body: p.parseWireBody()}
-	case GO:
-		if p.peek(1).tok == PERIOD {
-			id := &Ident{NamePos: p.tok.pos, Name: "go"}
-			p.next()
-			return id
-		}
-		g := &GoExpr{Go: p.tok.pos}
-		p.next()
-		if p.tok.tok == LBRACE {
-			g.Block = p.parseBlock()
-			return g
-		}
-		start := p.tok.pos
-		x := p.parsePrimaryExpr()
-		call, ok := x.(*CallExpr)
-		if !ok {
-			p.errorAt(start, int(x.End()-start), "go takes a call or a block")
-		}
-		g.Call = call
-		return g
+		return p.parseWireLit()
 	}
 	p.errorf("expected an expression, found %s", p.found())
 	return nil
+}
+
+func (p *parser) basicLit() *BasicLit {
+	b := &BasicLit{ValuePos: p.tok.pos, Kind: p.tok.tok, Value: p.tok.lit, ValueEnd: p.tok.end}
+	p.next()
+	return b
+}
+
+// parseInterpolated parses `"a \(x) b"` from its STRING_HEAD.
+func (p *parser) parseInterpolated() *InterpolatedString {
+	s := &InterpolatedString{Texts: []*BasicLit{p.basicLit()}}
+	saved := p.exprLev
+	p.exprLev = 1
+	for {
+		s.Exprs = append(s.Exprs, p.parseExpr())
+		switch p.tok.tok {
+		case STRING_MID:
+			s.Texts = append(s.Texts, p.basicLit())
+		case STRING_TAIL:
+			s.Texts = append(s.Texts, p.basicLit())
+			p.exprLev = saved
+			return s
+		default:
+			p.errorf("expected \")\" to close the interpolation, found %s", p.found())
+		}
+	}
 }
 
 func (p *parser) parseIndexOrSlice(x Expr) Expr {
@@ -298,7 +292,7 @@ func (p *parser) parseIndexOrSlice(x Expr) Expr {
 	}
 	var index [3]Expr
 	if p.tok.tok != COLON {
-		index[0] = p.parseExpr()
+		index[0] = p.parseIndexValue()
 	}
 	if p.tok.tok == COLON {
 		s := &SliceExpr{X: x, Lbrack: lbrack, Low: index[0]}
@@ -325,10 +319,24 @@ func (p *parser) parseIndexOrSlice(x Expr) Expr {
 		if p.tok.tok == RBRACK {
 			break
 		}
-		ix.Indices = append(ix.Indices, p.parseExpr())
+		ix.Indices = append(ix.Indices, p.parseIndexValue())
 	}
 	ix.Rbrack = p.want(RBRACK)
 	return ix
+}
+
+// parseIndexValue parses an index or a type argument: a type that cannot
+// start an expression (`*T`, `func(T) U`) is read as a type.
+func (p *parser) parseIndexValue() Expr {
+	if p.tok.tok == MUL && p.exprLev > 0 {
+		start := p.i
+		var t Expr
+		if p.attempt(func() { t = p.parseType(ctxList) }) && (p.tok.tok == COMMA || p.tok.tok == RBRACK) {
+			return t
+		}
+		p.backtrack(start)
+	}
+	return p.parseExpr()
 }
 
 func (p *parser) parseCall(fun Expr) *CallExpr {
@@ -337,14 +345,10 @@ func (p *parser) parseCall(fun Expr) *CallExpr {
 	for p.tok.tok != RPAREN {
 		c.Args = append(c.Args, p.parseExpr())
 		if p.tok.tok == ELLIPSIS {
-			c.Ellipsis = p.tok.pos
-			p.next()
+			p.errorf("a call has no spread argument: pass the slice")
 		}
 		if !p.got(COMMA) {
 			break
-		}
-		if c.Ellipsis.IsValid() && p.tok.tok != RPAREN {
-			p.errorAt(c.Ellipsis, 3, "only the final argument can be spread with ...")
 		}
 	}
 	p.exprLev--
@@ -354,7 +358,7 @@ func (p *parser) parseCall(fun Expr) *CallExpr {
 	c.Rparen = p.tok.pos
 	p.next()
 	// A trailing block opens on the call's line; in a control clause header
-	// the `{` opens the body instead (grammar.md, Expressions 3).
+	// the `{` opens the body instead.
 	if p.tok.tok == LBRACE && p.exprLev >= 0 {
 		c.Trailing = p.parseBlock()
 	}
@@ -365,8 +369,8 @@ func (p *parser) parseCompositeLit(typ Expr) *CompositeLit {
 	p.enter()
 	defer p.leave()
 	lit := &CompositeLit{Type: typ, Lbrace: p.want(LBRACE)}
-	saved, savedGuard := p.exprLev, p.guardOK
-	p.exprLev, p.guardOK = 1, false
+	saved := p.exprLev
+	p.exprLev = 1
 	keyed, positional := -1, -1
 	for p.tok.tok != RBRACE {
 		elt := p.parseElement()
@@ -383,7 +387,7 @@ func (p *parser) parseCompositeLit(typ Expr) *CompositeLit {
 			break
 		}
 	}
-	p.exprLev, p.guardOK = saved, savedGuard
+	p.exprLev = saved
 	if p.tok.tok != RBRACE {
 		p.errorf("expected \",\" or \"}\" in a composite literal, found %s", p.found())
 	}
@@ -407,4 +411,200 @@ func (p *parser) parseElementValue() Expr {
 		return p.parseCompositeLit(nil)
 	}
 	return p.parseExpr()
+}
+
+// ---------------------------------------------------------------- if, match, with
+
+// parseHeader parses the expression of an if, match or with header, where
+// a `{` opens the body (Go's composite-literal rule).
+func (p *parser) parseHeader() Expr {
+	saved := p.exprLev
+	p.exprLev = -1
+	x := p.parseExpr()
+	p.exprLev = saved
+	return x
+}
+
+// noInit reports an init statement in an if or match header (Go's
+// `if x := f(); c`): Ergo writes the let on the line before.
+func (p *parser) noInit() {
+	if p.tok.tok == DEFINE || p.tok.tok == SEMICOLON && p.tok.lit == ";" || p.tok.tok == ASSIGN {
+		p.habit(p.tok.pos, int(p.tok.end-p.tok.pos), habitIfInit)
+	}
+}
+
+// parseIf parses `if c { … } [else if … | else { … }]`.
+func (p *parser) parseIf() *IfStmt {
+	s := &IfStmt{If: p.want(IF), ElsePos: NoPos}
+	if p.tok.tok == LET || p.tok.tok == VAR {
+		p.habit(p.tok.pos, int(p.tok.end-p.tok.pos), habitIfInit)
+	}
+	s.Cond = p.parseHeader()
+	p.noInit()
+	if p.tok.tok != LBRACE {
+		p.errorf("expected \"{\" after the if condition, found %s", p.found())
+	}
+	s.Body = p.parseBlock()
+	if p.tok.tok == ELSE {
+		s.ElsePos = p.tok.pos
+		p.next()
+		switch p.tok.tok {
+		case IF:
+			// Each else if nests one level deeper in the tree.
+			p.enter()
+			s.Else = p.parseIf()
+			p.leave()
+		case LBRACE:
+			s.Else = p.parseBlock()
+		default:
+			p.errorf("expected \"if\" or \"{\" after else, found %s", p.found())
+		}
+	}
+	return s
+}
+
+// parseMatch parses `match e { case P: … }`. Every top-level pattern a
+// literal or `_`, on a subject that is not a tuple, gives a value switch
+// (SwitchStmt); any other match is a TypeSwitchStmt with one subject per
+// tuple element (#196, D3).
+func (p *parser) parseMatch() Stmt {
+	pos := p.want(MATCH)
+	subject := stripParens(p.parseHeader())
+	p.noInit()
+	if p.tok.tok != LBRACE {
+		p.errorf("expected \"{\" after the match subject, found %s", p.found())
+	}
+	lbrace := p.tok.pos
+	p.next()
+	saved := p.exprLev
+	p.exprLev = 0
+	var clauses []*CaseClause
+	for p.tok.tok == CASE {
+		c := &CaseClause{Case: p.tok.pos}
+		p.next()
+		c.List = p.parseCaseList()
+		if len(c.List) == 1 {
+			if id, ok := c.List[0].(*Ident); ok && id.Name == "_" {
+				c.List = nil
+			}
+		}
+		c.Colon = p.want(COLON)
+		c.Body = p.parseStmtList()
+		clauses = append(clauses, c)
+	}
+	p.exprLev = saved
+	if p.tok.tok != RBRACE {
+		p.errorf("expected \"case\" or \"}\", found %s", p.found())
+	}
+	rbrace := p.tok.pos
+	p.next()
+	tuple, isTuple := subject.(*TupleExpr)
+	if !isTuple && literalCases(clauses) {
+		return &SwitchStmt{Switch: pos, Tag: subject, Lbrace: lbrace, Clauses: clauses, Rbrace: rbrace}
+	}
+	s := &TypeSwitchStmt{Switch: pos, Define: NoPos, Lbrace: lbrace, Clauses: clauses, Rbrace: rbrace}
+	subjects := []Expr{subject}
+	if isTuple {
+		subjects = tuple.Elts
+	}
+	for _, x := range subjects {
+		s.Subjects = append(s.Subjects, &TypeGuard{X: x, Lparen: NoPos, Rparen: NoPos})
+	}
+	return s
+}
+
+// literalCases reports whether every pattern of every clause is a literal,
+// optionally negated.
+func literalCases(clauses []*CaseClause) bool {
+	for _, c := range clauses {
+		for _, x := range c.List {
+			if u, ok := x.(*UnaryExpr); ok && u.Op == SUB {
+				x = u.X
+			}
+			if _, ok := x.(*BasicLit); !ok {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// parseCaseList parses `Pattern {, Pattern}` up to the colon. A case item
+// that goes on as an expression is S001 with a pointer to if.
+func (p *parser) parseCaseList() []Expr {
+	var list []Expr
+	for {
+		list = append(list, p.parsePattern())
+		switch {
+		case p.tok.tok == COMMA:
+			p.next()
+			continue
+		case p.tok.tok == COLON:
+			return list
+		case p.tok.tok.Precedence() > 0, p.tok.tok == LPAREN, p.tok.tok == PERIOD, p.tok.tok == LBRACK, p.tok.tok == DOTDOT:
+			p.errorf("a case lists patterns, not expressions; test a condition with `if`")
+		}
+		return list
+	}
+}
+
+// parseWith parses `with E, F { body }` into the call shape
+// `with(E, F) { body }` that the checker reads (#196, D3).
+func (p *parser) parseWith() *CallExpr {
+	pos := p.want(WITH)
+	c := &CallExpr{Fun: &Ident{NamePos: pos, Name: "with"}, Lparen: NoPos, Ellipsis: NoPos, Rparen: NoPos}
+	c.Args = append(c.Args, p.parseHeader())
+	for p.got(COMMA) {
+		c.Args = append(c.Args, p.parseHeader())
+	}
+	if len(c.Args) == 1 {
+		c.Args[0] = stripParens(c.Args[0])
+	}
+	if p.tok.tok != LBRACE {
+		p.errorf("expected \"{\" after the wires of with, found %s", p.found())
+	}
+	c.Trailing = p.parseBlock()
+	return c
+}
+
+// stripParens removes the parentheses around a header expression that
+// reads the same without them (`with (W)`, `match (x)`; #196, D4), so the
+// formatter's spelling has the same tree as the source.
+func stripParens(x Expr) Expr {
+	for {
+		par, ok := x.(*ParenExpr)
+		if !ok || !headerSafe(par.X) {
+			return x
+		}
+		x = par.X
+	}
+}
+
+// headerSafe reports whether x reads the same in a header without
+// parentheses: no composite literal, function literal, trailing block or
+// braced expression outside parentheses or brackets.
+func headerSafe(x Expr) bool {
+	switch x := x.(type) {
+	case *Ident, *BasicLit, *InterpolatedString, *ParenExpr, *TupleExpr, *WireLit:
+		// A wire value starts with its keyword, so its braces are never
+		// read as the body (D1.8).
+		return true
+	case *SelectorExpr:
+		return headerSafe(x.X)
+	case *IndexExpr:
+		return headerSafe(x.X)
+	case *SliceExpr:
+		return headerSafe(x.X)
+	case *CallExpr:
+		return x.Trailing == nil && x.Lparen.IsValid() && headerSafe(x.Fun)
+	case *StarExpr:
+		return headerSafe(x.X)
+	case *UnaryExpr:
+		return headerSafe(x.X)
+	case *BinaryExpr:
+		return headerSafe(x.X) && headerSafe(x.Y)
+	case *TryExpr:
+		return headerSafe(x.X)
+	}
+	return false
 }

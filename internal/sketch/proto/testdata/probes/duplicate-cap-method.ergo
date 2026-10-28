@@ -1,0 +1,6 @@
+// want S108
+type Store {
+	Get() string,
+	Get() string,
+}
+func main() {}

@@ -1,0 +1,4 @@
+// want: S001 2 []T
+func f(xs [3]int64) {
+	use(xs)
+}

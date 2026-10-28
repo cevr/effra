@@ -1,0 +1,26 @@
+type Payment =
+	| Pending{}
+	| Authorized{AuthID string}
+	| Declined{Reason Reason}
+
+type Reason =
+	| Fraud{Rule string}
+	| CardExpired{}
+
+func describe(pay Payment) string {
+	match pay {
+	case Pending:
+		"waiting"
+	case Authorized{AuthID: id}:
+		"ok \(id)"
+	case Declined{Reason: Fraud{Rule: rule}}:
+		"fraud: \(rule)"
+	case Declined:
+		"declined"
+	}
+}
+
+func main() needs Console {
+	Console.Println(describe(Authorized{AuthID: "auth-7"}))
+	Console.Println(describe(Declined{Reason: Fraud{Rule: "velocity"}}))
+}

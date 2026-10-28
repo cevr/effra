@@ -1,0 +1,5 @@
+// want: S001 4 += 1
+func f() {
+	let mut i = 0
+	i++
+}

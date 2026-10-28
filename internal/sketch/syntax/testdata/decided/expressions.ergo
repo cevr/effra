@@ -1,0 +1,25 @@
+func fee(gold bool, total int64) int64 {
+	let rate int64 = if gold { 0 } else { 3 }
+	total * rate / 100
+}
+
+func label(pay Payment) string {
+	match pay {
+	case Pending:
+		"waiting"
+	case Authorized{AuthID: id}:
+		"ok \(id)"
+	case Declined:
+		"declined"
+	}
+}
+
+func log(pay Payment) needs Console {
+	let text = match pay {
+	case Pending:
+		"waiting"
+	case _:
+		"settled"
+	}
+	Console.Println(text)
+}

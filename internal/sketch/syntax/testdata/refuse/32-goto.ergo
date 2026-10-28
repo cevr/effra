@@ -1,0 +1,4 @@
+// want: S001 3 structured
+func f() {
+	goto done
+}

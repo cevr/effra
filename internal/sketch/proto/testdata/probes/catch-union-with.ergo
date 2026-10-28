@@ -1,0 +1,13 @@
+// out: {}
+type Fault {}
+type A { Value string }
+type B {}
+type Sum = A | B
+func a() Sum fails Fault { return Fault{} }
+func main() needs Console {
+	let y = a() catch {
+	case Fault:
+		B{}
+	}
+	Console.Println(y)
+}

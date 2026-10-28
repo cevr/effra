@@ -1,0 +1,4 @@
+// want S001
+type Pair { A string, B string }
+
+func main() needs Console { Console.Println(Pair{B: "b", "a"}) }

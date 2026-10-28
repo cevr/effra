@@ -1,0 +1,6 @@
+// want S109
+type A {}
+type B {}
+type Choice = A | B
+func isChoice_(_ A) {}
+func main()         {}

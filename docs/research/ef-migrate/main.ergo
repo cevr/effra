@@ -1,16 +1,15 @@
 // Deferred effects, nominal services, and selective recovery.
 // Hand migration of examples/main.ef to the 2026 edition (docs/spec/ v0).
-package main
 
-type NotFound struct{}
+type NotFound {}
 
-type Users interface {
-	Get(id string) (string, error[NotFound])
+type Users {
+	Get(id string) string fails NotFound,
 }
 
-type MemoryUsers struct{}
+type MemoryUsers {}
 
-func (MemoryUsers) Get(id string) (string, error[NotFound]) {
+func Get(_ MemoryUsers, id string) string fails NotFound {
 	if id == "42" {
 		return "Ada"
 	}
@@ -21,19 +20,19 @@ func welcome(name string) string {
 	return "Hello, " + name
 }
 
-func greeting(id string) (string, error[NotFound]) needs Users {
-	user := try Users.Get(id)
+func greeting(id string) string fails NotFound needs Users {
+	let user = try Users.Get(id)
 	return welcome(user)
 }
 
 func main() needs Console {
-	found := with(wire{ Users = MemoryUsers{} }) { greeting("42") } catch {
+	let found = with wire { Users: MemoryUsers{} } { greeting("42") } catch {
 	case NotFound:
 		"Unknown user"
 	}
 	Console.Println(found)
 
-	absent := with(wire{ Users = MemoryUsers{} }) { greeting("missing") } catch {
+	let absent = with wire { Users: MemoryUsers{} } { greeting("missing") } catch {
 	case NotFound:
 		"Unknown user"
 	}

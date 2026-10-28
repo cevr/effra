@@ -1,0 +1,74 @@
+import timeout
+
+type OrderNotFound { ID string }
+type GatewayDown {}
+
+type Order {
+	ID    string,
+	Total int64,
+}
+
+type Payment = Pending | Authorized | Declined
+
+type Pending {}
+type Authorized { AuthID string }
+type Declined { Reason string }
+
+type Orders {
+	Find(id string) Order fails OrderNotFound,
+}
+
+type Gateway {
+	Authorize(order Order) Payment fails GatewayDown,
+}
+
+func checkout(id string) string fails OrderNotFound | GatewayDown | timeout.Expired needs Orders, Gateway, Scheduler {
+	let order = try Orders.Find(id)
+	let payment = try timeout.After(500ms) { Gateway.Authorize(order) }
+	match payment {
+	case Pending:
+		return "pending"
+	case Authorized as p:
+		return "paid " + p.AuthID
+	case Declined as p:
+		return "declined: " + p.Reason
+	}
+}
+
+type MemoryOrders {}
+
+func Find(_ MemoryOrders, id string) Order fails OrderNotFound {
+	if id == "42" {
+		return Order{ID: id, Total: 1999}
+	}
+	return OrderNotFound{ID: id}
+}
+
+type FakeGateway { AuthID string }
+
+func Authorize(g FakeGateway, order Order) Payment fails GatewayDown {
+	return Authorized{g.AuthID}
+}
+
+let Live = wire {
+	Orders:    MemoryOrders{},
+	Gateway:   FakeGateway{AuthID: "auth-7"},
+	Scheduler: LiveScheduler{},
+}
+
+func report(id string) needs Console {
+	let outcome = with Live { checkout(id) } catch { // Live lives for this call only
+	case OrderNotFound:
+		"no such order"
+	case GatewayDown:
+		"gateway down"
+	case timeout.Expired:
+		"gateway timed out"
+	}
+	Console.Println(outcome)
+}
+
+func main() needs Console {
+	report("42")
+	report("7")
+}

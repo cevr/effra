@@ -1,0 +1,2 @@
+// want: S108 2 own type
+type Card { Number string, Valid() bool }

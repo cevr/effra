@@ -1,0 +1,16 @@
+// out: recovered
+type Fault {}
+func fail() string fails Fault { return Fault{} }
+func handled() string fails Fault {
+	return fail() catch {
+	case Fault:
+		"recovered"
+	}
+}
+func main() needs Console {
+	let v = handled() catch {
+	case Fault:
+		"escaped"
+	}
+	Console.Println(v)
+}

@@ -1,0 +1,56 @@
+type Insufficient { ID string }
+
+type Account {
+	ID      string,
+	Balance int64,
+	History []int64,
+}
+
+type Transfer {
+	From, To int,
+	Amount   int64,
+}
+
+// A *T parameter is a borrow: never nil, never stored, never returned.
+func move(from, to *Account, amount int64) fails Insufficient {
+	if from.Balance < amount {
+		return Insufficient{from.ID}
+	}
+	from.Balance -= amount
+	to.Balance += amount
+	from.History = from.History.Append(-amount)
+	to.History = to.History.Append(amount)
+}
+
+// Two borrows into one slice need a proof that they do not overlap.
+// Without the From == To guard, the checker rejects the move call.
+func apply(accounts *[]Account, transfers []Transfer) int {
+	let mut rejected = 0
+	for t in transfers {
+		if t.From == t.To {
+			rejected += 1
+			continue
+		}
+		move(&accounts[t.From], &accounts[t.To], t.Amount) catch {
+		case Insufficient:
+			rejected += 1
+		}
+	}
+	return rejected
+}
+
+// ef test checks a Law like a fuzz target; ef prove tries to prove it.
+func LawMoveConservesMoney(from, to Account, amount int64) bool {
+	let total = from.Balance + to.Balance
+	move(&from, &to, amount) catch {
+	case Insufficient:
+	}
+	return from.Balance+to.Balance == total
+}
+
+func main() needs Console {
+	let mut accounts = []Account{{ID: "a", Balance: 100}, {ID: "b", Balance: 50}}
+	let before = accounts // a value copy: apply cannot change it
+	let rejected = apply(&accounts, []Transfer{{0, 1, 30}, {1, 0, 500}, {0, 0, 10}})
+	Console.Println(before[0].Balance, accounts[0].Balance, rejected) // 100 70 2
+}

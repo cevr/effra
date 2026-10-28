@@ -1,0 +1,10 @@
+// want S108
+type Fault {}
+func work() fails Fault    { return Fault{} }
+func forward() fails Fault { return try work() }
+func main() needs Console {
+	forward() catch {
+	case Fault:
+		Console.Println("handled")
+	}
+}

@@ -1,0 +1,15 @@
+// out: Console Println with timeout After duration LiveScheduler Scheduler
+type Box {
+	Console       string,
+	Println       string,
+	with2         string,
+	timeout       string,
+	After         string,
+	duration      string,
+	LiveScheduler string,
+	Scheduler     string,
+}
+func main() needs Console {
+	let value = Box{"Console", "Println", "with", "timeout", "After", "duration", "LiveScheduler", "Scheduler"}
+	Console.Println(value.Console, value.Println, value.with2, value.timeout, value.After, value.duration, value.LiveScheduler, value.Scheduler)
+}

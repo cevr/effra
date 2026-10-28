@@ -1,0 +1,7 @@
+import go strconv
+
+func parsePort(text string) int64 fails go.Error needs go.Foreign {
+	strconv.ParseInt(text, 10, 64)
+}
+
+extern go strings.ToUpper func Upper(s string) string

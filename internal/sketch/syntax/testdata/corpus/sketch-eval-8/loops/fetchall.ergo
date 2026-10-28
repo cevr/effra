@@ -1,0 +1,58 @@
+import http
+import os
+import retry
+import tasks
+import timeout
+
+type Unauthorized {}
+type Failed { Status int }
+
+type Result {
+	URL   string,
+	Bytes Option[int], // None when every attempt failed
+}
+
+// The deadline covers the headers and the body, as Go's context timeout does.
+func fetchOnce(url string) int fails Unauthorized | Failed | timeout.Expired needs http.Client, Scheduler {
+	return timeout.After(2s) { get(url) }
+}
+
+// Get returns after the headers. resp holds the connection and closes when get returns.
+func get(url string) int fails Unauthorized | Failed needs http.Client {
+	let resp = try Client.Get(url)
+	if resp.Status == 401 {
+		return Unauthorized{}
+	}
+	if resp.Status >= 500 {
+		return Failed{resp.Status}
+	}
+	let body = try resp.ReadAll()
+	return len(body)
+}
+
+// retry.On retries only the listed errors; Unauthorized passes straight through.
+func fetch(url string) Result fails Unauthorized needs http.Client, Scheduler {
+	let n = try retry.On[Failed | timeout.Expired](retry.Exponential(100ms).Times(3)) { fetchOnce(url) } catch {
+	case Failed, timeout.Expired:
+		return Result{URL: url}
+	}
+	return Result{url, Some{n}}
+}
+
+// The first Unauthorized exits fetchAll, and that exit stops the fetches still running.
+func fetchAll(urls []string) []Result fails Unauthorized needs http.Client, Scheduler {
+	return tasks.Map(urls, 8, fetch)
+}
+
+func main() fails Unauthorized needs http.Client, os.Args, Scheduler, Console {
+	let results = try fetchAll(Args.Rest())
+	let mut ok, total = (0, 0)
+	for r in results {
+		let n, found = r.Bytes.Get()
+		if found {
+			ok += 1
+			total += n
+		}
+	}
+	Console.Println(ok, "ok,", len(results)-ok, "failed,", total, "bytes")
+}

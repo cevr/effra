@@ -8,9 +8,10 @@ import (
 	"unicode/utf8"
 )
 
-// token is one lexical token. lit is the source text of identifiers and
-// literals (carriage returns removed from raw strings, as go/scanner does),
-// and ";" or "\n" for an explicit or inserted semicolon.
+// token is one lexical token. lit is the source text of identifiers,
+// literals, paths and string segments (carriage returns removed from raw
+// strings, as go/scanner does), and ";" or "\n" for an explicit or inserted
+// semicolon.
 type token struct {
 	tok Token
 	pos Pos
@@ -18,14 +19,29 @@ type token struct {
 	lit string
 }
 
-// durationUnits are the duration literal suffixes (grammar.md, Literals 2).
+// durationUnits are the duration literal suffixes (grammar.md, Literals).
 var durationUnits = map[string]bool{"ns": true, "us": true, "ms": true, "s": true, "m": true, "h": true}
+
+// interpolation is an open `\( … )` of an interpreted string: quote is the
+// string's opening quote, depth the parentheses open inside the
+// interpolation.
+type interpolation struct {
+	quote int
+	depth int
+}
 
 // scanner splits a source into tokens with Go's semicolon insertion. It
 // collects comments apart from the tokens, as go/scanner with ScanComments
 // does for go/parser. The first lexical error ends the token stream with an
 // ILLEGAL token at the error's position, so the parser reports whichever
 // error comes first in the source.
+//
+// Two contexts change how words lex. After `import` (and its optional `go`)
+// up to two words on the line are PATH tokens, the alias and the unquoted
+// import path; after `extern go` one word is the PATH of the target. A path
+// word starts with a letter, a digit or `_` and runs over letters, digits
+// and `_ . / - ~ +`. Inside an interpreted string, `\(` opens an
+// interpolation whose tokens lex normally up to its matching `)`.
 type scanner struct {
 	src      string
 	offset   int
@@ -34,6 +50,11 @@ type scanner struct {
 	comments []*Comment
 	semi     bool // a newline here inserts a semicolon
 	err      *Error
+
+	paths   int  // path words still to lex as PATH on this line
+	pathGo  bool // the next path word may be `go` (right after import)
+	externs bool // the previous token is extern: `go` then one path word
+	interp  []interpolation
 }
 
 func scan(src string) *scanner {
@@ -50,15 +71,32 @@ func scan(src string) *scanner {
 func (s *scanner) emit(tok Token, pos, end int, lit string) {
 	s.toks = append(s.toks, token{tok, Pos(pos), Pos(end), lit})
 	switch tok {
-	case IDENT, INT, DURATION, STRING, RUNE, RPAREN, RBRACK, RBRACE, INC, DEC, RETURN, BREAK, CONTINUE:
+	case IDENT, INT, FLOAT, DURATION, STRING, STRING_TAIL, RUNE, PATH, RPAREN, RBRACK, RBRACE, INC, DEC, RETURN, BREAK, CONTINUE:
 		s.semi = true
 	default:
 		s.semi = false
+	}
+	// The word contexts of import and extern.
+	switch {
+	case tok == IMPORT:
+		s.paths, s.pathGo, s.externs = 2, true, false
+	case tok == EXTERN:
+		s.paths, s.pathGo, s.externs = 0, false, true
+	case tok == GO && s.externs:
+		s.paths, s.pathGo, s.externs = 1, false, false
+	case tok == GO && s.pathGo:
+		s.pathGo = false
+	case tok == PATH:
+		s.paths--
+		s.pathGo = false
+	default:
+		s.paths, s.pathGo, s.externs = 0, false, false
 	}
 }
 
 // insertSemi emits the semicolon a newline at pos implies.
 func (s *scanner) insertSemi(pos int) {
+	s.paths, s.pathGo, s.externs = 0, false, false
 	if s.semi {
 		s.toks = append(s.toks, token{SEMICOLON, Pos(pos), Pos(pos), "\n"})
 		s.semi = false
@@ -74,6 +112,10 @@ func (s *scanner) run() {
 	src := s.src
 	for s.err == nil {
 		if s.offset >= len(src) {
+			if len(s.interp) > 0 {
+				s.fail(s.interp[len(s.interp)-1].quote, 1, "string literal not terminated")
+				return
+			}
 			s.insertSemi(len(src))
 			s.toks = append(s.toks, token{EOF, Pos(len(src)), Pos(len(src)), ""})
 			return
@@ -82,39 +124,26 @@ func (s *scanner) run() {
 		c := src[start]
 		switch {
 		case c == '\n':
+			if len(s.interp) > 0 {
+				s.fail(s.interp[len(s.interp)-1].quote, 1, "newline in string")
+				return
+			}
 			s.insertSemi(start)
 			s.offset++
 		case c == ' ' || c == '\t' || c == '\r':
 			s.offset++
-		case c == '/' && start+1 < len(src) && src[start+1] == '/':
-			end := strings.IndexByte(src[start:], '\n')
-			if end < 0 {
-				end = len(src)
-			} else {
-				end += start
+		case c == '/' && start+1 < len(src) && (src[start+1] == '/' || src[start+1] == '*'):
+			if len(s.interp) > 0 {
+				s.fail(start, 2, "a comment cannot stand inside an interpolation")
+				return
 			}
-			s.insertSemi(start)
-			text := strings.TrimRight(src[start:end], "\r")
-			s.comments = append(s.comments, &Comment{Slash: Pos(start), Text: text, EndPos: Pos(start + len(text))})
-			s.offset = end
-		case c == '/' && start+1 < len(src) && src[start+1] == '*':
-			end := strings.Index(src[start+2:], "*/")
-			if end < 0 {
-				s.fail(start, 2, "block comment not terminated")
-				continue
-			}
-			end += start + 4
-			raw := src[start:end]
-			if strings.IndexByte(raw, '\n') >= 0 {
-				// A block comment that spans lines acts as a newline (Go).
-				s.insertSemi(start)
-			}
-			s.comments = append(s.comments, &Comment{Slash: Pos(start), Text: strings.ReplaceAll(raw, "\r", ""), EndPos: Pos(end)})
-			s.offset = end
-		case '0' <= c && c <= '9':
+			s.comment(start)
+		case s.paths > 0 && pathStart(src, start):
+			s.pathWord(start)
+		case '0' <= c && c <= '9', c == '.' && start+1 < len(src) && '0' <= src[start+1] && src[start+1] <= '9':
 			s.number(start)
 		case c == '"':
-			s.interpreted(start)
+			s.interpreted(start, start, STRING)
 		case c == '`':
 			end := strings.IndexByte(src[start+1:], '`')
 			if end < 0 {
@@ -134,16 +163,91 @@ func (s *scanner) run() {
 	}
 }
 
+func (s *scanner) comment(start int) {
+	src := s.src
+	if src[start+1] == '/' {
+		end := strings.IndexByte(src[start:], '\n')
+		if end < 0 {
+			end = len(src)
+		} else {
+			end += start
+		}
+		s.insertSemi(start)
+		text := strings.TrimRight(src[start:end], "\r")
+		s.comments = append(s.comments, &Comment{Slash: Pos(start), Text: text, EndPos: Pos(start + len(text))})
+		s.offset = end
+		return
+	}
+	end := strings.Index(src[start+2:], "*/")
+	if end < 0 {
+		s.fail(start, 2, "block comment not terminated")
+		return
+	}
+	end += start + 4
+	raw := src[start:end]
+	if strings.IndexByte(raw, '\n') >= 0 {
+		// A block comment that spans lines acts as a newline (Go).
+		s.insertSemi(start)
+	}
+	s.comments = append(s.comments, &Comment{Slash: Pos(start), Text: strings.ReplaceAll(raw, "\r", ""), EndPos: Pos(end)})
+	s.offset = end
+}
+
+// pathStart reports whether a path word starts at i: a letter, a digit or
+// `_`.
+func pathStart(src string, i int) bool {
+	r, _ := utf8.DecodeRuneInString(src[i:])
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+// pathRune reports whether r continues a path word.
+func pathRune(r rune) bool {
+	switch r {
+	case '_', '.', '/', '-', '~', '+':
+		return true
+	}
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+// pathWord scans one word of an import or extern line. Right after import,
+// the word `go` is the keyword of a Go import.
+func (s *scanner) pathWord(start int) {
+	src := s.src
+	end := start
+	for end < len(src) {
+		if src[end] == '/' && end+1 < len(src) && (src[end+1] == '/' || src[end+1] == '*') {
+			break
+		}
+		r, size := utf8.DecodeRuneInString(src[end:])
+		if r == utf8.RuneError && size == 1 {
+			s.fail(end, 1, "invalid UTF-8 byte %#x", src[end])
+			return
+		}
+		if !pathRune(r) {
+			break
+		}
+		end += size
+	}
+	word := src[start:end]
+	s.offset = end
+	if word == "go" && s.pathGo {
+		s.emit(GO, start, end, word)
+		return
+	}
+	s.emit(PATH, start, end, word)
+}
+
 // identRune applies Go's identifier rule to one decoded rune (grammar.md,
 // Identifiers): a letter or '_' anywhere, a decimal digit after the first.
 func identRune(r rune, first bool) bool {
 	return r == '_' || unicode.IsLetter(r) || !first && unicode.IsDigit(r)
 }
 
-// identifier scans an identifier or keyword. Code points are decoded before
-// they are tested, so the bytes of a multi-byte symbol never pass as
-// letters; a code point that cannot start or continue a name is S001 where
-// the scanner meets it, including one directly after an identifier.
+// identifier scans an identifier, keyword or reserved word. Code points
+// are decoded before they are tested, so the bytes of a multi-byte symbol
+// never pass as letters; a code point that cannot start or continue a name
+// is S001 where the scanner meets it, including one directly after an
+// identifier.
 func (s *scanner) identifier(start int) {
 	src := s.src
 	r, size := utf8.DecodeRuneInString(src[start:])
@@ -172,24 +276,35 @@ func (s *scanner) identifier(start int) {
 	s.offset = end
 }
 
-// number scans a decimal integer or a duration. The numeric forms of #81
-// (hexadecimal, octal, binary, separators, floating point) stay errors.
+func digits(src string, i int) int {
+	for i < len(src) && '0' <= src[i] && src[i] <= '9' {
+		i++
+	}
+	return i
+}
+
+// number scans a decimal integer, a decimal float (Go's forms: 1.5, 1.,
+// .5, 1e9, 2.5e-3) or a duration. `1..n` is the integer 1 and the range
+// operator, never the float `1.`. The other numeric forms of #81
+// (hexadecimal, octal, binary, separators) and imaginary literals stay
+// errors.
 func (s *scanner) number(start int) {
 	src := s.src
-	end := start
-	for end < len(src) && '0' <= src[end] && src[end] <= '9' {
-		end++
+	end := digits(src, start)
+	float := false
+	if end < len(src) && src[end] == '.' && !(end+1 < len(src) && src[end+1] == '.') {
+		float = true
+		end = digits(src, end+1)
 	}
-	if end < len(src) && src[end] == '.' {
-		// Go reads `1.5`, and also `0.` before any other character, as a
-		// floating-point literal: `0.A` is the float `0.` and the name `A`,
-		// never a selector on 0 (write `0 .A`, as gofmt does).
-		length := end + 1 - start
-		if end+1 < len(src) && '0' <= src[end+1] && src[end+1] <= '9' {
-			length++
+	if end > start && end < len(src) && (src[end] == 'e' || src[end] == 'E') {
+		exp := end + 1
+		if exp < len(src) && (src[exp] == '+' || src[exp] == '-') {
+			exp++
 		}
-		s.fail(start, length, "floating-point literals are not part of v0 (#81)")
-		return
+		if after := digits(src, exp); after > exp {
+			float = true
+			end = after
+		}
 	}
 	suffixEnd := end
 	for suffixEnd < len(src) {
@@ -200,18 +315,22 @@ func (s *scanner) number(start int) {
 		suffixEnd += size
 	}
 	if suffixEnd == end {
-		s.emit(INT, start, end, src[start:end])
+		if float {
+			s.emit(FLOAT, start, end, src[start:end])
+		} else {
+			s.emit(INT, start, end, src[start:end])
+		}
 		s.offset = end
 		return
 	}
 	suffix := src[end:suffixEnd]
-	if durationUnits[suffix] {
+	switch {
+	case suffix == "i":
+		s.fail(start, suffixEnd-start, "imaginary literals are not part of the language")
+	case !float && durationUnits[suffix]:
 		s.emit(DURATION, start, suffixEnd, src[start:suffixEnd])
 		s.offset = suffixEnd
-		return
-	}
-	switch {
-	case src[start:end] == "0" && strings.ContainsAny(suffix[:1], "xXbBoO"):
+	case !float && src[start:end] == "0" && strings.ContainsAny(suffix[:1], "xXbBoO"):
 		s.fail(start, suffixEnd-start, "hexadecimal, octal and binary literals are not part of v0 (#81)")
 	case suffix[0] == '_':
 		s.fail(start, suffixEnd-start, "digit separators are not part of v0 (#81)")
@@ -220,26 +339,45 @@ func (s *scanner) number(start int) {
 	}
 }
 
-func (s *scanner) interpreted(start int) {
+// interpreted scans an interpreted string from segStart, where a segment
+// of kind kind starts: the opening quote of a string (STRING), or the `)`
+// that closes an interpolation (STRING_MID). quote is the string's opening
+// quote. A `\(` ends the segment as STRING_HEAD or STRING_MID and opens an
+// interpolation; the closing quote ends it as STRING or STRING_TAIL.
+func (s *scanner) interpreted(quote, segStart int, kind Token) {
 	src := s.src
-	for i := start + 1; i < len(src); i++ {
+	for i := segStart + 1; i < len(src); i++ {
 		switch src[i] {
 		case '\\':
+			if i+1 < len(src) && src[i+1] == '(' {
+				head := STRING_HEAD
+				if kind != STRING {
+					head = STRING_MID
+				}
+				s.emit(head, segStart, i+2, src[segStart:i+2])
+				s.interp = append(s.interp, interpolation{quote: quote})
+				s.offset = i + 2
+				return
+			}
 			i++
 			if i < len(src) && src[i] == '\n' {
-				s.fail(start, 1, "newline in string")
+				s.fail(quote, 1, "newline in string")
 				return
 			}
 		case '\n':
-			s.fail(start, 1, "newline in string")
+			s.fail(quote, 1, "newline in string")
 			return
 		case '"':
-			s.emit(STRING, start, i+1, src[start:i+1])
+			tail := STRING
+			if kind != STRING {
+				tail = STRING_TAIL
+			}
+			s.emit(tail, segStart, i+1, src[segStart:i+1])
 			s.offset = i + 1
 			return
 		}
 	}
-	s.fail(start, 1, "string literal not terminated")
+	s.fail(quote, 1, "string literal not terminated")
 }
 
 func (s *scanner) runeLit(start int) {
@@ -270,7 +408,9 @@ func (s *scanner) runeLit(start int) {
 	s.fail(start, 1, "rune literal not terminated")
 }
 
-// operators are Go's operators and punctuation, longest first.
+// operators are Go's operators and punctuation plus `..`, longest first.
+// The removed operators (:=, <-, ++, --, ...) still lex, so `x <-y` is
+// never `x < -y` and the parser can name the Ergo form.
 var operators = []struct {
 	text string
 	tok  Token
@@ -280,7 +420,7 @@ var operators = []struct {
 	{"*=", MUL_ASSIGN}, {"/=", QUO_ASSIGN}, {"%=", REM_ASSIGN}, {"&=", AND_ASSIGN},
 	{"|=", OR_ASSIGN}, {"^=", XOR_ASSIGN}, {"&&", LAND}, {"||", LOR}, {"<-", ARROW},
 	{"++", INC}, {"--", DEC}, {"==", EQL}, {"!=", NEQ}, {"<=", LEQ}, {">=", GEQ},
-	{":=", DEFINE},
+	{":=", DEFINE}, {"..", DOTDOT},
 }
 
 var singleOperators = map[byte]Token{
@@ -302,6 +442,21 @@ func (s *scanner) operator(start int) {
 	if !ok {
 		s.fail(start, 1, "unexpected character %q", rest[0])
 		return
+	}
+	if n := len(s.interp); n > 0 {
+		switch tok {
+		case LPAREN:
+			s.interp[n-1].depth++
+		case RPAREN:
+			if s.interp[n-1].depth == 0 {
+				// The `)` closes the interpolation: the string goes on.
+				frame := s.interp[n-1]
+				s.interp = s.interp[:n-1]
+				s.interpreted(frame.quote, start, STRING_MID)
+				return
+			}
+			s.interp[n-1].depth--
+		}
 	}
 	s.emit(tok, start, start+1, rest[:1])
 	s.offset = start + 1

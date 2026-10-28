@@ -1,0 +1,11 @@
+func Max[T ordered](a, b T) T {
+	if a > b { a } else { b }
+}
+
+func Transform[A, B, E, R](xs []A, f func(A) B fails E needs R) []B fails E needs R {
+	let mut out = slice.WithCapacity[B](len(xs))
+	for x in xs {
+		out = out.Append(try f(x))
+	}
+	out
+}

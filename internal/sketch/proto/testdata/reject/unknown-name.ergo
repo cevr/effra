@@ -1,0 +1,36 @@
+// want S104
+
+type OrderNotFound { ID string }
+type GatewayDown {}
+
+type Order {
+	ID    string,
+	Total int64,
+}
+
+type Orders {
+	Find(id string) Order fails OrderNotFound,
+}
+
+type Gateway {
+	Charge(order Order) string fails GatewayDown,
+}
+
+type MemoryOrders {}
+
+func Find(_ MemoryOrders, id string) Order fails OrderNotFound {
+	if id == "42" {
+		return Order{ID: id, Total: 1999}
+	}
+	return OrderNotFound{ID: id}
+}
+
+type FakeGateway {}
+
+func Charge(_ FakeGateway, order Order) string fails GatewayDown {
+	return "auth-7"
+}
+
+func main() needs Console {
+	Console.Println(missing)
+}

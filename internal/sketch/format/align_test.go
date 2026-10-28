@@ -53,15 +53,13 @@ var columnKinds = []struct {
 	name, open, close string
 	row               func(i, size int) string
 }{
-	{"struct names", "type T struct {\n", "}\n", func(i, size int) string { return cell("f", i, size) + " int\n" }},
-	{"struct types", "type T struct {\n", "}\n", func(i, size int) string { return fmt.Sprintf("f%d %s\n", i, cell("T", i, size)) }},
-	{"struct types before comments", "type T struct {\n", "}\n", func(i, size int) string { return fmt.Sprintf("f%d %s // c\n", i, cell("T", i, size)) }},
-	{"struct names before comments", "type T struct {\n", "}\n", func(i, size int) string { return cell("f", i, size) + " int // c\n" }},
-	{"var names", "var (\n", ")\n", func(i, size int) string { return cell("v", i, size) + " = 1\n" }},
-	{"var types", "var (\n", ")\n", func(i, size int) string { return fmt.Sprintf("v%d %s = 1\n", i, cell("T", i, size)) }},
-	{"var values before comments", "var (\n", ")\n", func(i, size int) string { return fmt.Sprintf("v%d = %s // c\n", i, cell("x", i, size)) }},
-	{"map keys", "var m = map[string]int{\n", "}\n", func(i, size int) string { return fmt.Sprintf("%q: 1,\n", cell("k", i, max(1, size-2))) }},
-	{"wire keys", "wire W {\n", "}\n", func(i, size int) string { return cell("K", i, size) + " = T{}\n" }},
+	{"record names", "type T {\n", "}\n", func(i, size int) string { return cell("f", i, size) + " int,\n" }},
+	{"record types", "type T {\n", "}\n", func(i, size int) string { return fmt.Sprintf("f%d %s,\n", i, cell("T", i, size)) }},
+	{"record types before comments", "type T {\n", "}\n", func(i, size int) string { return fmt.Sprintf("f%d %s, // c\n", i, cell("T", i, size)) }},
+	{"record names before comments", "type T {\n", "}\n", func(i, size int) string { return cell("f", i, size) + " int, // c\n" }},
+	{"let values before comments", "", "", func(i, size int) string { return fmt.Sprintf("let v%d = %s // c\n", i, cell("x", i, size)) }},
+	{"map keys", "let m = Map[string, int]{\n", "}\n", func(i, size int) string { return fmt.Sprintf("%q: 1,\n", cell("k", i, max(1, size-2))) }},
+	{"wire keys", "let W = wire {\n", "}\n", func(i, size int) string { return cell("K", i, size) + ": T{},\n" }},
 }
 
 // cell is a unique name of at least size characters.
@@ -79,7 +77,7 @@ func TestAlignmentIsLinear(t *testing.T) {
 		for _, first := range []int{256, 4096} {
 			for taper, widths := range tapers(first) {
 				var b strings.Builder
-				b.WriteString("package p\n\n" + kind.open)
+				b.WriteString("" + kind.open)
 				for i, w := range widths {
 					b.WriteString(kind.row(i, w))
 				}

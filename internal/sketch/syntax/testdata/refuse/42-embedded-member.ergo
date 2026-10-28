@@ -1,0 +1,2 @@
+// want: S001 2 -
+type Account { Balance int64, Base }

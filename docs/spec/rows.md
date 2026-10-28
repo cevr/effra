@@ -9,8 +9,8 @@ Every function has two rows besides its result: an error row, `error[...]`, and 
 Status: **implemented in prototype**.
 
 ```go
-func pay(id string) (string, error[OrderNotFound | GatewayDown]) needs Orders, Gateway {
-	order := try Orders.Find(id)
+func pay(id string) string fails OrderNotFound | GatewayDown needs Orders, Gateway {
+	let order = try Orders.Find(id)
 	return Gateway.Charge(order)
 }
 ```
@@ -39,14 +39,14 @@ func pay(id string) (string, error[OrderNotFound | GatewayDown]) needs Orders, G
 Status: **implemented in prototype** for single-expression arms; the binding form is **designed, not yet implemented**.
 
 ```go
-outcome := with(Live) { checkout(id) } catch {
+let outcome = with Live { checkout(id) } catch {
 case OrderNotFound:
 	"no such order"
 case GatewayDown, timeout.Expired:
 	"gateway unavailable"
 }
 
-order := try Orders.Find(id) catch {
+let order = try Orders.Find(id) catch {
 case OrderNotFound:
 	Order{ID: id}
 } // any other failure of Find escapes through try
@@ -91,10 +91,10 @@ Status: **designed, not yet implemented**.
 Status: **partly implemented in prototype**: provider literals and closed named wires. Constructors, embedding and `replace` are **designed, not yet implemented**.
 
 ```go
-wire Live {
-	Orders    = MemoryOrders{}
-	Gateway   = FakeGateway{AuthID: "auth-7"}
-	Scheduler = LiveScheduler{}
+let Live = wire {
+	Orders:    MemoryOrders{},
+	Gateway:   FakeGateway{AuthID: "auth-7"},
+	Scheduler: LiveScheduler{},
 }
 ```
 
@@ -115,8 +115,8 @@ wire Live {
 Status: **implemented in prototype** for one wire argument; context values are **designed, not yet implemented**.
 
 ```go
-value := with(Live) { checkout(id) }
-local := with(wire{ Orders = MemoryOrders{} }) { report(id) }
+let value = with Live { checkout(id) }
+let local = with wire { Orders: MemoryOrders{} } { report(id) }
 ```
 
 1. `with(W) { block }` takes one wire, named or inline, and a block (S108 otherwise). An unknown wire name is S104.
@@ -129,8 +129,8 @@ local := with(wire{ Orders = MemoryOrders{} }) { report(id) }
    Measured (fixture `wire-order`, output `outer inner`):
 
    ```go
-   with(wire{ Store = Holder{Value: "outer"} }) {
-   	with(wire{ Store = Holder{Value: "inner"}; Box = Holder{Value: read()} }) {
+   with wire { Store: Holder{Value: "outer"} } {
+   	with wire { Store: Holder{Value: "inner"}, Box: Holder{Value: read()} } {
    		Console.Println(Box.Get(), Store.Get()) // read() saw the outer Store
    	}
    }

@@ -1,0 +1,6 @@
+// want S109
+func main() needs Console {
+	let string = "shadow"
+	let value = "ok"
+	Console.Println(string, value)
+}

@@ -1,0 +1,13 @@
+// out: handled
+type Fault {}
+func f() fails Fault { return Fault{} }
+func g() fails Fault {
+	try f()
+	return
+}
+func main() needs Console {
+	g() catch {
+	case Fault:
+		Console.Println("handled")
+	}
+}

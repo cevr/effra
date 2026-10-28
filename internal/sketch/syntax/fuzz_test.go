@@ -8,7 +8,8 @@ import (
 	"ergo.local/prototype/internal/sketch/sketchtest"
 )
 
-// FuzzParse: Parse never panics, and every error is a located S001 whose
+// FuzzParse: Parse never panics, and every error is a located S001 (or the
+// parser's S108 for a type that mixes fields and operations) whose
 // line and column agree with its byte offset. The corpus, the spec fences
 // and the fixture tables are the seeds.
 func FuzzParse(f *testing.F) {
@@ -37,8 +38,8 @@ func FuzzParse(f *testing.F) {
 			return
 		}
 		var e *Error
-		if !errors.As(err, &e) || e.Code != CodeSyntax || file != nil {
-			t.Fatalf("error %v (%T) is not a lone S001", err, err)
+		if !errors.As(err, &e) || (e.Code != CodeSyntax && e.Code != CodeMixedMembers) || file != nil {
+			t.Fatalf("error %v (%T) is not a lone S001 or S108", err, err)
 		}
 		if e.Offset < 0 || e.Length < 0 || e.Offset+e.Length > len(src) {
 			t.Fatalf("span %d+%d outside the %d-byte source", e.Offset, e.Length, len(src))

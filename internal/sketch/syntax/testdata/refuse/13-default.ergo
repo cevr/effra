@@ -1,0 +1,9 @@
+// want: S001 6 case _
+func f(code int64) string {
+	match code {
+	case 404:
+		"missing"
+	default:
+		"other"
+	}
+}

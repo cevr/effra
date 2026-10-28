@@ -1,0 +1,4 @@
+// want S109
+type Item { is__Choice string }
+type Choice = Item
+func main() {}

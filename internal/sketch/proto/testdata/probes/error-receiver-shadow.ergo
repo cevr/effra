@@ -1,0 +1,4 @@
+// out:
+type e {}
+func f() fails e {}
+func main()      {}
