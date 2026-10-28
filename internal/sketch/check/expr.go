@@ -418,7 +418,7 @@ func (c *checker) ident(x *syntax.Ident) operand {
 		if c.fn != nil && c.fn.reach != nil {
 			c.fn.reach.funcs = append(c.fn.reach.funcs, o)
 		}
-		if c.groupRef(o, x, x != c.callee) {
+		if c.groupRef(o) {
 			return bad(x)
 		}
 		if len(sig.TParams) > 0 {

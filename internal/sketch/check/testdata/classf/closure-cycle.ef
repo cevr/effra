@@ -3,6 +3,6 @@ type Bang struct{}
 type Box[T any] interface{M(T)}
 func BoxOf[T any](x T) Box[T]
 func Choose[T any](x T,y T) error[Bang]
-func a(){return Choose(BoxOf(func(){return b()}),BoxOf(func(){return a()}))} // want S108 S108
-func b(){return Choose(BoxOf(func(){return a()}),BoxOf(func(){return b()}))}
+func a(){return Choose(BoxOf(func(){return b()}),BoxOf(func(){return a()}))} // want S108
+func b(){return Choose(BoxOf(func(){return a()}),BoxOf(func(){return b()}))} // want S108
 

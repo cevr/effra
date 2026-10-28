@@ -130,10 +130,11 @@ type bodyNode struct {
 //
 // The graph's edges are the references that row inference needs: to a
 // function whose rows are inferred and to a package var. They are the
-// resolved objects the resolving pass recorded (resolveBodies), never names
-// looked up in package scope: a local, a parameter or a receiver that
-// shadows a package function adds no edge (round 14 M1; go/types
-// initorder.go walks objects too). A method or a function that spells its
+// plain identifiers of each body resolved through its lexical scopes by a
+// walk that runs before typing and visits every node (refs.go, class H):
+// a local, a parameter or a receiver that shadows a package function adds
+// no edge (round 14 M1), and a tentative type error hides none (round 15
+// M1). A method or a function that spells its
 // rows is read by its signature, so it adds no edge: one edge per
 // referenced object, never one per same-named method (round-3 M5).
 func (c *checker) checkBodies() {
@@ -153,7 +154,21 @@ func (c *checker) checkBodies() {
 		nodes = append(nodes, n)
 		byVar[v] = n
 	}
-	c.resolveBodies()
+	// Class H: the edges come from the lexical walk of every body, before
+	// any body is typed (refs.go).
+	c.refs = make(map[any]map[any]bool, len(nodes))
+	c.valueRefs = make(map[any]map[*Func][2]bool, len(nodes))
+	for _, n := range nodes {
+		var owner any = n.v
+		var w *refWalker
+		if n.fn != nil {
+			owner, w = n.fn, c.bodyRefs(n.fn)
+		} else {
+			w = c.varRefs(n.v)
+		}
+		c.refs[owner], c.valueRefs[owner] = w.refs, w.values
+	}
+	c.discoverInit()
 	c.bodyEdges = 0
 	for _, n := range nodes {
 		var owner any = n.v
@@ -180,66 +195,61 @@ func (c *checker) checkBodies() {
 	for _, scc := range tarjan(nodes) {
 		c.checkComponent(scc)
 	}
+	c.valueRefs = nil
 	// Instantiation cycles through methods alone close outside any cyclic
 	// component (methods add no edge); the reporting pass recorded them.
 	c.checkInstantiationCycles()
 	c.checkInitCycles()
 }
 
-// resolveBodies resolves every body once, silently, before any body is
-// checked with diagnostics: each package var's initializer, then every
-// function and method. Its references are the resolved objects (c.refs,
-// recordDep), from which checkBodies builds the body graph (round 14 M1),
-// and the dependency graph of Go's initialization order, from which the
-// package's initialization cycles are found (round-2 M2, round-3 M5): a
-// cycle through a var is S108 and its vars become invalid, so no row
-// diagnostic follows from them. Linear in the source. The silent checks
-// leave no row behind: the inferred rows restart empty.
-//
-// A body that names no package var and no function with an inferred row
-// (any identifier, shadowed or not) has no edge, so it is resolved only
-// when a var initializer reaches it (the initialization order's closure);
-// every edge is a resolved identifier with its object's name.
-func (c *checker) resolveBodies() {
-	c.silent++
-	c.init.tentative = true
-	c.refs = map[any]map[any]bool{}
-	visited := map[*Func]bool{}
-	var queue []*Func
-	enqueue := func(f *Func) {
-		if !visited[f] && f.Decl != nil && f.Decl.Body != nil && f.Sig != nil {
-			visited[f] = true
-			queue = append(queue, f)
+// discoverInit finds the package's initialization cycles before any body
+// is checked with diagnostics (round-2 M2, round-3 M5). Each body's
+// dependencies start from its lexical references (c.refs, class H), so no
+// function or var dependency depends on typing; it then checks, silently,
+// each package var's initializer and every function and method those
+// reach, each once, which adds the references that need types (a method
+// value or call, round-3 M5): the dependency closure of Go's
+// initialization order, linear in its size. A cycle through a var is S108
+// and its vars become invalid, so no row diagnostic follows from them. The
+// silent checks leave no row behind: the inferred rows restart empty.
+func (c *checker) discoverInit() {
+	if len(c.vars) == 0 {
+		return
+	}
+	if c.init.deps == nil {
+		c.init.deps = map[any]map[any]bool{}
+	}
+	for owner, refs := range c.refs {
+		m := c.init.deps[owner]
+		if m == nil {
+			m = map[any]bool{}
+			c.init.deps[owner] = m
+		}
+		for o := range refs {
+			m[o] = true
 		}
 	}
-	reached := func(owner any) {
-		for _, d := range sortedDeps(c.refs[owner]) {
-			if f, ok := d.(*Func); ok {
-				enqueue(f)
-			}
-		}
+	c.silent++
+	c.init.tentative = true
+	visited := map[*Func]bool{}
+	var queue []*Func
+	enqueue := func(owner any) {
 		for _, d := range sortedDeps(c.init.deps[owner]) {
-			if f, ok := d.(*Func); ok {
-				enqueue(f)
+			if f, ok := d.(*Func); ok && !visited[f] && f.Decl != nil && f.Decl.Body != nil && f.Sig != nil {
+				visited[f] = true
+				queue = append(queue, f)
 			}
 		}
 	}
 	for _, pv := range c.vars {
 		c.checkPkgVar(pv)
-		reached(pv)
-	}
-	for _, f := range c.funcs {
-		if c.namesInferred(f) {
-			enqueue(f)
-		}
+		enqueue(pv)
 	}
 	for len(queue) > 0 {
 		f := queue[0]
 		queue = queue[1:]
 		c.checkFuncBody(f)
-		if len(c.vars) > 0 {
-			reached(f)
-		}
+		enqueue(f)
 	}
 	c.init.tentative = false
 	c.silent--
@@ -253,39 +263,6 @@ func (c *checker) resolveBodies() {
 	c.checkInitCycles()
 }
 
-// namesInferred reports whether f's body has an identifier spelled as a
-// package var or a package function with an inferred row: only such a
-// body can have an edge of the body graph. A selector's name is a field
-// or method, never a package object of this package.
-func (c *checker) namesInferred(f *Func) bool {
-	if f.Decl == nil || f.Decl.Body == nil || f.Sig == nil {
-		return false
-	}
-	found := false
-	sel := map[*syntax.Ident]bool{}
-	syntax.Inspect(f.Decl.Body, func(x syntax.Node) bool {
-		if found {
-			return false
-		}
-		switch x := x.(type) {
-		case *syntax.SelectorExpr:
-			sel[x.Sel] = true
-		case *syntax.Ident:
-			if sel[x] {
-				return true
-			}
-			switch o := c.pkg.Scope.names[x.Name].(type) {
-			case *Func:
-				found = o.inferErrors || o.inferUses
-			case *Var:
-				found = true
-			}
-		}
-		return true
-	})
-	return found
-}
-
 func (c *checker) checkComponent(scc []*bodyNode) {
 	// The group whose rows are being inferred (class G, pinGroup).
 	c.group = map[*Func]bool{}
@@ -294,7 +271,7 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 			c.group[n.fn] = true
 		}
 	}
-	c.groupValue, c.grew = map[*Func][2]valueUse{}, map[*Func][2]bool{}
+	c.groupValue, c.grew = map[*Func][2]bool{}, map[*Func][2]bool{}
 	defer func() { c.group, c.groupValue, c.grew = nil, nil, nil }()
 	cyclic := len(scc) > 1
 	if !cyclic {
@@ -342,6 +319,7 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 	for _, n := range scc {
 		c.checkNode(n)
 	}
+	c.reportGroup(scc)
 	for _, n := range scc {
 		if n.fn != nil {
 			delete(c.settled, n.fn)
@@ -350,107 +328,48 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 	c.finalComponent(scc)
 }
 
-// valueUse is a value use of a group member: an identifier that is not a
-// call, or a function literal or go expression that refers to the member
-// and is itself a value. file is the index of its file, so the first one in
-// source order is well defined.
-type valueUse struct {
-	file int
-	at   syntax.Node
-}
-
-// A litMode says, for one row kind, how a function literal, trailing block
-// or go expression passes on the rows of the group members it refers to.
-type litMode int
-
-const (
-	// litPass: the rows flow into the enclosing body, as for a call (a
-	// literal called on the spot, the capabilities of a go expression).
-	litPass litMode = iota
-	// litValue: the rows become part of a value's type (the literal's
-	// inferred row, a task's error row): a value use of each member.
-	litValue
-	// litStop: the row is written or comes from the expected function
-	// type, so it depends on no member's row.
-	litStop
-)
-
-// litModeOf is a literal row's mode: litStop when the row is declared
-// (written, or from the expected function type), else the given mode.
-func litModeOf(declared *Row, value litMode) litMode {
-	if declared != nil {
-		return litStop
-	}
-	return value
-}
-
 // litFrame is a function literal, trailing block or go expression being
-// checked: the group members it refers to, per row kind, while it is a
-// value (class G, round 14 O1).
+// typed in the reporting pass: the refused group members it refers to make
+// it invalid, so nothing cascades from their pinned rows (D3). Which uses
+// are value uses is decided before typing (refWalker, class H).
 type litFrame struct {
-	at   syntax.Node
-	mode [2]litMode
-	refs [2][]*Func
+	refs []*Func
 }
 
 // pushLit starts a literal frame; endLit ends it.
-func (c *checker) pushLit(at syntax.Node, errors, uses litMode) *litFrame {
-	l := &litFrame{at: at, mode: [2]litMode{errors, uses}}
+func (c *checker) pushLit() *litFrame {
+	l := &litFrame{}
 	c.lits = append(c.lits, l)
 	return l
 }
 
-// endLit ends the innermost literal frame, l: each member it refers to
-// through a value row has a value use at l. It reports whether the literal
-// is refused (the first value use of a member whose pinned row its body
-// exceeds).
+// endLit ends the innermost literal frame, l, and reports whether it refers
+// to a refused member.
 func (c *checker) endLit(l *litFrame) bool {
 	c.lits = c.lits[:len(c.lits)-1]
-	var members []*Func
-	seen := map[*Func]bool{}
-	for k := range 2 {
-		for _, f := range l.refs[k] {
-			c.noteValueUse(f, k, l.at)
-			if !seen[f] {
-				seen[f] = true
-				members = append(members, f)
-			}
+	for _, f := range l.refs {
+		if c.refused(f) {
+			return true
 		}
 	}
-	refused := false
-	for _, f := range members {
-		if c.groupRefused(f, l.at) {
-			refused = true
-		}
-	}
-	return refused
+	return false
 }
 
-// noteValueUse records at as a value use of f's row of kind k (0 errors,
-// 1 capabilities) when it is the first in source order.
-func (c *checker) noteValueUse(f *Func, k int, at syntax.Node) {
-	file := -1
-	if c.cur != nil {
-		file = c.cur.index
-	}
-	uses := c.groupValue[f]
-	first := uses[k]
-	if first.at == nil || file < first.file || file == first.file && at.Pos() < first.at.Pos() {
-		uses[k] = valueUse{file, at}
-		c.groupValue[f] = uses
-	}
-}
-
-// pinGroup applies class G to a cyclic component after its silent pass has
-// recorded the value uses (rows.md, Capability rows 6): a member used as a
-// value inside its own group has the rows it writes, and each row it does
-// not write is pinned empty, as for an exported function. A function
-// literal or go expression that is a value and refers to a member pins the
-// member's rows that its own inferred rows would carry. So no type in the
+// pinGroup applies class G to a cyclic component (rows.md, Capability rows
+// 6): a member used as a value inside its own group has the rows it
+// writes, and each row it does not write is pinned empty, as for an
+// exported function. The value uses come from the lexical walk of the
+// component's bodies (refWalker.values, class H), so they do not depend on
+// typing: a use that is not a call is a value use of both rows, and a
+// function literal, trailing block or go task that is a value is a value
+// use of each row of the members it refers to that its own row would carry
+// (not written, not called on the spot). A var on an initialization cycle
+// is invalid, so its initializer adds no value use (D3). So no type in the
 // group depends on a row still being inferred, call admission does not
 // depend on the rows, and the rows grow monotonically to their least
 // fixpoint. When the body of a pinned member needs more than the empty
-// row, its first value use is S108 (groupRefused), never a chosen fixpoint.
+// row, the member's declaration is S108 (reportGroup), never a chosen
+// fixpoint.
 //
 // Prior art: OCaml's let rec is monomorphic inside its group; Haskell needs
 // a signature for polymorphic recursion; TypeScript reports a name
@@ -458,6 +377,24 @@ func (c *checker) noteValueUse(f *Func, k int, at syntax.Node) {
 // require every signature. Each refuses the circular case instead of
 // choosing a fixpoint.
 func (c *checker) pinGroup(scc []*bodyNode) {
+	for _, n := range scc {
+		var owner any = n.fn
+		if n.v != nil {
+			if n.v.initCycle {
+				continue
+			}
+			owner = n.v
+		}
+		for f, kinds := range c.valueRefs[owner] {
+			if !c.group[f] {
+				continue
+			}
+			uses := c.groupValue[f]
+			uses[0] = uses[0] || kinds[0]
+			uses[1] = uses[1] || kinds[1]
+			c.groupValue[f] = uses
+		}
+	}
 	var pin []*RowVar
 	for _, n := range scc {
 		if n.fn == nil {
@@ -465,7 +402,7 @@ func (c *checker) pinGroup(scc []*bodyNode) {
 		}
 		uses := c.groupValue[n.fn]
 		for k, v := range []*RowVar{n.fn.errVar, n.fn.useVar} {
-			if v != nil && !v.final && uses[k].at != nil {
+			if v != nil && !v.final && uses[k] {
 				pin = append(pin, v)
 			}
 		}
@@ -476,92 +413,64 @@ func (c *checker) pinGroup(scc []*bodyNode) {
 	}
 }
 
-// groupRef handles a reference x to f while f's component is checked
-// (class G): every enclosing literal frame that is a value takes f, up to
-// the first frame whose row of that kind is written, and a use that is not
-// a call (value) is a value use of both of f's rows. It reports whether
-// the reference is refused: in the reporting pass, every reference to a
-// member whose pinned row its body exceeds is invalid, so nothing cascades
-// from it (D3), and the member's first value use carries the S108.
-func (c *checker) groupRef(f *Func, x *syntax.Ident, value bool) bool {
+// groupRef handles a reference to f while f's component is checked: every
+// enclosing literal frame takes f, and the reference is refused when f is
+// (refused): in the reporting pass, every reference to a member whose
+// pinned row its body exceeds is invalid, so nothing cascades from it
+// (D3); the S108 is at the member's declaration (reportGroup).
+func (c *checker) groupRef(f *Func) bool {
 	if !c.group[f] || !f.inferErrors && !f.inferUses {
 		return false
 	}
-	if c.inertGroup {
-		_, exceeded := c.exceeded(f)
-		return c.silent == 0 && exceeded
-	}
-	for k := range 2 {
-		for i := len(c.lits) - 1; i >= 0; i-- {
-			l := c.lits[i]
-			if l.mode[k] == litStop {
-				break
-			}
-			if l.mode[k] == litValue && !slices.Contains(l.refs[k], f) {
-				l.refs[k] = append(l.refs[k], f)
-			}
+	for _, l := range c.lits {
+		if !slices.Contains(l.refs, f) {
+			l.refs = append(l.refs, f)
 		}
 	}
-	if value {
-		c.noteValueUse(f, 0, x)
-		c.noteValueUse(f, 1, x)
-	}
-	if c.groupRefused(f, x) {
-		return true
-	}
-	_, exceeded := c.exceeded(f)
-	return c.silent == 0 && exceeded
+	return c.refused(f)
 }
 
-// exceeded returns the first value use of f among its pinned rows that its
-// body exceeds, and whether there is one. The fixpoint decides it; only
-// the reporting pass reads it.
-func (c *checker) exceeded(f *Func) (valueUse, bool) {
+// exceeded returns which of f's pinned rows (errors, capabilities) its body
+// exceeds. The fixpoint decides it; only the reporting pass reads it.
+func (c *checker) exceeded(f *Func) [2]bool {
 	grew, uses := c.grew[f], c.groupValue[f]
-	var first valueUse
-	found := false
-	for k := range 2 {
-		u := uses[k]
-		if !grew[k] || u.at == nil {
-			continue
-		}
-		if !found || u.file < first.file || u.file == first.file && u.at.Pos() < first.at.Pos() {
-			first, found = u, true
-		}
-	}
-	return first, found
+	return [2]bool{grew[0] && uses[0], grew[1] && uses[1]}
 }
 
-// groupRefused reports the S108 of f at at when at is f's first value use
-// among the pinned rows its body exceeds, in the reporting pass.
-func (c *checker) groupRefused(f *Func, at syntax.Node) bool {
+// refused reports, in the reporting pass, whether f is refused by class G.
+func (c *checker) refused(f *Func) bool {
 	if c.silent > 0 {
 		return false
 	}
-	first, ok := c.exceeded(f)
-	if !ok || first.at != at {
-		return false
+	ex := c.exceeded(f)
+	return ex[0] || ex[1]
+}
+
+// reportGroup reports the class G S108 of each refused member of a
+// component at its declaration, where the row is written: one diagnostic
+// per function, at a position that does not depend on the order of the
+// declarations (round 16).
+func (c *checker) reportGroup(scc []*bodyNode) {
+	for _, n := range scc {
+		f := n.fn
+		if f == nil || !c.refused(f) {
+			continue
+		}
+		ex := c.exceeded(f)
+		var row string
+		switch {
+		case ex[0] && ex[1]:
+			row = fmt.Sprintf("write its error row and capability row: func %s() error[…] needs …", f.Name)
+		case ex[0]:
+			row = fmt.Sprintf("write its error row: func %s() error[…]", f.Name)
+		default:
+			row = fmt.Sprintf("write its capability row: func %s() needs …", f.Name)
+		}
+		saved := c.cur
+		c.cur = f.file
+		c.errorf(f.Decl.Name, CodeType, "%s is used as a value inside its own recursive group, directly or through a function literal or task; %s", f.Name, row)
+		c.cur = saved
 	}
-	grew, uses := c.grew[f], c.groupValue[f]
-	errs, caps := grew[0] && uses[0].at != nil, grew[1] && uses[1].at != nil
-	var row string
-	switch {
-	case errs && caps:
-		row = fmt.Sprintf("write its error row and capability row: func %s() error[…] needs …", f.Name)
-	case errs:
-		row = fmt.Sprintf("write its error row: func %s() error[…]", f.Name)
-	default:
-		row = fmt.Sprintf("write its capability row: func %s() needs …", f.Name)
-	}
-	switch at.(type) {
-	case *syntax.Ident:
-		c.errorf(at, CodeType, "%s is used as a value inside its own recursive group; %s", f.Name, row)
-	case *syntax.GoExpr:
-		c.errorf(at, CodeType, "%s is called by this go expression, whose task is a value inside %s's own recursive group; %s", f.Name, f.Name, row)
-	default:
-		c.errorf(at, CodeType, "%s is referred to by this function literal, a value inside %s's own recursive group; %s", f.Name, f.Name, row)
-	}
-	return true
 }
 
 // finalComponent binds the row variables of a component for good and
@@ -1011,13 +920,6 @@ func (c *checker) checkPkgVar(pv *pkgVar) {
 	pv.checking = true
 	defer func() { pv.checking = false }()
 	defer c.beginDeps(pv)()
-	// A var on an initialization cycle is invalid: no class G value use
-	// follows from its initializer (D3).
-	if pv.initCycle {
-		prev := c.inertGroup
-		c.inertGroup = true
-		defer func() { c.inertGroup = prev }()
-	}
 	// A silent check (a fixpoint round) does not count: the reporting
 	// pass checks the initializer again against converged rows.
 	if c.silent == 0 {

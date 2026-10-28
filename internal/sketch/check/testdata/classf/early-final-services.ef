@@ -6,6 +6,6 @@ func marker() error[Bang]
 func BoxOf[T any](x T) Box[T]
 func Choose[T any](x T,y T) needs Cap
 func a() { _ = b; return Bang{} } // want S108
-func c() { _ = b; return Bang{} }
-func b() { Choose(BoxOf(a),BoxOf(c)) } // want S108 S108
+func c() { _ = b; return Bang{} } // want S108
+func b() { Choose(BoxOf(a),BoxOf(c)) } // want S108
 func F() { b() }

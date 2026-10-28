@@ -84,21 +84,19 @@ type checker struct {
 	// assert).
 	settled map[*Func]bool
 	widened []string
+	// refs holds each body's lexical references to package functions and
+	// vars (refs.go, class H): the body graph's edges. valueRefs holds each
+	// body's class G value uses, also lexical (refWalker).
+	refs      map[any]map[any]bool
+	valueRefs map[any]map[*Func][2]bool
 	// Class G (rows.go pinGroup): group holds the functions of the
-	// component being checked and callee the function expression of the
-	// call being checked. groupValue is the first value use, in source
-	// order, of each row (errors, capabilities) of each member with an
-	// inferred row; such a row is pinned empty, and grew records which of
-	// them its body exceeds.
-	// refs collects, while resolveBodies runs, the resolved package
-	// functions and vars each body refers to: the body graph's edges.
-	refs       map[any]map[any]bool
+	// component being checked. groupValue records which rows (errors,
+	// capabilities) of each member with an inferred row have a value use
+	// inside the component; such a row is pinned empty, and grew records
+	// which of them its body exceeds.
 	group      map[*Func]bool
-	callee     syntax.Expr
-	groupValue map[*Func][2]valueUse
-	lits       []*litFrame    // the literal frames being checked, innermost last
-	discardGo  *syntax.GoExpr // a go expression statement: its task is not a value
-	inertGroup bool           // checking a var on an initialization cycle: no value use
+	groupValue map[*Func][2]bool
+	lits       []*litFrame // the literal frames being checked, innermost last
 	// nodeCheck replaces checkNode in converge for the synthetic oscillation
 	// test (nil otherwise); convergeChecks counts converge's checks.
 	nodeCheck      func(*bodyNode) bool

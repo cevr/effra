@@ -16,8 +16,9 @@ type admissionGroup struct {
 	// pinned and written count the value-used members without and with
 	// written rows; grew counts the pinned members whose body needs a row.
 	pinned, written, grew int
-	// literal counts the admission calls through function literals.
-	literal int
+	// literal counts the admission calls through function literals, blocks
+	// those with a trailing block.
+	literal, blocks int
 }
 
 // recursiveAdmission writes one recursive group f0…f(n-1): a ring of
@@ -30,7 +31,7 @@ type admissionGroup struct {
 //     and each row it does not write is empty;
 //   - every other member's row is the least fixpoint over its calls;
 //   - a value-used member with an unwritten row whose body needs more than
-//     the empty row gets one S108 at its first value use; nothing else is
+//     the empty row gets one S108 at its declaration; nothing else is
 //     reported.
 //
 // An admission call may also pass function literals that call the members
@@ -67,12 +68,14 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 		emit("type Box[T any] interface{ M(T) }")
 		emit("func BoxOf[T any](x T) Box[T]")
 		emit("func Choose[T any](x T, y T) error[Bang]")
+		emit("func Run[T any, E error](x T, y T, callback func() error[E]) error[E]")
 	} else {
 		emit("type Cap interface{ M() }")
 		emit("type Box[T any] interface{ M(T) }")
 		emit("func BoxOf[T any](x T) Box[T]")
 		emit("func Choose[T any](x T, y T) needs Cap")
 		emit("func Same[T any](x T, y T) {}")
+		emit("func Run[T any](x T, y T, callback func() needs R) needs R")
 	}
 	// Which members are used as values, and which of those write rows.
 	value := make([]bool, n)
@@ -90,6 +93,10 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 		call, use []int // members called, members used as values
 		seed      bool  // the body fails or charges by itself
 		choose    bool  // an admission call through Choose (fails or charges)
+		// block: an admission call through Run whose trailing block calls
+		// member block-1 (round 15 M1); the block is a value of the row
+		// Run infers, so a value use of that member.
+		block int
 	}
 	bodies := make([][]stmt, n)
 	// partner picks a value-used member of the same kind as x.
@@ -137,9 +144,34 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 			bodies[i] = append(bodies[i], stmt{seed: true})
 		}
 	}
+	// Admission calls with a trailing block (round 15 M1), from their own
+	// random stream so the other statements stay as they were.
+	blocks := rand.New(rand.NewPCG(seed, seed^0xb10c))
+	var marked []int
+	for j := range n {
+		if value[j] {
+			marked = append(marked, j)
+		}
+	}
+	for i := range n {
+		if len(marked) == 0 || blocks.IntN(2) == 0 {
+			continue
+		}
+		x := marked[blocks.IntN(len(marked))]
+		var same []int
+		for _, j := range marked {
+			if written[j] == written[x] {
+				same = append(same, j)
+			}
+		}
+		y := same[blocks.IntN(len(same))]
+		bodies[i] = append(bodies[i], stmt{use: []int{x, y}, block: blocks.IntN(n) + 1})
+		g.blocks++
+	}
 	// A member that is called but never used as a value stays inferred; in
 	// the error family it is fallible, since every body fails.
-	firstUse := make([]int, n)
+	used := make([]bool, n) // a value use, at any line: class G is lexical (round 16)
+	declLine := make([]int, n)
 	for i := range n {
 		row := ""
 		if written[i] {
@@ -150,6 +182,7 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 			}
 		}
 		emit("func f%d()%s {", i, row)
+		declLine[i] = line
 		for _, s := range bodies[i] {
 			switch {
 			case s.seed && errors:
@@ -160,6 +193,10 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 				emit("\ttry f%d()", s.call[0])
 			case len(s.call) > 0:
 				emit("\tf%d()", s.call[0])
+			case s.block > 0 && errors:
+				emit("\ttry Run(BoxOf(f%d), BoxOf(f%d)) { try f%d() }", s.use[0], s.use[1], s.block-1)
+			case s.block > 0:
+				emit("\tRun(BoxOf(f%d), BoxOf(f%d)) { f%d() }", s.use[0], s.use[1], s.block-1)
 			case len(s.use) == 1:
 				emit("\t_ = f%d", s.use[0])
 			default:
@@ -185,9 +222,10 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 				}
 			}
 			for _, j := range s.use {
-				if firstUse[j] == 0 {
-					firstUse[j] = line
-				}
+				used[j] = true
+			}
+			if s.block > 0 {
+				used[s.block-1] = true
 			}
 		}
 		// A literal whose capability row is written carries no member's
@@ -215,11 +253,11 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 	// ordinary member, inferred or written.
 	pinned := make([]bool, n)
 	for i := range n {
-		pinned[i] = firstUse[i] != 0 && !written[i]
+		pinned[i] = used[i] && !written[i]
 		switch {
 		case pinned[i]:
 			g.pinned++
-		case firstUse[i] != 0:
+		case used[i]:
 			g.written++
 		}
 	}
@@ -234,7 +272,7 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 				continue
 			}
 			for _, s := range bodies[i] {
-				hit := s.seed || s.choose
+				hit := s.seed || s.choose || s.block > 0 && written[s.block-1]
 				for _, j := range s.call {
 					if written[j] || needs[j] && !pinned[j] {
 						hit = true
@@ -250,7 +288,7 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 	for i := range n {
 		if pinned[i] && needs[i] {
 			g.grew++
-			g.want = append(g.want, fmt.Sprintf("S108@%d", firstUse[i]))
+			g.want = append(g.want, fmt.Sprintf("S108@%d", declLine[i]))
 		}
 	}
 	sort.Strings(g.want)
@@ -260,21 +298,22 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 // TestRecursiveAdmissionGroups: generated recursive admission graphs get
 // the verdict of their source: a group whose value-used members write
 // their rows is accepted, and each value-used member with an unwritten row
-// that its body needs gets the class G S108 at its first value use, never a
+// that its body needs gets the class G S108 at its declaration, never a
 // chosen fixpoint (round 13 M1, O1).
 func TestRecursiveAdmissionGroups(t *testing.T) {
-	var accepted, refused, pinnedAccepted, literals int
+	var accepted, refused, pinnedAccepted, literals, blocks int
 	for _, errors := range []bool{true, false} {
 		for seed := range uint64(300) {
 			g := recursiveAdmission(seed, errors)
 			literals += g.literal
+			blocks += g.blocks
 			c, diags := checkFor(g.src)
 			if c == nil {
 				t.Fatalf("seed %d: %v\n%s", seed, diags, g.src)
 			}
 			var have []string
 			for _, d := range diags {
-				if d.Code == CodeType && !strings.Contains(d.Message, "own recursive group; write its") {
+				if d.Code == CodeType && !strings.Contains(d.Message, "inside its own recursive group, directly or through") {
 					t.Errorf("seed %d errors=%v: unexpected %s\n%s", seed, errors, d, g.src)
 				}
 				have = append(have, fmt.Sprintf("%s@%d", d.Code, d.Line))
@@ -297,7 +336,10 @@ func TestRecursiveAdmissionGroups(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("600 groups: %d accepted with written rows, %d accepted with pinned empty rows, %d refused; %d admission calls through literals", accepted, pinnedAccepted, refused, literals)
+	t.Logf("600 groups: %d accepted with written rows, %d accepted with pinned empty rows, %d refused; %d admission calls through literals, %d with a trailing block", accepted, pinnedAccepted, refused, literals, blocks)
+	if blocks < 300 {
+		t.Fatalf("only %d admission calls with a trailing block; the generator misses round 15 M1", blocks)
+	}
 	if literals < 300 {
 		t.Fatalf("only %d admission calls through function literals; the generator misses round 14 O1", literals)
 	}

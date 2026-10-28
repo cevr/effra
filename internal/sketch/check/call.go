@@ -26,14 +26,7 @@ func (c *checker) call(x *syntax.CallExpr, hint Type) operand {
 			return bad(x)
 		}
 	}
-	// The callee is a call, not a value use (class G, groupValueUse).
-	prev := c.callee
-	c.callee = unparen(x.Fun)
-	if ix, ok := c.callee.(*syntax.IndexExpr); ok {
-		c.callee = unparen(ix.X)
-	}
 	fun := c.expr(x.Fun, nil)
-	c.callee = prev
 	switch fun.mode {
 	case modeInvalid:
 		c.silentArgs(x)
@@ -190,7 +183,10 @@ func (c *checker) callSig(x *syntax.CallExpr, sig *Signature, fun operand) opera
 		if !ok {
 			c.errorf(args.trailing, CodeType, "a trailing block is a function-literal argument, but the final parameter has type %s", pt)
 		} else {
-			lit := c.blockLit(args.trailing, ps, nil, true)
+			lit, refused := c.blockLit(args.trailing, ps, nil, true)
+			if refused { // class G: invalid, nothing cascades
+				return bad(x)
+			}
 			if ok, why := c.assignable(lit, pt); !ok {
 				c.errorf(args.trailing, CodeType, "this block cannot be %s: %s", pt, why)
 			}
@@ -611,7 +607,10 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 			c.errorf(args.trailing, CodeType, "a trailing block is a function-literal argument, but the final parameter has type %s", pt)
 			return bad(x)
 		}
-		lt := c.blockLit(args.trailing, expected, in, true)
+		lt, refused := c.blockLit(args.trailing, expected, in, true)
+		if refused { // class G: invalid, nothing cascades
+			return bad(x)
+		}
 		lits[i] = lt
 		_ = in.unify(pt, lt, unifyAssign) // a block's mismatch is the assignment's error below
 	}
@@ -790,14 +789,9 @@ func (c *checker) funcLit(x *syntax.FuncLit, expected *Signature, in *inferer) o
 	default:
 		t.uses = newRow()
 	}
-	// Class G (round 14 O1): a literal that is a value carries the rows
-	// of the group members it refers to through its inferred rows; called
-	// on the spot, those rows flow into the enclosing body.
-	value := litValue
-	if c.callee == syntax.Expr(x) {
-		value = litPass
-	}
-	frame := c.pushLit(x, litModeOf(t.declErrors, value), litModeOf(t.declUses, value))
+	// Class G: a literal that refers to a refused group member is invalid
+	// (D3); which literals are value uses is lexical (refWalker).
+	frame := c.pushLit()
 	c.body(t, x.Type, sig.Params, func() {
 		c.stmtList(x.Body.List, false)
 		if len(sig.Results) > 0 && !c.terminatesList(x.Body.List) {
@@ -849,8 +843,8 @@ func (c *checker) body(t *target, ft *syntax.FuncType, params []*Var, check func
 // no parameters (grammar.md, Expressions 3): f(a) { body } is
 // f(a, func() T { return body }). The block's last expression is its result;
 // return, break and continue may not leave it (grammar.md, Statements 5).
-func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer, value bool) *Signature {
-	sig := &Signature{Errors: newRow(), Uses: newRow()}
+func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer, value bool) (sig *Signature, refused bool) {
+	sig = &Signature{Errors: newRow(), Uses: newRow()}
 	t := &target{name: "this block"}
 	resultFree := expected == nil || (in != nil && func() bool {
 		for _, r := range expected.Results {
@@ -878,10 +872,11 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 	if !resultFree {
 		t.results, t.resultKnown = expected.Results, true
 	}
-	// A trailing block is a function-literal argument: a value (class G).
+	// A trailing block is a function-literal argument: one that refers to
+	// a refused group member is invalid (class G, D3). A with block is not.
 	var frame *litFrame
 	if value {
-		frame = c.pushLit(b, litModeOf(t.declErrors, litValue), litModeOf(t.declUses, litValue))
+		frame = c.pushLit()
 	}
 	c.body(t, nil, nil, func() {
 		res := c.yieldingBlock(b, b.List, t.results, t.resultKnown, func(op *operand) { c.escape(op.expr, op.errs) })
@@ -897,12 +892,12 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 	sig.Uses = t.row(t.declUses, t.uses)
 	sig.Fallible = !sig.Errors.Empty() || expected != nil && expected.Fallible
 	if frame != nil {
-		c.endLit(frame)
+		refused = c.endLit(frame)
 	}
 	if c.silent == 0 {
 		c.pkg.Info.Literals[b] = sig
 	}
-	return sig
+	return sig, refused
 }
 
 // yieldingBlock checks a block that yields its last expression: a with

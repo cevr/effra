@@ -2,5 +2,5 @@ package p
 type Bang struct{}
 func run(f func() error[Bang]) error[Bang]
 func a() {return run(func(){return b()})}
-func b() {return a()}
+func b() {return a()} // want S108
 func F() error[Bang] {return a()}

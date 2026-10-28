@@ -55,7 +55,7 @@ func checkWithin(t *testing.T, src string, d time.Duration) (*check.Package, []c
 //   - a closed body gets one S102 per such call and per C.M of its own;
 //   - class G: a function referenced by _ = f inside its own component of
 //     the body graph has its row pinned empty; when its body still needs
-//     C, it gets one S108 at its first value use.
+//     C, it gets one S108 at its declaration.
 //   - a parameter or a local of a nested literal spelled as another body's
 //     name (lexical shadowing) is no reference: no edge.
 //
@@ -228,7 +228,7 @@ func TestRowGraphDomain(t *testing.T) {
 		// whose edges reach inferred bodies only (methods and exported
 		// functions spell their rows). A function used as a value (_ = f)
 		// inside its own component has its rows pinned empty; when its body
-		// still needs C, that is one S108 at its first value use. A var on
+		// still needs C, that is one S108 at its declaration. A var on
 		// an initialization cycle is invalid: no value use follows from its
 		// initializer (D3), and a var in a cyclic component is always on one.
 		bcomp := bodyComponents(n, func(i int) []int {

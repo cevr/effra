@@ -16,9 +16,9 @@
 // lazily with cycle colouring; resolve signatures; reject instantiation
 // cycles on the instantiation graph (mono.go); check bodies one strongly
 // connected component of the reference graph at a time, so the inferred
-// rows of a callee are final before its callers (a silent resolving pass first
-// records every body's resolved references, the graph's edges, and finds
-// the initialization cycles, resolveBodies; class G pins the unwritten
+// rows of a callee are final before its callers (a lexical walk of every body
+// gives the graph's edges before any typing, refs.go; the initialization
+// cycles are found first, discoverInit; class G pins the unwritten
 // rows of a function used as a value inside its own component; inside a cyclic component a silent pass
 // finds the instantiation cycles, then a worklist joins the rows to a
 // fixpoint from empty rows before any is published); then the
