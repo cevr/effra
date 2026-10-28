@@ -39,7 +39,7 @@ The labels follow [the preview rules](README.md#rules):
 | No `reflect`, no `any` and no empty interface. Interface values exist only for services; generics cover open sets, and unions cover closed sets | 196d | Go's `reflect` and `any` | Decided (owner, 2026-10-28) |
 | A function value does not escape by default; the `escaping` marker shows the rest | 196e | designed: non-escaping parameters | Decided (owner, 2026-10-28). The word `escaping` is recommended and open |
 | String interpolation `"ok \(id)"` replaces format verbs | 196s | `+` and `fmt` | Decided (owner, 2026-10-28) |
-| One shape for type declarations: `type Card { Number string }` is a record, `type Store { Find(id string) Order fails NotFound; law … }` an interface; the member shape decides the kind. No `struct` or `interface` keywords, no type aliases | 196p, extended | `struct` and `interface` | Decided (owner, 2026-10-28: "find a way to make interface xonsistent with other types") |
+| One shape for type declarations: `type Card { Number string }` is a record, `type Store { Find(id string) Order fails NotFound, law … }` an interface; the member shape decides the kind. No `struct` or `interface` keywords, no type aliases | 196p, extended | `struct` and `interface` | Decided (owner, 2026-10-28: "find a way to make interface xonsistent with other types") |
 | `machine` keeps its declaration, in the same shape: `type Breaker machine[State, Signal] { initial: Closed{0}, step: Step }`, members written like literal entries (sixth round). One machine is both an FSM and an actor (`actor.StartMachine`) | #3, #57 | `type X machine[S, E] { … }` | Decided (owner, 2026-10-28: "the syntax earns its keep") |
 | `fails` replaces `(T, error[E])`: `func F(…) T fails A \| B needs S`; function types `func(A) B fails E needs R` | 196t, beside tuples | `(T, error[E])` | Decided (owner, 2026-10-28) |
 | No `package` line; one `import` per line, with an unquoted path | 196v, extended | `package` and quoted, grouped imports | Decided (owner, 2026-10-28) |
@@ -51,10 +51,11 @@ The labels follow [the preview rules](README.md#rules):
 | An empty record or variant has `{}` only where it is declared; a use writes the bare name (`None`, `case Pending:`). A literal or pattern of a one-field record may omit the key (`Some{x}`); a declaration always names its fields | 196p | `Pending{}` in use; keys always written | Decided (owner, 2026-10-28, sixth round) |
 | Commas separate the entries of every brace list, declarations included: `type Card { Number string, Expiry Date }` | 196p | semicolons or newlines in `struct` and `interface` | Decided (owner, 2026-10-28, sixth round) |
 | Type parameters are declared in brackets with the constraint inline: `func Largest[T ordered](xs []T) T`. Kinds stay implicit. No `where` clause | 196g, amended | implicit one-letter parameters | Decided (owner, 2026-10-28, sixth round) |
-| `try` covers the whole expression to its right: `try Decode(Encode(v)) == v` | 196a, 196r | not stated in `docs/spec/` (inferred) | Decided (owner, 2026-10-28, sixth round) |
+| `try` covers the whole expression to its right: `try Decode(Encode(v)) == v` | 196a, 196r | `try` binds looser than every binary operator ([grammar.md](../spec/grammar.md#expressions), Expressions rule 1); the sixth round adds that every failing call to its right propagates | Decided (owner, 2026-10-28, sixth round) |
 | A top-level tuple pattern in `let` or `for` needs no parentheses: `let q, r = DivMod(a, b)`; inside `match` it keeps them | 196t | several results | Decided (owner, 2026-10-28, sixth round) |
 | The leading `\|` of a union is optional; the formatter writes it only on several lines | 196p | none | Decided (owner, 2026-10-28, sixth round) |
 | Every record with no fields is bare in use; one `catch` form, where `case err:` binds the failure; `break` and `continue` in a `match` act on the loop; `Map[K, V]` replaces `map[K]V`; no variadic parameters; no anonymous record types; `x.f` without a call is only a field | 196p, 196r, 196v, 196m | Go's forms | Decided by the orchestrator under owner delegation, 2026-10-28 (seventh round, [below](#seventh-round-decided-by-the-orchestrator)) |
+| `with` takes an expression, and `ergo fmt` strips parentheses around it; a prelude name cannot be redeclared; no init statement in `if` and `match` headers | 196x, 196v | `with(W) { … }`; Go's shadowing of predeclared names; `if x := f(); cond` | Decided by the orchestrator under owner delegation, 2026-10-28 (eighth-round addendum, [below](#seventh-round-decided-by-the-orchestrator)) |
 | One merged row for failures and services | none | separate rows | Considered; rejected by the owner, 2026-10-28. `fails` and `needs` stay separate |
 | A surface without pointers | spike [#222](https://github.com/cevr/ergo/issues/222) | `*T` on parameters | Measure first; Proposed |
 | Fewer number types: `int`, `float` and `byte` | measured on [#222](https://github.com/cevr/ergo/issues/222) | Go's numeric types (designed) | Measure first; Proposed |
@@ -78,11 +79,17 @@ The owner delegated this round on 2026-10-28 ("dont block on me anymore"). The o
 
 Considered and kept: `[]T`, `if`/`else if` chains for conditions without a subject, Go's parameter grouping `a, b int`, and defined types such as `type Celsius float64`.
 
+**Eighth-round addendum, decided by the orchestrator under the owner's delegation (2026-10-28).** Three points that the review of this preview raised:
+
+1. `with` takes an expression. `with (W) { … }` parses, because `(W)` is a parenthesized expression, and `ergo fmt` writes it as `with W { … }`, as gofmt strips the parentheses of `if (x)` [196x].
+2. A prelude name cannot be redeclared. Types and values share one namespace per scope, as in Go, and declaring `Map`, `Option`, `string` or another prelude name at any scope is a diagnostic. The generics example names its helper `Transform` for this reason [196v].
+3. `if` and `match` headers have no init statement. Write `let x = f()` on the line before, or `match f() { … }` [196v].
+
 **The Decided column is now far from Go.** After these decisions it has no `package` line, no `:=`, no `var`, no `switch`, no `struct` or `interface` keyword, no `map` keyword, no `(T, error)` result, no `go`, no `defer`, no channels, no C-style `for`, no `make`, no receivers, no several results, no variadic parameters, no method values, no `TestX` functions and no untyped constants. What it keeps from Go is `func`, the `name Type` order of parameters and fields with Go's grouping, most of its types and its lowering target. The Decided and Non-Go columns now share their semantics, their declarations, their binding words, `match`, `for`, `fails`, `with`, `test`, `law` and imports. They differ in three spellings: `func` against `fn`, `name Type` against `name: Type`, and a result after the parameters against a result after `->`. This preview compares that remaining difference.
 
 ## What stays
 
-Every column keeps Ergo's philosophy and its guarantees. A signature lists every expected failure and every service the caller must supply. The compiler checks typed errors, declared dependencies, resource safety, structured concurrency with cancellation and every failure cause kept. Tracing and observability come from the checked model, with no span calls in the source. Laws state what must hold, and `ergo test` checks them. Constructs that the compiler must know get keywords, and a dot form is always library. Braces delimit blocks (owner, 2026-10-27: "No, it's fine. We can keep braces"). Names are exported by an upper-case first letter, so a name maps one to one to its Go name. Go is the only target. The Non-Go column still lowers to plain Go: rows are erased, `try` becomes `if err != nil`, a union becomes a Go interface or a tagged struct, and generics become Go code. The Non-Go column keeps Go's types (`string`, `int64`, `[]T`, `map[K]V`), the decided library calls (`len`, `xs.Append(x)`, `slice.WithCapacity(n)`) and Go's semicolon insertion. It changes only the surface.
+Every column keeps Ergo's philosophy and its guarantees. A signature lists every expected failure and every service the caller must supply. The compiler checks typed errors, declared dependencies, resource safety, structured concurrency with cancellation and every failure cause kept. Tracing and observability come from the checked model, with no span calls in the source. Laws state what must hold, and `ergo test` checks them. Constructs that the compiler must know get keywords, and a dot form is always library. Braces delimit blocks (owner, 2026-10-27: "No, it's fine. We can keep braces"). Names are exported by an upper-case first letter, so a name maps one to one to its Go name. Go is the only target. The Non-Go column still lowers to plain Go: rows are erased, `try` becomes `if err != nil`, a union becomes a Go interface or a tagged struct, and generics become Go code. The Non-Go column keeps the decided types (`string`, `int64`, `[]T`, and `Map[K, V]` as in the Decided column), the decided library calls (`len`, `xs.Append(x)`, `slice.WithCapacity(n)`) and Go's semicolon insertion. It changes only the surface.
 
 Speed is the same in the Decided and Non-Go columns, because the syntax changes no lowering (inferred). The owner restated the goal on 2026-10-28, "faster than hand optimized go code" (north-star pillar 7). The levers toward it are listed on [#190](https://github.com/cevr/ergo/issues/190#issuecomment-6460103094): full monomorphization, wire devirtualization, unions by value, errors without allocation and others. Several decided stages give the compiler a fact that a lever uses: 196g and 196d allow specialization with no run-time dictionary, 196e allows inlined function values, and 196s lowers interpolation without boxing arguments into interfaces (inferred from the stage designs). Each lever needs its own benchmark against hand-written Go. This preview measures no speed.
 
@@ -319,7 +326,7 @@ fn main() needs Console {
 ```
 
 - The pattern `Declined{Reason: Fraud{Rule: rule}}` covers one variant of the nested union. The arm `Declined` covers the rest. The exhaustiveness check treats a variant pattern as a constructor, as Maranget's usefulness algorithm does (196p rule 3).
-- In a pattern, a name that resolves to a type matches that type. Any other name binds. Rust resolves the same ambiguity the same way.
+- In a pattern, a name that resolves to a type matches that type. Any other name binds. Rust resolves a bare name the same way, as a path pattern when the name resolves and as a binding otherwise. But a Rust path pattern matches only a constant or a variant with no fields; a variant with a payload needs `Declined { .. }`. Ergo adds a rule: a bare type name such as `case Declined:` tests the type of a variant that has fields.
 - Every variant here has one field, so `case Authorized{id}:` and `Declined{Fraud{"velocity"}}` are also legal: a literal or a pattern of a one-field record may omit the key (sixth round). A record with two or more fields stays keyed. The blocks keep the keyed form, which Today's checked file uses, so the counts compare like with like.
 - `"ok \(id)"` interpolates `id` (196s). `\(` is not a valid escape in a Go string, so the form cannot be misread. Each interpolated value must have a generated text form (196d).
 - The two decided bodies of `describe` are now the same text. The union declarations differ only in the colon of each field, and the signatures in `func` against `fn` and `-> string`.
@@ -391,7 +398,7 @@ type Celsius float64
 - Use decides the role, as today ([types.md](../spec/types.md#capabilities), Capabilities rule 3). An operation type in `needs` or in a wire is a service. In a constraint position it is a constraint (196g). As a value type it is a provider value (196d).
 - `type Celsius float64` is a defined type over another type. It is not an alias.
 - `type Point { X, Y int }` gives both fields the type `int`, as `func f(a, b int)` does for parameters (seventh round). With commas as the separator, this is the one reading. The Non-Go column writes each type.
-- In `try Find(id) == o`, `try` covers the whole expression to its right, so a failure of `Find` propagates out of the law (sixth round). Swift's `try` has the same reach.
+- In `try Find(id) == o`, `try` parses over the whole comparison, as today's grammar already has it. The sixth round adds that every failing call in that expression propagates, so a failure of `Find` propagates out of the law. Swift's `try` has the same reach.
 - Prior art: TypeScript object types put properties and methods in one literal form, and the member shape decides the kind. Rust `struct` and Gleam custom types put the fields directly after the name. Go chooses the kind by keyword.
 
 ### Machines: an FSM and an actor
@@ -727,7 +734,7 @@ fn main() needs Console {
 - `catch` has one form (seventh round). `e catch err { … }` is removed. The arm `case err:` binds the whole failure, as a binding pattern does in any `match`, so `catch` and `match` have the same arms and nothing else.
 
 - `catch` stays postfix in every column. The prefix `catch f() { … }` is ranked mistake 2 in [the stage-1a ranking](../research/agent-mistakes.md#ranked-language-mistakes) (3 instances, measured there). The Non-Go syntax does not remove it.
-- `try` stays a prefix keyword that binds looser than every operator: it covers the whole expression to its right, so in `try Decode(Encode(v)) == v` every failing call propagates (sixth round). A Rust-style postfix `?` was not taken: ranked mistake 6, `try` over a selector or a comparison, is a Rust habit (2 instances, measured there).
+- `try` stays a prefix keyword that binds looser than every binary operator, as [grammar.md](../spec/grammar.md#expressions) states today (Expressions rule 1). That rule is about parsing. The sixth round adds a checker rule on top of it: every failing call in the expression to the right of `try` propagates, so in `try Decode(Encode(v)) == v` a failure of `Encode` or of `Decode` escapes. A Rust-style postfix `?` was not taken: ranked mistake 6, `try` over a selector or a comparison, is a Rust habit (2 instances, measured there).
 
 ### A signature with failures and services
 
@@ -821,7 +828,8 @@ fn total(order: Order, fee: int64) -> int64 {
 - After the amended 196v, the two decided columns use the same binding words. They differ only in the colon before a type.
 - Go's `:=` and `=` differ by one character, and Go's "at least one new variable" rule lets `a, err := …` reuse `a`. `let` and `let mut` make the difference a word, and the rarer case, a mutable local, carries the marker.
 - A top-level tuple pattern in `let` or `for` needs no parentheses: `let q, r = DivMod(a, b)` and `for i, x in xs` (sixth round). Inside `match` a tuple pattern keeps them.
-- A `for` header binds as `let` does: `for i, x in xs` (196v, extended). `match` binds through its patterns. One Go header stays open (inferred from the decisions, which do not mention it): the init statement of `if x := f(); cond`. Neither sketch has one.
+- A `for` header binds as `let` does: `for i, x in xs` (196v, extended). `match` binds through its patterns.
+- `if` and `match` headers have no init statement (eighth round, decided by the orchestrator under the owner's delegation). `if x, ok := f(); ok` has no successor: with `let`, `match` on a value, and `fails` with `catch`, a header binding is a second way to scope a name. Write `let x = f()` on the line before, or `match f() { … }`. Rust and Swift have no `if` init statement either (they bind through patterns, `if let`), and Gleam has no `if`.
 
 ### Expression `if` and `match`
 
@@ -928,7 +936,7 @@ func Max[T cmp.Ordered](a, b T) T {
 	return b
 }
 
-func Map(xs []A, f func(A) (B, error[E]) needs R) ([]B, error[E]) needs R {
+func Transform(xs []A, f func(A) (B, error[E]) needs R) ([]B, error[E]) needs R {
 	out := make([]B, 0, len(xs))
 	for _, x := range xs {
 		out = append(out, try f(x))
@@ -937,14 +945,14 @@ func Map(xs []A, f func(A) (B, error[E]) needs R) ([]B, error[E]) needs R {
 }
 ```
 
-**Decided.** Label: **Proposed** (196g as amended, 196r, 196v as extended, 196e, `fails`). Type parameters are declared in brackets, with the constraint inline, and a bare `T` no longer becomes a parameter by itself (sixth round). There is no `where` clause. The kinds stay implicit: `E` after `fails` is a failure row, and `R` after `needs` is a service row. A constraint is a method set or one of the predeclared `comparable`, `ordered` and `number`. `out` is reassigned, so it is `let mut`. `for x in xs` replaces `for _, x := range xs`, and library calls replace `make` and `append`. `f` does not escape `Map`, so it needs no `escaping` marker.
+**Decided.** Label: **Proposed** (196g as amended, 196r, 196v as extended, 196e, `fails`). Type parameters are declared in brackets, with the constraint inline, and a bare `T` no longer becomes a parameter by itself (sixth round). There is no `where` clause. The kinds stay implicit: `E` after `fails` is a failure row, and `R` after `needs` is a service row. A constraint is a method set or one of the predeclared `comparable`, `ordered` and `number`. `out` is reassigned, so it is `let mut`. `for x in xs` replaces `for _, x := range xs`, and library calls replace `make` and `append`. `f` does not escape `Transform`, so it needs no `escaping` marker. The helper is not called `Map`, because `Map` is a prelude type and a prelude name cannot be redeclared.
 
 ```go
 func Max[T ordered](a, b T) T {
 	if a > b { a } else { b }
 }
 
-func Map[A, B, E, R](xs []A, f func(A) B fails E needs R) []B fails E needs R {
+func Transform[A, B, E, R](xs []A, f func(A) B fails E needs R) []B fails E needs R {
 	let mut out = slice.WithCapacity[B](len(xs))
 	for x in xs {
 		out = out.Append(try f(x))
@@ -960,7 +968,7 @@ fn Max[T: ordered](a: T, b: T) -> T {
 	if a > b { a } else { b }
 }
 
-fn Map[A, B, E, R](xs: []A, f: fn(A) -> B fails E needs R) -> []B fails E needs R {
+fn Transform[A, B, E, R](xs: []A, f: fn(A) -> B fails E needs R) -> []B fails E needs R {
 	let mut out = slice.WithCapacity[B](len(xs))
 	for x in xs {
 		out = out.Append(try f(x))
@@ -973,7 +981,8 @@ fn Map[A, B, E, R](xs: []A, f: fn(A) -> B fails E needs R) -> []B fails E needs 
 
 - The Non-Go column cannot group parameters (`a, b T`). Each parameter writes its type.
 - A function value that escapes writes the marker in its type: `escaping func(T) U` in the Go-shaped column, `escaping fn(T) -> U` in the Non-Go column (196e). A field or a result of function type escapes by definition.
-- A function literal may leave out its parameter types where the context gives them: `xs.Map(func(x) { x * 2 })` ([#214](https://github.com/cevr/ergo/issues/214)). The Non-Go spelling is `xs.Map(fn(x) { x * 2 })`.
+- A function literal may leave out its parameter types where the context gives them: `xs.Transform(func(x) { x * 2 })` ([#214](https://github.com/cevr/ergo/issues/214)). The Non-Go spelling is `xs.Transform(fn(x) { x * 2 })`.
+- A prelude name cannot be redeclared (eighth round, decided by the orchestrator under the owner's delegation). Types and values share one namespace per scope, as in Go. Declaring `Map`, `Option`, `string` or another prelude name at any scope is a diagnostic, because shadowing a predeclared name is a known Go trap. Go allows that shadowing, and linters such as `predeclared` flag it; Rust lets a module shadow a prelude item only by an explicit import or declaration.
 - `Map[K, V]` replaces `map[K]V` (seventh round). A map is a prelude generic type, so its type, its literal `Map[string, int]{"a": 1}` and its functions `m.Get(k)` and `m.Delete(k)` follow the rules of every other generic type, and the keyword `map` goes. `[]T` stays, because it is the most common type in a program. Prior art: Swift `Dictionary`, Rust `HashMap<K, V>`, TypeScript `Map<K, V>`.
 - There are no variadic parameters (seventh round). A function that takes many values takes a slice: `Sum([]int{1, 2, 3})`. Go's main variadic users, `append` and `fmt`, are already gone. Gleam and Rust have no variadic functions either.
 - 196g also decides that generic code is specialized per instance in the lowering, so a constraint never needs a run-time dictionary. That is a speed lever of [#190](https://github.com/cevr/ergo/issues/190#issuecomment-6460103094); its gain is not measured yet (inferred).
@@ -1204,7 +1213,7 @@ Today has 28 keywords, the list in [grammar.md](../spec/grammar.md#keywords). De
 | Decided Go-shaped, sketch at one granularity | 62 | measured: productions in [the first sketch](#decided-go-shaped-sketch) |
 | Non-Go, sketch at the same granularity | 63 | measured: productions in [the second sketch](#non-go-sketch) |
 
-The 133 and the two sketches are not comparable: the Go spec splits its productions more finely than the sketches do (inferred). The two sketches were written by one author at one granularity, so they compare with each other: 62 against 63 (measured). The decided stages removed every production by which the Non-Go sketch was shorter before: the three-clause `for`, the `range` clause, the switch guard, `default`, the `if` init statement, grouped imports, the `error[…]` result and the `struct` and `interface` forms. The seventh round removes `MapType` from both sketches, and variadic parameters and the `catch e` binding from inside other productions. The two name lists now differ by one production (measured by comparing them): only the Non-Go sketch has `Rows` (`-> T fails E needs S`), which its function types, signatures and function literals share. The Decided sketch puts the same optional parts straight into `Signature` and `FuncLit`. Every other production has the same name on both sides, and most have the same body; the differences are `:` before a type and `fn` for `func`. Both inherit Go's lexical grammar, plus the `duration` literal of [grammar.md](../spec/grammar.md#literals).
+The 133 and the two sketches are not comparable: the Go spec splits its productions more finely than the sketches do (inferred). The two sketches were written by one author at one granularity, so they compare with each other: 62 against 63 (measured). The decided stages removed every production by which the Non-Go sketch was shorter before: the three-clause `for`, the `range` clause, the switch guard, `default`, grouped imports, the `error[…]` result and the `struct` and `interface` forms. The seventh round removes `MapType` from both sketches, and variadic parameters and the `catch e` binding from inside other productions. Neither sketch ever had the `if` init statement: round 3 of this preview left it out while it was open, and the eighth round now removes it from the language. The two name lists now differ by one production (measured by comparing them): only the Non-Go sketch has `Rows` (`-> T fails E needs S`), which its function types, signatures and function literals share. The Decided sketch puts the same optional parts straight into `Signature` and `FuncLit`. Every other production has the same name on both sides, and most have the same body; the differences are `:` before a type and `fn` for `func`. Both inherit Go's lexical grammar, plus the `duration` literal of [grammar.md](../spec/grammar.md#literals).
 
 ## Costs
 
@@ -1216,7 +1225,7 @@ The decided changes already bring Rust, Swift and Kotlin spellings into both dec
 
 Several ranked mistakes do not depend on the syntax: a prefix `catch` (2), `needs` read as the footprint (3), and `timeout.After` under `Clock` (11). The Non-Go syntax does not remove them (inferred from their causes).
 
-The decided changes move the Go-shaped column far from Go (inferred from the decided stages). `package p`, a grouped and quoted import, `type T struct { … }`, `type I interface { … }`, a `(T, error)` result, `x := e`, `var x = e`, `switch`, `default`, `for i := 0; i < n; i++`, `for _, x := range xs`, `make`, `new`, `append`, `go f()`, `make(chan T)`, `select`, `defer`, a method receiver, a shadowed `err`, `func TestX(t *testing.T)`, a fixed array, a `~T` constraint, a dot import, `any`, `reflect`, `fmt.Sprintf`, `map[K]V`, a variadic `...T`, a method value `c.Valid`, an anonymous `struct{ X int }` and an implicit type parameter are all everyday Go or today's Ergo. After the decided stages, each one is a mistake that needs a recognising diagnostic (#220 stage 2). One habit fails silently instead: `break` inside a `match` leaves the loop, where Go's `break` inside a `switch` leaves only the switch (seventh round). A program that relies on Go's reading still checks, so #220's cheatsheet needs a row for it, and a lint may need to warn (inferred). So the Go-shaped column keeps `func`, `name Type` and most of Go's types, but most of Go's prior knowledge now produces mistakes in it. The honest comparison is no longer "Go's prior knowledge against none". It is "a familiar look with many false friends" against "an unfamiliar look with fewer of them" (inferred). The stage-1b arm measures which one agents handle better.
+The decided changes move the Go-shaped column far from Go (inferred from the decided stages). `package p`, a grouped and quoted import, `type T struct { … }`, `type I interface { … }`, a `(T, error)` result, `x := e`, `var x = e`, `switch`, `default`, `for i := 0; i < n; i++`, `for _, x := range xs`, `make`, `new`, `append`, `go f()`, `make(chan T)`, `select`, `defer`, a method receiver, a shadowed `err`, `func TestX(t *testing.T)`, a fixed array, a `~T` constraint, a dot import, `any`, `reflect`, `fmt.Sprintf`, `map[K]V`, a variadic `...T`, a method value `c.Valid`, an anonymous `struct{ X int }`, an `if x := f(); cond` header, a local named `len` or `string`, and an implicit type parameter are all everyday Go or today's Ergo. After the decided stages, each one is a mistake that needs a recognising diagnostic (#220 stage 2). One habit fails silently instead: `break` inside a `match` leaves the loop, where Go's `break` inside a `switch` leaves only the switch (seventh round). A program that relies on Go's reading still checks, so #220's cheatsheet needs a row for it, and a lint may need to warn (inferred). So the Go-shaped column keeps `func`, `name Type` and most of Go's types, but most of Go's prior knowledge now produces mistakes in it. The honest comparison is no longer "Go's prior knowledge against none". It is "a familiar look with many false friends" against "an unfamiliar look with fewer of them" (inferred). The stage-1b arm measures which one agents handle better.
 
 ### Interop with Go packages
 
@@ -1281,7 +1290,7 @@ The pointer question is open and syntax-neutral. The surface without `*T` is [#2
 
 Stage 1b of [#220](https://github.com/cevr/ergo/issues/220) is the live multi-model eval. This arm adds one comparison to it: which syntax agents write correctly more often. The protocol is fixed before the run, so that the decision rule cannot move after the results.
 
-**Arms.** Two syntaxes: Decided Go-shaped, and Non-Go. Both have the same semantics, every decided stage from 196u to 196x included. Run the arm after those stages land, so that `ergo check` judges the Go-shaped arm. 196c waits for the runtime lane. If it is late, run the arm after 196g, leave the concurrency tasks out of both arms, and record that.
+**Arms.** Two syntaxes: Decided Go-shaped, and Non-Go. Both have the same semantics, every decided stage from 196u to 196x included. Run the arm after those stages land, so that `ergo check` judges the Go-shaped arm. The arm waits for 196x, the last of them, and runs the full 24 tasks and 288 programs; it has no earlier, reduced form.
 
 **Tasks.** 24 tasks. Each task has a short statement in English, the declarations it needs (types and capabilities) written in the arm's syntax, an expected output or test, and a reference solution in each syntax. The reference solutions must check and run. The tasks cover every construct, and each one targets the stage-1a classes it can provoke:
 
@@ -1346,14 +1355,14 @@ One line for each language: what it does, what this preview takes or refuses, an
 
 - No switch to the Non-Go syntax is decided. The stage-1b arm decides it.
 - The Non-Go syntax has no parser, no formatter and no checker. Its snippets are unchecked, and so are both grammar sketches.
-- The seventh round is decided by the orchestrator under the owner's delegation, not by the owner item by item.
+- The seventh round and the eighth-round addendum are decided by the orchestrator under the owner's delegation, not by the owner item by item.
 - The decided changes are not in `docs/spec/` or the checker yet. Their snippets are Proposed until their stages land.
 - The counts are not a usability result. Fewer tokens are not shown to mean fewer mistakes.
 - No speed claim is made. The speed levers are on #190, and the pointer and number-type questions wait for #222.
 
 ## Appendix: two grammar sketches
 
-The two sketches cover the same forms at one granularity, so their production counts compare. Both include the decided stages: patterns, the union form, `match`, expression `if`, no receivers, `let` and `let mut`, one `for`, tuples, qualified imports with one unquoted path per line and no `package` line, no fixed arrays, no labels, no `++` or `--`, no `go`, `chan`, `select`, `<-` or `defer`, the `escaping` marker, and the fifth round: one `type` shape whose members (fields, or operations and laws) decide its kind, the `machine` declaration, `fails`, `test`, `assert`, `law`, `extern go`, wire values with `with`, and function literals with untyped parameters (#214). A function declaration needs a body; a bodiless Go binding is an `extern go` declaration. They also include the sixth and seventh rounds: commas in every brace list, `initial: …, step: …` in a machine, declared type parameters with an inline constraint, an unquoted `extern` target, tuple patterns without parentheses in `let`, an optional leading `|`, one `catch` form, `Map[K, V]`, and no variadic parameters. Wire entries use `Name: value` (sixth round). `wire` may state `provides` and `needs` (inferred). Both defer to Go's lexical grammar (identifiers, literals, `binary_op`, `unary_op`, `assign_op`). Both add the `duration` literal, the `..` range operator and `\( … )` interpolation inside an interpreted string (196s). Neither has an `if` init statement, the open point of the [bindings section](#bindings). Neither sketch is checked by a parser.
+The two sketches cover the same forms at one granularity, so their production counts compare. Both include the decided stages: patterns, the union form, `match`, expression `if`, no receivers, `let` and `let mut`, one `for`, tuples, qualified imports with one unquoted path per line and no `package` line, no fixed arrays, no labels, no `++` or `--`, no `go`, `chan`, `select`, `<-` or `defer`, the `escaping` marker, and the fifth round: one `type` shape whose members (fields, or operations and laws) decide its kind, the `machine` declaration, `fails`, `test`, `assert`, `law`, `extern go`, wire values with `with`, and function literals with untyped parameters (#214). A function declaration needs a body; a bodiless Go binding is an `extern go` declaration. They also include the sixth and seventh rounds: commas in every brace list, `initial: …, step: …` in a machine, declared type parameters with an inline constraint, an unquoted `extern` target, tuple patterns without parentheses in `let`, an optional leading `|`, one `catch` form, `Map[K, V]`, and no variadic parameters. Wire entries use `Name: value` (sixth round). `wire` may state `provides` and `needs` (inferred). Both defer to Go's lexical grammar (identifiers, literals, `binary_op`, `unary_op`, `assign_op`). Both add the `duration` literal, the `..` range operator and `\( … )` interpolation inside an interpreted string (196s). Neither has an init statement in an `if` or `match` header, which the eighth round removes ([bindings section](#bindings)). Neither sketch is checked by a parser.
 
 ### Decided Go-shaped sketch
 
@@ -1496,7 +1505,7 @@ Notes on both sketches:
 
 - `for x in xs` and `for i, x in xs` iterate a slice or a `Map`. `for i in 0..n` iterates a half-open `Range` value. There is no three-clause `for`, and no `++` or `--`.
 - `match` has a subject; several subjects form a tuple. A tagless choice is an `if`/`else` chain.
-- In both sketches, `with` takes wires and context values ([runtime.md](../spec/runtime.md#g1-context-through-with)), and its block is part of the construct. Today `with(…) { … }` is a call with a trailing block; 196x makes `with W { … }` a form of its own with no parentheses, and `with(W) { … }` stops parsing (sixth round).
+- In both sketches, `with` takes wires and context values ([runtime.md](../spec/runtime.md#g1-context-through-with)), and its block is part of the construct. Today `with(…) { … }` is a call with a trailing block; 196x makes `with W { … }` a form of its own that takes an expression (sixth round). `with (W) { … }` still parses, because `(W)` is a parenthesized expression, and `ergo fmt` rewrites it to `with W { … }`, as gofmt strips the parentheses of `if (x)` (eighth round, decided by the orchestrator under the owner's delegation).
 - One `TypeDecl` covers records, operation types, defined types, unions and machines. The members decide the kind: a type with fields is a record, and a type with operations is an operation type. A type that mixes fields and operations is S108, and a `law` is a member of an operation type only; the sketch does not express these rules. `=` always means a union, so there are no type aliases.
 - A `law` member has parameters and a block that yields `bool`. A `test` with parameters is a property, run with generated inputs.
 - Every brace list separates its entries with commas and allows a trailing comma: `Members`, `MachineType`, `WireBody` and `LiteralValue`. A `Block` keeps statements separated by semicolons, which Go's rule inserts at line ends.
