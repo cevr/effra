@@ -390,7 +390,12 @@ func (c *checker) interfaceType(spec *syntax.InterfaceType, ctx *typeCtx) *Inter
 			continue
 		}
 		name := m.Names[0]
-		mctx := &typeCtx{params: ctx.params, method: true, decl: ctx.decl, reported: new(bool)}
+		mctx := &typeCtx{method: true, reported: new(bool)}
+		if ctx != nil {
+			// A package var's type has no context (FuzzCheck found
+			// var A interface{A()} dereferencing it).
+			mctx.params, mctx.decl = ctx.params, ctx.decl
+		}
 		sig := c.signature(ft, mctx)
 		if ft.Needs != nil {
 			c.errorf(ft.Needs, CodeType, "an interface method writes no capability row: a provider's requirements are captured when it is built (types.md, Capabilities 4; README Gap 17)")
