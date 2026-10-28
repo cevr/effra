@@ -538,6 +538,8 @@ func (p *parser) parseMembers() *members {
 			law.Params = p.parseParameters(paramPlain)
 			law.Body = p.parseBlock()
 			m.laws = append(m.laws, law)
+		case p.tok.tok == IDENT && p.peek(1).tok == LBRACK && p.bracketsThenParen():
+			p.errorAt(p.peek(1).pos, 1, "an operation has no type parameters; declare them on its type: `type Name[T] { … }`")
 		case p.tok.tok == IDENT && p.peek(1).tok == LPAREN:
 			kind = memberOperation
 			name := p.parseIdent()
@@ -566,6 +568,25 @@ func (p *parser) parseMembers() *members {
 	m.rbrace = p.tok.pos
 	p.next()
 	return m
+}
+
+// bracketsThenParen reports whether the brackets that open at the next
+// token close before a `(`, as in the operation `Get[T](k string) T`; a
+// field type such as `xs [n]int` closes before a type instead.
+func (p *parser) bracketsThenParen() bool {
+	depth := 0
+	for i := 1; ; i++ {
+		switch p.peek(i).tok {
+		case LBRACK:
+			depth++
+		case RBRACK:
+			if depth--; depth == 0 {
+				return p.peek(i+1).tok == LPAREN
+			}
+		case LBRACE, RBRACE, SEMICOLON, EOF:
+			return false
+		}
+	}
 }
 
 // parseFieldDecl parses `name {, name} Type`. Names group up to the type,

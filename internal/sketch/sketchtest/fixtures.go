@@ -133,7 +133,8 @@ var MalformedTable = []Malformed{
 	{Name: "wire-decl", Src: "wire Live {\n\tClock = Fixed{}\n}\n", Lines: []int{1}},
 	{Name: "wire-entry-assign", Src: "let Live = wire {\n\tClock = Fixed{},\n}\n", Lines: []int{2}},
 	{Name: "catch-bind", Src: "func f() {\n\tg() catch e {\n\tcase E:\n\t}\n}\n", Lines: []int{2}},
-	{Name: "bodiless", Src: "//ef:go strings.ToUpper\nfunc Upper(s string) string\n", Lines: []int{2}},
+	{Name: "bodiless", Src: "func Upper(s string) string\n", Lines: []int{1}},
+	{Name: "operation-type-params", Src: "type Store {\n\tGet[T](k string) T,\n}\n", Lines: []int{2}},
 	{Name: "try-operand", Src: "func f(a int64) int64 fails E {\n\ta + try g()\n}\n", Lines: []int{2}},
 	{Name: "uses", Src: "func f() uses Clock {}\n", Lines: []int{1}},
 	// Decided-grammar rules (#196, D1).
