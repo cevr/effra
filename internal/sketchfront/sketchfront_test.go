@@ -10,11 +10,11 @@ import (
 	"testing"
 	"unicode/utf16"
 
-	"ergo.local/prototype/internal/compiler"
+	"ergo.local/prototype/internal/report"
 )
 
 // utf16Column counts the UTF-16 code units of text, independently of the
-// compiler's position index.
+// report's position index.
 func utf16Column(text string) int { return len(utf16.Encode([]rune(text))) }
 
 func TestSketchCheckReportsPrototypeDiagnostics(t *testing.T) {
@@ -62,7 +62,7 @@ func TestSketchCheckReportsPrototypeDiagnostics(t *testing.T) {
 			if character == want-lineStart {
 				t.Fatalf("case has no non-ASCII text before the error")
 			}
-			report := analysis.Result(c.source, compiler.Target).ForeignReport(compiler.SourceSnapshot{URI: "file:///x/main.ef", Text: c.source}, false, "lint unavailable")
+			report := analysis.Result(c.source, report.Target).Report(report.SourceSnapshot{URI: "file:///x/main.ef", Text: c.source}, false)
 			if report.Checked || len(report.Diagnostics) != len(analysis.Diagnostics) {
 				t.Fatalf("report checked=%v with %d findings, want unchecked with %d", report.Checked, len(report.Diagnostics), len(analysis.Diagnostics))
 			}
@@ -78,11 +78,11 @@ func TestSketchCheckReportsPrototypeDiagnostics(t *testing.T) {
 	}
 	t.Run("unrecognised error shape", func(t *testing.T) {
 		got := syntaxDiagnostic(errors.New("something else: S001 broken"))
-		if got.Code != "S001" || got.Message != "something else: S001 broken" || got.Span != (compiler.Span{}) {
+		if got.Code != "S001" || got.Message != "something else: S001 broken" || got.Span != (report.Span{}) {
 			t.Fatalf("fallback %+v, want the whole text without a location", got)
 		}
-		report := compiler.ForeignResult("x", compiler.Target, []compiler.Diagnostic{got}).ForeignReport(compiler.SourceSnapshot{Text: "x"}, false, "")
-		if lsp := report.Diagnostics[0].LSP; lsp == nil || lsp.Range != (compiler.DiagnosticRange{}) || lsp.Code != "S001" {
+		projected := report.NewResult("x", report.Target, []report.Diagnostic{got}).Report(report.SourceSnapshot{Text: "x"}, false)
+		if lsp := projected.Diagnostics[0].LSP; lsp == nil || lsp.Range != (report.DiagnosticRange{}) || lsp.Code != "S001" {
 			t.Fatalf("a location-less finding projects %+v, want the document start", lsp)
 		}
 	})
@@ -95,7 +95,7 @@ func TestSketchCheckReportsPrototypeDiagnostics(t *testing.T) {
 		if len(analysis.Diagnostics) != 0 {
 			t.Fatalf("the 2026 example has diagnostics: %+v", analysis.Diagnostics)
 		}
-		if result := analysis.Result(string(source), compiler.Target); !result.Checked {
+		if result := analysis.Result(string(source), report.Target); !result.Checked {
 			t.Fatal("a clean analysis is not checked")
 		}
 	})
@@ -110,8 +110,8 @@ func TestFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Text != want || !result.Changed || result.SchemaVersion != compiler.FormatterSchemaVersion ||
-		result.InputDigest != compiler.FormatDigest(source) || result.OutputDigest != compiler.FormatDigest(want) {
+	if result.Text != want || !result.Changed || result.SchemaVersion != report.FormatterSchemaVersion ||
+		result.InputDigest != report.FormatDigest(source) || result.OutputDigest != report.FormatDigest(want) {
 		t.Fatalf("result %+v", result)
 	}
 	again, err := Format(want, 0)
@@ -123,7 +123,7 @@ func TestFormat(t *testing.T) {
 	}
 
 	_, err = Format("package p\n\nfunc main() {\n\tx := )\n}\n", 0)
-	var failure compiler.FormatFailure
+	var failure report.FormatFailure
 	if !errors.As(err, &failure) || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code != "S001" {
 		t.Fatalf("syntax error gave %v", err)
 	}
@@ -135,7 +135,7 @@ func TestFormat(t *testing.T) {
 	}
 
 	_, err = Format(source, 10)
-	var limit compiler.FormatLimitError
+	var limit report.FormatLimitError
 	if !errors.As(err, &limit) || limit.Limit != 10 {
 		t.Fatalf("limit gave %v", err)
 	}

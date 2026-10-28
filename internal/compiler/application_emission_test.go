@@ -1,7 +1,6 @@
 package compiler
 
 import (
-	"bufio"
 	"go/ast"
 	goparser "go/parser"
 	gotoken "go/token"
@@ -247,19 +246,17 @@ effect fn test_assertion() -> void raises { AssertionFailed } uses { Assert } {
 	}
 }
 
-// Every authored example builds against exactly its plan's runtime selection.
+// Every legacy example builds against exactly its plan's runtime selection.
 // The Go compiler is the coherence oracle: a declaration referring to an
-// unselected runtime module cannot build.
+// unselected runtime module cannot build. scripts/authored_examples.txt
+// lists the sketch sources now, so the examples are globbed.
 func TestAuthoredExamplesBuildAgainstSelectedRuntime(t *testing.T) {
-	list, err := os.Open("../../scripts/authored_examples.txt")
-	if err != nil {
-		t.Fatal(err)
+	paths, err := filepath.Glob("../../examples/*.ef")
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no legacy examples: %v", err)
 	}
-	defer list.Close()
-	scanner := bufio.NewScanner(list)
 	built := 0
-	for scanner.Scan() {
-		path := "../../" + scanner.Text()
+	for _, path := range paths {
 		source, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -296,9 +293,6 @@ func TestAuthoredExamplesBuildAgainstSelectedRuntime(t *testing.T) {
 				}
 			})
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatal(err)
 	}
 	if built == 0 {
 		t.Fatal("no authored example declares a native application")
