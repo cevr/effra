@@ -84,6 +84,27 @@ func LookupWork(src string) (ops, builds int, d []Diagnostic) {
 	return c.variantOps, c.types.lookupBuilds, diags
 }
 
+// SignatureWork checks src and returns the signature key fields the table
+// built (round 11 M2), with the diagnostics.
+func SignatureWork(src string) (int, []Diagnostic) {
+	c, diags := checkFor(src)
+	if c == nil {
+		return -1, diags
+	}
+	return c.types.sigBuilds, diags
+}
+
+// IndexSortWork checks src and returns the switches' variant operations
+// and the sort comparisons run while a step counter was attached (index
+// construction and case lookups; round 11 M3), with the diagnostics.
+func IndexSortWork(src string) (ops, cmps int, d []Diagnostic) {
+	c, diags := checkFor(src)
+	if c == nil {
+		return -1, -1, diags
+	}
+	return c.variantOps, c.types.sortCmps, diags
+}
+
 // InstancesMade checks src and returns the generic instances it created
 // (round-6 M5: linear in the source for a default-only switch over
 // distinct instantiations of a generic union), with the diagnostics.
