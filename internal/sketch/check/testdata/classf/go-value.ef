@@ -1,0 +1,5 @@
+package p
+type Bang struct{}
+func mark() error[Bang]
+func a() {t := go b();_ = t;return Bang{}} // want S108
+func b() {return a()}

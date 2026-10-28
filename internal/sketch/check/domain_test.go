@@ -228,7 +228,9 @@ func TestRowGraphDomain(t *testing.T) {
 		// whose edges reach inferred bodies only (methods and exported
 		// functions spell their rows). A function used as a value (_ = f)
 		// inside its own component has its rows pinned empty; when its body
-		// still needs C, that is one S108 at its first value use.
+		// still needs C, that is one S108 at its first value use. A var on
+		// an initialization cycle is invalid: no value use follows from its
+		// initializer (D3), and a var in a cyclic component is always on one.
 		bcomp := bodyComponents(n, func(i int) []int {
 			var out []int
 			for _, e := range edges[i] {
@@ -241,7 +243,7 @@ func TestRowGraphDomain(t *testing.T) {
 		pinned := make([]bool, n)
 		for i := range n {
 			for _, e := range edges[i] {
-				if !e.call && kind[e.to] == kFunc && bcomp[i] == bcomp[e.to] {
+				if !e.call && kind[e.to] == kFunc && bcomp[i] == bcomp[e.to] && !poisoned[i] {
 					pinned[e.to] = true
 				}
 			}

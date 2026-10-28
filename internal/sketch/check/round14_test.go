@@ -16,6 +16,8 @@ type admissionGroup struct {
 	// pinned and written count the value-used members without and with
 	// written rows; grew counts the pinned members whose body needs a row.
 	pinned, written, grew int
+	// literal counts the admission calls through function literals.
+	literal int
 }
 
 // recursiveAdmission writes one recursive group f0…f(n-1): a ring of
@@ -31,6 +33,11 @@ type admissionGroup struct {
 //     the empty row gets one S108 at its first value use; nothing else is
 //     reported.
 //
+// An admission call may also pass function literals that call the members
+// (round 14 O1): a literal that is a value refers to them through its
+// inferred rows, so it is a value use of each, at the literal. A literal
+// that writes its capability row is no value use of a capability row.
+//
 // Every body may also hold a nested literal whose parameter or local is
 // spelled as a member (lexical shadowing, round 14 M1): no reference.
 //
@@ -44,6 +51,7 @@ type admissionGroup struct {
 func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 	rng := rand.New(rand.NewPCG(seed, seed^0x51ab))
 	shadows := rand.New(rand.NewPCG(seed, seed^0x5ad0))
+	lits := rand.New(rand.NewPCG(seed, seed^0x11f7))
 	n := 2 + rng.IntN(5)
 	var g admissionGroup
 	var b strings.Builder
@@ -163,13 +171,29 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 				if errors {
 					prefix = "try "
 				}
-				emit("\t%s%s(BoxOf(f%d), BoxOf(f%d))", prefix, fn, s.use[0], s.use[1])
+				switch {
+				case lits.IntN(2) == 0:
+					emit("\t%s%s(BoxOf(f%d), BoxOf(f%d))", prefix, fn, s.use[0], s.use[1])
+				case errors:
+					// Function literals that call the members and are values
+					// (round 14 O1): value uses of them, at the literal.
+					emit("\ttry %s(BoxOf(func() { try f%d() }), BoxOf(func() { try f%d() }))", fn, s.use[0], s.use[1])
+					g.literal++
+				default:
+					emit("\t%s(BoxOf(func() { f%d() }), BoxOf(func() { f%d() }))", fn, s.use[0], s.use[1])
+					g.literal++
+				}
 			}
 			for _, j := range s.use {
 				if firstUse[j] == 0 {
 					firstUse[j] = line
 				}
 			}
+		}
+		// A literal whose capability row is written carries no member's
+		// capability row: no value use of it.
+		if !errors && lits.IntN(3) == 0 {
+			emit("\tSame(BoxOf(func() needs Cap { f%d() }), BoxOf(func() needs Cap { f%d() }))", lits.IntN(n), lits.IntN(n))
 		}
 		// Lexical shadowing (round 14 M1): a parameter or a local of a
 		// nested literal spelled as a member is no reference to it.
@@ -239,17 +263,18 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 // that its body needs gets the class G S108 at its first value use, never a
 // chosen fixpoint (round 13 M1, O1).
 func TestRecursiveAdmissionGroups(t *testing.T) {
-	var accepted, refused, pinnedAccepted int
+	var accepted, refused, pinnedAccepted, literals int
 	for _, errors := range []bool{true, false} {
 		for seed := range uint64(300) {
 			g := recursiveAdmission(seed, errors)
+			literals += g.literal
 			c, diags := checkFor(g.src)
 			if c == nil {
 				t.Fatalf("seed %d: %v\n%s", seed, diags, g.src)
 			}
 			var have []string
 			for _, d := range diags {
-				if d.Code == CodeType && !strings.Contains(d.Message, "used as a value inside its own recursive group") {
+				if d.Code == CodeType && !strings.Contains(d.Message, "own recursive group; write its") {
 					t.Errorf("seed %d errors=%v: unexpected %s\n%s", seed, errors, d, g.src)
 				}
 				have = append(have, fmt.Sprintf("%s@%d", d.Code, d.Line))
@@ -272,7 +297,10 @@ func TestRecursiveAdmissionGroups(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("600 groups: %d accepted with written rows, %d accepted with pinned empty rows, %d refused", accepted, pinnedAccepted, refused)
+	t.Logf("600 groups: %d accepted with written rows, %d accepted with pinned empty rows, %d refused; %d admission calls through literals", accepted, pinnedAccepted, refused, literals)
+	if literals < 300 {
+		t.Fatalf("only %d admission calls through function literals; the generator misses round 14 O1", literals)
+	}
 	if accepted < 50 || refused < 50 || pinnedAccepted < 10 {
 		t.Fatalf("the generator misses a verdict: %d accepted, %d pinned accepted, %d refused", accepted, pinnedAccepted, refused)
 	}
