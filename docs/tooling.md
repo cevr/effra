@@ -7,7 +7,7 @@ Every `ergo` command reads one `.ef` source through one front end, `internal/ske
 | `check FILE [--target go]` | Runs | The check envelope as JSON; exit 0 when the source checks, 1 when it does not |
 | `diagnostics FILE [--strict] [--json] [--target go]` | Runs | One finding per line, or the diagnostic report as JSON; exit 0 when policy passes, 1 when it fails, 2 for an invalid invocation |
 | `build FILE [-o PATH] [--target go]` | Runs | Builds a native executable, `dist/NAME` by default, and prints its path; a source that does not check prints its check envelope and builds nothing |
-| `run FILE [--target go]` | Runs | Builds, then runs the program; SIGINT and SIGTERM are forwarded and the program's exit status passes through |
+| `run FILE [--target go]` | Runs | Builds, then runs the program; SIGINT and SIGTERM are forwarded and the program's exit status passes through; a program that a forwarded signal ends exits 128 plus the signal number (130 for SIGINT, 143 for SIGTERM), with no message of `ergo`'s own |
 | `fmt FILE... [--check] [--json]`, `fmt --stdin` | Runs | Canonical formatting; files are replaced atomically |
 | `test FILE` | Not available yet | `not available yet; lowering adds it (#196)`, exit 1 |
 | `edition` | Removed | `removed in v1; there is one language and no editions (#205)`, exit 1 |
@@ -64,7 +64,7 @@ Completed file entries include `path`, `requestedPaths`, digests, `changed`, `wr
 
 Mutating paths keep the requested display spelling while the operating system resolves ancestor symlinks and `..` components. The leaf must stay regular and not a symlink at each replacement check. Lexical spellings that resolve to the same path are deduplicated; distinct hardlink or inode aliases in one request are rejected. A requested hardlink is replaced through an atomic same-directory rename, so that directory entry splits from unlisted hardlinks. A read-only regular file may be replaced when its directory is writable, and its permission, setuid, setgid and sticky bits are kept. These cooperative checks do not claim hostile-filesystem race protection or directory-fsync durability.
 
-The formatter does not yet refuse invalid UTF-8: it formats such a source and writes the replacement character for an invalid byte in a comment. The earlier front end refused it with EF001; restoring that refusal belongs to the parser.
+The formatter does not refuse invalid UTF-8. It formats such a source and writes the invalid bytes of comments and string literals back unchanged; an invalid byte where an identifier may start is the parse error S001, `EFMT_SYNTAX`. The earlier front end refused every invalid byte with EF001.
 
 ## Gate prerequisites
 
