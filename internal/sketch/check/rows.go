@@ -128,15 +128,17 @@ type bodyNode struct {
 // diagnostics. An acyclic graph is linear: each body is checked once.
 //
 // The graph's edges are the references that row inference needs: to a
-// function whose rows are inferred and to a package var. A method or a
-// function that spells its rows is read by its signature, so it adds no
-// edge: one edge per referenced name, never one per same-named method
-// (round-3 M5). Initialization cycles are found before, by discoverInit
-// over resolved references.
+// function whose rows are inferred and to a package var. They are the
+// resolved objects the resolving pass recorded (resolveBodies), never names
+// looked up in package scope: a local, a parameter or a receiver that
+// shadows a package function adds no edge (round 14 M1; go/types
+// initorder.go walks objects too). A method or a function that spells its
+// rows is read by its signature, so it adds no edge: one edge per
+// referenced object, never one per same-named method (round-3 M5).
 func (c *checker) checkBodies() {
 	var nodes []*bodyNode
 	byFunc := map[*Func]*bodyNode{}
-	byVar := map[*Var]*bodyNode{}
+	byVar := map[*pkgVar]*bodyNode{}
 	for _, f := range c.funcs {
 		if f.Decl.Body == nil || f.Sig == nil {
 			continue
@@ -148,53 +150,32 @@ func (c *checker) checkBodies() {
 	for _, v := range c.vars {
 		n := &bodyNode{v: v, index: -1}
 		nodes = append(nodes, n)
-		byVar[v.obj] = n
+		byVar[v] = n
 	}
+	c.resolveBodies()
 	c.bodyEdges = 0
 	for _, n := range nodes {
-		var root syntax.Node
+		var owner any = n.v
 		if n.fn != nil {
-			root = n.fn.Decl.Body
-		} else if n.v.spec != nil {
-			if n.v.idx < len(n.v.spec.Values) {
-				root = n.v.spec.Values[n.v.idx]
-			} else if len(n.v.spec.Values) == 1 {
-				root = n.v.spec.Values[0]
+			owner = n.fn
+		}
+		for _, d := range sortedDeps(c.refs[owner]) {
+			var to *bodyNode
+			switch d := d.(type) {
+			case *Func:
+				if d.inferErrors || d.inferUses {
+					to = byFunc[d]
+				}
+			case *pkgVar:
+				to = byVar[d]
 			}
-		}
-		if root == nil {
-			continue
-		}
-		seen := map[*bodyNode]bool{}
-		skip := map[*syntax.Ident]bool{}
-		edge := func(to *bodyNode) {
-			if to != nil && !seen[to] {
-				seen[to] = true
+			if to != nil {
 				n.edges = append(n.edges, to)
 				c.bodyEdges++
 			}
 		}
-		syntax.Inspect(root, func(x syntax.Node) bool {
-			switch x := x.(type) {
-			case *syntax.SelectorExpr:
-				skip[x.Sel] = true
-			case *syntax.Ident:
-				if skip[x] {
-					return true
-				}
-				switch o := c.pkg.Scope.names[x.Name].(type) {
-				case *Func:
-					if o.inferErrors || o.inferUses {
-						edge(byFunc[o])
-					}
-				case *Var:
-					edge(byVar[o])
-				}
-			}
-			return true
-		})
 	}
-	c.discoverInit()
+	c.refs = nil
 	for _, scc := range tarjan(nodes) {
 		c.checkComponent(scc)
 	}
@@ -204,39 +185,60 @@ func (c *checker) checkBodies() {
 	c.checkInitCycles()
 }
 
-// discoverInit finds the package's initialization cycles before any body
-// is checked with diagnostics (round-2 M2, round-3 M5). It checks, silently,
-// each package var's initializer and every function and method those reach
-// through resolved references (a call, a value, a method value or
-// expression), each once: the dependency closure of Go's initialization
-// order, linear in its size. A cycle through a var is S108 and its vars
-// become invalid, so no row diagnostic follows from them. The silent checks
+// resolveBodies resolves every body once, silently, before any body is
+// checked with diagnostics: each package var's initializer, then every
+// function and method. Its references are the resolved objects (c.refs,
+// recordDep), from which checkBodies builds the body graph (round 14 M1),
+// and the dependency graph of Go's initialization order, from which the
+// package's initialization cycles are found (round-2 M2, round-3 M5): a
+// cycle through a var is S108 and its vars become invalid, so no row
+// diagnostic follows from them. Linear in the source. The silent checks
 // leave no row behind: the inferred rows restart empty.
-func (c *checker) discoverInit() {
-	if len(c.vars) == 0 {
-		return
-	}
+//
+// A body that names no package var and no function with an inferred row
+// (any identifier, shadowed or not) has no edge, so it is resolved only
+// when a var initializer reaches it (the initialization order's closure);
+// every edge is a resolved identifier with its object's name.
+func (c *checker) resolveBodies() {
 	c.silent++
 	c.init.tentative = true
+	c.refs = map[any]map[any]bool{}
 	visited := map[*Func]bool{}
 	var queue []*Func
-	enqueue := func(owner any) {
+	enqueue := func(f *Func) {
+		if !visited[f] && f.Decl != nil && f.Decl.Body != nil && f.Sig != nil {
+			visited[f] = true
+			queue = append(queue, f)
+		}
+	}
+	reached := func(owner any) {
+		for _, d := range sortedDeps(c.refs[owner]) {
+			if f, ok := d.(*Func); ok {
+				enqueue(f)
+			}
+		}
 		for _, d := range sortedDeps(c.init.deps[owner]) {
-			if f, ok := d.(*Func); ok && !visited[f] && f.Decl != nil && f.Decl.Body != nil && f.Sig != nil {
-				visited[f] = true
-				queue = append(queue, f)
+			if f, ok := d.(*Func); ok {
+				enqueue(f)
 			}
 		}
 	}
 	for _, pv := range c.vars {
 		c.checkPkgVar(pv)
-		enqueue(pv)
+		reached(pv)
+	}
+	for _, f := range c.funcs {
+		if c.namesInferred(f) {
+			enqueue(f)
+		}
 	}
 	for len(queue) > 0 {
 		f := queue[0]
 		queue = queue[1:]
 		c.checkFuncBody(f)
-		enqueue(f)
+		if len(c.vars) > 0 {
+			reached(f)
+		}
 	}
 	c.init.tentative = false
 	c.silent--
@@ -248,6 +250,39 @@ func (c *checker) discoverInit() {
 	}
 	c.newSolutions()
 	c.checkInitCycles()
+}
+
+// namesInferred reports whether f's body has an identifier spelled as a
+// package var or a package function with an inferred row: only such a
+// body can have an edge of the body graph. A selector's name is a field
+// or method, never a package object of this package.
+func (c *checker) namesInferred(f *Func) bool {
+	if f.Decl == nil || f.Decl.Body == nil || f.Sig == nil {
+		return false
+	}
+	found := false
+	sel := map[*syntax.Ident]bool{}
+	syntax.Inspect(f.Decl.Body, func(x syntax.Node) bool {
+		if found {
+			return false
+		}
+		switch x := x.(type) {
+		case *syntax.SelectorExpr:
+			sel[x.Sel] = true
+		case *syntax.Ident:
+			if sel[x] {
+				return true
+			}
+			switch o := c.pkg.Scope.names[x.Name].(type) {
+			case *Func:
+				found = o.inferErrors || o.inferUses
+			case *Var:
+				found = true
+			}
+		}
+		return true
+	})
+	return found
 }
 
 func (c *checker) checkComponent(scc []*bodyNode) {

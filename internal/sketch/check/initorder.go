@@ -15,7 +15,7 @@ type initDeps struct {
 	owner any                  // *Func or *pkgVar being checked
 	deps  map[any]map[any]bool // owner → referenced *Func or *pkgVar
 	byVar map[*Var]*pkgVar
-	// tentative: discoverInit's silent pass records references too, at
+	// tentative: resolveBodies' silent pass records references too, at
 	// its own silence level only (a nested peek is checked again at that
 	// level), so the cycles are known before the reporting pass, which
 	// records them again.
@@ -23,8 +23,17 @@ type initDeps struct {
 }
 
 // recordDep notes that the body being checked refers to o.
+// While resolveBodies runs (c.refs set), every resolved reference is also
+// recorded, at any silence level, as an edge of the body graph: name
+// resolution does not depend on the silence or the rows.
 func (c *checker) recordDep(o any) {
-	if c.init.owner == nil || c.silent > 0 && !(c.init.tentative && c.silent == 1) {
+	if c.init.owner == nil {
+		return
+	}
+	if c.refs != nil {
+		c.recordRef(o)
+	}
+	if c.silent > 0 && !(c.init.tentative && c.silent == 1) {
 		return
 	}
 	if v, ok := o.(*Var); ok {
@@ -47,6 +56,34 @@ func (c *checker) recordDep(o any) {
 	if m == nil {
 		m = map[any]bool{}
 		c.init.deps[c.init.owner] = m
+	}
+	m[o] = true
+}
+
+// recordRef records a resolved reference of the body being resolved: a
+// package function of this package or a package var.
+func (c *checker) recordRef(o any) {
+	switch x := o.(type) {
+	case *Var:
+		if !x.pkg {
+			return
+		}
+		pv := c.pkgVarOf(x)
+		if pv == nil {
+			return
+		}
+		o = pv
+	case *Func:
+		if x.Pkg != c.pkg {
+			return
+		}
+	default:
+		return
+	}
+	m := c.refs[c.init.owner]
+	if m == nil {
+		m = map[any]bool{}
+		c.refs[c.init.owner] = m
 	}
 	m[o] = true
 }
@@ -77,8 +114,8 @@ func (c *checker) pkgVarOf(v *Var) *pkgVar {
 // ("initialization cycle"): a var's initializer would need its own value
 // (round-2 M2). A cycle through functions alone is recursion, legal.
 //
-// discoverInit (rows.go) records the resolved references of every var
-// initializer and of the functions and methods they reach before any body
+// resolveBodies (rows.go) records the resolved references of every var
+// initializer, function and method before any body
 // is checked with diagnostics, and checkInitCycles reports the cycles then:
 // the cycle's vars become invalid, so their rows never reach a caller and
 // no capability or error diagnostic follows from them (D3). It runs once

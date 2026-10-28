@@ -90,6 +90,9 @@ type checker struct {
 	// order, of each member with an inferred row; such a member's inferred
 	// rows are pinned empty, and grew records which of them its body
 	// exceeds (by kind: errors, capabilities).
+	// refs collects, while resolveBodies runs, the resolved package
+	// functions and vars each body refers to: the body graph's edges.
+	refs       map[any]map[any]bool
 	group      map[*Func]bool
 	callee     syntax.Expr
 	groupValue map[*Func]valueUse
