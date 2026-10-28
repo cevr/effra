@@ -97,22 +97,22 @@ type checker struct {
 	group      map[*Func]bool
 	groupValue map[*Func][2]groupSite
 	lits       []*litFrame // the literal frames being checked, innermost last
-	// building is the named wire whose body checkWires is about to check
-	// (wireBody reads and clears it).
-	building *Wire
 	// walkOps counts the reference walk's literal elements, an operation
 	// count for the linear-growth tests (round 17 M2).
 	walkOps int
 	// wires meters the wire summaries' work against the package's budget
-	// (wiresum.go; nil until the first summary).
+	// (wiresum.go; nil when the package has no wire).
 	wires *wireMeter
+	// wiresDone is set once wireSummaries has run.
+	wiresDone bool
+	// wireLimit, set only by tests, replaces the budget of a package of
+	// the given wire size.
+	wireLimit func(size int) int
 	// wireComp maps each named wire to its embedding component (wireSummaries).
 	wireComp map[*Wire]*wireComp
-	// wireBodies holds each wire body's summary, decided once (bodySummary).
+	// wireBodies holds each wire body's summary, decided once (wireSummaries,
+	// finished by bodySummary).
 	wireBodies map[*syntax.WireBody]*bodySum
-	// foreignCaps holds another package's wire summaries keyed by this
-	// check's type table (localCaps).
-	foreignCaps map[*capSet]*capSet
 	// nodeCheck replaces checkNode in converge for the synthetic oscillation
 	// test (nil otherwise); convergeChecks counts converge's checks.
 	nodeCheck      func(*bodyNode) bool

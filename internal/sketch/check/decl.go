@@ -42,6 +42,9 @@ func (c *checker) run(files []*syntax.File) *Package {
 	c.checkInstantiationCycles()
 	c.collectBodyErrorRows()
 	c.checkEntry()
+	// The wire pass runs once, before any body, so its budget verdict does
+	// not depend on which body meets a wire first (wiresum.go).
+	c.wireSummaries()
 	// Bodies converge first: a machine's initial value and the named wires
 	// are closed contexts that read the converged inferred rows (M2).
 	c.checkBodies()

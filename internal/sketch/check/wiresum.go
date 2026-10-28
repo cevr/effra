@@ -2,8 +2,7 @@ package check
 
 import (
 	"fmt"
-	"math/bits"
-	"sort"
+	"strings"
 
 	"ergo.local/prototype/internal/sketch/syntax"
 )
@@ -16,61 +15,124 @@ import (
 // the source (a ladder of disjoint chains), and batch reachability has no
 // known linear algorithm, so no exact checker is linear on every input.
 // The summaries therefore run on one deterministic budget per package,
-// wireBudgetPerUnit × wireSize, counted before each unit of work
-// (capset.go wireMeter). When the next step would pass it, the checker
-// stops summarising: the wire it was working on gets S111
-// (wireBudgetMessage), and every wire or body summarised after it adds no
-// diagnostic of its own and binds an unknown set, so a with of it
-// discharges everything (D3). The checker never accepts a wire it has not
-// proved, as S103 never accepts a switch it has not proved total.
+// wireBudgetPerUnit × wireSize, and every unit of their work is charged
+// before it runs: ordering, the graph walk, set nodes, copies, union
+// elements and probes (capset.go wireMeter; round 19 M1). When the next
+// step would pass the budget, the checker stops: the wire or the inline
+// wire it was working on gets S111 (wireBudgetMessage), and every wire not
+// summarised yet binds an unknown set and adds no diagnostic of its own,
+// so a with of it discharges everything (D3). The checker never accepts a
+// wire it has not proved, as S103 never accepts a switch it has not proved
+// total.
+//
+// The verdict does not depend on the declarations' order (round 19 M2):
+// the pass runs once, before any body, over the named wires in name order
+// and then over the inline wires grouped by their declaration's name;
+// sets are keyed by capability names (capset.go); and every union plan
+// follows the wires' names and their entries' order. The charged total is
+// a function of the wire graph and its names, and so is the place of the
+// refusal.
 // Prior art: TypeScript stops instantiation after a fixed count (TS2589)
-// and rustc refuses past recursion_limit and type_length_limit; both are
-// deterministic, source-only budgets that refuse.
+// and rustc refuses past recursion_limit; both are deterministic,
+// source-only budgets that refuse. Elixir's typer sorts definitions before
+// its recursive traversal (module/types.ex), so its traversal does not
+// depend on their order either.
 
 // wireBudgetPerUnit is K, the work allowed per unit of wire source: 128.
-// One summary step is a treap node visited, copied or created, an element
-// enumerated, or a probe. A capability added along a chain costs about
-// 2·log2(n) + 2 steps for its path (visit and copy), and it is added a few
-// times (its wire's own set, its component's union, a body summary), so a
-// chain, a fan-in or a large base with a chain of 8000 wires uses 15 to
-// 19% of the budget (TestWireBudget, measured). A small program pays a
-// constant per wire, so K must also leave the corpus room: its largest
-// share is 5.8% at 128 and was 11.6% at 64. The corpus, the fixtures and
-// the examples use under 10% of their budget (TestWireBudgetHeadroom).
+// One step is a set node read, copied or created, an element enumerated, a
+// probe, a graph step, or a sort's comparison or move. A wire costs a
+// constant for its graph steps plus 3⌈log₂ n⌉ for the name sort, and a
+// capability added along a chain about 2·log₂ n + 2 for its path, a few
+// times over (its wire's own set, its component's union, a body), so a
+// chain, a fan-in or a large base with a chain of 8000 wires uses under a
+// third of the budget (TestWireBudget, measured). A small program pays a
+// constant per wire, so K must also leave the corpus room: the corpus, the
+// fixtures and the examples use under 10% of their budget
+// (TestWireBudgetHeadroom).
 const wireBudgetPerUnit = 128
 
 // wireBudgetMessage is the S111 of a wire whose summary passed the budget.
 const wireBudgetMessage = "this wire's embedding graph is too large to check for duplicate entries; split it"
 
-// meter returns the package's wire meter. Its budget is fixed by the
-// source alone, at first use.
-func (c *checker) meter() *wireMeter {
-	if c.wires == nil {
-		c.wires = &wireMeter{limit: wireBudgetPerUnit * c.wireSize()}
-	}
-	return c.wires
+// A wireGroup is the inline wires of the top-level declarations of one
+// name, in source order. The pass handles a group as one unit, so two
+// declarations of one name (`var _`, a duplicate) need no order between
+// them.
+type wireGroup struct {
+	key  string
+	lits []*syntax.WireLit
 }
 
-// wireSize is the size the wire budget is proportional to: the wire
-// entries and embeddings of every wire declaration and literal, the
-// capability names written in wire keys and in needs rows, and one.
-func (c *checker) wireSize() int {
-	size := 1
+// wireSource reads the package's wire source once: its size, which fixes
+// the budget, and its inline wires by declaration. The size counts every
+// wire declaration and literal, its entries and embeddings, the capability
+// names written in wire keys and in needs rows, and one. This walk defines
+// the budget, so it is not charged to it; it is linear in the source.
+func (c *checker) wireSource() (size int, groups []*wireGroup, any bool) {
+	size = 1
+	byKey := map[string]*wireGroup{}
 	for _, f := range c.files {
-		syntax.Inspect(f.syntax, func(n syntax.Node) bool {
-			switch n := n.(type) {
-			case *syntax.WireEntry:
-				size++
-				if n.Kind != syntax.WireEmbed {
-					size += 1 + len(n.Keys)
+		for _, d := range f.syntax.Decls {
+			key := declKey(d)
+			syntax.Inspect(d, func(n syntax.Node) bool {
+				switch n := n.(type) {
+				case *syntax.WireDecl:
+					size++
+					any = true
+				case *syntax.WireLit:
+					size++
+					any = true
+					g := byKey[key]
+					if g == nil {
+						g = &wireGroup{key: key}
+						byKey[key] = g
+						groups = append(groups, g)
+					}
+					g.lits = append(g.lits, n)
+				case *syntax.WireEntry:
+					size++
+					if n.Kind != syntax.WireEmbed {
+						size += 1 + len(n.Keys)
+					}
+				case *syntax.NeedsClause:
+					size += len(n.Names)
 				}
-			case *syntax.NeedsClause:
-				size += len(n.Names)
-			}
-			return true
-		})
+				return true
+			})
+		}
 	}
-	return size
+	return size, groups, any
+}
+
+// declKey names a top-level declaration independently of its place.
+func declKey(d syntax.Decl) string {
+	switch d := d.(type) {
+	case *syntax.FuncDecl:
+		if d.Recv != nil && len(d.Recv.List) > 0 {
+			t := d.Recv.List[0].Type
+			if s, ok := t.(*syntax.StarExpr); ok {
+				t = s.X
+			}
+			if ix, ok := t.(*syntax.IndexExpr); ok {
+				t = ix.X
+			}
+			return "func " + exprText(t) + "." + d.Name.Name
+		}
+		return "func " + d.Name.Name
+	case *syntax.VarDecl:
+		var names []string
+		for _, s := range d.Specs {
+			for _, n := range s.Names {
+				names = append(names, n.Name)
+			}
+		}
+		return "var " + strings.Join(names, ",")
+	case *syntax.WireDecl:
+		return "wire " + d.Name.Name
+	case *syntax.TypeDecl:
+		return "type " + d.Name.Name
+	}
+	return "decl"
 }
 
 // wireBinds returns the capabilities a named wire binds: its entries and
@@ -87,62 +149,198 @@ func (c *checker) wireBinds(w *Wire) *capSet {
 type wireComp struct {
 	binds   *capSet // nil when refused
 	unknown bool
+	done    bool
 }
 
-// wireSummaries computes, once, every named wire's binding summary over
-// the embedding graph: the strongly connected components (Tarjan) in
-// reverse topological order, each component's summary the union of its
-// members' own entries and its successors' summaries, shared by every
-// member and every embedding. The result does not depend on which wire is
-// asked first (round 17 M1; an embedding cycle is reported by
-// checkWireCycles). Every step is metered; past the budget the wire being
-// summarised is marked (Wire.budget, reported by checkWires) and every
-// wire not summarised yet binds an unknown set.
-// Prior art: go/types orders package initialization over its dependency
-// graph once (initorder.go).
+// A bodySum is a wire body's summary: what it binds, whether that is
+// known, and its S111 and replace findings, which wireBody reports on
+// every pass. An inline wire's body is prepared by the pass (its
+// embeddings' union and their collisions) and finished at its first check,
+// where its keys resolve in the enclosing body's scope, within the
+// allowance the pass charged for it (finishBody).
+type bodySum struct {
+	binds    *capSet
+	known    bool
+	findings []wireFinding
+
+	pending         bool
+	embedded, cycle *capSet
+	collisions      []collision
+	allowance       int
+}
+
+type wireFinding struct {
+	at        syntax.Node
+	code, msg string
+}
+
+type collision struct {
+	cap Type
+	key capKey
+	at  syntax.Expr
+}
+
+// wireSummaries runs the wire pass once, before any body (decl.go run):
+//  1. the named wires are ordered by name, and the inline wire groups by
+//     their declaration's name;
+//  2. each named wire's own entries are collected, in name order;
+//  3. the strongly connected components of the embedding graph (Tarjan,
+//     roots in name order, embeddings in entry order) get their summaries
+//     in reverse topological order: the union of the members' own entries
+//     and the successors' summaries, shared by every member and every
+//     embedding (round 17 M1, round 18);
+//  4. each named wire's body is summarised, in name order;
+//  5. each inline wire is prepared, group by group, and the work of
+//     finishing it is charged as its allowance.
+//
+// Every step is charged before it runs. Past the budget, the unit being
+// worked on is refused: a named wire gets Wire.budget (reported by
+// checkWires), an inline wire group gets the S111 at each of its wires,
+// and nothing after it is summarised.
 func (c *checker) wireSummaries() {
-	if c.wireComp != nil {
+	if c.wiresDone {
 		return
 	}
+	c.wiresDone = true
 	c.wireComp = map[*Wire]*wireComp{}
-	m := c.meter()
-	wires := make([]*Wire, 0, len(c.pkg.Wires))
+	c.wireBodies = map[*syntax.WireBody]*bodySum{}
+	size, groups, any := c.wireSource()
+	if !any {
+		return
+	}
+	limit := wireBudgetPerUnit * size
+	if c.wireLimit != nil {
+		limit = c.wireLimit(size)
+	}
+	m := &wireMeter{limit: limit}
+	c.wires = m
+	savedCur, savedFn := c.cur, c.fn
+	c.fn = nil
+	c.silent++
+	defer func() { c.silent--; c.cur, c.fn = savedCur, savedFn }()
+
+	p := &wirePass{c: c, m: m}
+	wires, ok := p.order(groups)
+	if !ok {
+		// Not even the wires' order fits: every wire is refused.
+		for _, w := range c.pkg.Wires {
+			w.budget = true
+		}
+		for _, g := range groups {
+			p.refuseGroup(g)
+		}
+		p.stopped = true
+	}
+	if !p.stopped {
+		p.own(wires)
+	}
+	if !p.stopped {
+		p.components(wires)
+	}
+	// Every wire without a summary binds an unknown set.
+	refused := &wireComp{unknown: true}
 	for _, w := range c.pkg.Wires {
+		if comp := c.wireComp[w]; comp == nil || !comp.done {
+			c.wireComp[w] = refused
+			w.binds, w.unknown = nil, true
+		}
+	}
+	for _, w := range wires {
+		if !p.stopped {
+			p.namedBody(w)
+		}
+	}
+	for _, g := range groups {
+		if !p.stopped {
+			p.inline(g)
+		}
+	}
+	// Every body not summarised binds an unknown set and has no finding.
+	for _, w := range c.pkg.Wires {
+		if c.wireBodies[w.Decl.Body] == nil {
+			c.wireBodies[w.Decl.Body] = &bodySum{}
+		}
+	}
+	for _, g := range groups {
+		for _, lit := range g.lits {
+			if c.wireBodies[lit.Body] == nil {
+				c.wireBodies[lit.Body] = &bodySum{}
+			}
+		}
+	}
+}
+
+// A wirePass is the state of one run of wireSummaries.
+type wirePass struct {
+	c       *checker
+	m       *wireMeter
+	stopped bool
+	nodes   map[*Wire]*wireNode
+}
+
+type wireNode struct {
+	index, low int
+	onStack    bool
+	embeds     []*Wire
+}
+
+// refuse marks the named wire being summarised and stops the pass.
+func (p *wirePass) refuse(w *Wire) {
+	if !p.stopped {
+		p.stopped, w.budget = true, true
+	}
+}
+
+func (p *wirePass) refuseGroup(g *wireGroup) {
+	for _, lit := range g.lits {
+		p.c.wireBodies[lit.Body] = &bodySum{findings: []wireFinding{{lit, CodeDuplicateCap, wireBudgetMessage}}}
+	}
+}
+
+// order charges and builds the named wires' name order and the groups'
+// order.
+func (p *wirePass) order(groups []*wireGroup) ([]*Wire, bool) {
+	c, m := p.c, p.m
+	n := len(c.pkg.Wires)
+	if !m.step(n) {
+		return nil, false
+	}
+	wires := make([]*Wire, 0, n)
+	for _, w := range c.pkg.Wires {
+		work(m)
 		wires = append(wires, w)
 	}
-	sort.Slice(wires, func(i, j int) bool {
-		if wires[i].file.index != wires[j].file.index {
-			return wires[i].file.index < wires[j].file.index
-		}
-		return wires[i].Pos < wires[j].Pos
-	})
-	stopped := false
-	refuse := func(w *Wire) {
-		if !stopped {
-			stopped, w.budget = true, true
-		}
+	if !sortWires(m, wires, func(a, b *Wire) bool { return a.Name < b.Name }) {
+		return nil, false
 	}
-	type node struct {
-		index, low int
-		onStack    bool
-		embeds     []*Wire
+	if !sortWires(m, groups, func(a, b *wireGroup) bool { return a.key < b.key }) {
+		return nil, false
 	}
-	nodes := make(map[*Wire]*node, len(wires))
-	own := func(w *Wire, n *node) bool {
-		saved := c.cur
+	return wires, true
+}
+
+// own collects each named wire's own entries and its embeddings.
+func (p *wirePass) own(wires []*Wire) {
+	c, m := p.c, p.m
+	p.nodes = make(map[*Wire]*wireNode, len(wires))
+	for _, w := range wires {
+		if !m.step(1) {
+			p.refuse(w)
+			return
+		}
+		work(m)
+		n := &wireNode{index: -1}
+		p.nodes[w] = n
 		c.cur = w.file
-		c.silent++
-		defer func() { c.silent--; c.cur = saved }()
 		set, known := &capSet{}, true
 		for _, e := range w.Decl.Body.Entries {
 			if !m.step(1) {
-				return false
+				p.refuse(w)
+				return
 			}
+			work(m)
 			if e.Kind == syntax.WireEmbed {
-				var inner *Wire
-				if id, ok := e.Key.(*syntax.Ident); ok {
-					inner = w.pkg.Wires[id.Name]
-				}
+				inner := c.embeddedWire(e)
 				if inner == nil {
 					known = false
 					continue
@@ -151,44 +349,54 @@ func (c *checker) wireSummaries() {
 				continue
 			}
 			for _, k := range append([]syntax.Expr{e.Key}, e.Keys...) {
-				if t := c.rowElem(k, KindUses, nil); t != nil {
-					if _, isParam := t.(*TypeParam); !isParam {
-						var ok bool
-						if set, ok = set.with(m, c.types, t); !ok {
-							return false
-						}
-					}
+				if !m.step(1) {
+					p.refuse(w)
+					return
+				}
+				work(m)
+				t := c.rowElem(k, KindUses, nil)
+				if t == nil {
+					continue
+				}
+				var ok bool
+				if set, ok = set.with(m, t); !ok {
+					p.refuse(w)
+					return
 				}
 			}
 		}
 		w.own, w.unknown = set, !known
-		return true
 	}
-	for _, w := range wires {
-		n := &node{index: -1}
-		nodes[w] = n
-		if !stopped && !own(w, n) {
-			refuse(w)
-		}
-	}
+}
+
+// components summarises the embedding graph's strongly connected
+// components (Tarjan).
+func (p *wirePass) components(wires []*Wire) {
+	c, m := p.c, p.m
 	index := 0
 	var stack []*Wire
 	var connect func(w *Wire)
 	connect = func(w *Wire) {
-		n := nodes[w]
+		if !m.step(1) {
+			p.refuse(w)
+			return
+		}
+		work(m)
+		n := p.nodes[w]
 		n.index, n.low = index, index
 		index++
 		stack = append(stack, w)
 		n.onStack = true
 		for _, e := range n.embeds {
-			if stopped || !m.step(1) {
-				refuse(w)
+			if !m.step(1) {
+				p.refuse(w)
 				return
 			}
-			d := nodes[e]
+			work(m)
+			d := p.nodes[e]
 			if d.index < 0 {
 				connect(e)
-				if stopped {
+				if p.stopped {
 					return
 				}
 				n.low = min(n.low, d.low)
@@ -202,9 +410,14 @@ func (c *checker) wireSummaries() {
 		comp := &wireComp{}
 		var members []*Wire
 		for {
+			if !m.step(1) {
+				p.refuse(w)
+				return
+			}
+			work(m)
 			v := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
-			nodes[v].onStack = false
+			p.nodes[v].onStack = false
 			c.wireComp[v] = comp
 			members = append(members, v)
 			if v == w {
@@ -212,17 +425,24 @@ func (c *checker) wireSummaries() {
 			}
 		}
 		// The summary joins the members' entries and each successor
-		// component's summary once, into the largest of them (capUnion).
+		// component's summary once, into the largest of them (capUnion), in
+		// the order the walk met them.
 		var sets []*capSet
 		succ := map[*wireComp]bool{}
 		for _, v := range members {
+			if !m.step(1) {
+				p.refuse(w)
+				return
+			}
+			work(m)
 			sets = append(sets, v.own)
 			comp.unknown = comp.unknown || v.unknown
-			for _, e := range nodes[v].embeds {
+			for _, e := range p.nodes[v].embeds {
 				if !m.step(1) {
-					refuse(w)
-					break
+					p.refuse(w)
+					return
 				}
+				work(m)
 				if d := c.wireComp[e]; d != comp && !succ[d] {
 					succ[d] = true
 					sets = append(sets, d.binds)
@@ -230,36 +450,56 @@ func (c *checker) wireSummaries() {
 				}
 			}
 		}
-		if !stopped {
-			var ok bool
-			if comp.binds, ok = capUnion(m, c.types, sets); !ok {
-				refuse(w)
-			}
+		binds, ok := capUnion(m, sets)
+		if !ok {
+			p.refuse(w)
+			return
 		}
-		if stopped {
-			comp.binds, comp.unknown = nil, true
-		}
+		comp.binds, comp.done = binds, true
 		for _, v := range members {
 			v.binds, v.unknown = comp.binds, comp.unknown
 		}
 	}
-	if !stopped {
-		for _, w := range wires {
-			if nodes[w].index < 0 {
-				connect(w)
-				if stopped {
-					break
-				}
+	for _, w := range wires {
+		if p.nodes[w].index < 0 {
+			connect(w)
+			if p.stopped {
+				return
 			}
 		}
 	}
-	// Past the budget, every wire without a summary binds an unknown set.
-	refused := &wireComp{unknown: true}
-	for _, w := range wires {
-		if c.wireComp[w] == nil {
-			c.wireComp[w] = refused
-			w.binds, w.unknown = nil, true
+}
+
+// namedBody summarises a named wire's body in its own closed context, where
+// its keys resolve as checkWires resolves them.
+func (p *wirePass) namedBody(w *Wire) {
+	c, m := p.c, p.m
+	c.cur = w.file
+	c.fn = &funcCtx{scope: newScope(c.pkg.Scope)}
+	defer func() { c.fn = nil }()
+	s := &bodySum{}
+	if !c.prepareBody(s, w.Decl.Body, w, m) || !c.finishBody(s, w.Decl.Body, m) {
+		p.refuse(w)
+		s = &bodySum{}
+	}
+	c.wireBodies[w.Decl.Body] = s
+}
+
+// inline prepares a group's inline wires and charges their allowances.
+func (p *wirePass) inline(g *wireGroup) {
+	c, m := p.c, p.m
+	sums := make([]*bodySum, len(g.lits))
+	for i, lit := range g.lits {
+		s := &bodySum{pending: true}
+		if !c.prepareBody(s, lit.Body, nil, m) || !m.step(s.allowance) {
+			p.stopped = true
+			p.refuseGroup(g)
+			return
 		}
+		sums[i] = s
+	}
+	for i, lit := range g.lits {
+		c.wireBodies[lit.Body] = sums[i]
 	}
 }
 
@@ -267,101 +507,57 @@ func (c *checker) wireSummaries() {
 // body of the named wire self (nil for an inline wire), whether every wire
 // it reaches exists and was summarised, and whether inner is on self's own
 // embedding cycle. Such an embedding, on a reported cycle (S108, Wire 5),
-// contributes the component's summary, and bodySummary counts none of it
-// as a second entry, against the wire's own entries or its other
-// embeddings: what it brings depends on how the cycle is fixed (D3; round
-// 16 m3, round 18). A replace may still name it.
+// contributes the component's summary, and the body counts none of it as
+// a second entry, against the wire's own entries or its other embeddings:
+// what it brings depends on how the cycle is fixed (D3; round 16 m3, round
+// 18). A replace may still name it.
 func (c *checker) embeddedBinds(inner, self *Wire) (binds *capSet, known, onCycle bool) {
-	c.wireSummaries()
 	comp := c.wireComp[inner]
 	return comp.binds, !comp.unknown, self != nil && comp == c.wireComp[self]
 }
 
-// localCaps returns s keyed by this check's type table: a wire summary of
-// another package is converted once, metered. ok is false when the budget
-// ran out.
-func (c *checker) localCaps(s *capSet) (*capSet, bool) {
-	if s == nil || s.size == 0 || s.tab == c.types {
-		return s, true
-	}
-	if out, ok := c.foreignCaps[s]; ok {
-		return out, true
-	}
-	m := c.meter()
-	out := &capSet{}
-	if !s.each(m, func(_ int32, t Type) bool {
-		var ok bool
-		out, ok = out.with(m, c.types, t)
-		return ok
-	}) {
-		return nil, false
-	}
-	if c.foreignCaps == nil {
-		c.foreignCaps = map[*capSet]*capSet{}
-	}
-	c.foreignCaps[s] = out
-	return out, true
-}
-
-// A bodySum is a wire body's summary, decided once: what it binds, whether
-// that is known, and its S111 and replace findings, which wireBody reports
-// on every pass.
-type bodySum struct {
-	binds    *capSet
-	known    bool
-	findings []wireFinding
-}
-
-type wireFinding struct {
-	at        syntax.Node
-	code, msg string
-}
-
-// bodySummary returns the summary of a named (self) or inline wire body;
-// at is the wire's name or literal, where a budget refusal is reported.
-// After a refusal a body binds an unknown set and has no finding (D3).
-func (c *checker) bodySummary(body *syntax.WireBody, self *Wire, at syntax.Node) *bodySum {
-	if s, ok := c.wireBodies[body]; ok {
-		return s
-	}
+// bodySummary returns the summary of a named or inline wire body, which
+// the pass decided; an inline body is finished here, at its first check,
+// within its allowance. After a refusal a body binds an unknown set and
+// has no finding of its own (D3).
+func (c *checker) bodySummary(body *syntax.WireBody) *bodySum {
 	c.wireSummaries()
-	if c.wireBodies == nil {
-		c.wireBodies = map[*syntax.WireBody]*bodySum{}
+	s := c.wireBodies[body]
+	if s == nil {
+		panic("check: a wire body outside the wire pass")
 	}
-	s := &bodySum{}
-	c.wireBodies[body] = s
-	m := c.meter()
-	if m.out {
-		return s
-	}
-	if !c.summarizeBody(s, body, self, m) {
-		*s = bodySum{findings: []wireFinding{{at, CodeDuplicateCap, wireBudgetMessage}}}
+	if s.pending {
+		s.pending = false
+		allowance := &wireMeter{limit: s.allowance, parent: c.wires}
+		if !c.finishBody(s, body, allowance) {
+			panic("check: a wire body passed the allowance charged for it")
+		}
 	}
 	return s
 }
 
-// summarizeBody decides a body's summary on the meter, and reports false
+// prepareBody joins a body's embeddings on the meter, and reports false
 // when the budget ran out. Two embedded wires that bind one capability
-// collide (S111) unless a replace entry of this body overrides it; an
-// entry for a capability already bound, other than a replace, is S111; a
-// replace of a capability no embedding binds is S108 (rows.md, Wire 1 and
-// 7). The embeddings' summaries are joined into the largest, which is
-// shared, not copied, and a collision is found against it or among the
-// others, at the later embedding.
-func (c *checker) summarizeBody(s *bodySum, body *syntax.WireBody, self *Wire, m *wireMeter) bool {
+// collide (S111, finishBody) unless a replace entry of this body overrides
+// it (rows.md, Wire 7). The embeddings' summaries are joined into the
+// largest, the first of equal sizes in entry order, which is shared, not
+// copied, and a collision is found against it or among the others, at the
+// later embedding. It sets the allowance finishBody needs: per key, a
+// lookup in the union and one in the cycle's summary (their heights), and
+// three steps.
+func (c *checker) prepareBody(s *bodySum, body *syntax.WireBody, self *Wire, m *wireMeter) bool {
 	s.known = true
-	type collision struct {
-		cap Type
-		at  syntax.Expr
-	}
 	var reaches []*capSet
 	var keys []syntax.Expr
-	var cycle *capSet
+	entries, names := 0, 0
 	for _, e := range body.Entries {
 		if !m.step(1) {
 			return false
 		}
+		work(m)
 		if e.Kind != syntax.WireEmbed {
+			entries++
+			names += 1 + len(e.Keys)
 			continue
 		}
 		inner := c.embeddedWire(e)
@@ -377,7 +573,7 @@ func (c *checker) summarizeBody(s *bodySum, body *syntax.WireBody, self *Wire, m
 			reach = &capSet{}
 		}
 		if onCycle {
-			cycle = reach // the same summary for every such embedding
+			s.cycle = reach // the same summary for every such embedding
 			continue
 		}
 		reaches = append(reaches, reach)
@@ -388,6 +584,7 @@ func (c *checker) summarizeBody(s *bodySum, body *syntax.WireBody, self *Wire, m
 		if !m.step(1) {
 			return false
 		}
+		work(m)
 		if largest < 0 || r.size > reaches[largest].size {
 			largest = i
 		}
@@ -396,89 +593,104 @@ func (c *checker) summarizeBody(s *bodySum, body *syntax.WireBody, self *Wire, m
 	if largest >= 0 {
 		embedded = reaches[largest]
 	}
-	var collisions []collision
-	seen := map[int32]bool{} // ids of the other embeddings so far
-	var early []Type         // their capabilities before the largest
+	seen := map[capKey]bool{} // the other embeddings' capabilities so far
+	var early []collision     // those met before the largest
 	for j, r := range reaches {
 		if j == largest {
-			var hits []Type
-			for _, t := range early {
-				found, ok := r.lookup(m, c.types.id(t))
+			for _, e := range early {
+				found, ok := r.lookup(m, e.key)
 				if !ok {
 					return false
 				}
 				if found {
-					hits = append(hits, t)
+					s.collisions = append(s.collisions, collision{e.cap, e.key, keys[j]})
 				}
-			}
-			if !m.step(len(hits)*bits.Len(uint(len(hits))) + 1) {
-				return false
-			}
-			sort.Slice(hits, func(a, b int) bool { return c.types.id(hits[a]) < c.types.id(hits[b]) })
-			for _, t := range hits {
-				collisions = append(collisions, collision{t, keys[j]})
 			}
 			continue
 		}
-		if !r.each(m, func(id int32, t Type) bool {
+		if !r.each(m, func(k capKey, t Type) bool {
 			if !m.step(1) {
 				return false
 			}
-			collide := seen[id]
+			work(m)
+			collide := seen[k]
 			if !collide && largest >= 0 && j > largest {
-				found, ok := reaches[largest].lookup(m, id)
+				found, ok := reaches[largest].lookup(m, k)
 				if !ok {
 					return false
 				}
 				collide = found
 			}
 			if collide {
-				collisions = append(collisions, collision{t, keys[j]})
+				s.collisions = append(s.collisions, collision{t, k, keys[j]})
 			}
-			if !seen[id] {
-				seen[id] = true
+			if !seen[k] {
+				seen[k] = true
 				if j < largest {
-					early = append(early, t)
+					early = append(early, collision{t, k, nil})
 				}
 			}
 			var ok bool
-			embedded, ok = embedded.with(m, c.types, t)
+			embedded, ok = embedded.with(m, t)
 			return ok
 		}) {
 			return false
 		}
 	}
-	binds := embedded
-	replaced := map[int32]bool{}
+	s.embedded = embedded
+	s.allowance = 1 + entries + names*(embedded.height()+s.cycle.height()+3) + len(s.collisions)
+	return true
+}
+
+// finishBody decides a body's entries on the meter, and reports false when
+// it ran out: an entry for a capability already bound, other than a
+// replace, is S111; a replace of a capability no embedding binds is S108
+// (rows.md, Wire 1 and 7); a collision of two embeddings is S111 unless a
+// replace names it. It charges at most the allowance prepareBody set.
+func (c *checker) finishBody(s *bodySum, body *syntax.WireBody, m *wireMeter) bool {
+	if !m.step(1) {
+		return false
+	}
+	work(m)
+	own := map[capKey]bool{}
+	replaced := map[capKey]bool{}
 	c.silent++
 	defer func() { c.silent-- }()
 	for _, e := range body.Entries {
 		if e.Kind == syntax.WireEmbed {
 			continue
 		}
+		if !m.step(1) {
+			return false
+		}
+		work(m)
 		constructor := c.isConstructor(e.Value)
 		for _, k := range append([]syntax.Expr{e.Key}, e.Keys...) {
 			if !m.step(1) {
 				return false
 			}
+			work(m)
 			t := c.wireKey(k)
 			if t == nil {
 				continue
 			}
-			id := c.types.id(t)
+			key, isKey := keyOf(t)
+			if !isKey {
+				continue
+			}
 			switch {
 			case e.Kind == syntax.WireReplace:
-				replaced[id] = true
+				replaced[key] = true
 				if constructor {
 					break
 				}
-				inEmbedded, ok := embedded.lookup(m, id)
+				inEmbedded, ok := s.embedded.lookup(m, key)
 				if !ok {
 					return false
 				}
 				// A replace may name what an embedding on the wire's own
 				// cycle brings.
-				inCycle, ok := cycle.lookup(m, id)
+				inCycle, ok := s.cycle.lookup(m, key)
 				if !ok {
 					return false
 				}
@@ -486,32 +698,38 @@ func (c *checker) summarizeBody(s *bodySum, body *syntax.WireBody, self *Wire, m
 					s.findings = append(s.findings, wireFinding{k, CodeType, fmt.Sprintf("replace %s names no entry of an embedded wire (rows.md, Wire 7)", t)})
 				}
 			case !constructor:
-				found, ok := binds.lookup(m, id)
-				if !ok {
+				if !m.step(1) {
 					return false
+				}
+				work(m)
+				found := own[key]
+				if !found {
+					var ok bool
+					if found, ok = s.embedded.lookup(m, key); !ok {
+						return false
+					}
 				}
 				if found {
 					s.findings = append(s.findings, wireFinding{k, CodeDuplicateCap, fmt.Sprintf("%s has a second entry in this wire; only replace overrides an embedded entry (rows.md, Wire 1; README Gap 28)", t)})
 				}
 			}
-			var ok bool
-			if binds, ok = binds.with(m, c.types, t); !ok {
+			if !m.step(1) {
 				return false
 			}
+			work(m)
+			own[key] = true
 		}
 	}
-	for _, k := range collisions {
+	for _, k := range s.collisions {
 		if !m.step(1) {
 			return false
 		}
-		if !replaced[c.types.id(k.cap)] {
+		work(m)
+		if !replaced[k.key] {
 			s.findings = append(s.findings, wireFinding{k.at, CodeDuplicateCap, fmt.Sprintf("%s is bound by two embedded wires; replace one entry (rows.md, Wire 7)", k.cap)})
 		}
 	}
-	out, ok := capUnion(m, c.types, []*capSet{binds, cycle})
-	if !ok {
-		return false
-	}
-	s.binds = out
+	s.binds = &capSet{root: s.embedded.root, size: s.embedded.size, extra: own}
+	s.embedded, s.cycle, s.collisions = nil, nil, nil
 	return true
 }

@@ -60,22 +60,31 @@ func TestWireChainLinear(t *testing.T) {
 		}
 		counts[n] = wire
 	}
-	linear(t, "wire chain", counts, 12)
+	// The name sort reserves 3⌈log₂ n⌉ steps per wire (capset.go), so the
+	// charged count grows by n log n; the rest is linear.
+	for n, ops := range counts {
+		if sorted := sortReserve(n); ops-sorted > 16*n {
+			t.Errorf("wire chain n=%d: %d steps beyond the sort's %d, more than 16 per wire", n, ops-sorted, sorted)
+		}
+	}
+	t.Logf("wire chain: %v", counts)
 }
 
 // TestCapSetPersistent: every version of a capSet keeps its elements after
-// later inserts, iterates in id order, and keeps the treap's order and heap
-// invariants, so lookups stay logarithmic.
+// later inserts, iterates in key order, keeps the treap's order and heap
+// invariants and its heights, so lookups stay logarithmic and their cost
+// is known in advance.
 func TestCapSetPersistent(t *testing.T) {
 	m := &wireMeter{limit: 1 << 30}
+	key := func(i int) capKey { return capKey{"p", fmt.Sprintf("C%05d", i)} }
 	var versions []*capNode
 	var sizes []int
 	var root *capNode
 	size := 0
 	for i := range 2000 {
-		id := int32((i * 7919) % 2003)
+		k := key((i * 7919) % 2003)
 		var added bool
-		root, added, _ = capInsert(m, root, id, nil, capPriority(id))
+		root, added, _ = capInsert(m, root, k, nil, k.priority())
 		if added {
 			size++
 		}
@@ -84,25 +93,29 @@ func TestCapSetPersistent(t *testing.T) {
 			sizes = append(sizes, size)
 		}
 	}
-	var check func(n *capNode, lo, hi int32) (count, depth int)
-	check = func(n *capNode, lo, hi int32) (int, int) {
+	lo, hi := capKey{"p", ""}, capKey{"p", "D"}
+	var check func(n *capNode, lo, hi capKey) (count, depth int)
+	check = func(n *capNode, lo, hi capKey) (int, int) {
 		if n == nil {
 			return 0, 0
 		}
-		if n.id <= lo || n.id >= hi {
-			t.Fatalf("id %d outside (%d, %d)", n.id, lo, hi)
+		if n.key.compare(lo) <= 0 || n.key.compare(hi) >= 0 {
+			t.Fatalf("key %v outside (%v, %v)", n.key, lo, hi)
 		}
 		for _, ch := range []*capNode{n.left, n.right} {
 			if ch != nil && ch.pri > n.pri {
-				t.Fatalf("heap order broken at %d", n.id)
+				t.Fatalf("heap order broken at %v", n.key)
 			}
 		}
-		lc, ld := check(n.left, lo, n.id)
-		rc, rd := check(n.right, n.id, hi)
+		lc, ld := check(n.left, lo, n.key)
+		rc, rd := check(n.right, n.key, hi)
+		if int(n.h) != max(ld, rd)+1 {
+			t.Fatalf("height %d at %v, want %d", n.h, n.key, max(ld, rd)+1)
+		}
 		return lc + rc + 1, max(ld, rd) + 1
 	}
 	for i, v := range versions {
-		count, depth := check(v, -1, 1<<30)
+		count, depth := check(v, lo, hi)
 		if count != sizes[i] {
 			t.Errorf("version %d: %d elements, want %d", i, count, sizes[i])
 		}
@@ -111,31 +124,47 @@ func TestCapSetPersistent(t *testing.T) {
 		}
 	}
 	s := &capSet{root: root, size: size}
-	prev := int32(-1)
-	s.each(m, func(id int32, _ Type) bool {
-		if id <= prev {
-			t.Fatalf("each: %d after %d", id, prev)
+	prev := lo
+	s.each(m, func(k capKey, _ Type) bool {
+		if k.compare(prev) <= 0 {
+			t.Fatalf("each: %v after %v", k, prev)
 		}
-		prev = id
-		if found, _ := s.lookup(m, id); !found {
-			t.Fatalf("lookup(%d) false", id)
+		prev = k
+		if found, _ := s.lookup(m, k); !found {
+			t.Fatalf("lookup(%v) false", k)
 		}
 		return true
 	})
-	if found, _ := s.lookup(m, 2003); found {
-		t.Error("lookup(2003) true")
-	}
-	if m.visits+m.copies > m.used {
-		t.Errorf("%d visits and %d copies, %d steps counted", m.visits, m.copies, m.used)
+	if found, _ := s.lookup(m, key(2003)); found {
+		t.Error("lookup(C02003) true")
 	}
 	// A meter that runs out stops an insert and leaves the set unchanged.
 	small := &wireMeter{limit: 3}
-	out, _, ok := capInsert(small, root, 99999, nil, capPriority(99999))
+	out, _, ok := capInsert(small, root, key(99999), nil, key(99999).priority())
 	if ok || out != root || !small.out || small.used > small.limit {
 		t.Errorf("an insert past the budget: ok=%v, out=%v, used %d of %d", ok, small.out, small.used, small.limit)
 	}
-	if count, _ := check(root, -1, 1<<30); count != size {
+	if count, _ := check(root, lo, hi); count != size {
 		t.Errorf("the stopped insert changed the set: %d elements, want %d", count, size)
+	}
+	// The shape is a function of the keys: another insertion order gives
+	// the same tree.
+	var other *capNode
+	for i := 2002; i >= 0; i-- {
+		k := key(i)
+		if found, _ := s.lookup(m, k); found {
+			other, _, _ = capInsert(m, other, k, nil, k.priority())
+		}
+	}
+	var same func(a, b *capNode) bool
+	same = func(a, b *capNode) bool {
+		if a == nil || b == nil {
+			return a == b
+		}
+		return a.key == b.key && same(a.left, b.left) && same(a.right, b.right)
+	}
+	if !same(root, other) {
+		t.Error("two insertion orders of one key set give two shapes")
 	}
 }
 

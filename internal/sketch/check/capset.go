@@ -1,55 +1,115 @@
 package check
 
-// A capSet is a persistent set of capabilities, keyed by their identity in
-// one type table: a treap whose priorities hash the ids, so its shape
-// depends on its elements alone. Adding an element copies one path and
-// leaves every earlier version intact, so a wire's binding summary shares
-// the largest of its parts instead of copying it (#196 round 18).
+import (
+	"math/bits"
+	"strings"
+)
+
+// A capSet is a persistent set of capabilities, keyed by their qualified
+// names (package path, then name): a treap whose priorities hash the
+// names, so its shape depends on the names alone, never on the order in
+// which the checker met the types (#196 round 19 M2). Adding an element
+// copies one path and leaves every earlier version intact, so a wire's
+// binding summary shares the largest of its parts instead of copying it
+// (round 18). Each node keeps its height, so the cost of a lookup is known
+// before it runs (finishBody's allowance).
 //
-// Every operation of the wire summaries runs on a wireMeter: each node
-// visited, each node copied or created and each element enumerated is
-// counted before it is done, and the operation stops when the package's
-// budget would be passed (D16 as amended in round 18; wire.go). Only the
-// membership test of a with scope while a body is checked (has) is not
-// wire-summary work and is not metered.
+// Every operation of the wire summaries runs on a wireMeter: each node is
+// charged before it is read, each node copied or created before it is
+// made, each element enumerated before it is passed on, and the operation
+// stops when the package's budget would be passed (D16 as amended in
+// round 18; wiresum.go). Only the membership test of a with scope while a
+// body is checked (has) is not wire-summary work and is not metered.
 // Prior art: OCaml's Set and Erlang maps share structure between
 // versions; TypeScript (TS2589) and rustc (recursion_limit) refuse past a
 // deterministic, source-only budget instead of accepting unproven.
 type capSet struct {
 	root *capNode
 	size int
-	tab  *typeTable // the table whose ids key the set; nil while empty
+	// extra holds an inline wire's own entries over the union of its
+	// embeddings in root (finishBody); only has reads it.
+	extra map[capKey]bool
 }
 
 type capNode struct {
-	id          int32
+	key         capKey
 	t           Type
 	pri         uint32
+	h           int32 // nodes on the longest path down from here
 	left, right *capNode
 }
 
-func capPriority(id int32) uint32 {
-	x := uint32(id)*0x9E3779B1 ^ 0x5bd1e995
-	x ^= x >> 15
-	x *= 0x2c1b3c6d
-	x ^= x >> 12
-	return x
+// A capKey is a capability's qualified name. A capability is a named,
+// non-generic interface declared at package level (isCapability), so its
+// package path and name identify it in every package that names it.
+type capKey struct{ path, name string }
+
+// keyOf returns t's key; ok is false when t is not a declared named type.
+func keyOf(t Type) (k capKey, ok bool) {
+	n, isNamed := t.(*Named)
+	if !isNamed || n.Obj == nil || n.Orig != nil {
+		return capKey{}, false
+	}
+	if n.Obj.Pkg != nil {
+		k.path = n.Obj.Pkg.Path
+	}
+	k.name = n.Obj.Name
+	return k, true
+}
+
+func (a capKey) compare(b capKey) int {
+	if c := strings.Compare(a.path, b.path); c != 0 {
+		return c
+	}
+	return strings.Compare(a.name, b.name)
+}
+
+// priority hashes a key (FNV-1a), so a set's shape is a function of its
+// elements' names.
+func (a capKey) priority() uint32 {
+	h := uint32(2166136261)
+	for i := 0; i < len(a.path); i++ {
+		h = (h ^ uint32(a.path[i])) * 16777619
+	}
+	h = (h ^ 0xff) * 16777619
+	for i := 0; i < len(a.name); i++ {
+		h = (h ^ uint32(a.name[i])) * 16777619
+	}
+	h ^= h >> 15
+	h *= 0x2c1b3c6d
+	h ^= h >> 12
+	return h
+}
+
+func height(n *capNode) int32 {
+	if n == nil {
+		return 0
+	}
+	return n.h
+}
+
+// height is the number of nodes on the set's longest path: a lookup reads
+// at most that many.
+func (s *capSet) height() int {
+	if s == nil {
+		return 0
+	}
+	return int(height(s.root))
 }
 
 // A wireMeter counts the wire summaries' work against the package's
 // budget. step reports whether n more units fit and counts them; once a
-// step does not fit, out is set and every later step fails, so no work
-// is done past the budget. visits and copies count, independently of the
-// steps, the nodes the treap operations actually visited and copied or
-// created: the tests check that each was counted (visits+copies <= used).
+// step does not fit, out is set and every later step fails, so no work is
+// done past the budget. An allowance (finishBody) is a meter whose whole
+// limit its parent was charged in advance.
 type wireMeter struct {
-	used, limit    int
-	out            bool
-	visits, copies int
+	used, limit int
+	out         bool
+	parent      *wireMeter
 }
 
 func (m *wireMeter) step(n int) bool {
-	if m.out || m.used+n > m.limit {
+	if m.out || n < 0 || m.used+n > m.limit {
 		m.out = true
 		return false
 	}
@@ -57,22 +117,36 @@ func (m *wireMeter) step(n int) bool {
 	return true
 }
 
+// wireWork, set only by tests, is called at each unit of wire-summary work
+// as it is done, apart from the meter's charges, so a test can count the
+// work independently and check that every unit was charged first.
+var wireWork func(m *wireMeter)
+
+func work(m *wireMeter) {
+	if wireWork != nil {
+		wireWork(m)
+	}
+}
+
 // has reports whether t is an element: a with scope's membership test
 // while a body is checked. Like Row.has, it charges one lookup step.
 func (s *capSet) has(tab *typeTable, t Type) bool {
-	if s == nil || s.size == 0 {
+	if s == nil || s.size == 0 && len(s.extra) == 0 {
 		return false
 	}
-	if s.tab != tab {
-		panic("capSet: a lookup through another type table; convert it with localCaps")
-	}
 	tab.charge(1)
-	id := tab.id(t)
+	k, ok := keyOf(t)
+	if !ok {
+		return false
+	}
+	if s.extra[k] {
+		return true
+	}
 	for n := s.root; n != nil; {
-		switch {
-		case id < n.id:
+		switch c := k.compare(n.key); {
+		case c < 0:
 			n = n.left
-		case id > n.id:
+		case c > 0:
 			n = n.right
 		default:
 			return true
@@ -81,9 +155,9 @@ func (s *capSet) has(tab *typeTable, t Type) bool {
 	return false
 }
 
-// lookup is has for the wire summaries: one step per node visited. ok is
-// false when the budget ran out.
-func (s *capSet) lookup(m *wireMeter, id int32) (found, ok bool) {
+// lookup is has for the wire summaries: one step per node, charged before
+// the node is read. ok is false when the budget ran out.
+func (s *capSet) lookup(m *wireMeter, k capKey) (found, ok bool) {
 	if s == nil {
 		return false, true
 	}
@@ -91,11 +165,11 @@ func (s *capSet) lookup(m *wireMeter, id int32) (found, ok bool) {
 		if !m.step(1) {
 			return false, false
 		}
-		m.visits++
-		switch {
-		case id < n.id:
+		work(m)
+		switch c := k.compare(n.key); {
+		case c < 0:
 			n = n.left
-		case id > n.id:
+		case c > 0:
 			n = n.right
 		default:
 			return true, true
@@ -106,48 +180,49 @@ func (s *capSet) lookup(m *wireMeter, id int32) (found, ok bool) {
 
 // with returns s with t added; s is unchanged. ok is false when the
 // budget ran out; s is then returned.
-func (s *capSet) with(m *wireMeter, tab *typeTable, t Type) (out *capSet, ok bool) {
+func (s *capSet) with(m *wireMeter, t Type) (out *capSet, ok bool) {
 	if s == nil {
 		s = &capSet{}
 	}
-	if s.tab != nil && s.tab != tab {
-		panic("capSet: elements of two type tables")
+	k, isKey := keyOf(t)
+	if !isKey {
+		return s, true
 	}
-	id := tab.id(t)
-	root, added, ok := capInsert(m, s.root, id, t, capPriority(id))
+	root, added, ok := capInsert(m, s.root, k, t, k.priority())
 	if !ok {
 		return s, false
 	}
 	if !added {
 		return s, true
 	}
-	return &capSet{root: root, size: s.size + 1, tab: tab}, true
+	return &capSet{root: root, size: s.size + 1}, true
 }
 
-// capInsert returns n with (id, t) added and whether it was added. The
-// nodes on the path are copies, so a returned node is never shared and a
-// rotation may change it. A visit and a copy are each one step, counted
-// first.
-func capInsert(m *wireMeter, n *capNode, id int32, t Type, pri uint32) (out *capNode, added, ok bool) {
+// capInsert returns n with (k, t) added and whether it was added. The nodes
+// on the path are copies, so a returned node is never shared and a
+// rotation may change it. A visit and a copy are each one step, charged
+// before the node is read or made.
+func capInsert(m *wireMeter, n *capNode, k capKey, t Type, pri uint32) (out *capNode, added, ok bool) {
 	if n == nil {
 		if !m.step(1) {
 			return nil, false, false
 		}
-		m.copies++
-		return &capNode{id: id, t: t, pri: pri}, true, true
+		work(m)
+		return &capNode{key: k, t: t, pri: pri, h: 1}, true, true
 	}
 	if !m.step(1) {
 		return n, false, false
 	}
-	m.visits++
-	if id == n.id {
+	work(m)
+	cmp := k.compare(n.key)
+	if cmp == 0 {
 		return n, false, true
 	}
 	var child *capNode
-	if id < n.id {
-		child, added, ok = capInsert(m, n.left, id, t, pri)
+	if cmp < 0 {
+		child, added, ok = capInsert(m, n.left, k, t, pri)
 	} else {
-		child, added, ok = capInsert(m, n.right, id, t, pri)
+		child, added, ok = capInsert(m, n.right, k, t, pri)
 	}
 	if !ok || !added {
 		return n, false, ok
@@ -155,41 +230,47 @@ func capInsert(m *wireMeter, n *capNode, id int32, t Type, pri uint32) (out *cap
 	if !m.step(1) {
 		return n, false, false
 	}
-	m.copies++
+	work(m)
 	c := *n
-	if id < n.id {
+	if cmp < 0 {
 		c.left = child
 		if child.pri > c.pri {
 			c.left, child.right = child.right, &c
+			c.h = 1 + max(height(c.left), height(c.right))
+			child.h = 1 + max(height(child.left), height(child.right))
 			return child, true, true
 		}
-		return &c, true, true
+	} else {
+		c.right = child
+		if child.pri > c.pri {
+			c.right, child.left = child.left, &c
+			c.h = 1 + max(height(c.left), height(c.right))
+			child.h = 1 + max(height(child.left), height(child.right))
+			return child, true, true
+		}
 	}
-	c.right = child
-	if child.pri > c.pri {
-		c.right, child.left = child.left, &c
-		return child, true, true
-	}
+	c.h = 1 + max(height(c.left), height(c.right))
 	return &c, true, true
 }
 
-// each calls f on the elements in id order, one step per node, until f
-// returns false. It returns false when the budget ran out or f stopped.
-func (s *capSet) each(m *wireMeter, f func(id int32, t Type) bool) bool {
+// each calls f on the elements in key order, one step per node, charged
+// before the node or its children are read, until f returns false. It
+// returns false when the budget ran out or f stopped.
+func (s *capSet) each(m *wireMeter, f func(k capKey, t Type) bool) bool {
 	if s == nil {
 		return true
 	}
 	var walk func(n *capNode) bool
 	walk = func(n *capNode) bool {
 		for n != nil {
-			if !walk(n.left) {
-				return false
-			}
 			if !m.step(1) {
 				return false
 			}
-			m.visits++
-			if !f(n.id, n.t) {
+			work(m)
+			if !walk(n.left) {
+				return false
+			}
+			if !f(n.key, n.t) {
 				return false
 			}
 			n = n.right
@@ -199,15 +280,20 @@ func (s *capSet) each(m *wireMeter, f func(id int32, t Type) bool) bool {
 	return walk(s.root)
 }
 
-// capUnion returns the union of sets of one table, adding the elements of
-// all but the largest to the largest: each union costs its smaller sides,
-// counted. ok is false when the budget ran out.
-func capUnion(m *wireMeter, tab *typeTable, sets []*capSet) (out *capSet, ok bool) {
+// capUnion returns the union of sets, adding the elements of all but the
+// largest to the largest: each union costs its smaller sides, counted.
+// The plan depends on the sizes and the order of sets alone, the first of
+// two equal sizes being kept, and every caller passes sets in an order
+// fixed by the wires' names and entries (wiresum.go), so the charged work
+// does not depend on the declarations' order. ok is false when the budget
+// ran out.
+func capUnion(m *wireMeter, sets []*capSet) (out *capSet, ok bool) {
 	largest := -1
 	for i, s := range sets {
 		if !m.step(1) {
 			return nil, false
 		}
+		work(m)
 		if s != nil && s.size > 0 && (largest < 0 || s.size > sets[largest].size) {
 			largest = i
 		}
@@ -220,9 +306,65 @@ func capUnion(m *wireMeter, tab *typeTable, sets []*capSet) (out *capSet, ok boo
 		if i == largest {
 			continue
 		}
-		if !s.each(m, func(_ int32, t Type) bool { out, ok = out.with(m, tab, t); return ok }) {
+		if !s.each(m, func(_ capKey, t Type) bool { out, ok = out.with(m, t); return ok }) {
 			return nil, false
 		}
 	}
 	return out, true
+}
+
+// sortReserve is the most work a top-down merge sort of n elements does:
+// n⌈log₂ n⌉ comparisons and, on each of its ⌈log₂ n⌉ levels, two moves of
+// each element.
+func sortReserve(n int) int {
+	if n < 2 {
+		return 0
+	}
+	return 3 * n * bits.Len(uint(n-1))
+}
+
+// sortWires sorts xs by less after it charges sortReserve(len(xs)); it
+// does not start when that does not fit, and reports false.
+func sortWires[T any](m *wireMeter, xs []T, less func(a, b T) bool) bool {
+	if !m.step(sortReserve(len(xs))) {
+		return false
+	}
+	if len(xs) > 1 {
+		mergeSort(m, xs, make([]T, len(xs)), less)
+	}
+	return true
+}
+
+func mergeSort[T any](m *wireMeter, xs, buf []T, less func(a, b T) bool) {
+	if len(xs) < 2 {
+		return
+	}
+	mid := len(xs) / 2
+	mergeSort(m, xs[:mid], buf[:mid], less)
+	mergeSort(m, xs[mid:], buf[mid:], less)
+	for i := range xs {
+		work(m)
+		buf[i] = xs[i]
+	}
+	i, j := 0, mid
+	for k := range xs {
+		work(m) // the move
+		switch {
+		case i == mid:
+			xs[k] = buf[j]
+			j++
+		case j == len(xs):
+			xs[k] = buf[i]
+			i++
+		default:
+			work(m) // the comparison
+			if less(buf[j], buf[i]) {
+				xs[k] = buf[j]
+				j++
+			} else {
+				xs[k] = buf[i]
+				i++
+			}
+		}
+	}
 }

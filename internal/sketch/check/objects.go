@@ -107,8 +107,8 @@ type Wire struct {
 	// not exist (reported at the embedding): what it binds is unknown, so
 	// a with of it discharges everything (D3; M18).
 	unknown bool
-	// budget marks the wire whose summary passed the package's wire budget
-	// (wiresum.go): it gets the budget S111.
+	// budget marks the wire whose summary or body passed the package's
+	// wire budget (wiresum.go): it gets the budget S111.
 	budget bool
 	pkg    *Package
 }

@@ -90,8 +90,9 @@ func (c *checker) withArg(arg syntax.Expr) (*capSet, bool) {
 					return nil, false
 				}
 				if w := pn.Pkg.Wires[a.Sel.Name]; w != nil && isExported(a.Sel.Name) {
-					binds, ok := c.localCaps(c.wireBinds(w))
-					return binds, ok && !w.unknown
+					// Its package's pass summarised it; a set keyed by
+					// capability names needs no conversion.
+					return w.binds, !w.unknown
 				}
 				c.errorf(a.Sel, CodeUnknown, "%s.%s is not an exported wire of package %s", id.Name, a.Sel.Name, pn.Pkg.Path)
 				return nil, false
@@ -109,20 +110,16 @@ func (c *checker) withArg(arg syntax.Expr) (*capSet, bool) {
 // is false when it embeds an unknown wire (reported) or its summary was
 // refused (wiresum.go).
 func (c *checker) wireLit(w *syntax.WireLit) (binds *capSet, known bool) {
-	return c.wireBody(w.Body, w)
+	return c.wireBody(w.Body)
 }
 
-// wireBody checks the body of a named or an inline wire (at names it) and
-// returns what it binds. The duplicate and replace rules are decided once
+// wireBody checks the body of a named or an inline wire and returns what
+// it binds. The duplicate and replace rules are decided once
 // per body by its summary (bodySummary), whose findings are reported on
 // every pass; the embedded names, the keys and the providers are checked
 // here, on every pass.
-func (c *checker) wireBody(body *syntax.WireBody, at syntax.Node) (*capSet, bool) {
-	// The named wire whose body this is (checkWires); an inline wire
-	// inside it is not it.
-	self := c.building
-	c.building = nil
-	sum := c.bodySummary(body, self, at)
+func (c *checker) wireBody(body *syntax.WireBody) (*capSet, bool) {
+	sum := c.bodySummary(body)
 	for _, f := range sum.findings {
 		c.errorf(f.at, f.code, "%s", f.msg)
 	}
@@ -354,8 +351,7 @@ func (c *checker) checkWires() {
 			t.withs = []*capSet{nil}
 		}
 		c.fn = &funcCtx{t: t, scope: newScope(c.pkg.Scope), reach: c.reachOf(w)}
-		c.building = w
-		c.wireBody(d.Body, d.Name)
+		c.wireBody(d.Body)
 		c.fn = nil
 	}
 }

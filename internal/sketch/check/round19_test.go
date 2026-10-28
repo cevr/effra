@@ -32,6 +32,9 @@ func wireFamily(shape string, n int) string {
 	if shape == "disjoint" || shape == "large-base chain" {
 		caps = 2 * n
 	}
+	if shape == "empty independent" {
+		caps = 1
+	}
 	for i := range caps {
 		fmt.Fprintf(&b, "type C%d interface{ M() }\n", i)
 	}
@@ -75,6 +78,22 @@ func wireFamily(shape string, n int) string {
 		for i := 1; i < n; i++ {
 			fmt.Fprintf(&b, "wire L%d { W%d }\nwire R%d { W%d }\nwire W%d {\n\tL%d\n\tR%d\n\treplace C0 = P{}\n}\n", i, i-1, i, i-1, i, i, i)
 		}
+	case "empty independent": // n wires with nothing in them (round 19 M1)
+		for i := range n {
+			fmt.Fprintf(&b, "wire W%d {}\n", i)
+		}
+		b.WriteString("func F() { with(wire{ C0 = P{} }) { C0.M() } }\n")
+		return b.String()
+	case "inline fan-in": // an inline wire embeds n one-entry wires and replaces one
+		for i := range n {
+			fmt.Fprintf(&b, "wire X%d {\n\tC%d = P{}\n}\n", i, i)
+		}
+		b.WriteString("func F() {\n\twith(wire{\n")
+		for i := range n {
+			fmt.Fprintf(&b, "\t\tX%d\n", i)
+		}
+		b.WriteString("\t\treplace C0 = P{}\n\t}) { C0.M() }\n}\n")
+		return b.String()
 	default:
 		panic(shape)
 	}
@@ -83,12 +102,14 @@ func wireFamily(shape string, n int) string {
 }
 
 // TestWireBudget: on every embedding shape, the wire summaries' counted
-// work stays within the package's budget, every treap node visited or
-// copied was counted, and the verdict is the exact one (acceptance) or the
+// work stays within the package's budget, every unit of work counted
+// apart from the meter (countWork) was charged before it was done, and
+// the verdict is the exact one (acceptance) or the
 // one budget S111 (D16 as amended in round 18). The disjoint ladder's
 // answer is quadratic, so it is refused at every size here; the chains and
 // the fan-in are accepted.
 func TestWireBudget(t *testing.T) {
+	wc := countWork(t)
 	for _, family := range []struct {
 		shape   string
 		sizes   []int
@@ -98,6 +119,8 @@ func TestWireBudget(t *testing.T) {
 		{"wide fan-in", []int{1000, 4000, 8000}, false},
 		{"large-base chain", []int{1000, 4000, 8000}, false},
 		{"replace diamond", []int{1000, 4000, 8000}, false},
+		{"empty independent", []int{1000, 4000, 8000}, false},
+		{"inline fan-in", []int{1000, 4000, 8000}, false},
 		{"disjoint", []int{128, 256, 512, 2048}, true},
 	} {
 		for _, n := range family.sizes {
@@ -105,8 +128,8 @@ func TestWireBudget(t *testing.T) {
 			if m == nil {
 				t.Fatalf("%s n=%d: no wire meter", family.shape, n)
 			}
-			if m.used > m.limit || m.visits+m.copies > m.used {
-				t.Errorf("%s n=%d: %d steps of %d, %d visits and %d copies", family.shape, n, m.used, m.limit, m.visits, m.copies)
+			if m.used > m.limit || wc.done[m] > m.used || len(wc.early) > 0 {
+				t.Errorf("%s n=%d: %d steps of %d charged, %d units done (%v)", family.shape, n, m.used, m.limit, wc.done[m], wc.early)
 			}
 			switch {
 			case len(diags) == 0 && !family.refused:
@@ -114,7 +137,7 @@ func TestWireBudget(t *testing.T) {
 			default:
 				t.Errorf("%s n=%d: want %s, got %v", family.shape, n, map[bool]string{false: "acceptance", true: "the budget S111"}[family.refused], diags)
 			}
-			t.Logf("%s n=%d: %d of %d steps (%.0f%%), %d visits, %d copies, %d diagnostics", family.shape, n, m.used, m.limit, 100*float64(m.used)/float64(m.limit), m.visits, m.copies, len(diags))
+			t.Logf("%s n=%d: %d of %d steps (%.0f%%), %d units done, %d diagnostics", family.shape, n, m.used, m.limit, 100*float64(m.used)/float64(m.limit), wc.done[m], len(diags))
 		}
 	}
 }

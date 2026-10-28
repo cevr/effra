@@ -110,6 +110,21 @@ func diagnosedAt(diags []Diagnostic, off int) bool {
 // ok is false when src does not parse or has fewer than two declarations
 // to permute.
 func PermuteDecls(src string, seed uint64) (out string, origKey, permKey func(int) (int, int), ok bool) {
+	return permuteDecls(src, seed, nil)
+}
+
+// PermuteWires is PermuteDecls for the wire declarations alone: they trade
+// places among themselves, and every other declaration keeps its place.
+func PermuteWires(src string, seed uint64) (out string, origKey, permKey func(int) (int, int), ok bool) {
+	return permuteDecls(src, seed, func(d syntax.Decl) bool {
+		_, ok := d.(*syntax.WireDecl)
+		return ok
+	})
+}
+
+// permuteDecls permutes the declarations that moves selects (every one
+// when moves is nil) among their own places.
+func permuteDecls(src string, seed uint64, moves func(syntax.Decl) bool) (out string, origKey, permKey func(int) (int, int), ok bool) {
 	file, err := syntax.Parse(src)
 	if err != nil {
 		return "", nil, nil, false
@@ -135,6 +150,24 @@ func PermuteDecls(src string, seed uint64) (out string, origKey, permKey func(in
 	text := func(s span) string { return src[s.start:s.end] }
 	header := src[:orig[0].start]
 	order := rand.New(rand.NewPCG(seed, seed^0x0de5)).Perm(len(decls))
+	if moves != nil {
+		var slots []int
+		for i, d := range decls {
+			if moves(d) {
+				slots = append(slots, i)
+			}
+		}
+		if len(slots) < 2 {
+			return "", nil, nil, false
+		}
+		order = make([]int, len(decls))
+		for i := range order {
+			order[i] = i
+		}
+		for i, j := range rand.New(rand.NewPCG(seed, seed^0x0de5)).Perm(len(slots)) {
+			order[slots[i]] = slots[j]
+		}
+	}
 	var b strings.Builder
 	b.WriteString(header)
 	perm := make([]span, len(decls))
@@ -167,14 +200,20 @@ func PermuteDecls(src string, seed uint64) (out string, origKey, permKey func(in
 // is compared by count, and a source with a duplicate declaration by its
 // verdict and duplicates (duplicatesOf).
 func OrderProblems(src string, n int) []string {
-	_, base := CheckSource(src)
+	return orderProblems(src, n, PermuteDecls, func(s string) []Diagnostic { _, d := CheckSource(s); return d })
+}
+
+// orderProblems is OrderProblems for one permutation family and one way
+// of checking.
+func orderProblems(src string, n int, permute func(string, uint64) (string, func(int) (int, int), func(int) (int, int), bool), check func(string) []Diagnostic) []string {
+	base := check(src)
 	var out []string
 	for seed := uint64(1); seed <= uint64(n); seed++ {
-		permuted, origKey, permKey, ok := PermuteDecls(src, seed)
+		permuted, origKey, permKey, ok := permute(src, seed)
 		if !ok {
 			return nil
 		}
-		_, diags := CheckSource(permuted)
+		diags := check(permuted)
 		want, have := orderKeys(base, src, origKey), orderKeys(diags, permuted, permKey)
 		if hasDuplicate(base) {
 			// The kept declaration depends on the order: compare the verdict
