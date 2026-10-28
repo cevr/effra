@@ -35,6 +35,7 @@ func classHSources(t *testing.T) map[string]string {
 		out[fmt.Sprintf("admission/errors/%d", seed)] = recursiveAdmission(seed, true).src
 		out[fmt.Sprintf("admission/capabilities/%d", seed)] = recursiveAdmission(seed, false).src
 		out[fmt.Sprintf("generic/%d", seed)] = genericInferred(seed)
+		out[fmt.Sprintf("keyed/%d", seed)] = keyedLiterals(seed)
 	}
 	return out
 }

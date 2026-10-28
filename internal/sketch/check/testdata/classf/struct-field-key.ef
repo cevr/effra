@@ -1,0 +1,7 @@
+package p
+type Bang struct{}
+type S struct{ b int }
+func mark() error[Bang]
+func a() { _ = S{b: 1}; try mark() }
+func b() { try a() }
+func F() error[Bang] { try b() }

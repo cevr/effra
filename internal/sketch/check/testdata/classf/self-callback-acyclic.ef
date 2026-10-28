@@ -1,0 +1,8 @@
+package p
+type Bang struct{}
+type Node struct{ kids []Node }
+func each(xs []Node, f func(Node) error[Bang]) error[Bang]
+func mark() error[Bang]
+func visit(k Node) { try mark() }
+func walk(n Node) { try mark(); try each(n.kids, func(k Node) { try visit(k) }) }
+func F(n Node) error[Bang] { try walk(n) }
