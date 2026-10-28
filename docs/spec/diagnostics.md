@@ -159,8 +159,9 @@ The checker refuses a construct that another ticket owns, and names it, instead 
 
 - A wire has two entries for one capability, and neither is a `replace` of an embedded entry (`duplicate-wire-entry`; README Gap 28).
 - Two embedded wires bind one capability, and no `replace` entry of the embedding wire overrides it (rows.md, Wire 7).
+- A wire whose embedding graph needs more than the package's fixed wire budget to check: "this wire's embedding graph is too large to check for duplicate entries; split it". The budget is 128 × (wire entries + embeddings + capability names written in wire keys and `needs` rows + 1) counted steps, shared by every wire of the package and fixed by the source alone. The S111 is at the wire whose summary or body was being checked when the next step would pass the budget, and no other wire diagnostic follows from it ([rows: wire](rows.md#wire) 5; checker tests `TestWireBudget`, `TestWireBudgetRefusal`).
 
-*Prior art:* Google Wire rejects two providers of one type; Effect's `Layer.merge` keeps the last silently, which Ergo refuses.
+*Prior art:* Google Wire rejects two providers of one type; Effect's `Layer.merge` keeps the last silently, which Ergo refuses. For the budget: TypeScript stops instantiation past a fixed count (TS2589), and rustc refuses past `recursion_limit` and `type_length_limit`.
 
 ### S112: resource map key
 
