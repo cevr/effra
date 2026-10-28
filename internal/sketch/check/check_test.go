@@ -245,5 +245,13 @@ func FuzzCheck(f *testing.F) {
 			t.Fatalf("two runs differ")
 		}
 		assertWellFormed(t, "input", src, a)
+		// Class H (round 16): the reference walk visits every body node and
+		// resolves as typing does, and declaration order changes no verdict.
+		if p := check.RefWalkProblems(src); len(p) > 0 {
+			t.Fatalf("reference walk: %s", strings.Join(p, "; "))
+		}
+		if p := check.OrderProblems(src, 2); len(p) > 0 {
+			t.Fatalf("declaration order: %s", p[0])
+		}
 	})
 }

@@ -619,6 +619,14 @@ func TestDifferentialGoTypes(t *testing.T) {
 		if d := diffOne(src); len(d) > 0 {
 			t.Fatalf("seed %d:\n%s\n%s", seed, strings.Join(d, "\n"), src)
 		}
+		// Class H (round 16): declaration order changes no verdict, and the
+		// reference walk is complete and exact.
+		if p := OrderProblems(src, 1); len(p) > 0 {
+			t.Fatalf("seed %d (declaration order): %s", seed, p[0])
+		}
+		if p := RefWalkProblems(src); len(p) > 0 {
+			t.Fatalf("seed %d (reference walk): %s", seed, strings.Join(p, "; "))
+		}
 		if _, diags := CheckSource(src); len(diags) == 0 {
 			accepted++
 		} else {
@@ -874,6 +882,12 @@ func FuzzDifferential(f *testing.F) {
 		src := g.program()
 		if d := diffOne(src); len(d) > 0 {
 			t.Fatalf("seed %d:\n%s\n%s", seed, strings.Join(d, "\n"), src)
+		}
+		if p := OrderProblems(src, 1); len(p) > 0 {
+			t.Fatalf("seed %d (declaration order): %s", seed, p[0])
+		}
+		if p := RefWalkProblems(src); len(p) > 0 {
+			t.Fatalf("seed %d (reference walk): %s", seed, strings.Join(p, "; "))
 		}
 		src = inferProgram(rand.New(rand.NewSource(seed)), wrapNone)
 		if d := diffCheck(src, false); len(d) > 0 {
