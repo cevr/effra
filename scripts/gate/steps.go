@@ -71,9 +71,11 @@ func declareSteps(root string, packages []string) ([]*Step, error) {
 	foldkit := &Inputs{Paths: []string{"scripts/conformance/", "conformance/", "go.mod"}, Tools: []string{"go"}, Installed: []string{"conformance/upstream/foldkit-d21db423"}}
 	add(&Step{Name: "foldkit corpus self-check", Argv: []string{"go", "run", "./scripts/conformance", "foldkit", "--self-check"}, Inputs: foldkit})
 	// The mapping check reads the mapping and the evidence tests it names,
-	// so the directories of those tests are inputs too. Its own tests run
-	// with the other Go packages.
-	mapping := &Inputs{Paths: append([]string{"scripts/conformance/", "conformance/effect-cases.json", "go.mod"}, evidenceDirectories(root)...), Tools: []string{"go"}}
+	// so the directories of those tests are inputs too, and it asks git
+	// whether each evidence file is tracked. Untracking a file without
+	// changing it leaves the key alone. Its own tests run with the other Go
+	// packages.
+	mapping := &Inputs{Paths: append([]string{"scripts/conformance/", "conformance/effect-cases.json", "go.mod"}, evidenceDirectories(root)...), Tools: []string{"go", "git"}}
 	add(&Step{Name: "effect conformance mapping", Argv: []string{"go", "run", "./scripts/conformance", "check"}, Inputs: mapping})
 
 	add(&Step{Name: "gofmt", Argv: append([]string{"sh", "-c", `unformatted=$(gofmt -l "$@"); if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi`, "gofmt"}, gofmtDirectories...)})

@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -63,8 +64,8 @@ func evidence(file, test string) any {
 }
 
 // evidenceFixture is the committed mapping with its first two cases backed
-// by evidence tests in two packages of a temporary root. One test is named
-// twice, by both cases.
+// by evidence tests in two packages of a temporary Git repository, every
+// file tracked. One test is named twice, by both cases.
 func evidenceFixture(t *testing.T) (map[string]any, string) {
 	t.Helper()
 	root := t.TempDir()
@@ -73,12 +74,36 @@ func evidenceFixture(t *testing.T) (map[string]any, string) {
 		"alpha/one.go":        "package alpha\n\nimport \"testing\"\n\nfunc TestOne(t *testing.T) {}\n",
 		"beta/deep/x_test.go": "package deep\n\nimport \"testing\"\n\nfunc TestThree(t *testing.T) {}\n",
 	})
+	fixtureGit(t, root, "init", "-q")
+	fixtureGit(t, root, "add", ".")
 	value := copyMapping(committedMapping(t))
 	mappingCase(value, 0)["status"] = "covered"
 	mappingCase(value, 0)["evidence"] = []any{evidence("alpha/one_test.go", "TestTwo"), evidence("alpha/one_test.go", "TestOne")}
 	mappingCase(value, 1)["status"] = "difference"
 	mappingCase(value, 1)["evidence"] = []any{evidence("beta/deep/x_test.go", "TestThree"), evidence("alpha/one_test.go", "TestOne")}
 	return value, root
+}
+
+// Evidence must be a test file Git tracks: an untracked test with a real
+// declaration is refused until it is added, and so is a root outside Git.
+func TestUntrackedEvidenceFails(t *testing.T) {
+	t.Parallel()
+	value, root := evidenceFixture(t)
+	writeFiles(t, root, map[string]string{"alpha/extra_test.go": "package alpha\n\nimport \"testing\"\n\nfunc TestExtra(t *testing.T) {}\n"})
+	mappingCase(value, 0)["evidence"] = append(mappingCase(value, 0)["evidence"].([]any), evidence("alpha/extra_test.go", "TestExtra"))
+	if _, err := validateMapping(value, root); err == nil || !strings.Contains(err.Error(), "evidence file is not tracked") {
+		t.Fatalf("untracked evidence: err = %v, want the not-tracked refusal", err)
+	}
+	fixtureGit(t, root, "add", "alpha/extra_test.go")
+	if _, err := validateMapping(value, root); err != nil {
+		t.Fatalf("tracked evidence refused: %v", err)
+	}
+	outside := t.TempDir()
+	writeFiles(t, outside, map[string]string{"alpha/one_test.go": "package alpha\n\nimport \"testing\"\n\nfunc TestOne(t *testing.T) {}\n\nfunc TestTwo(t *testing.T) {\n}\n"})
+	backed := copyMapping(committedMapping(t))
+	mappingCase(backed, 0)["status"] = "covered"
+	mappingCase(backed, 0)["evidence"] = []any{evidence("alpha/one_test.go", "TestOne")}
+	rejectMappingAt(t, backed, outside)
 }
 
 // The committed mapping claims no evidence: the earlier compiler's evidence
@@ -248,8 +273,16 @@ func TestMissingOrUnexecutableGoIsAStructuredCLIRefusal(t *testing.T) {
 	if err := os.WriteFile(mapping, encoded, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Evidence admission runs git, so PATH keeps git and loses only go.
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, unexecutable := range []bool{false, true} {
 		directory := t.TempDir()
+		if err := os.Symlink(git, filepath.Join(directory, "git")); err != nil {
+			t.Fatal(err)
+		}
 		if unexecutable {
 			if err := os.WriteFile(filepath.Join(directory, "go"), []byte("unexecutable fixture"), 0o600); err != nil {
 				t.Fatal(err)

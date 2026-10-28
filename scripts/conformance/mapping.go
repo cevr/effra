@@ -4,12 +4,13 @@ package main
 // behavior is specified upstream (file, line and test label at the pinned
 // commit) as provenance text; Ergo keeps no copy of the upstream corpus, so
 // the record is checked for shape, and its evidence must be an existing Go
-// test in a *_test.go file of the repository.
+// test in a *_test.go file that Git tracks in the repository.
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -153,6 +154,9 @@ func validateMapping(mapping map[string]any, root string) ([]evidenceTest, error
 			if !strings.HasSuffix(file, "_test.go") || !testOK || !mappingTestName.MatchString(test) || !isGoTargets(pointer["targets"]) {
 				return nil, fmt.Errorf("evidence must name an existing Go test for %s", identity)
 			}
+			if err := requireTracked(root, file); err != nil {
+				return nil, fmt.Errorf("evidence file is not tracked for %s: %v", identity, err)
+			}
 			contents, err := readText(filepath.Join(root, file))
 			if err != nil {
 				return nil, fmt.Errorf("evidence file is unavailable for %s", identity)
@@ -175,6 +179,19 @@ func validateMapping(mapping map[string]any, root string) ([]evidenceTest, error
 		return selected[i].name < selected[j].name
 	})
 	return selected, nil
+}
+
+// requireTracked refuses a repository-relative file that Git does not track
+// in root, so an untracked local test cannot stand as evidence.
+func requireTracked(root, file string) error {
+	command := exec.Command("git", "-C", root, "ls-files", "--error-unmatch", "--", file)
+	if output, err := command.CombinedOutput(); err != nil {
+		if message := strings.TrimSpace(string(output)); message != "" {
+			return errors.New(message)
+		}
+		return err
+	}
+	return nil
 }
 
 // packageOf is the go test package pattern of a repository-relative file.

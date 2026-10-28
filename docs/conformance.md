@@ -24,7 +24,7 @@ go run ./scripts/conformance check --run
 ./scripts/gate.sh
 ```
 
-Evidence may be any Go test in a `*_test.go` file of the repository. The gate's mapping step keys on the directories of the evidence tests that the mapping names.
+Evidence may be any Go test in a `*_test.go` file that Git tracks in the repository; an untracked test file is refused. The gate's mapping step keys on the directories of the evidence tests that the mapping names.
 
 **Since [#205](https://github.com/cevr/ergo/issues/205), no case has evidence.** The evidence tests of the 17 `covered` and `difference` cases were in the retired compiler, so each of those cases is now `pending` with no evidence; its limits keep the earlier text after "Earlier limits:", and the [retirement record](receipts/retire-ef.md#conformance-cases-without-evidence) lists them. A case returns to `covered` or `difference` when a v1 test asserts it. The next three paragraphs record what the removed evidence asserted.
 
