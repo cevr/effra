@@ -41,7 +41,7 @@ var testTools = []string{"git", "sh"}
 var goRuntimeEnvironment = []string{"GODEBUG", "GOGC", "GOMEMLIMIT", "GOMAXPROCS", "GOTRACEBACK"}
 
 // gofmtDirectories are the Go trees the gate requires to be gofmt-clean.
-var gofmtDirectories = []string{"cmd", "internal", "runtime", "lint", "scripts/gate", "scripts/conformance", "examples/go-interop", "examples/sdk", "examples/compare", "examples/hosttypes", "examples/lintpack"}
+var gofmtDirectories = []string{"cmd", "internal", "runtime", "scripts/gate", "scripts/conformance", "examples/go-interop"}
 
 // gateSteps declares the gate's steps over the module's Go packages.
 func gateSteps(root string) ([]*Step, error) {
@@ -271,7 +271,7 @@ func authoredExamples(root string) ([]string, error) {
 }
 
 // slowPackages are measured by -record-durations and sharded by the gate.
-var slowPackages = []string{"./internal/compiler", "./cmd/ergo"}
+var slowPackages = []string{"./cmd/ergo"}
 
 // writeDurations measures each slow package's tests serially (as a single
 // process runs them) and rewrites the durations file.

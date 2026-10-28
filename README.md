@@ -360,7 +360,7 @@ These are rules of the designed language. The parser enforces the syntax rules t
 | Actors as a library | Landed as a spike in [`prototypes/actorlib`](prototypes/actorlib/doc.go) ([#101](https://github.com/cevr/ergo/issues/101), closed); the std package is [#57](https://github.com/cevr/ergo/issues/57) |
 | Go interop | Designed |
 | `ergo test`, lint rules, `ergo inspect`, MCP and the language server | Unavailable until ported to the new front end ([#203](https://github.com/cevr/ergo/issues/203)) |
-| The earlier `.ef` language | Retired ([#205](https://github.com/cevr/ergo/issues/205)): no command runs it |
+| The earlier `.ef` language | Removed by [#205](https://github.com/cevr/ergo/issues/205) ([record](docs/receipts/retire-ef.md)) |
 
 ## Learn more
 
@@ -386,4 +386,4 @@ go build -o bin/ergo ./cmd/ergo
 
 - A source is one `.ef` file. There is no manifest and no edition.
 - Where things live: the parser in `internal/sketch/syntax`, the formatter in `internal/sketch/format`, the prototype checker and its bridge in `internal/sketch/proto`, the front end the commands share in `internal/sketchfront`, the task runtime in `runtime/rt`, the CLI in `cmd/ergo`, and the specification in `docs/spec`.
-- [#205](https://github.com/cevr/ergo/issues/205) retired the earlier `.ef` language. Its documents stay as design reference: [implemented syntax](docs/prototype.md), [testing](docs/testing.md) and [bundled modules](docs/bundled-modules.md).
+- [#205](https://github.com/cevr/ergo/issues/205) removed the earlier `.ef` language ([record](docs/receipts/retire-ef.md)). Its documents stay as design reference: [implemented syntax](docs/prototype.md), [testing](docs/testing.md) and [bundled modules](docs/bundled-modules.md).
