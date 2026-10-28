@@ -1,0 +1,2 @@
+go test fuzz v1
+string("package A\nfunc(A)A()\ntype A struct{}\nfunc(A)A()\nfunc A()\nfunc A(A)")

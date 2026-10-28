@@ -51,10 +51,12 @@ type refWalker struct {
 	values  map[*Func][2]bool
 	frames  []valueFrame
 	callees map[syntax.Node]bool // callees of calls: identifiers and function literals
-	// Test builds only (refWalk set): the resolution of each walked
-	// identifier (a package object or nil) and every node visited.
-	idents  map[*syntax.Ident]any
-	visited map[syntax.Node]bool
+	// Test builds only (refTrace set): the resolution of each walked
+	// identifier (a package object or nil), the identifiers in type
+	// positions and every node visited.
+	idents     map[*syntax.Ident]any
+	typeIdents map[*syntax.Ident]bool
+	visited    map[syntax.Node]bool
 }
 
 // A frameMode says what a value frame does with a row of the calls inside
@@ -128,6 +130,7 @@ func (c *checker) newRefWalker() *refWalker {
 	w := &refWalker{c: c, refs: map[any]bool{}, values: map[*Func][2]bool{}, callees: map[syntax.Node]bool{}}
 	if refTrace != nil {
 		w.idents = map[*syntax.Ident]any{}
+		w.typeIdents = map[*syntax.Ident]bool{}
 		w.visited = map[syntax.Node]bool{}
 	}
 	return w
@@ -254,6 +257,9 @@ func (w *refWalker) typ(n syntax.Node) {
 	}
 	syntax.Inspect(n, func(x syntax.Node) bool {
 		w.visit(x)
+		if id, ok := x.(*syntax.Ident); ok && w.typeIdents != nil {
+			w.typeIdents[id] = true
+		}
 		return true
 	})
 }

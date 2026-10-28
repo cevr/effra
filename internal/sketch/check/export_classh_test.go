@@ -14,9 +14,10 @@ import (
 // every identifier the walk resolved differently from typing: typing
 // resolves a walked identifier to a package function or var exactly when
 // the walk does, and to the same object. An identifier typing resolves to
-// a package function that the walk skipped is reported too; a skipped
-// composite-literal key that typing resolves to a package var is a map key
-// (refs.go), not an edge.
+// a package function that the walk skipped is reported too, unless the walk
+// saw it in a type position and the checker reports an error there (a
+// function used as a type); a skipped composite-literal key that typing
+// resolves to a package var is a map key (refs.go), not an edge.
 func RefWalkProblems(src string) []string {
 	file, err := syntax.Parse(src)
 	if err != nil {
@@ -74,13 +75,29 @@ func RefWalkProblems(src string) []string {
 			if _, walked := wk.w.idents[id]; walked {
 				continue
 			}
-			if f, ok := pkgObject(u).(*Func); ok {
-				out = append(out, fmt.Sprintf("%s at %d: typing resolves the package function %s, the walk skipped it", id.Name, id.Pos(), f.Name))
+			f, ok := pkgObject(u).(*Func)
+			if !ok {
+				continue
 			}
+			if wk.w.typeIdents[id] && diagnosedAt(c.diags, int(id.Pos())) {
+				// A function in a type position (`A{}` with A a function) is
+				// an error there: not a value reference, no edge.
+				continue
+			}
+			out = append(out, fmt.Sprintf("%s at %d: typing resolves the package function %s, the walk skipped it", id.Name, id.Pos(), f.Name))
 		}
 	}
 	sort.Strings(out)
 	return out
+}
+
+func diagnosedAt(diags []Diagnostic, off int) bool {
+	for _, d := range diags {
+		if d.Offset == off {
+			return true
+		}
+	}
+	return false
 }
 
 // PermuteDecls returns src with its top-level declarations after the
@@ -177,13 +194,19 @@ func hasDuplicate(diags []Diagnostic) bool {
 	return false
 }
 
-// duplicatesOf keeps the duplicate keys and the verdict.
+// duplicatesOf keeps the verdict and the names of the duplicate package
+// declarations, once each. A duplicate method is left out: whether its
+// receiver names a type depends on which declaration is kept.
 func duplicatesOf(keys []string, rejected bool) []string {
 	out := []string{fmt.Sprintf("rejected %v", rejected)}
+	seen := map[string]bool{}
 	for _, k := range keys {
-		if strings.Contains(k, " duplicate ") {
-			out = append(out, k)
+		_, name, ok := strings.Cut(k, " duplicate ")
+		if !ok || strings.Contains(name, ".") || seen[name] {
+			continue
 		}
+		seen[name] = true
+		out = append(out, name)
 	}
 	return out
 }
