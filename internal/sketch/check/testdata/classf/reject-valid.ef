@@ -1,0 +1,8 @@
+package p
+type Bang struct{}
+type Box[T any] interface{ M(T) }
+func BoxOf[T any](x T) Box[T]
+func Choose[T any](x T,y T) error[Bang]
+func a() {return Choose(BoxOf(a),BoxOf(b))} // want S108 S108
+func b() {_ = a;return Choose(BoxOf(b),BoxOf(b))}
+

@@ -15,7 +15,7 @@ import (
 var reviewCases = []struct {
 	finding, name, want, src string
 }{
-	{"M1", "inference-chain-through-values", "S102", ""}, // built by largeSCC
+	{"M1", "inference-chain-through-values", "S108", ""}, // built by largeSCC; class G (round 14)
 	{"M2", "machine-initial-inferred", "S102", `type C interface{ Use() }
 type S interface{ Idle }
 type Idle struct{}
@@ -304,7 +304,7 @@ func TestReviewCases(t *testing.T) {
 		t.Run(c.finding+"/"+c.name, func(t *testing.T) {
 			src := c.src
 			if src == "" {
-				src = largeSCC(100)
+				src = largeSCC(100, true)
 			} else {
 				src = "package main\n" + src + "\n"
 			}
@@ -316,13 +316,20 @@ func TestReviewCases(t *testing.T) {
 	}
 }
 
-// largeSCC is the M1 probe: f0 names f1…fn as values and calls C.Use(); each
-// fi calls f(i-1); exported F calls fn, so the inferred row must reach F.
-func largeSCC(n int) string {
+// largeSCC is the M1 probe: f0 calls f1…fn (or names them as values) and
+// calls C.Use(); each fi calls f(i-1); exported F calls fn, so the inferred
+// row must reach F. Named as values, f1…fn are used as values inside their
+// own group (class G, round 14): their rows are pinned empty, and f1, whose
+// body calls f0, gets the one S108.
+func largeSCC(n int, values bool) string {
 	var b strings.Builder
 	b.WriteString("package main\ntype C interface{ Use() }\nfunc f0() {\n")
 	for i := 1; i <= n; i++ {
-		fmt.Fprintf(&b, "\t_ = f%d\n", i)
+		if values {
+			fmt.Fprintf(&b, "\t_ = f%d\n", i)
+		} else {
+			fmt.Fprintf(&b, "\tf%d()\n", i)
+		}
 	}
 	b.WriteString("\tC.Use()\n}\n")
 	for i := 1; i <= n; i++ {
@@ -336,7 +343,7 @@ func largeSCC(n int) string {
 // whatever the cycle's length (M1).
 func TestInferenceConverges(t *testing.T) {
 	for _, n := range []int{10, 100, 400} {
-		pkg, diags := check.CheckSource(largeSCC(n))
+		pkg, diags := check.CheckSource(largeSCC(n, false))
 		if codesOf(diags) != "S102" {
 			t.Fatalf("n=%d: want one S102, got %s", n, describe(diags))
 		}

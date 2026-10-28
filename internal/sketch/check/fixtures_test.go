@@ -12,17 +12,22 @@ import (
 	"ergo.local/prototype/internal/sketch/check"
 )
 
-var wantMarker = regexp.MustCompile(`// want (S\d{3})\s*$`)
+// wantMarker is `// want CODE`, or `// want CODE CODE` for two diagnostics on
+// one line.
+var wantMarker = regexp.MustCompile(`// want (S\d{3}(?: S\d{3})*)\s*$`)
 
 // usesWord finds the keyword the frozen prototype fixtures spell before #217.
 var usesWord = regexp.MustCompile(`\buses\b`)
 
-// expected lists the `// want CODE` markers of a source as CODE@LINE.
+// expected lists the `// want CODE` markers of a source as CODE@LINE, one per
+// code.
 func expected(src string) []string {
 	var out []string
 	for i, line := range strings.Split(src, "\n") {
 		if m := wantMarker.FindStringSubmatch(line); m != nil {
-			out = append(out, fmt.Sprintf("%s@%d", m[1], i+1))
+			for _, code := range strings.Fields(m[1]) {
+				out = append(out, fmt.Sprintf("%s@%d", code, i+1))
+			}
 		}
 	}
 	sort.Strings(out)

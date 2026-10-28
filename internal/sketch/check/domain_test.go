@@ -52,7 +52,10 @@ func checkWithin(t *testing.T, src string, d time.Duration) (*check.Package, []c
 //     invalid, so a call through it charges nothing (D3; round-2 M2);
 //   - an inferred row holds C exactly when the body calls C.M or calls an
 //     inferred body whose row holds C (least fixpoint);
-//   - a closed body gets one S102 per such call and per C.M of its own.
+//   - a closed body gets one S102 per such call and per C.M of its own;
+//   - class G: a function referenced by _ = f inside its own component of
+//     the body graph has its row pinned empty; when its body still needs
+//     C, it gets one S108 at its first value use.
 //
 // Nothing else is reported.
 func TestRowGraphDomain(t *testing.T) {
@@ -63,7 +66,7 @@ func TestRowGraphDomain(t *testing.T) {
 		kMethod
 		kExported
 	)
-	cycles := 0
+	cycles, groups := 0, 0
 	for trial := 0; trial < 1500; trial++ {
 		n := 2 + rng.Intn(9)
 		kind := make([]int, n)
@@ -201,9 +204,34 @@ func TestRowGraphDomain(t *testing.T) {
 			cycles++
 		}
 
-		// Inferred rows: least fixpoint over calls to unpoisoned inferred bodies.
+		// Class G: the checker's components are those of the body graph,
+		// whose edges reach inferred bodies only (methods and exported
+		// functions spell their rows). A function used as a value (_ = f)
+		// inside its own component has its rows pinned empty; when its body
+		// still needs C, that is one S108 at its first value use.
+		bcomp := bodyComponents(n, func(i int) []int {
+			var out []int
+			for _, e := range edges[i] {
+				if kind[e.to] == kFunc || kind[e.to] == kVar {
+					out = append(out, e.to)
+				}
+			}
+			return out
+		})
+		pinned := make([]bool, n)
+		for i := range n {
+			for _, e := range edges[i] {
+				if !e.call && kind[e.to] == kFunc && bcomp[i] == bcomp[e.to] {
+					pinned[e.to] = true
+				}
+			}
+		}
+
+		// Inferred rows: least fixpoint over calls to unpoisoned inferred bodies;
+		// a pinned row stays empty, and grew records that its body needs C.
 		inferred := func(j int) bool { return kind[j] == kFunc || kind[j] == kVar }
 		hasC := make([]bool, n)
+		grew := make([]bool, n)
 		for changed := true; changed; {
 			changed = false
 			for i := range n {
@@ -216,7 +244,10 @@ func TestRowGraphDomain(t *testing.T) {
 						c = true
 					}
 				}
-				if c {
+				switch {
+				case c && pinned[i]:
+					grew[i] = true
+				case c:
 					hasC[i], changed = true, true
 				}
 			}
@@ -236,20 +267,32 @@ func TestRowGraphDomain(t *testing.T) {
 			}
 		}
 
+		wantG := 0
+		for i := range n {
+			if grew[i] {
+				wantG++
+			}
+		}
+		if wantG > 0 {
+			groups++
+		}
+
 		pkg, diags := checkWithin(t, src, 5*time.Second)
-		gotS108, gotS102 := 0, 0
+		gotS108, gotS102, gotG := 0, 0, 0
 		for _, d := range diags {
 			switch {
 			case d.Code == "S108" && strings.Contains(d.Message, "initialization cycle"):
 				gotS108++
+			case d.Code == "S108" && strings.Contains(d.Message, "used as a value inside its own recursive group"):
+				gotG++
 			case d.Code == "S102":
 				gotS102++
 			default:
 				t.Fatalf("trial %d: unexpected %s\n%s", trial, describe(diags), src)
 			}
 		}
-		if gotS108 != wantS108 || gotS102 != wantS102 {
-			t.Fatalf("trial %d: want %d initialization cycles and %d S102, got %s\n%s", trial, wantS108, wantS102, describe(diags), src)
+		if gotS108 != wantS108 || gotS102 != wantS102 || gotG != wantG {
+			t.Fatalf("trial %d: want %d initialization cycles, %d S102 and %d value uses in a group, got %s\n%s", trial, wantS108, wantS102, wantG, describe(diags), src)
 		}
 		for _, f := range pkg.Funcs {
 			var i int
@@ -264,6 +307,56 @@ func TestRowGraphDomain(t *testing.T) {
 	if cycles < 100 {
 		t.Fatalf("only %d trials held an initialization cycle; the generator misses the domain", cycles)
 	}
+	if groups < 100 {
+		t.Fatalf("only %d trials held a value use inside its group needing a row; the generator misses class G", groups)
+	}
+}
+
+// bodyComponents numbers the strongly connected components of the graph
+// over 0…n-1 with the given successors (Tarjan), independent of the checker.
+func bodyComponents(n int, succ func(int) []int) []int {
+	comp := make([]int, n)
+	index := make([]int, n)
+	low := make([]int, n)
+	on := make([]bool, n)
+	for i := range index {
+		index[i] = -1
+	}
+	var stack []int
+	next, ncomp := 0, 0
+	var visit func(int)
+	visit = func(v int) {
+		index[v], low[v] = next, next
+		next++
+		stack = append(stack, v)
+		on[v] = true
+		for _, w := range succ(v) {
+			if index[w] < 0 {
+				visit(w)
+				low[v] = min(low[v], low[w])
+			} else if on[w] {
+				low[v] = min(low[v], index[w])
+			}
+		}
+		if low[v] == index[v] {
+			for {
+				w := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				on[w] = false
+				comp[w] = ncomp
+				if w == v {
+					break
+				}
+			}
+			ncomp++
+		}
+	}
+	for i := range n {
+		if index[i] < 0 {
+			visit(i)
+		}
+	}
+	return comp
 }
 
 // expandingCases are generic functions and types whose instantiation grows
