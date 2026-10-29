@@ -171,21 +171,15 @@ func (c *checker) solveDeclKinds() {
 		if d == nil || d.Type == nil {
 			continue
 		}
-		var rt syntax.Expr
-		var own map[string]bool // nil: a receiver, which declares its names
-		switch {
-		case d.Recv != nil && len(d.Recv.List) > 0:
-			rt = d.Recv.List[0].Type
-		case d.TypeParams != nil && d.Type.Params != nil && len(d.Type.Params.List) > 0 && f.Name != "main":
-			rt = d.Type.Params.List[0].Type
-			own = map[string]bool{}
-			for _, fld := range d.TypeParams.List {
-				for _, n := range fld.Names {
-					own[n.Name] = true
-				}
-			}
-		default:
+		if d.TypeParams == nil || d.Type.Params == nil || len(d.Type.Params.List) == 0 || f.Name == "main" {
 			continue
+		}
+		rt := d.Type.Params.List[0].Type
+		own := map[string]bool{}
+		for _, fld := range d.TypeParams.List {
+			for _, n := range fld.Names {
+				own[n.Name] = true
+			}
 		}
 		rt = unparen(rt)
 		if st, ok := rt.(*syntax.StarExpr); ok {
@@ -199,12 +193,12 @@ func (c *checker) solveDeclKinds() {
 		if htn == nil || !isDecl[htn] {
 			continue
 		}
-		if _, op := htn.Decl.Spec.(*syntax.InterfaceType); op && own != nil {
+		if _, op := htn.Decl.Spec.(*syntax.InterfaceType); op {
 			continue
 		}
 		index := map[string]int{}
 		for i, a := range ix.Indices {
-			if id, ok := unparen(a).(*syntax.Ident); ok && id.Name != "_" && (own == nil || own[id.Name]) {
+			if id, ok := unparen(a).(*syntax.Ident); ok && id.Name != "_" && own[id.Name] {
 				index[id.Name] = i
 			}
 		}

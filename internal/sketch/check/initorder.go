@@ -192,9 +192,6 @@ func (c *checker) reportInitCycles(nodes []any, in func(any) bool) {
 func depName(n any) string {
 	switch n := n.(type) {
 	case *Func:
-		if n.Recv != nil {
-			return n.Recv.Obj.Name + "." + n.Name
-		}
 		// A 196m function is named by its first parameter's type, as Go
 		// names the method it lowers to; same-named ones stay apart.
 		if n.owner != nil {

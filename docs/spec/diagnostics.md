@@ -75,7 +75,8 @@ The checker does not restrict `main`'s capability row; the build refuses what th
 
 ### S104: unknown name
 
-- An unknown local, function, type, field, method, label, package or wire (`reject/unknown-name.ergo`, `unknown-local`, `unknown-type`, `unknown-field`, `unknown-selector`, `unknown-wire`).
+- An unknown local, function, type, field, method, package or wire (`reject/unknown-name.ergo`, `unknown-local`, `unknown-type`, `unknown-field`, `unknown-selector`, `unknown-wire`).
+- A Go built-in function other than `len`: `make`, `new`, `cap`, `copy`, `close`, `print`, `println`, `append`, `delete`, `min`, `max`, `clear`, `panic`, `recover`, `complex`, `real` and `imag` are not predeclared. The message names the Ergo form: `xs.Append(x)`, `m.Delete(k)`, a literal, `Console.Println`, `if a < b { a } else { b }` (#196, fourth round, item 2).
 - A capability name in an expression position other than a method call's receiver, such as `f(Orders)` (`capability-as-value`; README Gap 29).
 - A local of the same name as a capability that the function's written row lists, in the same frame (`local-and-binding-one-frame`; rows-and-constraints §7 amendment 3). A local in an inner frame may shadow a package capability.
 - A capability row or a wire key names a type that is not a capability (`needs-non-capability`, `wire-entry-non-capability`).
@@ -149,15 +150,15 @@ The checker refuses a construct that another ticket owns, and names it, instead 
 | A law, a `test` declaration, `assert` | 196l, laws and tests (check-v1) |
 | `import task`, `scope`, `slice` or `queue` | lower-v1, the std modules |
 | `import go net/url` | [#202](https://github.com/cevr/ergo/issues/202), Go imports |
-| A dot import | [#206](https://github.com/cevr/ergo/issues/206), the standard library |
+| A node or field the decided parser never builds, in a tree built by hand: a channel, `select`, `go`, `defer`, a label, `++` or `--`, a variadic parameter or spread argument, an array type with a length, a receiver, a dot or grouped import, a grouped `let`, a `:=` or multi-side assignment, an `if`, `for` or `match` header statement. The message is "… is not produced by the decided parser" | syntax `TestDecidedOnly` (no owner: the form left the language) |
 | At build only: any refusal of the prototype bridge, checker or emitter, with the message "the prototype emitter cannot lower this program yet (#50): CODE message" at its position | [#50](https://github.com/cevr/ergo/issues/50) |
 
 ### S110: unused
 
 - A local is declared and never read (`unused-local`; `probes/same-local-as-cap.ergo`).
-- A type-switch binding is read in no case (`unused-type-switch-binding`). A `catch` binding is read in no arm.
-- An expression statement is not a call, a receive, `try` or `catch` (`unused-expression`, `probes/unused-expression.ergo`).
-- An import or a label is not used (Go's rules).
+- An `as` binding is read in no case (`unused-type-switch-binding`).
+- An expression statement is not a call, `try`, `catch` or `with` (`unused-expression`, `probes/unused-expression.ergo`).
+- An import is not used (Go's rule).
 
 *Prior art:* Go rejects unused locals, imports and unused expression values; Rust and Gleam warn instead. Ergo keeps Go's errors because its output is Go and because an unread value usually hides a dropped result.
 

@@ -1,6 +1,11 @@
 package check
 
-import "ergo.local/prototype/internal/sketch/syntax"
+import (
+	"fmt"
+	"strings"
+
+	"ergo.local/prototype/internal/sketch/syntax"
+)
 
 // Decided forms this checker does not check yet (check-v1) are S109, each
 // naming the stage that owns it, and nothing cascades from them (D3; round
@@ -12,6 +17,21 @@ import "ergo.local/prototype/internal/sketch/syntax"
 // with the noun that names its stage. It never panics.
 func (c *checker) outside(n syntax.Node, noun string) operand {
 	c.errorf(n, CodeOutside, "%s is not checked yet (check-v1)", noun)
+	if x, ok := n.(syntax.Expr); ok {
+		return bad(x)
+	}
+	return operand{mode: modeInvalid, typ: invalid}
+}
+
+// undecided reports a node, or a field of a node, that the decided parser
+// never builds (syntax's TestDecidedOnly proves the list; spec D-A5): S109,
+// never a panic, so a tree built by hand still gets a located diagnostic.
+// The checker has no other branch for such a node.
+func (c *checker) undecided(n syntax.Node, what string) operand {
+	if what == "" {
+		what = strings.TrimPrefix(fmt.Sprintf("%T", n), "*syntax.")
+	}
+	c.errorf(n, CodeOutside, "%s is not produced by the decided parser", what)
 	if x, ok := n.(syntax.Expr); ok {
 		return bad(x)
 	}

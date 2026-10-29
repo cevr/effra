@@ -29,14 +29,13 @@ type TypeName struct {
 	id   int
 }
 
-// Func is a function or a method.
+// Func is a package function, extern included.
 type Func struct {
 	Name  string
 	Pkg   *Package
 	Pos   syntax.Pos
 	Decl  *syntax.FuncDecl
-	Recv  *Named // the receiver's type, for a method
-	Ptr   bool   // a *T receiver
+	Ptr   bool // a 196m function whose first parameter is *owner
 	Sig   *Signature
 	file  *fileInfo
 	state int // signature: 0 none, 1 resolving, 2 done

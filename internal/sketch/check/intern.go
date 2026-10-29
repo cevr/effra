@@ -282,12 +282,8 @@ func shape(t Type) (kind byte, ref any, n int64, s string, kids []Type) {
 		return vParam, t, 0, "", nil
 	case *Slice:
 		return vSlice, nil, 0, "", []Type{t.Elem}
-	case *Array:
-		return vArray, nil, t.Len, "", []Type{t.Elem}
 	case *Map:
 		return vMap, nil, 0, "", []Type{t.Key, t.Elem}
-	case *Chan:
-		return vChan, nil, int64(t.Dir), "", []Type{t.Elem}
 	case *Pointer:
 		return vPointer, nil, 0, "", []Type{t.Elem}
 	case *Tuple:
@@ -299,7 +295,7 @@ func shape(t Type) (kind byte, ref any, n int64, s string, kids []Type) {
 		}
 		kids = append(kids, t.Results...)
 		kids = append(kids, &RowArg{Row: t.Errors}, &RowArg{Row: t.Uses})
-		s := strconv.Itoa(len(t.Params)) + "," + strconv.Itoa(len(t.Results)) + "," + strconv.FormatBool(t.Variadic)
+		s := strconv.Itoa(len(t.Params)) + "," + strconv.Itoa(len(t.Results))
 		return vSig, nil, 0, s, kids
 	case *Struct:
 		names := make([]string, len(t.Fields))

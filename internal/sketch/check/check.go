@@ -377,8 +377,10 @@ var universeOnce struct {
 	goPkg      *Package
 }
 
-// universe is Go's universe block, minus what the spec removes (D2): no nil,
-// new, panic, recover, print, println, complex, real or imag.
+// universe is the predeclared block: the basic types, comparable, true,
+// false and len, the one built-in function (#196, fourth round, item 2;
+// removedBuiltins names the Ergo form of each Go built-in it drops), and
+// with, the construct (grammar.md, Reserved names 2).
 func universe() *Scope {
 	universeOnce.Do(func() {
 		s := newScope(nil)
@@ -401,7 +403,7 @@ func universe() *Scope {
 		s.insert("error", errName)
 		s.insert("true", &Const{Name: "true", Type: Typ[UntypedBool], Val: true})
 		s.insert("false", &Const{Name: "false", Type: Typ[UntypedBool], Val: false})
-		for _, name := range []string{"len", "cap", "append", "make", "copy", "delete", "clear", "min", "max", "close", "with"} {
+		for _, name := range []string{"len", "with"} {
 			s.insert(name, &Builtin{Name: name})
 		}
 		// go.Foreign (a capability) and go.Error (an error type) are

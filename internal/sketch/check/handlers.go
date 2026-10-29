@@ -56,6 +56,10 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 // statements: when the catch's value is used, the arm's last statement
 // yields it, and return in an arm leaves the function (rows.md, Catch 7).
 func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool) operand {
+	if x.Bind != nil {
+		c.undecided(x.Bind, "a catch binding before the arms")
+		return bad(x)
+	}
 	openMark := c.openRowSeq
 	op := c.expr(x.X, hint)
 	valid := !op.invalid()
@@ -96,10 +100,6 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 	// review M1). The table's generation moves only between body checks
 	// (newSolutions, rows.go), so the ids hold for the whole catch.
 	covered, seen := map[int32]bool{}, map[int32]bool{}
-	var group *switchGroup
-	if x.Bind != nil && x.Bind.Name != "_" {
-		group = &switchGroup{}
-	}
 	for _, arm := range x.Arms {
 		var types []Type
 		var asName *syntax.Ident
@@ -152,18 +152,6 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 		}
 		saved := c.fn.scope
 		c.fn.scope = newScope(saved)
-		if group != nil {
-			bt := Type(invalid)
-			switch len(types) {
-			case 0:
-			case 1:
-				bt = types[0]
-			default:
-				bt = &Union{Variants: types}
-			}
-			v := c.bindLocal(&Var{Name: x.Bind.Name, Type: bt, Pos: x.Bind.Pos(), group: group, used: true})
-			c.fn.scope.insert(v.Name, v)
-		}
 		var asBinds []asBinding
 		if asName != nil {
 			bt := Type(invalid)
@@ -177,9 +165,6 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 		c.catchArm(arm, valueType, hasValue, wantValue && hasValue, valid)
 		c.unusedAs(asBinds)
 		c.fn.scope = saved
-	}
-	if group != nil && !group.used {
-		c.errorf(x.Bind, CodeUnused, "the catch binding %s is read in no arm", x.Bind.Name)
 	}
 	if !valid {
 		if hasValue {
@@ -278,39 +263,6 @@ func (c *checker) catchArm(arm *syntax.CatchArm, valueType Type, hasValue, yield
 	case !hasValue:
 		c.needNoValueOrCall(&op)
 	}
-}
-
-// goExpr checks `go f(x)` and `go { … }`: they start a task and yield a
-// prelude Task[T, E], where T is the body's value and E its error row
-// (runtime.md, Tasks 2). The body's requirements charge the enclosing
-// function at the go site.
-func (c *checker) goExpr(x *syntax.GoExpr) operand {
-	var value Type = NoValue
-	errs := newRow()
-	if x.Call != nil {
-		op := c.expr(x.Call, nil)
-		if op.invalid() {
-			return bad(x)
-		}
-		if op.mode == modeValue || op.mode == modeConst {
-			value = c.defaultOf(&op)
-		}
-		errs = op.errs
-	} else {
-		sig, _ := c.blockLit(x.Block, nil, nil, false)
-		c.chargeRow(x, c.types.resolve(sig.Uses))
-		if len(sig.Results) == 1 {
-			value = sig.Results[0]
-		}
-		c.readRow(sig.Errors)
-		errs = c.types.resolve(sig.Errors)
-	}
-	task := preludeType("Task")
-	if task == nil {
-		c.errorf(x, CodeType, "the prelude has no Task type")
-		return bad(x)
-	}
-	return operand{mode: modeValue, typ: c.instantiate(task, []Type{value, &RowArg{Row: errs}})}
 }
 
 // preludeType returns a prelude declaration's type by name.

@@ -304,8 +304,6 @@ func (c *checker) expr0(x syntax.Expr, hint Type) operand {
 	case *syntax.WireLit:
 		// A wire value outside with (grammar.md, Expressions 8).
 		return c.outside(x, "a wire value (196x, extern and wire values)")
-	case *syntax.GoExpr:
-		return c.goExpr(x)
 	case *syntax.KeyValueExpr:
 		c.errorf(x, CodeType, "a key: value pair belongs in a composite literal")
 		return bad(x)
@@ -314,20 +312,21 @@ func (c *checker) expr0(x syntax.Expr, hint Type) operand {
 	case *syntax.TypeGuard:
 		c.errorf(x, CodeType, "x.(type) is the subject of a type switch only")
 		return bad(x)
-	// check-v1: dead for *syntax.StructType below: no anonymous struct type (ruling C).
-	case *syntax.ArrayType, *syntax.MapType, *syntax.ChanType, *syntax.FuncType, *syntax.StructType, *syntax.InterfaceType:
+	case *syntax.ArrayType, *syntax.MapType, *syntax.FuncType, *syntax.InterfaceType:
 		t := c.typExpr(x, c.localTypeCtx())
 		if isInvalid(t) {
 			return bad(x)
 		}
 		return operand{mode: modeType, typ: t}
-	case *syntax.Ellipsis, *syntax.ErrorRow, *syntax.MachineType:
+	case *syntax.ErrorRow, *syntax.MachineType, *syntax.StructType:
 		c.errorf(x, CodeType, "unexpected type form in an expression")
 		return bad(x)
 	case *syntax.InterpolatedString:
 		return c.interpolated(x)
+	case *syntax.AsPattern, *syntax.VariantSpec, *syntax.IfStmt, *syntax.SwitchStmt, *syntax.TypeSwitchStmt:
+		return c.notYet(x)
 	}
-	return c.notYet(x)
+	return c.undecided(x, "")
 }
 
 // interpolated checks `"a \(x) b"`: each interpolated expression is a
@@ -398,19 +397,6 @@ func (c *checker) localTypeCtx() *typeCtx {
 		for _, tp := range c.fn.fn.Sig.TParams {
 			ctx.params[tp.Name] = tp
 		}
-		if c.fn.fn.Recv != nil && c.fn.fn.Decl.Recv != nil {
-			rt := c.fn.fn.Decl.Recv.List[0].Type
-			if s, ok := rt.(*syntax.StarExpr); ok {
-				rt = s.X
-			}
-			if ix, ok := rt.(*syntax.IndexExpr); ok {
-				for i, a := range ix.Indices {
-					if id, ok := a.(*syntax.Ident); ok && i < len(c.fn.fn.Recv.TParams) {
-						ctx.params[id.Name] = c.fn.fn.Recv.TParams[i]
-					}
-				}
-			}
-		}
 	}
 	if c.fn != nil {
 		ctx.scope = c.fn.scope
@@ -444,6 +430,10 @@ func (c *checker) ident(x *syntax.Ident) operand {
 	}
 	o := c.lookup(x.Name)
 	if o == nil {
+		if form, ok := removedBuiltins[x.Name]; ok {
+			c.errorf(x, CodeUnknown, "%s is not predeclared in Ergo; %s", x.Name, form)
+			return bad(x)
+		}
 		c.errorf(x, CodeUnknown, "unknown name %s", x.Name)
 		return bad(x)
 	}
@@ -626,14 +616,7 @@ func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 			return operand{mode: modeValue, typ: t}
 		}
 	case *Slice:
-		c.elements(x, u.Elem, -1)
-	case *Array:
-		if u.Len < 0 {
-			n := c.elements(x, u.Elem, -1)
-			t = &Array{Len: int64(n), Elem: u.Elem}
-		} else {
-			c.elements(x, u.Elem, u.Len)
-		}
+		c.elements(x, u.Elem)
 	case *Map:
 		// A constant key appears once, compared after conversion to the
 		// key type, as in Go (N3).
@@ -681,15 +664,6 @@ func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 // that lists one of its instances, or an instance), else from its field
 // values (D6: Some{n}, Enter{x}).
 func (c *checker) literalType(x *syntax.CompositeLit, hint Type) Type {
-	if at, ok := x.Type.(*syntax.ArrayType); ok {
-		if _, ell := at.Len.(*syntax.Ellipsis); ell {
-			elem := c.typExpr(at.Elt, c.localTypeCtx())
-			if isInvalid(elem) {
-				return nil
-			}
-			return &Array{Len: -1, Elem: elem}
-		}
-	}
 	raw := c.typExpr0(x.Type, c.localTypeCtx())
 	if isInvalid(raw) {
 		return nil
@@ -913,8 +887,7 @@ func (c *checker) localTypeText(t Type) string {
 	return re.ReplaceAllString(t.String(), "$1")
 }
 
-func (c *checker) elements(x *syntax.CompositeLit, elem Type, n int64) int {
-	count := 0
+func (c *checker) elements(x *syntax.CompositeLit, elem Type) {
 	for _, e := range x.Elts {
 		val := e
 		if kv, ok := e.(*syntax.KeyValueExpr); ok {
@@ -924,12 +897,7 @@ func (c *checker) elements(x *syntax.CompositeLit, elem Type, n int64) int {
 		}
 		op := c.valueExpr(val, elem)
 		c.assign(&op, elem, "element")
-		count++
 	}
-	if n >= 0 && int64(count) > n {
-		c.errorf(x, CodeType, "%d elements in an array of length %d", count, n)
-	}
-	return count
 }
 
 // ---------------------------------------------------------------- selectors
@@ -1161,11 +1129,6 @@ func (c *checker) index(x *syntax.IndexExpr, hint Type) operand {
 	case *Slice:
 		c.intIndex(x.Indices[0])
 		return operand{mode: modeValue, typ: u.Elem, addressable: true}
-	case *Array:
-		if i, ok := c.intIndex(x.Indices[0]); ok && i >= u.Len {
-			c.errorf(x.Indices[0], CodeType, "index %d is out of bounds of %s (length %d)", i, base.typ, u.Len)
-		}
-		return operand{mode: modeValue, typ: u.Elem, addressable: base.addressable}
 	case *Basic:
 		if isString(t) {
 			if i, ok := c.intIndex(x.Indices[0]); ok {
@@ -1227,12 +1190,10 @@ func constLength(op operand) (int64, bool) {
 func (c *checker) sliceExpr(x *syntax.SliceExpr) operand {
 	base := c.valueExpr(x.X, nil)
 	// The constant bounds: ordered low <= high <= max, and within the
-	// length of an array or a constant string (S108; Go's rule).
+	// length of a constant string (S108; Go's rule).
 	limit, limited := int64(0), false
 	if !base.invalid() {
-		if a, ok := under(base.typ).(*Array); ok {
-			limit, limited = a.Len, true
-		} else if n, ok := constLength(base); ok {
+		if n, ok := constLength(base); ok {
 			limit, limited = n, true
 		}
 	}
@@ -1256,11 +1217,9 @@ func (c *checker) sliceExpr(x *syntax.SliceExpr) operand {
 	if base.invalid() {
 		return bad(x)
 	}
-	switch u := under(base.typ).(type) {
+	switch under(base.typ).(type) {
 	case *Slice:
 		return operand{mode: modeValue, typ: base.typ}
-	case *Array:
-		return operand{mode: modeValue, typ: &Slice{Elem: u.Elem}}
 	case *Basic:
 		if isString(base.typ) {
 			if x.Slice3 {

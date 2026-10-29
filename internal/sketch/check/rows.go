@@ -493,12 +493,6 @@ func (s groupSite) before(t groupSite) bool {
 
 // funcKey names a function or method for groupSite.
 func funcKey(f *Func) string {
-	if f.Recv != nil {
-		return f.Recv.Obj.Name + "." + f.Name
-	}
-	if f.Decl.Recv != nil && len(f.Decl.Recv.List) > 0 {
-		return exprText(f.Decl.Recv.List[0].Type) + "." + f.Name
-	}
 	return f.Name
 }
 
@@ -838,9 +832,6 @@ type funcCtx struct {
 	locals   []*Var
 	fn       *Func
 	reach    *reachNode
-	// labelUsed records the labels a break or continue names (Go: a label
-	// defined and not used is an error).
-	labelUsed map[string]bool
 }
 
 type branchKind int
@@ -848,15 +839,11 @@ type branchKind int
 const (
 	brLoop branchKind = iota
 	brSwitch
-	brSelect
 	brBarrier // a with, trailing or bare block: nothing crosses it
-	brLabel
 )
 
 type branch struct {
-	kind  branchKind
-	label string
-	used  *bool
+	kind branchKind
 }
 
 // bodySize counts the syntax nodes of n: the cost of one check of a body
@@ -900,24 +887,14 @@ func (c *checker) checkFuncBody(f *Func) bool {
 		return false
 	}
 	defer c.beginDeps(f)()
-	// A method's receiver binds its type's parameters, which its body
-	// instantiates like its own: they own its instantiations too, as
-	// go/types canonicalizes receiver parameters (round-3 M1).
-	owner := f.Sig.TParams
-	if f.Recv != nil && len(f.Recv.TParams) > 0 {
-		owner = append(append([]*TypeParam(nil), f.Recv.TParams...), f.Sig.TParams...)
-	}
-	defer c.monoOwner(owner)()
+	defer c.monoOwner(f.Sig.TParams)()
 	saved := c.cur
 	c.cur = f.file
 	defer func() { c.cur = saved }()
 	sig := f.Sig
 	d := f.Decl
 	name := "function " + f.Name
-	if f.Recv != nil {
-		name = "method " + f.Recv.Obj.Name + "." + f.Name
-	}
-	t := &target{name: name, results: sig.Results, resultKnown: true, isFunc: true, main: f.Name == "main" && f.Recv == nil}
+	t := &target{name: name, results: sig.Results, resultKnown: true, isFunc: true, main: f.Name == "main"}
 	if f.inferErrors {
 		t.errors = newRow()
 	} else {
@@ -934,49 +911,13 @@ func (c *checker) checkFuncBody(f *Func) bool {
 	prev := c.fn
 	c.fn = fc
 	defer func() { c.fn = prev }()
-	if d.Recv != nil && f.Recv != nil {
-		field := d.Recv.List[0]
-		if len(field.Names) > 0 {
-			rt := Type(f.Recv)
-			if len(f.Recv.TParams) > 0 {
-				rt = c.instantiate(f.Recv, c.typeParamsAsArgs(f.Recv.TParams))
-			}
-			if f.Ptr {
-				rt = &Pointer{Elem: rt}
-			}
-			v := &Var{Name: field.Names[0].Name, Type: rt, Pos: field.Names[0].Pos(), param: true, used: true}
-			frame.insert(v.Name, v)
-		}
-	}
-	if d.Recv != nil && f.Recv == nil {
-		// An invalid receiver (collectMethods) leaves an empty signature.
-		// The receiver and the parameters still bind their names, as
-		// invalid vars, so a use of one is no reference to a package name
-		// and nothing follows from it (D3).
-		for _, list := range []*syntax.FieldList{d.Recv, d.Type.Params} {
-			if list == nil {
-				continue
-			}
-			for _, field := range list.List {
-				for _, n := range field.Names {
-					if n.Name != "_" {
-						frame.insert(n.Name, &Var{Name: n.Name, Type: invalid, Pos: n.Pos(), param: true, used: true})
-					}
-				}
-			}
-		}
-	}
 	for _, p := range sig.Params {
 		if p.Name == "_" {
 			continue
 		}
 		if prev, ok := frame.names[p.Name]; ok {
 			if _, isVar := prev.(*Var); isVar && prev.(*Var).param {
-				what := "parameter"
-				if d.Recv != nil && len(d.Recv.List[0].Names) > 0 && d.Recv.List[0].Names[0].Name == p.Name {
-					what = "receiver"
-				}
-				c.errorAt(p.Pos, p.Pos+syntax.Pos(len(p.Name)), CodeType, "%s is already a %s of %s", p.Name, what, f.Name)
+				c.errorAt(p.Pos, p.Pos+syntax.Pos(len(p.Name)), CodeType, "%s is already a parameter of %s", p.Name, f.Name)
 				continue
 			}
 		}
@@ -1027,18 +968,6 @@ func (c *checker) checkFuncBody(f *Func) bool {
 		}
 	}
 	return changed
-}
-
-func (c *checker) typeParamsAsArgs(tps []*TypeParam) []Type {
-	out := make([]Type, len(tps))
-	for i, tp := range tps {
-		if tp.Kind != KindType {
-			out[i] = &RowArg{Row: c.types.row(tp)}
-			continue
-		}
-		out[i] = tp
-	}
-	return out
 }
 
 // bindRequirements enters the written capability-row names of a body into

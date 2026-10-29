@@ -55,41 +55,13 @@ func (c *checker) stmt(s syntax.Stmt) {
 	c.stmtMark = c.undiagSeq
 	defer func() { c.stmtMark = savedMark }()
 	switch s := s.(type) {
-	case nil, *syntax.EmptyStmt:
+	case nil:
 	case *syntax.DeclStmt:
 		c.varDecl(s.Decl)
-	case *syntax.LabeledStmt:
-		c.labeled(s)
 	case *syntax.ExprStmt:
 		c.exprStmt(s)
-	case *syntax.SendStmt:
-		ch := c.valueExpr(s.Chan, nil)
-		if ch.invalid() {
-			c.valueExpr(s.Value, nil)
-			return
-		}
-		ct, ok := under(ch.typ).(*Chan)
-		if !ok || ct.Dir == syntax.ChanRecv {
-			c.errorf(s.Chan, CodeType, "cannot send to %s", ch.typ)
-			c.valueExpr(s.Value, nil)
-			return
-		}
-		v := c.valueExpr(s.Value, ct.Elem)
-		c.assign(&v, ct.Elem, "send")
-	case *syntax.IncDecStmt:
-		op := c.valueExpr(s.X, nil)
-		if op.invalid() {
-			return
-		}
-		if !isNumeric(op.typ) {
-			c.errorf(s, CodeType, "%s is not defined on %s", s.Tok, op.typ)
-			return
-		}
-		c.assignable0(s.X, &op)
 	case *syntax.AssignStmt:
 		c.assignStmt(s)
-	case *syntax.DeferStmt:
-		c.stmt(s.Stmt)
 	case *syntax.ReturnStmt:
 		c.returnStmt(s)
 	case *syntax.BranchStmt:
@@ -103,10 +75,11 @@ func (c *checker) stmt(s syntax.Stmt) {
 		c.fn.branches = c.fn.branches[:len(c.fn.branches)-1]
 		done()
 	case *syntax.IfStmt:
-		done := c.openScope()
 		if s.Init != nil {
-			c.stmt(s.Init)
+			c.undecided(s.Init, "an if header's init statement")
+			return
 		}
+		done := c.openScope()
 		c.condition(s.Cond)
 		c.block(s.Body)
 		if s.Else != nil {
@@ -114,17 +87,17 @@ func (c *checker) stmt(s syntax.Stmt) {
 		}
 		done()
 	case *syntax.SwitchStmt:
-		c.switchStmt(s, "")
+		c.switchStmt(s)
 	case *syntax.TypeSwitchStmt:
-		c.typeSwitch(s, "")
-	case *syntax.SelectStmt:
-		c.selectStmt(s, "")
+		c.typeSwitch(s)
 	case *syntax.ForStmt:
-		c.forStmt(s, "")
+		c.forStmt(s)
 	case *syntax.RangeStmt:
-		c.rangeStmt(s, "")
-	default:
+		c.rangeStmt(s)
+	case *syntax.AssertStmt:
 		c.notYet(s)
+	default:
+		c.undecided(s, "")
 	}
 }
 
@@ -150,8 +123,8 @@ func (c *checker) condition(x syntax.Expr) {
 	}
 }
 
-// exprStmt checks an expression statement: a call, a receive, try, catch,
-// with or go, as in Go (S110 otherwise). A fallible statement is S105.
+// exprStmt checks an expression statement: a call, try, catch or with
+// (S110 otherwise). A fallible statement is S105.
 func (c *checker) exprStmt(s *syntax.ExprStmt) {
 	x := unparen(s.X)
 	var op operand
@@ -185,7 +158,7 @@ func (c *checker) exprStmt(s *syntax.ExprStmt) {
 	}
 	c.handled(&op)
 	if !isCallLike(x) {
-		c.errorf(s.X, CodeUnused, "this value is not used; an expression statement is a call, a receive, try or catch (as in Go)")
+		c.errorf(s.X, CodeUnused, "this value is not used; an expression statement is a call, try, catch or with")
 		return
 	}
 	if call, ok := x.(*syntax.CallExpr); ok && op.mode != modeNoValue {
@@ -258,7 +231,7 @@ func (c *checker) varDecl(d *syntax.VarDecl) {
 }
 
 // multiValue checks a value that must give n values: a call with n
-// results, or a comma-ok form (a map index, a receive).
+// results, or a comma-ok map index.
 func (c *checker) multiValue(x syntax.Expr, n int) []Type {
 	out := make([]Type, n)
 	for i := range out {
@@ -279,15 +252,6 @@ func (c *checker) multiValue(x syntax.Expr, n int) []Type {
 			}
 			c.errorf(x, CodeType, "2 values from one value")
 			return out
-		case *syntax.UnaryExpr:
-			if e.Op == syntax.ARROW {
-				op := c.valueExpr(e, nil)
-				if op.invalid() {
-					return out
-				}
-				out[0], out[1] = op.typ, Typ[Bool]
-				return out
-			}
 		}
 	}
 	op := c.valueExpr(x, nil)
@@ -310,158 +274,44 @@ func (c *checker) multiValue(x syntax.Expr, n int) []Type {
 	return out
 }
 
+// assignStmt checks `x = e` and `x op= e`: one target and one value. A
+// `:=` or a statement with several sides is not produced by the decided
+// parser (D-A5).
 func (c *checker) assignStmt(s *syntax.AssignStmt) {
-	switch s.Tok {
-	case syntax.DEFINE:
-		ids := make([]*syntax.Ident, len(s.Lhs))
-		for i, l := range s.Lhs {
-			id, ok := l.(*syntax.Ident)
-			if !ok {
-				c.errorf(l, CodeType, "the left side of := is names only")
-				return
-			}
-			ids[i] = id
-		}
-		reuse, skip := c.defineTargets(s, ids)
-		var types []Type
-		switch {
-		case len(s.Rhs) == len(ids):
-			types = make([]Type, len(ids))
-			for i, r := range s.Rhs {
-				if skip[i] {
-					op := c.valueExpr(r, nil)
-					c.defaultOf(&op)
-					continue
-				}
-				if v := reuse[i]; v != nil {
-					op := c.valueExpr(r, v.Type)
-					if !isInvalid(v.Type) {
-						c.assign(&op, v.Type, "assignment")
-					}
-					continue
-				}
-				op := c.valueExpr(r, nil)
-				types[i] = c.defaultOf(&op)
-			}
-		case len(s.Rhs) == 1:
-			types = c.multiValue(s.Rhs[0], len(ids))
-			for i, v := range reuse {
-				if v == nil || skip[i] || isInvalid(types[i]) || isInvalid(v.Type) {
-					continue
-				}
-				if ok, why := c.assignable(types[i], v.Type); !ok {
-					c.errorf(ids[i], CodeType, "cannot assign %s to %s: %s", types[i], v.Type, why)
-				}
-			}
-		default:
-			c.errorf(s, CodeType, "%d names and %d values", len(ids), len(s.Rhs))
-			types = make([]Type, len(ids))
-		}
-		for i, id := range ids {
-			if skip[i] {
-				continue // repeated on the left: reported, binds nothing
-			}
-			if v := reuse[i]; v != nil {
-				// Reassigning an existing local does not read it.
-				c.recordUse(id, v)
-				continue
-			}
-			c.declareLocal(id, types[i])
-		}
-	case syntax.ASSIGN:
-		var types []Type
-		if len(s.Rhs) == 1 && len(s.Lhs) > 1 {
-			types = c.multiValue(s.Rhs[0], len(s.Lhs))
-			for i, l := range s.Lhs {
-				if isBlank(l) {
-					continue
-				}
-				lop := c.lhs(l)
-				if lop.invalid() || isInvalid(types[i]) {
-					continue
-				}
-				if ok, why := c.assignable(types[i], lop.typ); !ok {
-					c.errorf(l, CodeType, "cannot assign %s to %s: %s", types[i], lop.typ, why)
-				}
-			}
+	if s.Tok == syntax.DEFINE || len(s.Lhs) != 1 || len(s.Rhs) != 1 {
+		c.undecided(s, "a declaring assignment, or one with several sides,")
+		return
+	}
+	l, r := s.Lhs[0], s.Rhs[0]
+	if s.Tok == syntax.ASSIGN {
+		if isBlank(l) {
+			op := c.valueExpr(r, nil)
+			c.defaultOf(&op)
 			return
 		}
-		if len(s.Rhs) != len(s.Lhs) {
-			c.errorf(s, CodeType, "%d targets and %d values", len(s.Lhs), len(s.Rhs))
-			return
+		lop := c.lhs(l)
+		var hint Type
+		if !lop.invalid() {
+			hint = lop.typ
 		}
-		for i, l := range s.Lhs {
-			if isBlank(l) {
-				op := c.valueExpr(s.Rhs[i], nil)
-				c.defaultOf(&op)
-				continue
-			}
-			lop := c.lhs(l)
-			var hint Type
-			if !lop.invalid() {
-				hint = lop.typ
-			}
-			op := c.valueExpr(s.Rhs[i], hint)
-			if lop.invalid() {
-				continue
-			}
-			c.assign(&op, lop.typ, "assignment")
-		}
-	default:
-		if len(s.Lhs) != 1 || len(s.Rhs) != 1 {
-			c.errorf(s, CodeType, "%s takes one target and one value", s.Tok)
-			return
-		}
-		lop := c.lhs(s.Lhs[0])
-		bin := &syntax.BinaryExpr{X: s.Lhs[0], OpPos: s.TokPos, Op: assignOp(s.Tok), Y: s.Rhs[0]}
+		op := c.valueExpr(r, hint)
 		if lop.invalid() {
-			c.valueExpr(s.Rhs[0], nil)
 			return
 		}
-		op := c.binary(bin, nil)
-		op.expr = s.Rhs[0]
-		if !op.invalid() {
-			c.assign(&op, lop.typ, "assignment")
-		}
+		c.assign(&op, lop.typ, "assignment")
+		return
 	}
-}
-
-// defineTargets classifies the names on the left of :=, as Go does: a name
-// already declared as a local of this block is reassigned, not redeclared,
-// and at least one non-blank name must be new (S108). A name repeated on
-// the left is S108 once; its later occurrences bind and assign nothing, and
-// the no-new-name rule is not reported on top of it (D3; round-2 M9). It
-// returns, per name, the local it reassigns or nil, and whether to skip it.
-func (c *checker) defineTargets(s *syntax.AssignStmt, ids []*syntax.Ident) ([]*Var, []bool) {
-	reuse := make([]*Var, len(ids))
-	skip := make([]bool, len(ids))
-	seen := map[string]bool{}
-	fresh, repeated := false, false
-	repeatedName := map[string]bool{}
-	for i, id := range ids {
-		if id.Name == "_" {
-			continue
-		}
-		if seen[id.Name] {
-			if !repeatedName[id.Name] {
-				c.errorf(id, CodeType, "%s is repeated on the left of :=", id.Name)
-			}
-			repeatedName[id.Name] = true
-			skip[i] = true
-			repeated = true
-			continue
-		}
-		seen[id.Name] = true
-		if v, ok := c.fn.scope.names[id.Name].(*Var); ok {
-			reuse[i] = v
-			continue
-		}
-		fresh = true
+	lop := c.lhs(l)
+	bin := &syntax.BinaryExpr{X: l, OpPos: s.TokPos, Op: assignOp(s.Tok), Y: r}
+	if lop.invalid() {
+		c.valueExpr(r, nil)
+		return
 	}
-	if !fresh && !repeated {
-		c.errorf(s, CodeType, "no new names on the left of :=; use = to assign")
+	op := c.binary(bin, nil)
+	op.expr = r
+	if !op.invalid() {
+		c.assign(&op, lop.typ, "assignment")
 	}
-	return reuse, skip
 }
 
 func isBlank(x syntax.Expr) bool {
@@ -676,43 +526,14 @@ func (c *checker) isErrorValue(t Type) bool {
 
 // ---------------------------------------------------------------- branches
 
-func (c *checker) labeled(s *syntax.LabeledStmt) {
-	label := s.Label.Name
-	for _, b := range c.fn.branches {
-		if b.label == label {
-			c.errorf(s.Label, CodeType, "label %s is already defined", label)
-		}
-	}
-	if c.fn.labelUsed == nil {
-		c.fn.labelUsed = map[string]bool{}
-	}
-	delete(c.fn.labelUsed, label)
-	defer func() {
-		if !c.fn.labelUsed[label] {
-			c.errorf(s.Label, CodeUnused, "label %s is defined and not used (as in Go)", label)
-		}
-	}()
-	switch inner := s.Stmt.(type) {
-	case *syntax.ForStmt:
-		c.forStmt(inner, label)
-	case *syntax.RangeStmt:
-		c.rangeStmt(inner, label)
-	case *syntax.SwitchStmt:
-		c.switchStmt(inner, label)
-	case *syntax.TypeSwitchStmt:
-		c.typeSwitch(inner, label)
-	case *syntax.SelectStmt:
-		c.selectStmt(inner, label)
-	default:
-		c.fn.branches = append(c.fn.branches, branch{kind: brLabel, label: label})
-		c.stmt(s.Stmt)
-		c.fn.branches = c.fn.branches[:len(c.fn.branches)-1]
-	}
-}
-
 // branchStmt checks break and continue: they may not leave a with block or
-// a block argument (grammar.md, Statements 5).
+// a block argument (grammar.md, Statements 5). A label is not produced by
+// the decided parser (D-A5).
 func (c *checker) branchStmt(s *syntax.BranchStmt) {
+	if s.Label != nil {
+		c.undecided(s.Label, "a label on break or continue")
+		return
+	}
 	crossed := false
 	for i := len(c.fn.branches) - 1; i >= 0; i-- {
 		b := c.fn.branches[i]
@@ -720,70 +541,44 @@ func (c *checker) branchStmt(s *syntax.BranchStmt) {
 			crossed = true
 			continue
 		}
-		if s.Label != nil {
-			if b.label != s.Label.Name {
-				continue
-			}
-			if c.fn.labelUsed != nil {
-				c.fn.labelUsed[b.label] = true
-			}
-			if s.Tok == syntax.CONTINUE && b.kind != brLoop {
-				c.errorf(s, CodeType, "continue %s: %s does not label a loop", s.Label.Name, s.Label.Name)
-				return
-			}
-			if b.kind == brLabel && s.Tok == syntax.BREAK {
-				c.errorf(s, CodeType, "break %s: %s does not label a loop, switch or select", s.Label.Name, s.Label.Name)
-				return
-			}
-		} else {
-			if s.Tok == syntax.CONTINUE && b.kind != brLoop {
-				continue
-			}
-			if b.kind == brLabel {
-				continue
-			}
+		if s.Tok == syntax.CONTINUE && b.kind != brLoop {
+			continue
 		}
 		if crossed {
 			c.errorf(s, CodeType, "%s cannot leave a with block or a block argument (grammar.md, Statements 5)", s.Tok)
 		}
 		return
 	}
-	if s.Label != nil {
-		c.errorf(s.Label, CodeUnknown, "unknown label %s", s.Label.Name)
-		return
-	}
 	if crossed {
 		c.errorf(s, CodeType, "%s cannot leave a with block or a block argument (grammar.md, Statements 5)", s.Tok)
 		return
 	}
-	c.errorf(s, CodeType, "%s is not inside a loop, switch or select", s.Tok)
+	c.errorf(s, CodeType, "%s is not inside a for or match", s.Tok)
 }
 
-func (c *checker) push(kind branchKind, label string) func() {
-	c.fn.branches = append(c.fn.branches, branch{kind: kind, label: label})
+func (c *checker) push(kind branchKind) func() {
+	c.fn.branches = append(c.fn.branches, branch{kind: kind})
 	return func() { c.fn.branches = c.fn.branches[:len(c.fn.branches)-1] }
 }
 
-func (c *checker) forStmt(s *syntax.ForStmt, label string) {
+func (c *checker) forStmt(s *syntax.ForStmt) {
+	if s.Init != nil || s.Post != nil {
+		c.undecided(s, "a for header with an init or post statement")
+		return
+	}
 	done := c.openScope()
 	defer done()
-	if s.Init != nil {
-		c.stmt(s.Init)
-	}
 	c.condition(s.Cond)
-	if s.Post != nil {
-		c.stmt(s.Post)
-	}
-	pop := c.push(brLoop, label)
+	pop := c.push(brLoop)
 	c.block(s.Body)
 	pop()
 }
 
 // countRange checks `for i in lo..hi { }` (grammar.md, One for): the
-// bounds are integers of one type, an untyped pair takes int, and the one
+// bounds are integers of one type, two literals take int, and the one
 // binding counts from lo up to hi, excluding hi, as Go's `for i := lo; i <
 // hi; i++` does.
-func (c *checker) countRange(s *syntax.RangeStmt, r *syntax.BinaryExpr, label string) {
+func (c *checker) countRange(s *syntax.RangeStmt, r *syntax.BinaryExpr) {
 	lo := c.valueExpr(r.X, nil)
 	hi := c.valueExpr(r.Y, nil)
 	t := Type(invalid)
@@ -803,16 +598,23 @@ func (c *checker) countRange(s *syntax.RangeStmt, r *syntax.BinaryExpr, label st
 		c.declareLocal(id, t)
 	}
 	c.rangePatterns(s)
-	pop := c.push(brLoop, label)
+	pop := c.push(brLoop)
 	c.block(s.Body)
 	pop()
 }
 
-func (c *checker) rangeStmt(s *syntax.RangeStmt, label string) {
+// rangeStmt checks `for x in e` and `for i, x in e`. The decided parser
+// always declares the bindings (Tok DEFINE); an assignment form is not
+// produced by it (D-A5).
+func (c *checker) rangeStmt(s *syntax.RangeStmt) {
+	if s.Tok != syntax.DEFINE {
+		c.undecided(s, "a for header that assigns")
+		return
+	}
 	done := c.openScope()
 	defer done()
 	if r, ok := s.X.(*syntax.BinaryExpr); ok && r.Op == syntax.DOTDOT {
-		c.countRange(s, r, label)
+		c.countRange(s, r)
 		return
 	}
 	x := c.valueExpr(s.X, nil)
@@ -825,12 +627,8 @@ func (c *checker) rangeStmt(s *syntax.RangeStmt, label string) {
 		switch u := under(t).(type) {
 		case *Slice:
 			kt, vt = Typ[Int], u.Elem
-		case *Array:
-			kt, vt = Typ[Int], u.Elem
 		case *Map:
 			kt, vt = u.Key, u.Elem
-		case *Chan:
-			kt, vt = u.Elem, nil
 		case *Basic:
 			switch {
 			case isString(u):
@@ -850,57 +648,39 @@ func (c *checker) rangeStmt(s *syntax.RangeStmt, label string) {
 	if vt == nil && s.Value != nil {
 		c.errorf(s.Value, CodeType, "range over %s permits only one iteration variable", x.typ)
 	}
-	switch s.Tok {
-	case syntax.DEFINE:
-		c.rangePatterns(s)
-		if id, ok := s.Key.(*syntax.Ident); ok {
-			c.declareLocal(id, kt)
-		}
-		if id, ok := s.Value.(*syntax.Ident); ok && vt != nil {
-			c.declareLocal(id, vt)
-		}
-	case syntax.ASSIGN:
-		for i, l := range []syntax.Expr{s.Key, s.Value} {
-			if l == nil || isBlank(l) {
-				continue
-			}
-			lop := c.lhs(l)
-			want := kt
-			if i == 1 {
-				want = vt
-			}
-			if !lop.invalid() && want != nil && !isInvalid(want) {
-				if ok, why := c.assignable(want, lop.typ); !ok {
-					c.errorf(l, CodeType, "cannot assign %s to %s: %s", want, lop.typ, why)
-				}
-			}
-		}
+	c.rangePatterns(s)
+	if id, ok := s.Key.(*syntax.Ident); ok {
+		c.declareLocal(id, kt)
 	}
-	pop := c.push(brLoop, label)
+	if id, ok := s.Value.(*syntax.Ident); ok && vt != nil {
+		c.declareLocal(id, vt)
+	}
+	pop := c.push(brLoop)
 	c.block(s.Body)
 	pop()
 }
 
-func (c *checker) switchStmt(s *syntax.SwitchStmt, label string) {
+func (c *checker) switchStmt(s *syntax.SwitchStmt) {
+	if s.Init != nil {
+		c.undecided(s.Init, "a match header's init statement")
+		return
+	}
 	done := c.openScope()
 	defer done()
-	if s.Init != nil {
-		c.stmt(s.Init)
-	}
 	var tag operand
 	tagType := Type(Typ[Bool])
 	if s.Tag != nil {
 		tag = c.valueExpr(s.Tag, nil)
 		tagType = c.defaultOf(&tag)
 	}
-	pop := c.push(brSwitch, label)
+	pop := c.push(brSwitch)
 	defer pop()
 	defaults := 0
 	for _, cl := range s.Clauses {
 		if cl.List == nil {
 			defaults++
 			if defaults > 1 {
-				c.errorf(cl, CodeType, "a switch has at most one default")
+				c.errorf(cl, CodeType, "a match has at most one case _")
 			}
 		}
 		for _, e := range cl.List {
@@ -910,7 +690,7 @@ func (c *checker) switchStmt(s *syntax.SwitchStmt, label string) {
 			}
 			if s.Tag == nil {
 				if !isBoolean(op.typ) {
-					c.errorf(e, CodeType, "a case of a switch without a tag must be a bool, not %s", op.typ)
+					c.errorf(e, CodeType, "a case of a match without a subject must be a bool, not %s", op.typ)
 				}
 				continue
 			}
@@ -926,78 +706,35 @@ func (c *checker) switchStmt(s *syntax.SwitchStmt, label string) {
 	}
 }
 
-func (c *checker) selectStmt(s *syntax.SelectStmt, label string) {
-	pop := c.push(brSelect, label)
-	defer pop()
-	defaults := 0
-	for _, cl := range s.Clauses {
-		done := c.openScope()
-		switch comm := cl.Comm.(type) {
-		case nil:
-			defaults++
-			if defaults > 1 {
-				c.errorf(cl, CodeType, "a select has at most one default")
-			}
-		case *syntax.SendStmt:
-			c.stmt(comm)
-		case *syntax.ExprStmt:
-			if u, ok := unparen(comm.X).(*syntax.UnaryExpr); !ok || u.Op != syntax.ARROW {
-				c.errorf(comm, CodeType, "a select case is a send or a receive")
-			} else {
-				c.valueExpr(comm.X, nil)
-			}
-		case *syntax.AssignStmt:
-			if len(comm.Rhs) != 1 {
-				c.errorf(comm, CodeType, "a select case is a send or a receive")
-				break
-			}
-			if u, ok := unparen(comm.Rhs[0]).(*syntax.UnaryExpr); !ok || u.Op != syntax.ARROW {
-				c.errorf(comm, CodeType, "a select case is a send or a receive")
-				break
-			}
-			c.assignStmt(comm)
-		default:
-			c.errorf(comm, CodeType, "a select case is a send or a receive")
-		}
-		c.stmtList(cl.Body, false)
-		done()
-	}
-}
-
 // ---------------------------------------------------------------- termination
 
 // terminatesList reports whether a statement list ends in a terminating
 // statement: Go's rules, plus a total type switch whose cases all terminate
 // (rows.md, Totality 3; D8).
 func (c *checker) terminatesList(list []syntax.Stmt) bool {
-	for i := len(list) - 1; i >= 0; i-- {
-		if _, empty := list[i].(*syntax.EmptyStmt); empty {
-			continue
-		}
-		return c.terminates(list[i], "")
+	if len(list) == 0 {
+		return false
 	}
-	return false
+	return c.terminates(list[len(list)-1])
 }
 
-func (c *checker) terminates(s syntax.Stmt, label string) bool {
+func (c *checker) terminates(s syntax.Stmt) bool {
 	switch s := s.(type) {
 	case *syntax.ReturnStmt:
 		return true
 	case *syntax.BlockStmt:
 		return c.terminatesList(s.List)
 	case *syntax.IfStmt:
-		return s.Else != nil && c.terminatesList(s.Body.List) && c.terminates(s.Else, "")
-	case *syntax.LabeledStmt:
-		return c.terminates(s.Stmt, s.Label.Name)
+		return s.Else != nil && c.terminatesList(s.Body.List) && c.terminates(s.Else)
 	case *syntax.ForStmt:
-		return s.Cond == nil && !hasBreak(s.Body, label, true)
+		return s.Cond == nil && !hasBreak(s.Body)
 	case *syntax.SwitchStmt:
 		hasDefault := false
 		for _, cl := range s.Clauses {
 			if cl.List == nil {
 				hasDefault = true
 			}
-			if !c.terminatesList(cl.Body) || hasBreakList(cl.Body, label, true) {
+			if !c.terminatesList(cl.Body) || hasBreakList(cl.Body) {
 				return false
 			}
 		}
@@ -1007,14 +744,7 @@ func (c *checker) terminates(s syntax.Stmt, label string) bool {
 			return false
 		}
 		for _, cl := range s.Clauses {
-			if !c.terminatesList(cl.Body) || hasBreakList(cl.Body, label, true) {
-				return false
-			}
-		}
-		return true
-	case *syntax.SelectStmt:
-		for _, cl := range s.Clauses {
-			if !c.terminatesList(cl.Body) || hasBreakList(cl.Body, label, true) {
+			if !c.terminatesList(cl.Body) || hasBreakList(cl.Body) {
 				return false
 			}
 		}
@@ -1023,41 +753,33 @@ func (c *checker) terminates(s syntax.Stmt, label string) bool {
 	return false
 }
 
-// hasBreak reports whether a break leaves the statement being analysed: an
-// unlabeled break outside any nested loop, switch or select, or a break of
-// its label.
-func hasBreak(s syntax.Stmt, label string, top bool) bool {
+// hasBreak reports whether a break leaves the statement being analysed: a
+// break outside any nested for or match (the decided language has no
+// labels).
+func hasBreak(s syntax.Stmt) bool {
 	found := false
-	var walk func(n syntax.Node, nested bool) bool
-	walk = func(n syntax.Node, nested bool) bool {
-		syntax.Inspect(n, func(x syntax.Node) bool {
-			if found {
-				return false
+	syntax.Inspect(s, func(x syntax.Node) bool {
+		if found {
+			return false
+		}
+		switch x := x.(type) {
+		case *syntax.FuncLit:
+			return false
+		case *syntax.BranchStmt:
+			if x.Tok == syntax.BREAK {
+				found = true
 			}
-			switch x := x.(type) {
-			case *syntax.FuncLit:
-				return false
-			case *syntax.BranchStmt:
-				if x.Tok == syntax.BREAK && (x.Label == nil && !nested || x.Label != nil && x.Label.Name == label && label != "") {
-					found = true
-				}
-			case *syntax.ForStmt, *syntax.RangeStmt, *syntax.SwitchStmt, *syntax.TypeSwitchStmt, *syntax.SelectStmt:
-				if x != n {
-					walk(x, true)
-					return false
-				}
-			}
-			return true
-		})
-		return found
-	}
-	_ = top
-	return walk(s, false)
+		case *syntax.ForStmt, *syntax.RangeStmt, *syntax.SwitchStmt, *syntax.TypeSwitchStmt:
+			return syntax.Node(x) == syntax.Node(s)
+		}
+		return true
+	})
+	return found
 }
 
-func hasBreakList(list []syntax.Stmt, label string, top bool) bool {
+func hasBreakList(list []syntax.Stmt) bool {
 	for _, s := range list {
-		if hasBreak(s, label, top) {
+		if hasBreak(s) {
 			return true
 		}
 	}

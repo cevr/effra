@@ -68,12 +68,8 @@ func (in *inferer) mentions(t Type) bool {
 			return walkRow(t.Row, walk)
 		case *Slice:
 			return walk(t.Elem)
-		case *Array:
-			return walk(t.Elem)
 		case *Map:
 			return walk(t.Key) || walk(t.Elem)
-		case *Chan:
-			return walk(t.Elem)
 		case *Pointer:
 			return walk(t.Elem)
 		case *Tuple:
@@ -178,18 +174,6 @@ func (in *inferer) nify(x, y Type, mode unifyMode, depth int) bool {
 		if !in.nify(b, y, mode, depth) {
 			return false
 		}
-		// Go refines a bidirectional channel binding to the directed
-		// channel of a later argument. Ergo infers a subset of Go (D6 as
-		// amended in round 7): it refuses the call, asking for the type
-		// arguments, rather than keep a binding Go would not.
-		if bc, ok := b.(*Chan); ok && mode&unifyExact == 0 {
-			if yc, ok := y.(*Chan); ok && bc.Dir == 0 && yc.Dir != 0 {
-				if in.refused == nil {
-					in.refused = px
-				}
-				return true
-			}
-		}
 		bi, yi := asInterface(b), asInterface(y)
 		_, bn := b.(*Named)
 		_, yn := y.(*Named)
@@ -288,15 +272,9 @@ func (in *inferer) nify(x, y Type, mode unifyMode, depth int) bool {
 	case *Slice:
 		ys, ok := y.(*Slice)
 		return ok && in.nify(x.Elem, ys.Elem, emode, depth)
-	case *Array:
-		ya, ok := y.(*Array)
-		return ok && x.Len == ya.Len && in.nify(x.Elem, ya.Elem, emode, depth)
 	case *Map:
 		ym, ok := y.(*Map)
 		return ok && in.nify(x.Key, ym.Key, emode, depth) && in.nify(x.Elem, ym.Elem, emode, depth)
-	case *Chan:
-		yc, ok := y.(*Chan)
-		return ok && (mode&unifyExact == 0 || x.Dir == yc.Dir) && in.nify(x.Elem, yc.Elem, emode, depth)
 	case *Pointer:
 		yp, ok := y.(*Pointer)
 		return ok && in.nify(x.Elem, yp.Elem, emode, depth)
@@ -307,18 +285,6 @@ func (in *inferer) nify(x, y Type, mode unifyMode, depth int) bool {
 		}
 		for i := range x.Types {
 			if !in.nify(x.Types[i], yt.Types[i], mode, depth) {
-				return false
-			}
-		}
-		return true
-	// check-v1: dead. Only an anonymous struct type unifies structurally (ruling C).
-	case *Struct:
-		ys, ok := y.(*Struct)
-		if !ok || len(ys.Fields) != len(x.Fields) {
-			return false
-		}
-		for i, f := range x.Fields {
-			if ys.Fields[i].Name != f.Name || !in.nify(f.Type, ys.Fields[i].Type, emode, depth) {
 				return false
 			}
 		}
@@ -364,7 +330,7 @@ func (in *inferer) nifySig(x, y *Signature, mode unifyMode, depth int) bool {
 	if x == nil || y == nil {
 		return x == y
 	}
-	if len(x.Params) != len(y.Params) || x.Variadic != y.Variadic {
+	if len(x.Params) != len(y.Params) {
 		return false
 	}
 	for i := range x.Params {

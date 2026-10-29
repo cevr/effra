@@ -99,16 +99,12 @@ func (c *checker) subst(t Type, m map[*TypeParam]Type) Type {
 		return &MachineType{State: c.subst(t.State, m), Signal: c.subst(t.Signal, m)}
 	case *Slice:
 		return &Slice{Elem: c.subst(t.Elem, m)}
-	case *Array:
-		return &Array{Len: t.Len, Elem: c.subst(t.Elem, m)}
 	case *Map:
 		return &Map{Key: c.subst(t.Key, m), Elem: c.subst(t.Elem, m)}
-	case *Chan:
-		return &Chan{Dir: t.Dir, Elem: c.subst(t.Elem, m)}
 	case *Pointer:
 		return &Pointer{Elem: c.subst(t.Elem, m)}
 	case *Signature:
-		s := &Signature{Variadic: t.Variadic, Fallible: t.Fallible}
+		s := &Signature{Fallible: t.Fallible}
 		for _, p := range t.Params {
 			s.Params = append(s.Params, &Var{Name: p.Name, Type: c.subst(p.Type, m), Pos: p.Pos, param: true})
 		}
@@ -170,7 +166,7 @@ func (c *checker) identical(a, b Type) bool {
 // sameShape reports whether two signatures have identical parameters and
 // results.
 func (c *checker) sameShape(a, b *Signature) bool {
-	if len(a.Params) != len(b.Params) || len(a.Results) != len(b.Results) || a.Variadic != b.Variadic {
+	if len(a.Params) != len(b.Params) || len(a.Results) != len(b.Results) {
 		return false
 	}
 	for i := range a.Params {
@@ -237,10 +233,6 @@ func (c *checker) assignable(v, t Type) (bool, string) {
 			return false, fmt.Sprintf("its capability row %s is wider than %s", rowText(vs.Uses), rowText(tt.Uses))
 		}
 		return true, ""
-	case *Chan:
-		if vc, ok := v.(*Chan); ok && vc.Dir == 0 && c.identical(vc.Elem, tt.Elem) {
-			return true, ""
-		}
 	}
 	return false, ""
 }
@@ -426,9 +418,7 @@ func comparableSeen(t Type, seen map[Type]bool) bool {
 			}
 		}
 		return true
-	case *Array:
-		return comparableSeen(u.Elem, seen)
-	case *Interface, *Union, *Chan, *Pointer:
+	case *Interface, *Union, *Pointer:
 		return true
 	case *TypeParam:
 		ci := asInterface(u.Constraint)
@@ -467,10 +457,8 @@ func defaultableSeen(t Type, seen map[Type]bool) bool {
 	switch u := under(t).(type) {
 	case *Basic:
 		return true
-	case *Slice, *Map, *Chan:
+	case *Slice, *Map:
 		return true
-	case *Array:
-		return defaultableSeen(u.Elem, seen)
 	case *Struct:
 		// A recursive struct reaches itself through a named type, the same
 		// type object (instances are cached by id).

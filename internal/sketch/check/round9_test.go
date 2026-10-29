@@ -50,8 +50,6 @@ func Ret() int8 { return (1 + 2) }
 	}
 	return 0 }`},
 		{"len", `func F() int { return len("ab") }`},
-		{"min", `func F(n int8) int8 { return min(n, 1) }`},
-		{"max of constants", `func F() int8 { return max(1, 2) }`},
 		{"range key", `func F(m map[int8]string) { for k := range m { _ = k == 1 } }`},
 	}
 	for _, s := range sites {

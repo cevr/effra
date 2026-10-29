@@ -9,7 +9,7 @@ import (
 
 // isEntry reports whether f is this package's entry function, main.
 func (c *checker) isEntry(f *Func) bool {
-	return f.Name == "main" && f.Recv == nil && f.Pkg == c.pkg
+	return f.Name == "main" && f.Pkg == c.pkg
 }
 
 // call checks a call, a conversion, a builtin or the with construct. In call
@@ -63,7 +63,7 @@ func (c *checker) callOf(x *syntax.CallExpr, hint Type) operand {
 		if fun.recv != nil {
 			return c.libraryCall(x, fun.obj.(*Builtin), *fun.recv)
 		}
-		return c.builtin(x, fun.obj.(*Builtin), hint)
+		return c.builtin(x, fun.obj.(*Builtin))
 	case modeCapFn:
 		c.charge(x, fun.cap)
 		return c.callSig(x, fun.typ.(*Signature), fun)
@@ -125,35 +125,19 @@ func (a argList) n() int {
 func argsOf(x *syntax.CallExpr) argList { return argList{exprs: x.Args, trailing: x.Trailing} }
 
 // paramType is the type the i-th argument is checked against.
-func paramType(sig *Signature, i int, spread bool) Type {
-	if sig.Variadic && i >= len(sig.Params)-1 {
-		last := sig.Params[len(sig.Params)-1].Type
-		if spread {
-			return last
-		}
-		if s, ok := last.(*Slice); ok {
-			return s.Elem
-		}
-		return last
-	}
+func paramType(sig *Signature, i int) Type {
 	if i < len(sig.Params) {
 		return sig.Params[i].Type
 	}
 	return nil
 }
 
+// arity checks the argument count. A spread argument `f(xs...)` is not
+// produced by the decided parser (D-A5): Ergo has no variadic parameters.
 func (c *checker) arity(x *syntax.CallExpr, sig *Signature, n int) bool {
-	spread := x.Ellipsis.IsValid()
-	if spread && !sig.Variadic {
-		c.errorf(x, CodeType, "cannot use ... with a non-variadic function")
+	if x.Ellipsis.IsValid() {
+		c.undecided(x, "a spread argument")
 		return false
-	}
-	if sig.Variadic && !spread {
-		if n < len(sig.Params)-1 {
-			c.errorf(x, CodeType, "not enough arguments: want at least %d, have %d", len(sig.Params)-1, n)
-			return false
-		}
-		return true
 	}
 	if n != len(sig.Params) {
 		which := "too many"
@@ -203,10 +187,9 @@ func (c *checker) callSig(x *syntax.CallExpr, sig *Signature, fun operand) opera
 		}
 		return bad(x)
 	}
-	spread := x.Ellipsis.IsValid()
 	refused := false
 	for i, a := range args.exprs {
-		pt := paramType(sig, i, spread)
+		pt := paramType(sig, i)
 		if !c.argument(a, pt, x) {
 			refused = true
 		}
@@ -215,7 +198,7 @@ func (c *checker) callSig(x *syntax.CallExpr, sig *Signature, fun operand) opera
 		return bad(x)
 	}
 	if args.trailing != nil {
-		pt := paramType(sig, len(args.exprs), false)
+		pt := paramType(sig, len(args.exprs))
 		ps, ok := under0(pt).(*Signature)
 		if !ok {
 			c.errorf(args.trailing, CodeType, "a trailing block is a function-literal argument, but the final parameter has type %s", pt)
@@ -373,9 +356,6 @@ type inferer struct {
 	// joined marks the row parameters bound by unification, not written:
 	// a later argument widens them (see unifyRow).
 	joined map[*TypeParam]bool
-	// refused is a parameter whose binding Go would refine past what Ergo
-	// infers (D6 as amended in round 7): the call asks for type arguments.
-	refused *TypeParam
 }
 
 func (in *inferer) free(tp *TypeParam) bool { return in.set[tp] && in.m[tp] == nil }
@@ -397,12 +377,8 @@ func (in *inferer) hasFree(t Type) bool {
 		return in.rowFree(t.Row)
 	case *Slice:
 		return in.hasFree(t.Elem)
-	case *Array:
-		return in.hasFree(t.Elem)
 	case *Map:
 		return in.hasFree(t.Key) || in.hasFree(t.Elem)
-	case *Chan:
-		return in.hasFree(t.Elem)
 	case *Pointer:
 		return in.hasFree(t.Elem)
 	case *Signature:
@@ -493,7 +469,6 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 	if !c.arity(x, sig, args.n()) {
 		return bad(x)
 	}
-	spread := x.Ellipsis.IsValid()
 	in := &inferer{c: c, m: map[*TypeParam]Type{}, set: map[*TypeParam]bool{}}
 	for _, tp := range sig.TParams {
 		in.set[tp] = true
@@ -517,7 +492,7 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 		}
 	}
 	for i := 0; i < len(args.exprs); i++ {
-		pt := paramType(sig, i, spread)
+		pt := paramType(sig, i)
 		if lit, ok := args.exprs[i].(*syntax.FuncLit); ok {
 			// A function literal's parameter and result types are written
 			// (#214 would infer them), so it is a typed argument: it
@@ -588,7 +563,7 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 		if ops[i] == nil || ops[i].invalid() || !isUntyped(ops[i].typ) {
 			continue
 		}
-		tp, ok := paramType(sig, i, spread).(*TypeParam)
+		tp, ok := paramType(sig, i).(*TypeParam)
 		if !ok || !in.free(tp) {
 			continue
 		}
@@ -639,7 +614,7 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 		// A trailing block writes no types: its result binds what is still
 		// free, after the constants (D6).
 		i := len(args.exprs)
-		pt := paramType(sig, i, spread)
+		pt := paramType(sig, i)
 		expected, _ := under0(c.subst(pt, in.m)).(*Signature)
 		if expected == nil {
 			c.errorf(args.trailing, CodeType, "a trailing block is a function-literal argument, but the final parameter has type %s", pt)
@@ -664,12 +639,6 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 		// from the expected result, nor through a method or core-type
 		// constraint; the fix is to write the type arguments.
 		c.cannotInfer(x, tp.Name, x.Fun, sig)
-		return bad(x)
-	}
-	if in.refused != nil {
-		// A binding Go would refine (a bidirectional channel to the
-		// directed one a later argument has): outside the subset.
-		c.cannotInfer(x, in.refused.Name, x.Fun, sig)
 		return bad(x)
 	}
 	for _, tp := range sig.TParams {
@@ -710,7 +679,7 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 		break
 	}
 	for i := 0; i < n; i++ {
-		pt := paramType(inst, i, spread)
+		pt := paramType(inst, i)
 		if lits[i] != nil {
 			if ok, why := c.assignable(lits[i], pt); !ok {
 				at := syntax.Node(args.trailing)
@@ -750,12 +719,8 @@ func (c *checker) paramsIn(t Type, set map[*TypeParam]bool) {
 		}
 	case *Slice:
 		c.paramsIn(t.Elem, set)
-	case *Array:
-		c.paramsIn(t.Elem, set)
 	case *Map:
 		c.paramsIn(t.Key, set)
-		c.paramsIn(t.Elem, set)
-	case *Chan:
 		c.paramsIn(t.Elem, set)
 	case *Pointer:
 		c.paramsIn(t.Elem, set)
@@ -1016,7 +981,7 @@ func (c *checker) needNoValueOrCall(op *operand) {
 		return
 	case modeValue, modeConst:
 		if !isCallLike(op.expr) {
-			c.errorf(op.expr, CodeUnused, "this value is not used; an expression statement is a call, a receive, try or catch")
+			c.errorf(op.expr, CodeUnused, "this value is not used; an expression statement is a call, try, catch or with")
 		}
 		return
 	}
@@ -1025,10 +990,8 @@ func (c *checker) needNoValueOrCall(op *operand) {
 
 func isCallLike(x syntax.Expr) bool {
 	switch x := x.(type) {
-	case *syntax.CallExpr, *syntax.TryExpr, *syntax.CatchExpr, *syntax.GoExpr:
+	case *syntax.CallExpr, *syntax.TryExpr, *syntax.CatchExpr:
 		return true
-	case *syntax.UnaryExpr:
-		return x.Op == syntax.ARROW
 	case *syntax.ParenExpr:
 		return isCallLike(x.X)
 	}
@@ -1092,217 +1055,65 @@ func (c *checker) libraryCall(x *syntax.CallExpr, b *Builtin, recv operand) oper
 	}
 }
 
-func (c *checker) builtin(x *syntax.CallExpr, b *Builtin, hint Type) operand {
+// builtin checks a call of len, the one built-in function (#196, fourth
+// round, item 2): its argument is a slice, a Map or a string, and its value
+// an int; the length of a constant string is a constant.
+func (c *checker) builtin(x *syntax.CallExpr, b *Builtin) operand {
 	if x.Trailing != nil {
 		c.errorf(x.Trailing, CodeType, "%s takes no block", b.Name)
 		return bad(x)
 	}
-	if x.Ellipsis.IsValid() && b.Name != "append" {
-		c.errorf(x, CodeType, "cannot use ... with %s", b.Name)
+	if b.Name != "len" {
+		c.errorf(x, CodeType, "unknown built-in %s", b.Name)
 		return bad(x)
 	}
-	n := len(x.Args)
-	want := func(lo, hi int) bool {
-		if n < lo || hi >= 0 && n > hi {
-			c.errorf(x, CodeType, "wrong number of arguments to %s", b.Name)
-			c.silentArgs(x)
-			return false
-		}
-		return true
+	if len(x.Args) != 1 {
+		c.errorf(x, CodeType, "len takes one argument")
+		c.silentArgs(x)
+		return bad(x)
 	}
-	switch b.Name {
-	case "len", "cap":
-		if !want(1, 1) {
-			return bad(x)
-		}
-		op := c.valueExpr(x.Args[0], nil)
-		if op.invalid() {
-			return bad(x)
-		}
-		t := op.typ
-		if p, ok := t.(*Pointer); ok {
-			t = p.Elem
-		}
-		switch u := under(t).(type) {
-		case *Basic:
-			if isString(u) && b.Name == "len" {
-				if op.mode == modeConst {
-					return operand{mode: modeConst, typ: Typ[Int], val: constant.MakeInt64(int64(len(constant.StringVal(op.val))))}
-				}
-				return operand{mode: modeValue, typ: Typ[Int]}
+	op := c.valueExpr(x.Args[0], nil)
+	if op.invalid() {
+		return bad(x)
+	}
+	t := op.typ
+	if p, ok := t.(*Pointer); ok {
+		t = p.Elem
+	}
+	switch u := under(t).(type) {
+	case *Basic:
+		if isString(u) {
+			if op.mode == modeConst {
+				return operand{mode: modeConst, typ: Typ[Int], val: constant.MakeInt64(int64(len(constant.StringVal(op.val))))}
 			}
-		case *Slice, *Array, *Chan:
 			return operand{mode: modeValue, typ: Typ[Int]}
-		case *Map:
-			if b.Name == "len" {
-				return operand{mode: modeValue, typ: Typ[Int]}
-			}
 		}
-		c.errorf(x.Args[0], CodeType, "invalid argument %s for %s", op.typ, b.Name)
-		return bad(x)
-	case "append":
-		if !want(1, -1) {
-			return bad(x)
-		}
-		s := c.valueExpr(x.Args[0], hint)
-		if s.invalid() {
-			c.silentArgs(&syntax.CallExpr{Args: x.Args[1:]})
-			return bad(x)
-		}
-		st, ok := under(s.typ).(*Slice)
-		if !ok {
-			c.errorf(x.Args[0], CodeType, "the first argument to append must be a slice, not %s", s.typ)
-			return bad(x)
-		}
-		for i, a := range x.Args[1:] {
-			if x.Ellipsis.IsValid() && i == len(x.Args)-2 {
-				op := c.valueExpr(a, s.typ)
-				if !op.invalid() && !(isString(op.typ) && isBasic(st.Elem, Uint8)) {
-					c.assign(&op, s.typ, "argument")
-				}
-				continue
-			}
-			op := c.valueExpr(a, st.Elem)
-			c.assign(&op, st.Elem, "argument")
-		}
-		return operand{mode: modeValue, typ: s.typ}
-	case "make":
-		if !want(1, 3) {
-			return bad(x)
-		}
-		t := c.typExpr(x.Args[0], c.localTypeCtx())
-		if isInvalid(t) {
-			return bad(x)
-		}
-		switch under(t).(type) {
-		case *Slice:
-			if n < 2 {
-				c.errorf(x, CodeType, "make of a slice needs a length")
-				return bad(x)
-			}
-		case *Map, *Chan:
-			if n > 2 {
-				c.errorf(x, CodeType, "too many arguments to make")
-				return bad(x)
-			}
-		default:
-			c.errorf(x.Args[0], CodeType, "cannot make %s", t)
-			return bad(x)
-		}
-		// Constant sizes are nonnegative, and a constant length is at most
-		// a constant capacity (S108; Go's rule).
-		var sizes []int64
-		known := true
-		for _, a := range x.Args[1:] {
-			v, ok := c.intIndex(a)
-			sizes = append(sizes, v)
-			known = known && ok
-		}
-		if known && len(sizes) == 2 && sizes[0] > sizes[1] {
-			c.errorf(x.Args[2], CodeType, "the length %d is larger than the capacity %d", sizes[0], sizes[1])
-		}
-		return operand{mode: modeValue, typ: t}
-	case "copy":
-		if !want(2, 2) {
-			return bad(x)
-		}
-		d := c.valueExpr(x.Args[0], nil)
-		s := c.valueExpr(x.Args[1], nil)
-		if d.invalid() || s.invalid() {
-			return bad(x)
-		}
-		ds, ok := under(d.typ).(*Slice)
-		if !ok {
-			c.errorf(x.Args[0], CodeType, "copy expects slice arguments")
-			return bad(x)
-		}
-		if ss, ok := under(s.typ).(*Slice); !(ok && c.identical(ss.Elem, ds.Elem) || isString(s.typ) && isBasic(ds.Elem, Uint8)) {
-			c.errorf(x, CodeType, "copy of mismatched slices %s and %s", d.typ, s.typ)
-			return bad(x)
-		}
+	case *Slice, *Map:
 		return operand{mode: modeValue, typ: Typ[Int]}
-	case "delete":
-		if !want(2, 2) {
-			return bad(x)
-		}
-		m := c.valueExpr(x.Args[0], nil)
-		if m.invalid() {
-			c.valueExpr(x.Args[1], nil)
-			return bad(x)
-		}
-		mt, ok := under(m.typ).(*Map)
-		if !ok {
-			c.errorf(x.Args[0], CodeType, "delete expects a map, not %s", m.typ)
-			return bad(x)
-		}
-		k := c.valueExpr(x.Args[1], mt.Key)
-		c.assign(&k, mt.Key, "map key")
-		return operand{mode: modeNoValue, typ: NoValue}
-	case "clear":
-		if !want(1, 1) {
-			return bad(x)
-		}
-		op := c.valueExpr(x.Args[0], nil)
-		if op.invalid() {
-			return bad(x)
-		}
-		switch under(op.typ).(type) {
-		case *Map, *Slice:
-			return operand{mode: modeNoValue, typ: NoValue}
-		}
-		c.errorf(x.Args[0], CodeType, "clear expects a map or a slice, not %s", op.typ)
-		return bad(x)
-	case "close":
-		if !want(1, 1) {
-			return bad(x)
-		}
-		op := c.valueExpr(x.Args[0], nil)
-		if op.invalid() {
-			return bad(x)
-		}
-		if ch, ok := under(op.typ).(*Chan); !ok || ch.Dir == syntax.ChanRecv {
-			c.errorf(x.Args[0], CodeType, "close expects a channel that can send, not %s", op.typ)
-			return bad(x)
-		}
-		return operand{mode: modeNoValue, typ: NoValue}
-	case "min", "max":
-		if !want(1, -1) {
-			return bad(x)
-		}
-		ops := make([]operand, n)
-		for i, a := range x.Args {
-			ops[i] = c.valueExpr(a, hint)
-			if ops[i].invalid() {
-				return bad(x)
-			}
-		}
-		res := ops[0]
-		for i := 1; i < n; i++ {
-			l, r := res, ops[i]
-			be := &syntax.BinaryExpr{X: x.Args[0], Op: syntax.LSS, Y: x.Args[i], OpPos: x.Lparen}
-			if !c.matchTypes(be, &l, &r) {
-				return bad(x)
-			}
-			if l.mode == modeConst && r.mode == modeConst {
-				if constant.Compare(r.val, tokenOf[syntax.LSS], l.val) == (b.Name == "min") {
-					l.val = r.val
-				}
-				res = operand{mode: modeConst, typ: l.typ, val: l.val}
-			} else {
-				res = operand{mode: modeValue, typ: l.typ}
-			}
-		}
-		if !ordered(res.typ) {
-			c.errorf(x, CodeType, "%s expects ordered values, not %s", b.Name, res.typ)
-			return bad(x)
-		}
-		// Every argument carries the result's type in Info (go/types
-		// min/max; round-7 M1).
-		for _, a := range x.Args {
-			c.updateExprType(a, res.typ)
-		}
-		return res
 	}
-	c.errorf(x, CodeType, "unknown builtin %s", b.Name)
+	c.errorf(x.Args[0], CodeType, "len takes a slice, a Map or a string, not %s", op.typ)
 	return bad(x)
+}
+
+// removedBuiltins are Go's built-in functions that Ergo does not
+// predeclare, each with the Ergo form that replaces it (#196, fourth round,
+// item 2; spec D-D5). A use of one is S104 naming that form.
+var removedBuiltins = map[string]string{
+	"append":  "write xs.Append(x)",
+	"delete":  "write m.Delete(k)",
+	"make":    "write a literal: []T{} or Map[K, V]{}",
+	"new":     "write a literal T{…}",
+	"cap":     "a slice's capacity is not part of the language; use len",
+	"copy":    "build the slice with a for loop and xs.Append(x)",
+	"close":   "Ergo has no channels",
+	"clear":   "assign an empty literal",
+	"print":   "write Console.Println(\"…\")",
+	"println": "write Console.Println(\"…\")",
+	"min":     "write if a < b { a } else { b }",
+	"max":     "write if a > b { a } else { b }",
+	"panic":   "a failure is a value: declare it with fails and return it",
+	"recover": "a failure is a value: handle it with catch",
+	"complex": "Ergo has no complex built-ins",
+	"real":    "Ergo has no complex built-ins",
+	"imag":    "Ergo has no complex built-ins",
 }

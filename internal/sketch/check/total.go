@@ -21,12 +21,13 @@ import (
 // decided parser builds every type switch from `match` (#196).
 const matchLen = syntax.Pos(len("match"))
 
-func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
+func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt) {
+	if s.Init != nil || s.Binds != nil || s.Define.IsValid() {
+		c.undecided(s, "a match header with an init statement or a binding")
+		return
+	}
 	done := c.openScope()
 	defer done()
-	if s.Init != nil {
-		c.stmt(s.Init)
-	}
 	n := len(s.Subjects)
 	subj := make([]Type, n)
 	unions := make([]*switchUnion, n)
@@ -45,13 +46,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 		}
 		subj[i], unions[i] = op.typ, u
 	}
-	groups := make([]*switchGroup, len(s.Binds))
-	for i, b := range s.Binds {
-		if b.Name != "_" {
-			groups[i] = &switchGroup{}
-		}
-	}
-	pop := c.push(brSwitch, label)
+	pop := c.push(brSwitch)
 	defer pop()
 	sizes := make([]int, n)
 	for i, u := range unions {
@@ -131,7 +126,6 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 	useful := newMatrixSolver(sizes)
 	var matrix [][]int
 	for ci, cl := range s.Clauses {
-		var tuples [][]int
 		for ii, item := range cl.List {
 			row := rowOf[ci][ii]
 			if row == nil || resolve.over { // past the budget: refused below, no case verdict
@@ -142,40 +136,12 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 				continue
 			}
 			matrix = useful.addRow(matrix, row)
-			tuples = append(tuples, row)
 		}
 		inner := c.openScope()
-		for j, b := range s.Binds {
-			if groups[j] == nil || j >= n {
-				continue
-			}
-			bt := subj[j]
-			if bt == nil {
-				bt = invalid
-			} else if len(tuples) > 0 {
-				first := tuples[0][j]
-				same := first >= 0
-				for _, t := range tuples[1:] {
-					if t[j] != first {
-						same = false
-					}
-				}
-				if same && len(tuples) > 0 && cl.List != nil {
-					bt = unions[j].at(first)
-				}
-			}
-			v := c.bindLocal(&Var{Name: b.Name, Type: bt, Pos: b.Pos(), group: groups[j], used: true})
-			c.fn.scope.insert(b.Name, v)
-		}
 		asGroups := c.bindAsPatterns(cl.List, n, rowOf[ci], unions, subj)
 		c.stmtList(cl.Body, false)
 		c.unusedAs(asGroups)
 		inner()
-	}
-	for j, g := range groups {
-		if g != nil && !g.used {
-			c.errorf(s.Binds[j], CodeUnused, "the type-switch binding %s is read in no case; write _ (rows.md, Totality 1)", s.Binds[j].Name)
-		}
 	}
 	// Totality is decided over the maximal case rows by a solver of its
 	// own, so it does not depend on which cases reachability judged first.

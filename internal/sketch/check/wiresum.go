@@ -143,16 +143,6 @@ func (c *checker) wireSource() (size int, groups []*wireGroup, wired bool) {
 func declKey(d syntax.Decl) string {
 	switch d := d.(type) {
 	case *syntax.FuncDecl:
-		if d.Recv != nil && len(d.Recv.List) > 0 {
-			t := d.Recv.List[0].Type
-			if s, ok := t.(*syntax.StarExpr); ok {
-				t = s.X
-			}
-			if ix, ok := t.(*syntax.IndexExpr); ok {
-				t = ix.X
-			}
-			return "func " + exprText(t) + "." + d.Name.Name
-		}
 		return "func " + d.Name.Name
 	case *syntax.VarDecl:
 		var names []string

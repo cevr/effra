@@ -53,7 +53,7 @@ func fromType(t Type) litType {
 	switch under(t).(type) {
 	case *Struct:
 		return litType{kind: litStruct, typ: t}
-	case *Slice, *Array, *Map, *MachineType:
+	case *Slice, *Map, *MachineType:
 		return litType{kind: litKeyed, typ: t}
 	}
 	return litType{}
@@ -86,9 +86,6 @@ func (c *checker) litTypeOf(e syntax.Expr, env *typeEnv) litType {
 				return fromType(tn.Type)
 			}
 		}
-	// check-v1: dead. An anonymous struct literal type (ruling C).
-	case *syntax.StructType:
-		return litType{kind: litStruct, expr: e, env: env}
 	case *syntax.ArrayType, *syntax.MapType:
 		return litType{kind: litKeyed, expr: e, env: env}
 	}
@@ -121,10 +118,6 @@ func (c *checker) elemOf(lt litType, key bool) litType {
 	if lt.typ != nil {
 		switch u := under(lt.typ).(type) {
 		case *Slice:
-			if !key {
-				return fromType(u.Elem)
-			}
-		case *Array:
 			if !key {
 				return fromType(u.Elem)
 			}

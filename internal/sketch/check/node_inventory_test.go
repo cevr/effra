@@ -166,7 +166,8 @@ var nodeTable = map[string]nodeEntry{
 	"VariantSpec": {"variant in place", "196 fifth round"},
 	"LawDecl":     {"law", "196l"}, "TestDecl": {"test", "196l"}, "AssertStmt": {"assert", "196l"},
 	// The forms that left the language (#196; syntax TestDecidedOnly):
-	// declared until their consumers are rewritten (grammar.md, Parser 2).
+	// still declared by the syntax package; the checker keeps no branch for
+	// them, and TestUndecidedNodes covers each.
 	"GoExpr": {notBuiltFamily, ""}, "SelectStmt": {notBuiltFamily, ""}, "CommClause": {notBuiltFamily, ""},
 	"SendStmt": {notBuiltFamily, ""}, "ChanType": {notBuiltFamily, ""}, "DeferStmt": {notBuiltFamily, ""},
 	"LabeledStmt": {notBuiltFamily, ""}, "IncDecStmt": {notBuiltFamily, ""}, "EmptyStmt": {notBuiltFamily, ""},

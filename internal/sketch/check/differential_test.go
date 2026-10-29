@@ -436,12 +436,8 @@ func (k ergoKeys) key(t Type) string {
 		return "?" + t.Name
 	case *Slice:
 		return "[]" + k.key(t.Elem)
-	case *Array:
-		return fmt.Sprintf("[%d]%s", t.Len, k.key(t.Elem))
 	case *Map:
 		return "map[" + k.key(t.Key) + "]" + k.key(t.Elem)
-	case *Chan:
-		return "chan " + k.key(t.Elem)
 	case *Pointer:
 		return "*" + k.key(t.Elem)
 	case *Signature:
@@ -873,8 +869,8 @@ var inferConstants = []string{
 	"1", "'a'", "\"s\"", "true",
 	"(1)", "-1", "-'a'", "!true", "(('a'))",
 	"1 + 'a'", "2 * 3", "1 < 2", "1 << 3", "\"a\" + \"b\"",
-	"min(1, 'a')", "max(2, 3)", "len(\"ab\")", "-(1 + 2)",
-	"n + 1", "('a' * n)", "n < 1 + 2", "min(n, 1)", "!(n < 1)",
+	"len(\"ab\")", "-(1 + 2)",
+	"n + 1", "('a' * n)", "n < 1 + 2", "!(n < 1)",
 	"int8(1)", "int32('a')", "float64(1)", "string(\"x\")", "bool(true)", "int8((1 + 2))", "int(n)",
 }
 

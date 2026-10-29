@@ -58,21 +58,15 @@ func structural(a, b Type) bool {
 	case *Slice:
 		b, ok := b.(*Slice)
 		return ok && structural(a.Elem, b.Elem)
-	case *Array:
-		b, ok := b.(*Array)
-		return ok && a.Len == b.Len && structural(a.Elem, b.Elem)
 	case *Map:
 		b, ok := b.(*Map)
 		return ok && structural(a.Key, b.Key) && structural(a.Elem, b.Elem)
-	case *Chan:
-		b, ok := b.(*Chan)
-		return ok && a.Dir == b.Dir && structural(a.Elem, b.Elem)
 	case *Pointer:
 		b, ok := b.(*Pointer)
 		return ok && structural(a.Elem, b.Elem)
 	case *Signature:
 		b, ok := b.(*Signature)
-		if !ok || len(a.Params) != len(b.Params) || len(a.Results) != len(b.Results) || a.Variadic != b.Variadic {
+		if !ok || len(a.Params) != len(b.Params) || len(a.Results) != len(b.Results) {
 			return false
 		}
 		for i := range a.Params {
@@ -182,12 +176,8 @@ func collectTypes(c *checker) []Type {
 			}
 		case *Slice:
 			walk(t.Elem)
-		case *Array:
-			walk(t.Elem)
 		case *Map:
 			walk(t.Key)
-			walk(t.Elem)
-		case *Chan:
 			walk(t.Elem)
 		case *Pointer:
 			walk(t.Elem)

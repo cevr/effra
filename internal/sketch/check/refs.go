@@ -163,25 +163,6 @@ func (c *checker) bodyRefs(f *Func) *refWalker {
 	defer func() { c.cur = saved }()
 	w.push()
 	d := f.Decl
-	if d.Recv != nil {
-		for _, field := range d.Recv.List {
-			for _, n := range field.Names {
-				w.bindAs(n.Name, &localBinding{rt: w.receiverType(f, field.Type)})
-			}
-			// The receiver's type arguments name its type parameters.
-			rt := field.Type
-			if s, ok := rt.(*syntax.StarExpr); ok {
-				rt = s.X
-			}
-			if ix, ok := rt.(*syntax.IndexExpr); ok {
-				for _, a := range ix.Indices {
-					if id, ok := a.(*syntax.Ident); ok {
-						w.tparams[id.Name] = true
-					}
-				}
-			}
-		}
-	}
 	if f.Sig != nil {
 		for _, tp := range f.Sig.TParams {
 			w.tparams[tp.Name] = true
@@ -246,30 +227,15 @@ type localBinding struct {
 	sig *Signature
 }
 
-// receiverType is the type of f's receiver, as its declaration resolved
-// it, or the written type when f's receiver did not resolve.
-func (w *refWalker) receiverType(f *Func, written syntax.Expr) Type {
-	if f.Recv != nil {
-		return f.Recv
-	}
-	return w.writtenType(written)
-}
-
 // writtenType resolves a written type at the point it is declared: a type
 // name, possibly instantiated or behind *, through the package scope and
-// the imports, or a written struct type (`struct{ Run func(…) error[E] }`,
-// round 19 m1). It is nil for a type parameter, a name a local shadows
-// there, a struct type that mentions either or an implicit type parameter,
-// and any other form. An instance resolves to its generic type, whose
-// members keep their type parameters, so closedRows treats a row that
-// mentions them as open.
+// the imports. It is nil for a type parameter, a name a local shadows
+// there, and any other form. An instance resolves to its generic type,
+// whose members keep their type parameters, so closedRows treats a row
+// that mentions them as open.
 func (w *refWalker) writtenType(t syntax.Expr) Type {
 	if s, ok := t.(*syntax.StarExpr); ok {
 		t = s.X
-	}
-	// check-v1: dead. The decided grammar has no anonymous struct type (ruling C).
-	if st, ok := t.(*syntax.StructType); ok {
-		return w.structType(st)
 	}
 	if ix, ok := t.(*syntax.IndexExpr); ok {
 		t = ix.X
@@ -282,36 +248,6 @@ func (w *refWalker) writtenType(t syntax.Expr) Type {
 		return tn.Type
 	}
 	return nil
-}
-
-// structType resolves a written struct type before any body is typed, as
-// the declaration's signature would: silently, through the package scope
-// and the imports. Every name in it must be a declared type or package
-// that no local shadows, so the type does not depend on the body; a field
-// name a local shares makes it nil too, which is conservative.
-// check-v1: dead. The decided grammar has no anonymous struct type (ruling C).
-func (w *refWalker) structType(st *syntax.StructType) Type {
-	fixed := true
-	syntax.Inspect(st, func(n syntax.Node) bool {
-		id, ok := n.(*syntax.Ident)
-		if !ok || !fixed {
-			return fixed
-		}
-		if w.tparams[id.Name] || w.local(id.Name) || isParamName(id.Name) && w.c.typeObject(id.Name, w.c.cur) == nil {
-			fixed = false
-		}
-		return fixed
-	})
-	if !fixed {
-		return nil
-	}
-	w.c.silent++
-	rt := w.c.typExpr0(st, nil)
-	w.c.silent--
-	if isInvalid(rt) {
-		return nil
-	}
-	return rt
 }
 
 func (w *refWalker) push()            { w.scopes = append(w.scopes, map[string]*localBinding{}) }
@@ -360,11 +296,9 @@ func (w *refWalker) params(ft *syntax.FuncType, sig *Signature) {
 		}
 		i := 0
 		for _, field := range ft.Params.List {
-			_, variadic := field.Type.(*syntax.Ellipsis)
 			for j := range max(len(field.Names), 1) {
 				var rt Type
 				switch {
-				case variadic:
 				case sig != nil:
 					rt = sig.Params[i].Type
 				default:
@@ -758,7 +692,7 @@ func (w *refWalker) calleeSig(fun syntax.Expr) *Signature {
 // declaredSig is the signature of a declared function that is not generic
 // in a way the call must infer: a function, not a method.
 func declaredSig(o Object) *Signature {
-	if f, ok := o.(*Func); ok && f.Recv == nil {
+	if f, ok := o.(*Func); ok {
 		return f.Sig
 	}
 	return nil
@@ -812,14 +746,6 @@ func (w *refWalker) staticType(e syntax.Expr) Type {
 func memberSig(t Type, name string) *Signature {
 	if p, ok := t.(*Pointer); ok {
 		t = p.Elem
-	}
-	// check-v1: dead. A written struct type is anonymous (ruling C).
-	if s, ok := t.(*Struct); ok {
-		if fld, _ := s.field(name); fld != nil {
-			sig, _ := under0(fld.Type).(*Signature)
-			return sig
-		}
-		return nil
 	}
 	n, ok := t.(*Named)
 	if !ok {
@@ -987,7 +913,6 @@ func (w *refWalker) expr(x syntax.Expr) {
 			w.expr(x.Fun)
 			w.selfCallee(x.Fun)
 			sig := w.calleeSig(x.Fun)
-			spread := x.Ellipsis.IsValid()
 			// Whether typing checks the literals and the block passed here
 			// (it does not when the callee is invalid, call.go silentArgs)
 			// is typing's verdict: each is a callback frame (inFrame), and
@@ -995,14 +920,14 @@ func (w *refWalker) expr(x syntax.Expr) {
 			// (checker.liveUses; round 8 review M2).
 			for i, a := range x.Args {
 				if lit, ok := unparen(a).(*syntax.FuncLit); ok && sig != nil {
-					w.argRows[lit] = closedRows(paramType(sig, i, spread))
+					w.argRows[lit] = closedRows(paramType(sig, i))
 				}
 				w.expr(a)
 			}
 			if x.Trailing != nil {
 				f := valueFrame{mode: [2]frameMode{frameValue, frameValue}, at: x.Trailing.Pos(), via: "the trailing block"}
 				if sig != nil {
-					closed := closedRows(paramType(sig, len(x.Args), spread))
+					closed := closedRows(paramType(sig, len(x.Args)))
 					for k := range closed {
 						if closed[k] {
 							f.mode[k] = frameStop
@@ -1014,17 +939,11 @@ func (w *refWalker) expr(x syntax.Expr) {
 				})
 			}
 		}
-	case *syntax.GoExpr:
-		w.frame(valueFrame{mode: [2]frameMode{frameValue, framePass}, at: x.Pos(), via: "the go task"}, func() { w.goBody(x) })
 	case *syntax.CatchExpr:
 		w.expr(x.X)
-		w.visit(x.Bind)
 		for _, arm := range x.Arms {
 			w.visit(arm)
 			w.push()
-			if x.Bind != nil {
-				w.bind(x.Bind.Name)
-			}
 			for _, t := range arm.Types {
 				w.typ(t)
 			}
@@ -1097,14 +1016,6 @@ func (w *refWalker) wireBody(b *syntax.WireBody) {
 	}
 }
 
-// goBody visits what a go expression runs: a call or a block.
-func (w *refWalker) goBody(g *syntax.GoExpr) {
-	if g.Call != nil {
-		w.expr(g.Call)
-	}
-	w.block(g.Block)
-}
-
 // writesErrors reports whether a function type writes its error row.
 func writesErrors(ft *syntax.FuncType) bool {
 	if ft == nil || ft.Results == nil {
@@ -1161,65 +1072,27 @@ func (w *refWalker) stmt(s syntax.Stmt) {
 		}
 	case *syntax.AssertStmt:
 		w.expr(s.X)
-	case *syntax.LabeledStmt:
-		w.visit(s.Label)
-		w.stmt(s.Stmt)
 	case *syntax.ExprStmt:
-		if g, ok := unparen(s.X).(*syntax.GoExpr); ok {
-			// A go statement discards its task: no frame.
-			for x := s.X; x != syntax.Expr(g); x = x.(*syntax.ParenExpr).X {
-				w.visit(x)
-			}
-			w.visit(g)
-			w.goBody(g)
-			break
-		}
-		w.expr(s.X)
-	case *syntax.SendStmt:
-		w.expr(s.Chan)
-		w.expr(s.Value)
-	case *syntax.IncDecStmt:
 		w.expr(s.X)
 	case *syntax.AssignStmt:
 		w.exprs(s.Rhs)
-		if s.Tok == syntax.DEFINE {
-			for i, l := range s.Lhs {
-				if id, ok := l.(*syntax.Ident); ok {
-					w.visit(id)
-					b := &localBinding{}
-					if len(s.Lhs) == len(s.Rhs) {
-						b = w.initBinding(s.Rhs[i])
-					}
-					w.bindAs(id.Name, b)
-					continue
-				}
-				w.expr(l)
-			}
-		} else {
-			w.exprs(s.Lhs)
-		}
-	case *syntax.DeferStmt:
-		w.stmt(s.Stmt)
+		w.exprs(s.Lhs)
 	case *syntax.ReturnStmt:
 		w.exprs(s.Results)
 	case *syntax.BranchStmt:
-		w.visit(s.Label)
 	case *syntax.BlockStmt:
 		w.push()
 		w.list(s.List)
 		w.pop()
 	case *syntax.IfStmt:
 		w.push()
-		w.stmt(s.Init)
 		w.expr(s.Cond)
 		w.stmt(s.Body)
 		w.stmt(s.Else)
 		w.pop()
 	case *syntax.ForStmt:
 		w.push()
-		w.stmt(s.Init)
 		w.expr(s.Cond)
-		w.stmt(s.Post)
 		w.stmt(s.Body)
 		w.pop()
 	case *syntax.RangeStmt:
@@ -1229,22 +1102,17 @@ func (w *refWalker) stmt(s syntax.Stmt) {
 			if l == nil {
 				continue
 			}
-			if id, ok := l.(*syntax.Ident); ok && s.Tok == syntax.DEFINE {
+			if id, ok := l.(*syntax.Ident); ok {
 				w.visit(id)
 				w.bind(id.Name)
 				continue
 			}
-			if s.Tok == syntax.DEFINE {
-				w.pattern(l)
-				continue
-			}
-			w.expr(l)
+			w.pattern(l)
 		}
 		w.stmt(s.Body)
 		w.pop()
 	case *syntax.SwitchStmt:
 		w.push()
-		w.stmt(s.Init)
 		w.expr(s.Tag)
 		for _, cl := range s.Clauses {
 			w.visit(cl)
@@ -1256,12 +1124,8 @@ func (w *refWalker) stmt(s syntax.Stmt) {
 		w.pop()
 	case *syntax.TypeSwitchStmt:
 		w.push()
-		w.stmt(s.Init)
 		for _, g := range s.Subjects {
 			w.expr(g)
-		}
-		for _, b := range s.Binds {
-			w.visit(b)
 		}
 		for _, cl := range s.Clauses {
 			w.visit(cl)
@@ -1269,24 +1133,10 @@ func (w *refWalker) stmt(s syntax.Stmt) {
 				w.typ(t)
 			}
 			w.push()
-			for _, b := range s.Binds {
-				if b.Name != "_" {
-					w.bind(b.Name)
-				}
-			}
 			w.bindPatterns(cl.List)
 			w.list(cl.Body)
 			w.pop()
 		}
 		w.pop()
-	case *syntax.SelectStmt:
-		for _, cl := range s.Clauses {
-			w.visit(cl)
-			w.push()
-			w.stmt(cl.Comm)
-			w.list(cl.Body)
-			w.pop()
-		}
-	case *syntax.EmptyStmt:
 	}
 }

@@ -25,8 +25,6 @@ func Take(v int8) {}
 	for _, body := range []string{
 		`func F() bool { return Id(true) }`,
 		`func F() int { return Id(1) }`,
-		`func F() int32 { return Id(min(1, 'a')) }`,
-		`func F() int32 { return Id(max('a', 1)) }`,
 		`func F() int { return Id(len("ab")) }`,
 		`func F() int { return Id((1)) }`,
 		`func F() int { return Id(-(1 + 2)) }`,
@@ -38,7 +36,6 @@ func Take(v int8) {}
 		`func F() int8 { return Id[int8](1 + 2) }`,
 		`func F() int8 { return Two[int8]((1), -2) }`,
 		`func F() { Take(1 + 2) }`,
-		`func F() { Take(min(1, 2)) }`,
 		`func F() int8 { return 1 + (2) }`,
 		`func F() { var v int8 = -(1 + 2); _ = v }`,
 		`func F() { v := 1 + 'a'; _ = v }`,

@@ -129,21 +129,9 @@ func (c *checker) unary(x *syntax.UnaryExpr, hint Type) operand {
 			return bad(x)
 		}
 		return operand{mode: modeValue, typ: &Pointer{Elem: op.typ}}
-	case syntax.ARROW:
-		op := c.valueExpr(x.X, nil)
-		if op.invalid() {
-			return op
-		}
-		ch, ok := under(op.typ).(*Chan)
-		if !ok {
-			c.errorf(x, CodeType, "cannot receive from %s", op.typ)
-			return bad(x)
-		}
-		if ch.Dir == syntax.ChanSend {
-			c.errorf(x, CodeType, "cannot receive from a send-only channel")
-			return bad(x)
-		}
-		return operand{mode: modeValue, typ: ch.Elem}
+	case syntax.ADD, syntax.SUB, syntax.NOT, syntax.XOR:
+	default:
+		return c.undecided(x, "the unary operator "+x.Op.String())
 	}
 	op := c.valueExpr(x.X, hint)
 	if op.invalid() {
@@ -166,9 +154,6 @@ func (c *checker) unary(x *syntax.UnaryExpr, hint Type) operand {
 			c.errorf(x, CodeType, "operator ^ is not defined on %s", t)
 			return bad(x)
 		}
-	default:
-		c.errorf(x, CodeType, "unexpected unary operator %s", x.Op)
-		return bad(x)
 	}
 	if op.mode == modeConst {
 		tok := map[syntax.Token]token.Token{syntax.NOT: token.NOT, syntax.SUB: token.SUB, syntax.ADD: token.ADD, syntax.XOR: token.XOR}[x.Op]

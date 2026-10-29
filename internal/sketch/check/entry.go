@@ -57,8 +57,6 @@ func (c *checker) checkRecursiveStructs() {
 			if _, ok := t.underlying().(*Struct); ok {
 				*out = append(*out, t)
 			}
-		case *Array:
-			fields(t.Elem, out)
 		case *Struct:
 			for _, f := range t.Fields {
 				fields(f.Type, out)
@@ -209,7 +207,7 @@ func (c *checker) checkMachine(tn *TypeName) {
 	sig := f.Sig
 	decision := preludeType("Decision")
 	want := "func(" + state.String() + ", " + signal.String() + ") Decision[" + state.String() + ", O]"
-	bad := len(sig.TParams) > 0 || sig.Variadic || len(sig.Params) != 2 || len(sig.Results) != 1
+	bad := len(sig.TParams) > 0 || len(sig.Params) != 2 || len(sig.Results) != 1
 	if !bad {
 		bad = !c.identical(sig.Params[0].Type, state) || !c.identical(sig.Params[1].Type, signal)
 	}
@@ -228,7 +226,7 @@ func (c *checker) checkMachine(tn *TypeName) {
 // of main is refused where it is checked (S113).
 func (c *checker) checkEntry() {
 	f, ok := c.pkg.Scope.names["main"].(*Func)
-	if !ok || f.Recv != nil {
+	if !ok {
 		return
 	}
 	c.cur = f.file
@@ -250,14 +248,11 @@ func (c *checker) checkEntry() {
 	}
 }
 
-// checkErrorMethods reports a method named Error on an error type: the
+// checkErrorMethods reports a function Error on an error type on an error type: the
 // emitter generates it from the fields (types.md, Methods 5).
 func (c *checker) checkErrorMethods() {
 	for _, f := range c.funcs {
-		owner := f.Recv
-		if owner == nil {
-			owner = f.owner // Error(e E) string, reached as e.Error() (196m)
-		}
+		owner := f.owner // Error(e E) string, reached as e.Error() (196m)
 		if owner == nil || f.Name != "Error" {
 			continue
 		}

@@ -1,9 +1,7 @@
 package check
 
 import (
-	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	"ergo.local/prototype/internal/sketch/syntax"
@@ -119,20 +117,8 @@ type MachineType struct {
 // Slice is []T.
 type Slice struct{ Elem Type }
 
-// Array is [N]T.
-type Array struct {
-	Len  int64
-	Elem Type
-}
-
 // Map is map[K]V.
 type Map struct{ Key, Elem Type }
-
-// Chan is chan T, with a direction.
-type Chan struct {
-	Dir  syntax.ChanDir
-	Elem Type
-}
 
 // Pointer is *T, a borrow: only a parameter or receiver type.
 type Pointer struct{ Elem Type }
@@ -144,7 +130,6 @@ type Signature struct {
 	TParams  []*TypeParam
 	NBracket int
 	Params   []*Var
-	Variadic bool
 	Results  []Type
 	// Fallible is true when the signature writes an error row; it decides
 	// method-row compatibility (types.md, Interface assignability 1).
@@ -252,9 +237,7 @@ func (*Interface) aType()   {}
 func (*Union) aType()       {}
 func (*MachineType) aType() {}
 func (*Slice) aType()       {}
-func (*Array) aType()       {}
 func (*Map) aType()         {}
-func (*Chan) aType()        {}
 func (*Pointer) aType()     {}
 func (*Signature) aType()   {}
 func (*TypeParam) aType()   {}
@@ -326,28 +309,14 @@ func (t *MachineType) String() string {
 	return "machine[" + t.State.String() + ", " + t.Signal.String() + "]"
 }
 func (t *Slice) String() string   { return "[]" + t.Elem.String() }
-func (t *Array) String() string   { return "[" + strconv.FormatInt(t.Len, 10) + "]" + t.Elem.String() }
 func (t *Map) String() string     { return "map[" + t.Key.String() + "]" + t.Elem.String() }
 func (t *Pointer) String() string { return "*" + t.Elem.String() }
-func (t *Chan) String() string {
-	switch t.Dir {
-	case syntax.ChanSend:
-		return "chan<- " + t.Elem.String()
-	case syntax.ChanRecv:
-		return "<-chan " + t.Elem.String()
-	}
-	return "chan " + t.Elem.String()
-}
 func (t *Signature) String() string {
 	var b strings.Builder
 	b.WriteString("func(")
 	for i, p := range t.Params {
 		if i > 0 {
 			b.WriteString(", ")
-		}
-		if t.Variadic && i == len(t.Params)-1 {
-			b.WriteString("..." + p.Type.(*Slice).Elem.String())
-			continue
 		}
 		b.WriteString(p.Type.String())
 	}
@@ -610,12 +579,8 @@ func typeString(t Type) string {
 		return "{" + t.Row.list("|") + "}"
 	case *Slice:
 		return "[]" + typeString(t.Elem)
-	case *Array:
-		return "[" + strconv.FormatInt(t.Len, 10) + "]" + typeString(t.Elem)
 	case *Map:
 		return "map[" + typeString(t.Key) + "]" + typeString(t.Elem)
-	case *Chan:
-		return fmt.Sprintf("chan%d ", t.Dir) + typeString(t.Elem)
 	case *Pointer:
 		return "*" + typeString(t.Elem)
 	case *Signature:
@@ -623,9 +588,6 @@ func typeString(t Type) string {
 		b.WriteString("func(")
 		for _, p := range t.Params {
 			b.WriteString(typeString(p.Type) + ",")
-		}
-		if t.Variadic {
-			b.WriteString("...")
 		}
 		b.WriteString(")(")
 		for _, r := range t.Results {
@@ -743,12 +705,8 @@ func containsInvalid(t Type) bool {
 		return containsInvalid(t.Elem)
 	case *Slice:
 		return containsInvalid(t.Elem)
-	case *Array:
-		return containsInvalid(t.Elem)
 	case *Map:
 		return containsInvalid(t.Key) || containsInvalid(t.Elem)
-	case *Chan:
-		return containsInvalid(t.Elem)
 	case *Tuple:
 		for _, e := range t.Types {
 			if containsInvalid(e) {

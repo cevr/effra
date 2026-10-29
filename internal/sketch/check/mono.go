@@ -137,12 +137,8 @@ func occurs(q *TypeParam, t Type) bool {
 			}
 		case *Slice:
 			return walk(t.Elem)
-		case *Array:
-			return walk(t.Elem)
 		case *Map:
 			return walk(t.Key) || walk(t.Elem)
-		case *Chan:
-			return walk(t.Elem)
 		case *Pointer:
 			return walk(t.Elem)
 		case *Tuple:

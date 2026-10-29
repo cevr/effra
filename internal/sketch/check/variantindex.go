@@ -61,7 +61,7 @@ type vrow struct {
 type vsym struct {
 	kind byte
 	ref  any    // the origin of a named type, the basic type
-	n    int64  // arity, array length, channel direction, comparable, row id
+	n    int64  // arity, comparable, row id
 	s    string // field or method names, counts and flags
 }
 
@@ -69,9 +69,7 @@ const (
 	vNamed byte = iota + 1
 	vBasic
 	vSlice
-	vArray
 	vMap
-	vChan
 	vPointer
 	vTuple
 	vSig
@@ -409,12 +407,8 @@ func hasParam(t Type, steps *int) bool {
 		return rowHasParam(t.Row, steps)
 	case *Slice:
 		return hasParam(t.Elem, steps)
-	case *Array:
-		return hasParam(t.Elem, steps)
 	case *Map:
 		return hasParam(t.Key, steps) || hasParam(t.Elem, steps)
-	case *Chan:
-		return hasParam(t.Elem, steps)
 	case *Pointer:
 		return hasParam(t.Elem, steps)
 	case *Tuple:

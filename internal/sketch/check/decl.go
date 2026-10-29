@@ -33,7 +33,7 @@ func (c *checker) run(files []*syntax.File) *Package {
 	// Expanding type instantiations are rejected before any walk expands
 	// instances (round-2 M1, M5).
 	c.checkInstantiationCycles()
-	c.collectMethods()
+	c.collectSelfFuncs()
 	for _, f := range c.funcs {
 		c.cur = f.file
 		c.funcSig(f)
@@ -148,9 +148,11 @@ func (c *checker) collect() {
 		for _, d := range f.Decls {
 			switch d := d.(type) {
 			case *syntax.ImportDecl:
-				for _, spec := range d.Specs {
-					c.importSpec(fi, spec)
+				if len(d.Specs) != 1 || d.Lparen.IsValid() {
+					c.undecided(d, "a grouped import")
+					continue
 				}
+				c.importSpec(fi, d.Specs[0])
 			case *syntax.TypeDecl:
 				tn := &TypeName{Name: d.Name.Name, Pkg: c.pkg, Pos: d.Name.Pos(), Decl: d, file: fi, id: newID()}
 				tn.Type = &Named{Obj: tn}
@@ -161,22 +163,28 @@ func (c *checker) collect() {
 					c.pkg.Types = append(c.pkg.Types, tn)
 				}
 			case *syntax.FuncDecl:
+				if d.Recv != nil {
+					c.undecided(d.Recv, "a receiver")
+					continue
+				}
 				fn := &Func{Name: d.Name.Name, Pkg: c.pkg, Pos: d.Name.Pos(), Decl: d, file: fi}
 				c.funcs = append(c.funcs, fn)
-				if d.Recv == nil {
-					// A second function of one name waits for the
-					// types: collectSelfFuncs accepts the group when the
-					// first parameters are distinct local types (196m
-					// rule 3) and reports the redeclaration otherwise.
-					if prev, ok := c.pkg.Scope.names[d.Name.Name].(*Func); ok && d.Name.Name != "_" {
-						prev.same = append(prev.same, fn)
-						continue
-					}
-					if c.declare(d.Name, fn) {
-						c.pkg.Funcs = append(c.pkg.Funcs, fn)
-					}
+				// A second function of one name waits for the types:
+				// collectSelfFuncs accepts the group when the first
+				// parameters are distinct local types (196m rule 3) and
+				// reports the redeclaration otherwise.
+				if prev, ok := c.pkg.Scope.names[d.Name.Name].(*Func); ok && d.Name.Name != "_" {
+					prev.same = append(prev.same, fn)
+					continue
+				}
+				if c.declare(d.Name, fn) {
+					c.pkg.Funcs = append(c.pkg.Funcs, fn)
 				}
 			case *syntax.VarDecl:
+				if len(d.Specs) != 1 || d.Lparen.IsValid() {
+					c.undecided(d, "a grouped let")
+					continue
+				}
 				for _, spec := range d.Specs {
 					if spec.Pattern != nil {
 						patterns = append(patterns, patternSpec{spec, fi})
@@ -197,6 +205,8 @@ func (c *checker) collect() {
 					continue
 				}
 				c.pkg.Wires[w.Name] = w
+			default:
+				c.undecided(d, "")
 			}
 		}
 	}
@@ -255,12 +265,13 @@ func (c *checker) importSpec(fi *fileInfo, spec *syntax.ImportSpec) {
 		path = p
 	}
 	switch spec.Kind {
+	case syntax.ImportPlain, syntax.ImportNamed:
 	case syntax.ImportGo:
 		c.errorf(spec, CodeOutside, "import go %q is #202's (Go imports); it is not checked yet", path)
 		c.bindBrokenImport(fi, spec, path)
 		return
-	case syntax.ImportDot:
-		c.errorf(spec, CodeOutside, "a dot import is not checked yet (#206)")
+	default:
+		c.undecided(spec.Path, "this import form")
 		return
 	}
 	pkg, err := c.imp.Import(path)
@@ -592,19 +603,11 @@ func (c *checker) typExpr0(x syntax.Expr, ctx *typeCtx) Type {
 		}
 		return c.instantiateExprs(n, x.Indices, x, ctx)
 	case *syntax.ArrayType:
-		elem := c.typExpr(x.Elt, ctx)
-		if x.Len == nil {
-			return &Slice{Elem: elem}
-		}
-		if _, ok := x.Len.(*syntax.Ellipsis); ok {
-			c.errorf(x, CodeType, "[...]T is the type of a composite literal only")
+		if x.Len != nil {
+			c.undecided(x, "an array type with a length")
 			return invalid
 		}
-		n, ok := c.constLen(x.Len)
-		if !ok {
-			return invalid
-		}
-		return &Array{Len: n, Elem: elem}
+		return &Slice{Elem: c.typExpr(x.Elt, ctx)}
 	case *syntax.MapType:
 		k := c.typExpr(x.Key, ctx)
 		v := c.typExpr(x.Value, ctx)
@@ -613,8 +616,6 @@ func (c *checker) typExpr0(x syntax.Expr, ctx *typeCtx) Type {
 			return invalid
 		}
 		return &Map{Key: k, Elem: v}
-	case *syntax.ChanType:
-		return &Chan{Dir: x.Dir, Elem: c.typExpr(x.Value, ctx)}
 	case *syntax.StarExpr:
 		if ctx == nil || !ctx.param {
 			c.errorf(x, CodeType, "a borrow *T is only a parameter or receiver type (types.md, Borrows 1)")
@@ -634,26 +635,13 @@ func (c *checker) typExpr0(x syntax.Expr, ctx *typeCtx) Type {
 		}
 		inner.field, inner.param = false, false
 		return c.signature(x, &inner)
-	// check-v1: dead. An anonymous struct type: the decided grammar has no
-	// struct keyword, so only a type declaration names a record (ruling C).
-	case *syntax.StructType:
-		inner := typeCtx{field: true}
-		if ctx != nil {
-			inner = *ctx
-			inner.field = true
-		}
-		return c.structType(x, &inner)
-	case *syntax.InterfaceType:
-		if len(x.Union) > 0 {
-			c.errorf(x, CodeType, "a union is a declared type")
-			return invalid
-		}
-		return c.interfaceType(x, ctx)
-	case *syntax.Ellipsis:
-		c.errorf(x, CodeType, "...T is the type of a final parameter only")
+	case *syntax.StructType, *syntax.InterfaceType:
+		// The decided parser builds a record, an operation type or a union
+		// only as a type declaration's body (resolveNamed).
+		c.errorf(x, CodeType, "a record, an operation type or a union is a declared type: write type T { … }")
 		return invalid
 	case *syntax.ErrorRow:
-		c.errorf(x, CodeType, "an error row appears only in a result list")
+		c.errorf(x, CodeType, "a failure row appears only after fails in a signature")
 		return invalid
 	case *syntax.TupleExpr:
 		c.outside(x, "a tuple type (196t, tuples)")
@@ -661,8 +649,14 @@ func (c *checker) typExpr0(x syntax.Expr, ctx *typeCtx) Type {
 	case *syntax.VariantSpec, *syntax.AsPattern:
 		c.notYet(x)
 		return invalid
+	case *syntax.BasicLit, *syntax.CompositeLit, *syntax.KeyValueExpr, *syntax.FuncLit, *syntax.SliceExpr,
+		*syntax.TypeGuard, *syntax.CallExpr, *syntax.UnaryExpr, *syntax.BinaryExpr, *syntax.TryExpr,
+		*syntax.CatchExpr, *syntax.WireLit, *syntax.MachineType, *syntax.InterpolatedString,
+		*syntax.IfStmt, *syntax.SwitchStmt, *syntax.TypeSwitchStmt:
+		c.errorf(x, CodeType, "expected a type")
+		return invalid
 	}
-	c.errorf(x, CodeType, "expected a type")
+	c.undecided(x, "")
 	return invalid
 }
 
@@ -1015,12 +1009,8 @@ func (w typeWalker) walk(x syntax.Node, k Kind) {
 	case *syntax.MapType:
 		w.walk(x.Key, KindType)
 		w.walk(x.Value, KindType)
-	case *syntax.ChanType:
-		w.walk(x.Value, KindType)
 	case *syntax.StarExpr:
 		w.walk(x.X, KindType)
-	case *syntax.Ellipsis:
-		w.walk(x.Elt, KindType)
 	case *syntax.FuncType:
 		w.fields(x.Params)
 		w.fields(x.Results)
@@ -1141,22 +1131,13 @@ func (c *checker) signature(ft *syntax.FuncType, ctx *typeCtx) *Signature {
 	pctx := *ctx
 	pctx.param, pctx.field = true, false
 	if ft.Params != nil {
-		for i, field := range ft.Params.List {
+		for _, field := range ft.Params.List {
 			var t Type
 			if field.Type == nil {
 				// A function literal's parameter written without a type
 				// (grammar.md; inferring it is #214).
 				c.errorf(field, CodeOutside, "a function literal parameter without a type is #214's (inferred parameter types); it is not checked yet")
 				t = invalid
-			} else if el, ok := field.Type.(*syntax.Ellipsis); ok {
-				last := i == len(ft.Params.List)-1 && len(field.Names) <= 1
-				if !last || el.Elt == nil {
-					c.errorf(field.Type, CodeType, "only the final parameter may be variadic")
-					t = invalid
-				} else {
-					t = &Slice{Elem: c.typExpr(el.Elt, &pctx)}
-					sig.Variadic = true
-				}
 			} else {
 				t = c.typExpr(field.Type, &pctx)
 			}
@@ -1209,11 +1190,6 @@ func (c *checker) funcSig(f *Func) *Signature {
 	d := f.Decl
 	ctx := &typeCtx{params: map[string]*TypeParam{}}
 	var tparams []*TypeParam
-	if d.Recv != nil {
-		ctx.method = true
-		ctx.reported = new(bool)
-		c.bindReceiverParams(f, ctx)
-	}
 	// The bracket parameters are declared before any constraint resolves,
 	// so the instantiations in the constraints and the signature are
 	// attributed to them (round-4 M1).
@@ -1244,15 +1220,11 @@ func (c *checker) funcSig(f *Func) *Signature {
 		}
 	}
 	// A signature instantiates generic types with the declaration's
-	// parameters, a method's receiver parameters included, as its body does:
+	// parameters, as its body does:
 	// they own those instantiations, so a growing one is an instantiation
 	// cycle before rows are inferred (round-4 M1; go/types mono.go records
 	// signature instances too).
-	var owner []*TypeParam
-	if f.Recv != nil {
-		owner = append(owner, f.Recv.TParams...)
-	}
-	owner = append(owner, tparams...)
+	owner := append([]*TypeParam(nil), tparams...)
 	restore := c.monoOwner(owner)
 	for _, p := range constraints {
 		if c.uncheckedConstraint(p.x, ctx) {
@@ -1264,15 +1236,12 @@ func (c *checker) funcSig(f *Func) *Signature {
 	c.kindBracketParams(d.Type, ctx, unconstrained)
 	c.monoLinkSelf(f, ctx)
 	nbracket := len(tparams)
-	var implicit []string
-	if d.Recv == nil {
-		c.prescanImplicit(d.Type, ctx)
-		implicit = implicitOrder(d.Type, ctx)
-		for _, name := range implicit {
-			owner = append(owner, ctx.implicit[name])
-		}
-		c.mono.owner = owner
+	c.prescanImplicit(d.Type, ctx)
+	implicit := implicitOrder(d.Type, ctx)
+	for _, name := range implicit {
+		owner = append(owner, ctx.implicit[name])
 	}
+	c.mono.owner = owner
 	sig := c.signature(d.Type, ctx)
 	restore()
 	sig.NBracket = nbracket
@@ -1364,91 +1333,6 @@ func implicitOrder(ft *syntax.FuncType, ctx *typeCtx) []string {
 	return out
 }
 
-// bindReceiverParams resolves a method's receiver and binds the type
-// parameters its type arguments name.
-func (c *checker) bindReceiverParams(f *Func, ctx *typeCtx) {
-	if f.Recv == nil {
-		return
-	}
-	if len(f.Recv.TParams) == 0 {
-		return
-	}
-	field := f.Decl.Recv.List[0]
-	rt := field.Type
-	if s, ok := rt.(*syntax.StarExpr); ok {
-		rt = s.X
-	}
-	ix, ok := rt.(*syntax.IndexExpr)
-	if !ok {
-		return
-	}
-	for i, a := range ix.Indices {
-		id, ok := a.(*syntax.Ident)
-		if !ok || i >= len(f.Recv.TParams) {
-			c.errorf(a, CodeType, "a receiver's type arguments name its type parameters")
-			continue
-		}
-		ctx.params[id.Name] = f.Recv.TParams[i]
-	}
-}
-
-// collectMethods attaches every method to its receiver type: a struct type
-// declared in this package (types.md, Methods 2).
-func (c *checker) collectMethods() {
-	for _, f := range c.funcs {
-		d := f.Decl
-		if d.Recv == nil {
-			continue
-		}
-		c.cur = f.file
-		field := d.Recv.List[0]
-		rt := field.Type
-		if s, ok := rt.(*syntax.StarExpr); ok {
-			rt = s.X
-			f.Ptr = true
-		}
-		if ix, ok := rt.(*syntax.IndexExpr); ok {
-			rt = ix.X
-		}
-		id, ok := rt.(*syntax.Ident)
-		if !ok {
-			c.errorf(field.Type, CodeType, "a receiver names a struct type declared in this package")
-			f.state = 2
-			f.Sig = &Signature{Errors: newRow(), Uses: newRow()}
-			continue
-		}
-		o := c.pkg.Scope.names[id.Name]
-		tn, ok := o.(*TypeName)
-		var n *Named
-		if ok {
-			n, _ = tn.Type.(*Named)
-		}
-		if n == nil || n.Obj.Pkg != c.pkg || asStruct(n) == nil {
-			what := id.Name
-			if o == nil {
-				if u, _ := c.universe.lookup(id.Name); u != nil {
-					what = id.Name + " (declared outside this package)"
-				}
-			}
-			c.errorf(field.Type, CodeType, "the receiver %s is not a struct type declared in this package (types.md, Methods 2)", what)
-			f.state = 2
-			f.Sig = &Signature{Errors: newRow(), Uses: newRow()}
-			continue
-		}
-		f.Recv = n
-		if !n.addMethod(f) {
-			c.errorf(d.Name, CodeType, "method %s.%s is declared twice", n.Obj.Name, f.Name)
-			continue
-		}
-		if s := asStruct(n); s != nil {
-			if fld, _ := s.field(f.Name); fld != nil {
-				c.errorf(d.Name, CodeType, "%s has both a field and a method named %s", n.Obj.Name, f.Name)
-			}
-		}
-	}
-	c.collectSelfFuncs()
-}
-
 // collectSelfFuncs resolves x.f(…) to package functions (196m; round-6
 // ruling B1). A package function whose first parameter's type is T or *T,
 // for a non-interface type T declared in this package, is what x.f(…)
@@ -1464,7 +1348,7 @@ func (c *checker) collectMethods() {
 // was, reported at each later function.
 func (c *checker) collectSelfFuncs() {
 	for _, f := range c.funcs {
-		if f.Decl.Recv == nil && f.Name != "main" {
+		if f.Name != "main" {
 			c.cur = f.file
 			f.owner, f.selfArgs, f.Ptr = c.selfOwner(f)
 		}
@@ -1590,7 +1474,7 @@ func (c *checker) selfArgsOK(d *syntax.FuncDecl, args []syntax.Expr) bool {
 // exported machine (the export guard) spell their rows.
 func (c *checker) inferFlags(f *Func) {
 	d := f.Decl
-	if d.Recv != nil || d.Body == nil || isExported(f.Name) || f.Name == "main" || c.guarded[f] {
+	if d.Body == nil || isExported(f.Name) || f.Name == "main" || c.guarded[f] {
 		return
 	}
 	hasErrRow := false
