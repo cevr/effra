@@ -172,7 +172,7 @@ func TestIndexScaling(t *testing.T) {
 // TestIndexBudget: the safety net. Work the index cannot hash, here a
 // collapsed instance U[A0, …, A0] whose k variants are all V[A0], so one
 // case reaches k candidates, is charged to the switch's step counter; past
-// totalityBudget the switch is S103 "split it or add default", the same
+// totalityBudget the match is S103 "split it or add case _", the same
 // refusal as the solvers', deterministically. Below the budget it checks
 // clean.
 func TestIndexBudget(t *testing.T) {
@@ -195,7 +195,7 @@ func TestIndexBudget(t *testing.T) {
 			continue
 		}
 		src := tc.src
-		if len(d) != 1 || d[0].Code != check.CodeNotTotal || !strings.Contains(d[0].Message, "too many cases to prove this switch total; split it or add default") {
+		if len(d) != 1 || d[0].Code != check.CodeNotTotal || !strings.Contains(d[0].Message, "too many cases to prove this match total; split it or add case _") {
 			t.Fatalf("want one S103 past the budget, got %s", describe(d))
 		}
 		again, d2 := check.VariantOps(src)

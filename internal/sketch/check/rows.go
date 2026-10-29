@@ -570,15 +570,22 @@ func (c *checker) reportGroup(scc []*bodyNode) {
 		if ps := f.Decl.Type.Params; ps != nil && len(ps.List) > 0 {
 			params = "(…)"
 		}
+		// The fix names the result, as the decided signature writes it
+		// (spec D-A7): func b(…) T fails ….
+		if f.Sig != nil && len(f.Sig.Results) == 1 {
+			params += " " + c.localTypeText(f.Sig.Results[0])
+		} else if f.Sig != nil && len(f.Sig.Results) > 1 {
+			params += " (…)"
+		}
 		var row string
 		site := sites[f][0]
 		switch {
 		case ex[0] && ex[1]:
-			row = fmt.Sprintf("write its error row and capability row: func %s%s error[…] needs …", f.Name, params)
+			row = fmt.Sprintf("write its failure row and service row: func %s%s fails … needs …", f.Name, params)
 		case ex[0]:
-			row = fmt.Sprintf("write its error row: func %s%s error[…]", f.Name, params)
+			row = fmt.Sprintf("write its failure row: func %s%s fails …", f.Name, params)
 		default:
-			row = fmt.Sprintf("write its capability row: func %s%s needs …", f.Name, params)
+			row = fmt.Sprintf("write its service row: func %s%s needs …", f.Name, params)
 			site = sites[f][1]
 		}
 		line, col := site.file.syntax.Position(site.at)

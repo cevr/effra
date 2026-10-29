@@ -277,7 +277,7 @@ func (t *Struct) String() string {
 	for i, f := range t.Fields {
 		parts[i] = f.Name + " " + f.Type.String()
 	}
-	return "struct{" + strings.Join(parts, "; ") + "}"
+	return "{ " + strings.Join(parts, ", ") + " }"
 }
 func (t *Interface) String() string {
 	if t.Comparable {
@@ -290,20 +290,20 @@ func (t *Interface) String() string {
 	for i, m := range t.Methods {
 		parts[i] = m.Name + strings.TrimPrefix(m.Sig.String(), "func")
 	}
-	return "interface{ " + strings.Join(parts, "; ") + " }"
+	return "{ " + strings.Join(parts, ", ") + " }"
 }
 func (t *Union) String() string {
 	parts := make([]string, len(t.Variants))
 	for i, v := range t.Variants {
 		parts[i] = v.String()
 	}
-	return "interface{ " + strings.Join(parts, " | ") + " }"
+	return strings.Join(parts, " | ")
 }
 func (t *MachineType) String() string {
 	return "machine[" + t.State.String() + ", " + t.Signal.String() + "]"
 }
 func (t *Slice) String() string   { return "[]" + t.Elem.String() }
-func (t *Map) String() string     { return "map[" + t.Key.String() + "]" + t.Elem.String() }
+func (t *Map) String() string     { return "Map[" + t.Key.String() + ", " + t.Elem.String() + "]" }
 func (t *Pointer) String() string { return "*" + t.Elem.String() }
 func (t *Signature) String() string {
 	var b strings.Builder
@@ -315,18 +315,21 @@ func (t *Signature) String() string {
 		b.WriteString(p.Type.String())
 	}
 	b.WriteString(")")
-	results := make([]string, 0, len(t.Results)+1)
+	results := make([]string, 0, len(t.Results))
 	for _, r := range t.Results {
 		results = append(results, r.String())
 	}
-	if errs := t.Errors.String(); errs != "" || t.Fallible {
-		results = append(results, "error["+errs+"]")
-	}
 	switch {
-	case len(results) == 1 && len(t.Results) == 1:
+	case len(results) == 1:
 		b.WriteString(" " + results[0])
-	case len(results) > 0:
+	case len(results) > 1:
 		b.WriteString(" (" + strings.Join(results, ", ") + ")")
+	}
+	// The failure row is spelled as the decided signature writes it.
+	if errs := t.Errors.String(); errs != "" {
+		b.WriteString(" fails " + errs)
+	} else if t.Fallible {
+		b.WriteString(" fails")
 	}
 	if uses := t.Uses.list(", "); uses != "" {
 		b.WriteString(" " + requirementKeyword + " " + uses)
@@ -574,7 +577,7 @@ func typeString(t Type) string {
 	case *Slice:
 		return "[]" + typeString(t.Elem)
 	case *Map:
-		return "map[" + typeString(t.Key) + "]" + typeString(t.Elem)
+		return "Map[" + typeString(t.Key) + "," + typeString(t.Elem) + "]"
 	case *Pointer:
 		return "*" + typeString(t.Elem)
 	case *Signature:

@@ -40,7 +40,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt) {
 		}
 		u := c.subjectUnion(op.typ)
 		if u == nil {
-			c.errorf(g, CodeType, "a type switch's subject must be a union, not %s (rows.md, Totality 1)", op.typ)
+			c.errorf(g, CodeType, "a match on types needs a union subject, not %s (rows.md, Totality 1)", op.typ)
 			valid = false
 			continue
 		}
@@ -70,7 +70,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt) {
 	for ci, cl := range s.Clauses {
 		if cl.List == nil {
 			if hasDefault {
-				c.errorf(cl, CodeType, "a switch has at most one default")
+				c.errorf(cl, CodeType, "a match has at most one case _")
 			}
 			hasDefault = true
 		}
@@ -82,7 +82,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt) {
 			} else if tup, ok := item.(*syntax.TupleExpr); ok && len(tup.Elts) == n {
 				elts = tup.Elts
 			} else {
-				c.errorf(item, CodeType, "a case of a %d-subject switch is a tuple of %d types", n, n)
+				c.errorf(item, CodeType, "a case of a match on %d subjects is a tuple of %d patterns", n, n)
 				patternsOK = false
 				continue
 			}
@@ -177,7 +177,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt) {
 	}
 	if useful.over {
 		// A case whose reachability is unproven is never accepted.
-		c.errorAt(s.Switch, s.Switch+matchLen, CodeNotTotal, "too many cases to prove which cases of this switch are reachable; split it (rows.md, Totality 5)")
+		c.errorAt(s.Switch, s.Switch+matchLen, CodeNotTotal, "too many cases to prove which cases of this match are reachable; split it (rows.md, Totality 5)")
 		c.totalSwitch[s] = true
 		return
 	}
@@ -185,7 +185,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt) {
 		// Resolving the cases ran past the budget (round 9 class C): the
 		// switch is refused like a solver past its budget, never accepted
 		// unproven.
-		c.errorAt(s.Switch, s.Switch+matchLen, CodeNotTotal, "too many cases to prove this switch total; split it or add default (rows.md, Totality 5)")
+		c.errorAt(s.Switch, s.Switch+matchLen, CodeNotTotal, "too many cases to prove this match total; split it or add case _ (rows.md, Totality 5)")
 		c.totalSwitch[s] = true
 		return
 	}
@@ -197,7 +197,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt) {
 	}
 	switch {
 	case !ok:
-		c.errorAt(s.Switch, s.Switch+matchLen, CodeNotTotal, "too many cases to prove this switch total; split it or add default (rows.md, Totality 5)")
+		c.errorAt(s.Switch, s.Switch+matchLen, CodeNotTotal, "too many cases to prove this match total; split it or add case _ (rows.md, Totality 5)")
 	case missing:
 		parts := make([]string, n)
 		for j, idx := range w {
@@ -207,7 +207,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt) {
 		if n > 1 {
 			what = "(" + strings.Join(parts, ", ") + ")"
 		}
-		c.errorAt(s.Switch, s.Switch+matchLen, CodeNotTotal, "this type switch is not total: no case handles %s; name every variant or add default (rows.md, Totality 2)", what)
+		c.errorAt(s.Switch, s.Switch+matchLen, CodeNotTotal, "this match is not total: no case handles %s; name every variant or add case _ (rows.md, Totality 2)", what)
 	}
 	// Reported or proved: the switch counts as total for the flow, so no
 	// missing-return diagnostic follows from an S103 (D3; round-2 N1).

@@ -248,7 +248,7 @@ func (c *checker) expr0(x syntax.Expr, hint Type) operand {
 	case *syntax.TupleExpr:
 		return c.outside(x, "a tuple (196t, tuples)")
 	case *syntax.TypeGuard:
-		c.errorf(x, CodeType, "x.(type) is the subject of a type switch only")
+		c.errorf(x, CodeType, "x.(type) is not an expression; write match x { case T: … }")
 		return bad(x)
 	case *syntax.ArrayType, *syntax.MapType, *syntax.FuncType, *syntax.InterfaceType:
 		t := c.typExpr(x, c.localTypeCtx())

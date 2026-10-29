@@ -83,7 +83,7 @@ func verdict(diags []check.Diagnostic) string {
 	for _, d := range diags {
 		if d.Code == "S103" {
 			switch {
-			case strings.Contains(d.Message, "too many cases to prove this switch total"):
+			case strings.Contains(d.Message, "too many cases to prove this match total"):
 				return "refused"
 			case strings.Contains(d.Message, "reachable"):
 				return "refused-reachability"

@@ -147,9 +147,9 @@ func soundSwitch(t *testing.T, name, src string, rows [][]int, sizes []int, hasD
 				t.Fatalf("%s: an unreachable diagnostic off a case line: %s", name, d)
 			}
 			unreachable[k] = true
-		case strings.Contains(d.Message, "which cases of this switch are reachable"):
+		case strings.Contains(d.Message, "which cases of this match are reachable"):
 			refusedReach = true
-		case strings.Contains(d.Message, "too many cases to prove this switch total"):
+		case strings.Contains(d.Message, "too many cases to prove this match total"):
 			refusedTotal = true
 		case strings.Contains(d.Message, "no case handles"):
 			missing = d.Message

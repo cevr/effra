@@ -326,7 +326,7 @@ func w() { try load(); try quit(); walk() }
 func main() {}
 `,
 		want: []string{
-			"7:6 S108 walk is used as a value through the function literal at 11:10 inside its own recursive group; write its capability row: func walk() needs …",
+			"7:6 S108 walk is used as a value through the function literal at 11:10 inside its own recursive group; write its service row: func walk() needs …",
 			"9:6 S103 this catch does not handle {main.Q}; a catch without try handles every error of the row (rows.md, Catch 4)",
 		},
 	},
@@ -375,7 +375,7 @@ func z() {
 func main() {}
 `,
 		want: []string{
-			"5:6 S108 walk is used as a value through the function literal at 9:10 inside its own recursive group; write its capability row: func walk() needs …",
+			"5:6 S108 walk is used as a value through the function literal at 9:10 inside its own recursive group; write its service row: func walk() needs …",
 			"11:2 S108 try on an expression that cannot fail (rows.md, Error rows 6)",
 		},
 	},
@@ -765,7 +765,7 @@ func outer() {
 func main() {}
 `,
 		want: []string{
-			"7:6 S108 walk is used as a value through the function literal at 11:10 inside its own recursive group; write its error row: func walk() error[…]",
+			"7:6 S108 walk is used as a value through the function literal at 11:10 inside its own recursive group; write its failure row: func walk() fails …",
 			"12:7 S108 main.Q is not in the caught row {main.G[int]} (rows.md, Catch 2)",
 			"19:7 S108 main.Q is not in the caught row {main.G[int]} (rows.md, Catch 2)",
 		},
