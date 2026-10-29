@@ -227,7 +227,12 @@ func (p *parser) headerLiteral(x Expr) {
 		return
 	}
 	next, after := p.peek(1).tok, p.peek(2).tok
-	if next == IDENT && after == COLON || next == RBRACE && after == LBRACE {
+	// A positional literal, `Point{1, 2}` or `Box{x}`: no statement starts
+	// with an operand and a comma (an assignment has one left side), and a
+	// body of one operand is not followed by another block.
+	operand := next == IDENT || next == INT || next == FLOAT || next == STRING || next == RUNE || next == DURATION
+	positional := operand && (after == COMMA || after == RBRACE && p.peek(3).tok == LBRACE)
+	if next == IDENT && after == COLON || next == RBRACE && after == LBRACE || positional {
 		name := p.src[x.Pos():x.End()]
 		p.errorAt(x.Pos(), int(x.End()-x.Pos()), "a composite literal in a header needs parentheses: write (%s{…}), or bind it with let first", name)
 	}

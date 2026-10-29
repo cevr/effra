@@ -171,6 +171,9 @@ var MalformedTable = []Malformed{
 	{Name: "map-type-argument", Src: "func main() {\n\trun(Map[string, int])\n}\n", Lines: []int{2}},
 	{Name: "header-keyed-literal", Src: "func main() {\n\twith Cfg{Port: 1} {\n\t\tuse(1)\n\t}\n}\n", Lines: []int{2}},
 	{Name: "header-empty-literal", Src: "func main() {\n\tif c == cfg.Cfg{} {\n\t\tuse(1)\n\t}\n}\n", Lines: []int{2}},
+	{Name: "header-positional-literal", Src: "func main() {\n\tif x == Point{1, 2} {\n\t\tuse(1)\n\t}\n}\n", Lines: []int{2}},
+	{Name: "header-positional-names", Src: "func main() {\n\tif p == Point{a, b} {\n\t\tuse(1)\n\t}\n}\n", Lines: []int{2}},
+	{Name: "header-positional-one", Src: "func main() {\n\tif p == Box{1} {\n\t\tuse(1)\n\t}\n}\n", Lines: []int{2}},
 	{Name: "uses", Src: "func f() uses Clock {}\n", Lines: []int{1}},
 	// Decided-grammar rules (#196, D1).
 	{Name: "mixed-members", Src: "type Card { Number string, Valid() bool }\n", Code: "S108", Lines: []int{1}},

@@ -513,6 +513,9 @@ func TestRoundFiveForms(t *testing.T) {
 		for _, c := range []struct{ name, at, msg string }{
 			{"header-keyed-literal", "Cfg{", "write (Cfg{…}), or bind it with let first"},
 			{"header-empty-literal", "cfg.Cfg{", "write (cfg.Cfg{…}), or bind it with let first"},
+			{"header-positional-literal", "Point{", "write (Point{…}), or bind it with let first"},
+			{"header-positional-names", "Point{", "write (Point{…}), or bind it with let first"},
+			{"header-positional-one", "Box{", "write (Box{…}), or bind it with let first"},
 		} {
 			src, e := malformedError(t, c.name)
 			if !strings.HasSuffix(e.Message, c.msg) || !strings.HasPrefix(src[e.Offset:], c.at) {
