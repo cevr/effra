@@ -159,6 +159,8 @@ func TestRules(t *testing.T) {
 			"func f(x int64) string {\n\tif x > 1 {\n\t\treturn \"a\"\n\t} else {\n\t\treturn \"b\"\n\t}\n}\n"},
 		{"type switch", "package p\n\nfunc f(v Value) string {\n\tswitch p := v.(type) {\n\tcase A:\n\t\treturn p.Name\n\tcase B, C:\n\t\treturn show(p)\n\tdefault:\n\t\treturn \"\"\n\t}\n}\n",
 			"func f(v Value) string {\n\tmatch v {\n\tcase A as p:\n\t\treturn p.Name\n\tcase B, C:\n\t\treturn show(v)\n\tcase _:\n\t\treturn \"\"\n\t}\n}\n"},
+		{"multi-subject type switch", "package p\n\nfunc f(p AB, q XY) string {\n\tswitch a, b := p.(type), q.(type) {\n\tcase (A, X):\n\t\treturn label(a, b)\n\tcase (B, _):\n\t\treturn show(b)\n\tdefault:\n\t\treturn \"\"\n\t}\n}\n",
+			"func f(p AB, q XY) string {\n\tmatch (p, q) {\n\tcase (A as a, X as b):\n\t\treturn label(a, b)\n\tcase (B, _ as b):\n\t\treturn show(b)\n\tcase _:\n\t\treturn \"\"\n\t}\n}\n"},
 		{"catch binding", "package p\n\nfunc f() string {\n\treturn g() catch e {\n\tcase NotFound:\n\t\te.ID\n\tcase Other:\n\t\t\"x\"\n\t}\n}\n",
 			"func f() string {\n\treturn g() catch {\n\tcase NotFound as e:\n\t\te.ID\n\tcase Other:\n\t\t\"x\"\n\t}\n}\n"},
 		{"try in operand", "package p\n\nfunc f() (int64, error[Gone]) {\n\tx := 1 + try g()\n\tok := !try h()\n\tuse(ok)\n\treturn x\n}\n",

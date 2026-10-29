@@ -2454,8 +2454,18 @@ func (t *translator) skipList(list []oldsyntax.Expr) {
 	}
 }
 
+// tupleCase returns the tuple of a case that lists exactly one tuple.
+func tupleCase(list []oldsyntax.Expr) (*oldsyntax.TupleExpr, bool) {
+	if len(list) != 1 {
+		return nil, false
+	}
+	tup, ok := list[0].(*oldsyntax.TupleExpr)
+	return tup, ok
+}
+
 // typeSwitch rewrites `switch p := x.(type)` to `match x`, binding p with
-// `as` in the single-type arms that read it.
+// `as` in the single-type arms that read it, and each binding of a
+// multi-subject switch with `as` on its element in a single-tuple arm.
 func (t *translator) typeSwitch(s *oldsyntax.TypeSwitchStmt) {
 	from := s.Subjects[0].Pos()
 	if len(s.Binds) > 0 {
@@ -2497,6 +2507,13 @@ func (t *translator) typeSwitch(s *oldsyntax.TypeSwitchStmt) {
 			}
 			if len(c.List) == 1 && len(s.Binds) == 1 {
 				t.insert(c.List[0].End(), " as "+binds[i])
+				continue
+			}
+			// A tuple case with one pattern narrows each binding to its
+			// element's type, as `as` on that element does (the subject
+			// keeps its union type, so a rename would not).
+			if tup, ok := tupleCase(c.List); ok && len(tup.Elts) == len(s.Binds) {
+				t.insert(tup.Elts[i].End(), " as "+binds[i])
 				continue
 			}
 			_, isName := s.Subjects[i].X.(*oldsyntax.Ident)
