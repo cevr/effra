@@ -948,7 +948,12 @@ func (t *translator) funcDecl(d *oldsyntax.FuncDecl) {
 			recv = "_ " + recv
 		}
 		t.textOf(d.Recv.Opening, d.Name.Pos())
-		t.replace(d.Recv.Opening, d.Name.Pos(), "")
+		// `func(r R)M()` keeps a blank between func and the name.
+		gap := ""
+		if o := int(d.Recv.Opening); o > 0 && t.src[o-1] != ' ' && t.src[o-1] != '\t' {
+			gap = " "
+		}
+		t.replace(d.Recv.Opening, d.Name.Pos(), gap)
 		sep := ", "
 		if len(d.Type.Params.List) == 0 {
 			sep = ""
@@ -2550,6 +2555,28 @@ func (t *translator) typeSwitch(s *oldsyntax.TypeSwitchStmt) {
 	t.replace(from, s.Lbrace, head)
 	for _, g := range s.Subjects {
 		t.skip(g)
+	}
+	// A binding no clause reads is Go's "declared and not used" (S110):
+	// the first single-type arm keeps it with `as`, so the unread binding
+	// and its diagnostic stay.
+	if len(s.Binds) == 1 && s.Binds[0].Name != "_" {
+		read := false
+		for _, c := range s.Clauses {
+			read = read || t.reads(c.Body, s.Binds[0].Name)
+		}
+		if !read {
+			kept := false
+			for _, c := range s.Clauses {
+				if len(c.List) == 1 {
+					t.insert(c.List[0].End(), " as "+binds[0])
+					kept = true
+					break
+				}
+			}
+			if !kept {
+				t.note(s.Switch, "no arm reads %s, which Go reports as unused: bind it in a single-type arm by hand", s.Binds[0].Name)
+			}
+		}
 	}
 	for _, c := range s.Clauses {
 		if c.List == nil {

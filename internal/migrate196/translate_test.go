@@ -161,6 +161,8 @@ func TestRules(t *testing.T) {
 			"func f(v Value) string {\n\tmatch v {\n\tcase A as p:\n\t\treturn p.Name\n\tcase B, C:\n\t\treturn show(v)\n\tcase _:\n\t\treturn \"\"\n\t}\n}\n"},
 		{"multi-subject type switch", "package p\n\nfunc f(p AB, q XY) string {\n\tswitch a, b := p.(type), q.(type) {\n\tcase (A, X):\n\t\treturn label(a, b)\n\tcase (B, _):\n\t\treturn show(b)\n\tdefault:\n\t\treturn \"\"\n\t}\n}\n",
 			"func f(p AB, q XY) string {\n\tmatch (p, q) {\n\tcase (A as a, X as b):\n\t\treturn label(a, b)\n\tcase (B, _ as b):\n\t\treturn show(b)\n\tcase _:\n\t\treturn \"\"\n\t}\n}\n"},
+		{"type switch binding no arm reads", "package p\n\nfunc f(v Value) string {\n\tswitch p := v.(type) {\n\tcase A, B:\n\t\treturn \"ab\"\n\tcase C:\n\t\treturn \"c\"\n\t}\n\treturn \"\"\n}\n",
+			"func f(v Value) string {\n\tmatch v {\n\tcase A, B:\n\t\treturn \"ab\"\n\tcase C as p:\n\t\treturn \"c\"\n\t}\n\treturn \"\"\n}\n"},
 		{"catch binding", "package p\n\nfunc f() string {\n\treturn g() catch e {\n\tcase NotFound:\n\t\te.ID\n\tcase Other:\n\t\t\"x\"\n\t}\n}\n",
 			"func f() string {\n\treturn g() catch {\n\tcase NotFound as e:\n\t\te.ID\n\tcase Other:\n\t\t\"x\"\n\t}\n}\n"},
 		{"try in operand", "package p\n\nfunc f() (int64, error[Gone]) {\n\tx := 1 + try g()\n\tok := !try h()\n\tuse(ok)\n\treturn x\n}\n",
@@ -234,6 +236,7 @@ func TestRules(t *testing.T) {
 		// named receiver names them _ (a list is all named or all unnamed).
 		{"receiver before unnamed parameters", "package p\n\ntype S struct{}\n\nfunc (S) M(int) {}\n\nfunc (s S) N(int, string) {}\n\nfunc (S) O(x int) {}\n",
 			"type S {}\n\nfunc M(S, int) {}\n\nfunc N(s S, _ int, _ string) {}\n\nfunc O(_ S, x int) {}\n"},
+		{"receiver with no blank after func", "package p\n\ntype S struct{}\n\nfunc(S)M() {}\n", "type S {}\n\nfunc M(_ S) {}\n"},
 		// Merge round: a union variant is translated before the variants
 		// join, so an error row inside one is written with fails.
 		{"union variant with an error row", "package main\n\ntype V[T any] struct{}\n\ntype A struct{}\n\ntype U[T any] interface{ V[func(A) error[T]] | V[map[string]T] }\n",
@@ -295,6 +298,7 @@ func TestNotes(t *testing.T) {
 		{"multi-type arm with an unknown literal key", "package p\n\nfunc f(v Value) Out {\n\tswitch p := v.(type) {\n\tcase A, B:\n\t\treturn Out{p: size(p)}\n\t}\n\treturn Out{}\n}\n", "several types reads p"},
 		{"multi-type arm that declares the subject", "package p\n\nfunc f(v Value) int64 {\n\tswitch p := v.(type) {\n\tcase A, B:\n\t\tv := 1\n\t\treturn size(p) + v\n\t}\n\treturn 0\n}\n", "several types reads p"},
 		{"multi-type arm on a written subject", "package p\n\nfunc f(v Value) int64 {\n\tswitch p := v.(type) {\n\tcase A, B:\n\t\treturn size(p)\n\t}\n\tv = A{}\n\treturn 0\n}\n", "several types reads p"},
+		{"type switch binding no single-type arm reads", "package p\n\nfunc f(v Value) string {\n\tswitch p := v.(type) {\n\tcase A, B:\n\t\treturn \"ab\"\n\t}\n\treturn \"\"\n}\n", "no arm reads p"},
 		// M13: a law moves into its operation type by hand.
 		{"law", "package p\n\nfunc LawRound(q Quantity) bool {\n\treturn q == q\n}\n", "a law function LawRound"},
 		// Merge round: dropping any would join T to the constrained group.
