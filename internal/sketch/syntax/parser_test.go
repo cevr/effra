@@ -266,6 +266,13 @@ func TestAdmittedForms(t *testing.T) {
 	if ts := stmts[3].(*TypeSwitchStmt); len(ts.Subjects) != 2 {
 		t.Fatalf("tuple match %+v", ts)
 	}
+	// A match with no literal pattern (no arm, or `_` arms only) is not on
+	// literal patterns: a type match.
+	for _, src := range []string{"match c {\n}", "match c {\ncase _:\n}"} {
+		if _, ok := body(src)[0].(*TypeSwitchStmt); !ok {
+			t.Fatalf("%q is %T, want a type match", src, body(src)[0])
+		}
+	}
 	// catch without a binding, patterns in the arms.
 	c := body("let r = f() catch {\ncase NotFound as e:\n\tlog(e)\n\t0\ncase A, B:\n\t1\n}")[0].(*DeclStmt).Decl.Specs[0].Values[0].(*CatchExpr)
 	if c.Bind != nil || len(c.Arms) != 2 || len(c.Arms[1].Types) != 2 {

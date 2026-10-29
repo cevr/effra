@@ -583,9 +583,12 @@ func (p *parser) parseMatch() Stmt {
 	return s
 }
 
-// literalCases reports whether every pattern of every clause is a literal,
-// optionally negated.
+// literalCases reports whether the clauses hold a pattern and every pattern
+// of every clause is a literal, optionally negated. A match with no literal
+// pattern (no arm, or `_` arms only) is not on literal patterns, so it is a
+// type match (grammar.md, Parser 2).
 func literalCases(clauses []*CaseClause) bool {
+	seen := false
 	for _, c := range clauses {
 		for _, x := range c.List {
 			if u, ok := x.(*UnaryExpr); ok && u.Op == SUB {
@@ -594,9 +597,10 @@ func literalCases(clauses []*CaseClause) bool {
 			if _, ok := x.(*BasicLit); !ok {
 				return false
 			}
+			seen = true
 		}
 	}
-	return true
+	return seen
 }
 
 // parseCaseList parses `Pattern {, Pattern}` up to the colon. A case item
