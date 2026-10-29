@@ -162,6 +162,38 @@ func TestConstantValues(t *testing.T) {
 	}
 }
 
+// TestRefusals196u (round-2 review m3): the differential excuses exactly
+// 196u's refusal texts. Every TestLiteralRules refusal is one, except a
+// mismatch of two typed operands (Go refuses it too) and a call of a
+// constant; the class G message, which also says "; write", is not one.
+func TestRefusals196u(t *testing.T) {
+	not196u := map[string]bool{
+		"4: typed operands never convert":       true,
+		"a literal is not called":               true,
+		"a parenthesized literal is not called": true,
+		"a named constant is not called":        true,
+	}
+	for _, row := range literalRules {
+		_, diags := CheckSource(row.src + "\n")
+		if len(diags) != 1 {
+			t.Fatalf("%s: want one diagnostic, got %s", row.rule, describeDiags(diags))
+		}
+		if got := is196uRefusal(diags[0].String()); got == not196u[row.rule] {
+			t.Errorf("%s: is196uRefusal(%q) = %v", row.rule, diags[0].String(), got)
+		}
+	}
+	for _, d := range []string{
+		"5:6: S108 walk is used as a value at 13:10 inside its own recursive group; write its error row: func walk() fails …",
+		"2:9: S108 mismatched types int32 and int64; write int64(a)",
+		"3:1: S108 cannot use float64 as int in return",
+		"3:1: S104 the constant 300 overflows int8",
+	} {
+		if is196uRefusal(d) {
+			t.Errorf("is196uRefusal(%q) = true", d)
+		}
+	}
+}
+
 func exprSource(src string, x syntax.Expr) string {
 	from, to := int(x.Pos()), int(x.End())
 	if from < 0 || to > len(src) || from > to {

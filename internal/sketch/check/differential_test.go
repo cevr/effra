@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"go/types"
 	"math/rand"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -579,35 +580,57 @@ func isRefusal(d string) bool {
 	return strings.Contains(d, "S108") && strings.Contains(d, "cannot infer") && strings.Contains(d, "write the type arguments")
 }
 
-// is196uRefusal reports whether d is one of 196u's S108 refusals of a
-// literal or a constant (literals.go, operators.go): a literal of the wrong
-// kind, a mismatch two defaults make, a name that does not convert, an
-// overflow, a shift in a non-integer context, mixed literal defaults.
-func is196uRefusal(d string) bool {
-	if !strings.Contains(d, "S108") {
-		return false
-	}
-	for _, s := range []string{
-		"literal takes only",
-		"an integer literal is not a duration",
-		"mismatched types",
-		"overflows",
-		"is not representable as",
-		"is not an integer, so it is not representable",
-		"truncates to an integer",
-		"the left operand of a shift is an integer",
-		"cannot infer",
-		"; write ", // a name that does not convert: "Limit is int; write int8(Limit) …"
-		// Rule 6: a literal binds its parameter to its default before the
-		// constraint is checked (G(1, s)), so the constraint failure is the
-		// refusal; Go infers the parameter from the constraint instead.
-		"does not satisfy the constraint",
+// refusals196u are 196u's S108 refusals of a literal or a constant, one
+// pattern per message format in literals.go, operators.go, call.go and
+// expr.go, matched against the whole message (round-2 review m3: exact
+// texts, never a phrase that other messages share).
+var refusals196u = func() []*regexp.Regexp {
+	var out []*regexp.Regexp
+	for _, p := range []string{
+		// Rule 1: a literal of the wrong kind (literalMismatch).
+		`a float literal takes only a float type, not \S+; write (an integer literal|-?[0-9]+)`,
+		`a rune literal takes only an integer type, not \S+`,
+		`a string literal takes only a string type, not \S+`,
+		`an integer literal is not a duration: write a duration literal such as -?[0-9]+s`,
 		// Rule 1: a literal takes its context's type, so ^7 and 7 % 2 in a
 		// float64 context apply an integer operator to a float (Go folds
 		// them as untyped integers first).
-		"is not defined on",
+		`operator \S+ is not defined on \S+`,
+		// Rule 4: two literals take their defaults (mismatchText).
+		`mismatched types \S+ and \S+; write \S+ \S+ \S+`,
+		`mismatched types \S+ and \S+; both literals take their defaults(, so convert one to the other's type, e\.g\. \S+\(…\))?`,
+		// Rule 3: a name does not convert (assign).
+		`\w+ is \S+; write \S+\(\w+\) or declare \w+ \S+`,
+		// Rule 3: a typed constant must fit (representable, conversion).
+		`the constant \S+ overflows \S+( \(types\.md, Basic types 2\))?`,
+		`\S+ is not an integer, so it is not representable as \S+`,
+		`the constant \S+ is not representable as \S+`,
+		`the constant \S+ truncates to an integer`,
+		`the constant \S+ overflows int, the type a conversion's literal takes; write it where \S+ is expected: let x \S+ = \S+`,
+		// D-A3: a shift's literal in a non-integer context.
+		`the left operand of a shift is an integer, and \S+ is expected here; write int\(.+\) (<<|>>) .+, then convert the result`,
+		// Rule 6: mixed literal defaults, in a call and in a record literal.
+		`cannot infer \w+; write the type arguments, e\.g\. .+: its literal arguments take \S+ and \S+ \(D6; 196u rule 6\)`,
+		`cannot infer the type argument \w+ of \w+: its literals take \S+ and \S+; write \w+\[…\] \(D6\)`,
+		// Rule 6: a literal binds its parameter to its default before the
+		// constraint is checked (G(1, s)), so the constraint failure is the
+		// refusal; Go infers the parameter from the constraint instead.
+		`\S+ does not satisfy the constraint .+ of \w+: .+ \(types\.md, Generics 2\)`,
 	} {
-		if strings.Contains(d, s) {
+		out = append(out, regexp.MustCompile(`^`+p+`$`))
+	}
+	return out
+}()
+
+// is196uRefusal reports whether the diagnostic d ("L:C: S108 message") is
+// one of refusals196u.
+func is196uRefusal(d string) bool {
+	_, msg, ok := strings.Cut(d, ": S108 ")
+	if !ok {
+		return false
+	}
+	for _, re := range refusals196u {
+		if re.MatchString(msg) {
 			return true
 		}
 	}
