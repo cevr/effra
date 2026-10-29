@@ -677,10 +677,11 @@ func (c *checker) finishBody(s *bodySum, body *syntax.WireBody, m *wireMeter) bo
 	s.finishes++
 	op(m, "body setup", singlePass, 1)
 	own := map[capKey]bool{}
+	ownAt := map[capKey]int{} // the entry (1-based) that first binds each capability
 	replaced := map[capKey]bool{}
 	c.silent++
 	defer func() { c.silent-- }()
-	for _, e := range body.Entries {
+	for i, e := range body.Entries {
 		op(m, "entry read", singlePass, 1)
 		if e.Kind == syntax.WireEmbed {
 			continue
@@ -696,6 +697,15 @@ func (c *checker) finishBody(s *bodySum, body *syntax.WireBody, m *wireMeter) bo
 			if !isKey {
 				return true
 			}
+			// One wire binds a capability once: a second own entry, replace
+			// or not, is S111 naming both (rows.md, Wire 1), since Info
+			// holds one binding per capability (D-A4).
+			op(m, "own probe", singlePass, 1)
+			if first, dup := ownAt[key]; dup {
+				s.findings = append(s.findings, wireFinding{k, CodeDuplicateCap, fmt.Sprintf("%s has a second entry in this wire, entry %d; the first is entry %d, and a wire binds a capability once (rows.md, Wire 1)", t, i+1, first)})
+				return true
+			}
+			ownAt[key] = i + 1
 			switch {
 			case e.Kind == syntax.WireReplace:
 				replaced[key] = true
@@ -716,13 +726,9 @@ func (c *checker) finishBody(s *bodySum, body *syntax.WireBody, m *wireMeter) bo
 					s.findings = append(s.findings, wireFinding{k, CodeType, fmt.Sprintf("replace %s names no entry of an embedded wire (rows.md, Wire 7)", t)})
 				}
 			case !constructor:
-				op(m, "own probe", singlePass, 1)
-				found := own[key]
-				if !found {
-					var ok bool
-					if found, ok = s.embedded.lookup(m, key); !ok {
-						return false
-					}
+				found, ok := s.embedded.lookup(m, key)
+				if !ok {
+					return false
 				}
 				if found {
 					s.findings = append(s.findings, wireFinding{k, CodeDuplicateCap, fmt.Sprintf("%s has a second entry in this wire; only replace overrides an embedded entry (rows.md, Wire 1; README Gap 28)", t)})

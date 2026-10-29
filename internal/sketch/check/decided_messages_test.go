@@ -48,6 +48,33 @@ func Get(m Mem) string { return m.V }
 func cmp(s Store, m Mem) bool {
 	return m != s
 }`, 5, "cannot compare main.Mem with main.Store", ""},
+	// One wire binds a capability once: a second own entry, replace or
+	// not, is S111 naming the first (round-3 review M2).
+	{"two replaces of one capability", `type Store { Get() string }
+type Mem { V string }
+func Get(m Mem) string { return m.V }
+let Base = wire { Store: Mem{V: "live"} }
+let W = wire {
+	replace Store: Mem{V: "one"},
+	replace Store: Mem{V: "two"},
+	Base,
+}`, 7, "main.Store has a second entry in this wire, entry 2; the first is entry 1, and a wire binds a capability once", CodeDuplicateCap},
+	{"a plain entry and a replace of one capability", `type Store { Get() string }
+type Mem { V string }
+func Get(m Mem) string { return m.V }
+let Base = wire { Store: Mem{V: "live"} }
+let W = wire {
+	replace Store: Mem{V: "one"},
+	Store: Mem{V: "two"},
+	Base,
+}`, 7, "main.Store has a second entry in this wire, entry 2; the first is entry 1", CodeDuplicateCap},
+	{"two plain entries of one capability", `type Store { Get() string }
+type Mem { V string }
+func Get(m Mem) string { return m.V }
+let W = wire {
+	Store: Mem{V: "one"},
+	Store: Mem{V: "two"},
+}`, 6, "main.Store has a second entry in this wire, entry 2; the first is entry 1", CodeDuplicateCap},
 	// A removed built-in's type argument is no second mistake (m8).
 	{"new(int) is one S104", `func b() {
 	let n = new(int)

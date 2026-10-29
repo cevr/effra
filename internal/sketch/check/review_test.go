@@ -174,7 +174,9 @@ let A = wire { I: S{} }
 let B = wire { I: S{} }
 let W = wire { A, B }
 func F() { with W { I.M() } }`},
-	{"M13", "wire-double-replace", "", `type I { M() }
+	// Two replaces of one capability in one wire are S111 since check-v1
+	// (round-3 review M2): a with binds each capability to one provider.
+	{"M13", "wire-double-replace", "S111", `type I { M() }
 type S {}
 func M(_ S) {}
 let Base = wire { I: S{} }
