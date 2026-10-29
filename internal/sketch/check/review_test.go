@@ -403,10 +403,13 @@ func TestReviewCases(t *testing.T) {
 			}
 			_, diags := check.CheckSource(src)
 			got := codesOf(diags)
-			if stage, ok := reviewPending[c.finding+"/"+c.name]; ok {
-				if !strings.Contains(got, check.CodeOutside) {
-					t.Errorf("pending on %s, but the checker now checks it: drop it from reviewPending and expect %q; got %q\n\t%s", stage, c.want, got, describe(diags))
+			if e, ok := pendingCase(t, "TestReviewCases/"+c.finding+"/"+c.name); ok {
+				for _, d := range diags {
+					if d.Code == check.CodeOutside && strings.Contains(d.Message, e.stage) {
+						return
+					}
 				}
+				t.Errorf("pending on %s, but the checker reports no S109 naming it: drop the line from testdata/v1-pending.txt and expect %q; got %q\n\t%s", e.stage, c.want, got, describe(diags))
 				return
 			}
 			if got != c.want {
@@ -414,18 +417,6 @@ func TestReviewCases(t *testing.T) {
 			}
 		})
 	}
-}
-
-// reviewPending names the cases whose decided source the 196a checker
-// refuses with S109 (not checked yet), with the stage that checks them.
-// Each such case must report S109 until that stage lands; then it leaves
-// this list and its want applies again. An `as` in a catch arm with several
-// types is 196p's (rows.md, Catch 7).
-var reviewPending = map[string]string{
-	"M4/error-union-rethrow":          "196p",
-	"M4/catch-union-switch":           "196p",
-	"M4/catch-union-switch-not-total": "196p",
-	"M4/error-union-as-value":         "196p",
 }
 
 // largeSCC is the M1 probe: f0 calls f1…fn (or names them as values) and
