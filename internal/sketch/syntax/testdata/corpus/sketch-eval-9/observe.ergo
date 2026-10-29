@@ -1,7 +1,6 @@
 import log
 import net
 import schedule
-import scope
 import tasks
 import trace
 
@@ -15,7 +14,7 @@ func main() fails net.ListenFailed needs net.Listener, Console, Clock, Scheduler
 		// restarted: a restart policy needs a reusable factory with no linear
 		// captures (Erlang one_for_one restarts from the child spec).
 		let conns = tasks.Set(tasks.LogFailures)
-		scope.OnExit() { conns.Stop() }
+		// conns is a resource: it is stopped when this with block ends, inside the span.
 		for conn in try Listener.Accept(":9000") {
 			conns.Go(func() {
 				with log.Annotate("peer", conn.Peer()) { handle(conn) }

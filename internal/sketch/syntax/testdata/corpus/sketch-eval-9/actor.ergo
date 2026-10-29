@@ -1,6 +1,5 @@
 import actor
 import schedule
-import scope
 import tasks
 
 // The CircuitBreaker machine, Breaker, Signal and breakerStep are the ones in
@@ -12,7 +11,7 @@ import tasks
 func main() string fails ProbeUnavailable needs Console {
 	return with wire { Probe: HealthyProbe{} } {
 		let b = actor.Start(CircuitBreaker{}, 16)
-		scope.OnExit() { b.Stop() }
+		// b is a resource: it is stopped when this with block ends (resources.md).
 
 		b.Send(Failure{"primary"}) // fire and forget; blocks only when the mailbox is full
 		b.Send(Failure{"primary"})
@@ -33,7 +32,7 @@ func main() string fails ProbeUnavailable needs Console {
 func supervised() needs Console, Clock, Scheduler {
 	with wire { Probe: HealthyProbe{} } {
 		let set = tasks.Set(tasks.Restart(schedule.Exponential(1s).UpTo(5)))
-		scope.OnExit() { set.Stop() }
+		// set is a resource: it is stopped when this with block ends, inside Probe.
 		set.Go(func() { actor.Run(CircuitBreaker{}, signals()) })
 	}
 }

@@ -57,11 +57,12 @@ Status: **partly implemented in prototype**.
 
 Status: **designed, not yet implemented**.
 
-1. `scope.OnExit() { … }` at the top level of a function body registers its block. The block runs when the function returns, on every path, and the blocks one call registered run last registered first: Go's `defer` order. Each block runs masked ([I2](#i2-automatic-masks)).
-2. The block reads its variables when it runs. Go evaluates a `defer` call's arguments at the `defer` statement instead, so `scripts/migrate196` rewrites `defer f(x)` only when `f` is a function name and each argument is a literal or a local that nothing writes; any other `defer` is a hand edit.
-3. The meaning of `scope.OnExit` in a nested block or a loop is not decided yet.
+1. `scope.OnExit() { … }` registers its block on the innermost enclosing function. The block runs when that function returns, on every path, and the blocks one call registered run last registered first. This is Go's `defer`, exactly. Each block runs masked ([I2](#i2-automatic-masks)).
+2. A function declaration, a function literal and the block of `task.Go` are functions here: an OnExit in a task's block runs when the task ends. A `with` block, an `if` or `match` arm and a loop body are not: an OnExit inside them registers on the enclosing function, and one inside a loop registers once per iteration. Whether the block of another call (`timeout.After`, `sync.Atomically`) counts as a function is not decided here.
+3. Cleanup at the end of a `with` block is a resource's release, not an OnExit: a resource bound in the block is released when the block ends ([resources.md](resources.md)).
+4. The block reads its variables when it runs. Go evaluates a `defer` call's arguments at the `defer` statement instead, so `scripts/migrate196` rewrites `defer f(x)` only when `f` is a function name, each argument is a literal or a local that nothing writes, and the `defer` stands at the top level of a function body; any other `defer` is a hand edit.
 
-*Prior art:* Go `defer` runs at function return, last first; Swift and Zig `defer` run at the end of the enclosing block.
+*Prior art:* Go's `defer` is function-scoped, and Ergo takes it because Go is the target, so the lowering and the translation are exact. Swift and Zig `defer` run at the end of the enclosing block.
 
 ## Timeouts
 
