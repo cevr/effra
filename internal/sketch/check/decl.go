@@ -55,6 +55,7 @@ func (c *checker) run(files []*syntax.File) *Package {
 	c.checkWireCycles()
 	c.checkErrorMethods()
 	c.checkUnusedImports()
+	c.finishInfo()
 	c.pkg.ErrorTypes = make(map[*Named]bool, len(c.errorTypes))
 	for n := range c.errorTypes {
 		c.pkg.ErrorTypes[n] = true
@@ -250,6 +251,7 @@ func (c *checker) declare(id *syntax.Ident, o Object) bool {
 		return false
 	}
 	c.pkg.Scope.insert(id.Name, o)
+	c.def(id, o)
 	return true
 }
 
@@ -354,6 +356,7 @@ func (c *checker) resolveNamed(n *Named) {
 		for _, field := range d.TypeParams.List {
 			for _, name := range field.Names {
 				tp := &TypeParam{Name: name.Name, Pos: name.Pos(), id: newID()}
+				c.def(name, tp)
 				switch {
 				case field.Type != nil && isErrorName(field.Type):
 					tp.Kind = KindErrors
@@ -716,6 +719,7 @@ func (c *checker) qualifiedType(x *syntax.SelectorExpr) Type {
 		return invalid
 	}
 	pn.used = true
+	c.recordUse(id, pn)
 	if pn.broken {
 		return invalid
 	}
@@ -1128,6 +1132,7 @@ func (c *checker) signature(ft *syntax.FuncType, ctx *typeCtx) *Signature {
 			}
 			for _, name := range field.Names {
 				sig.Params = append(sig.Params, &Var{Name: name.Name, Type: t, Pos: name.Pos(), param: true})
+				c.paramIdents[name.Pos()] = name
 			}
 		}
 	}
@@ -1185,6 +1190,7 @@ func (c *checker) funcSig(f *Func) *Signature {
 		for _, field := range d.TypeParams.List {
 			for _, name := range field.Names {
 				tp := &TypeParam{Name: name.Name, Pos: name.Pos(), id: newID()}
+				c.def(name, tp)
 				switch {
 				case field.Type != nil && isErrorName(field.Type):
 					tp.Kind = KindErrors

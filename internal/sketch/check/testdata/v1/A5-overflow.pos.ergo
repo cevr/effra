@@ -1,0 +1,9 @@
+// 196u rule 3: the compiler evaluates constant expressions exactly; a value
+// that fits its one type is accepted.
+let Max8 int8 = 127
+let Big int64 = 9000000000
+let Shifted int64 = 1 << 40
+
+func top() int64 {
+	return int64(Max8) + Big + Shifted
+}

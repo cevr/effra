@@ -1,0 +1,8 @@
+// 196u rule 3: Limit is int, so it does not become int8 by itself
+// (S108 "Limit is int; write int8(Limit) or declare Limit int8").
+let Limit = 10
+
+func small() int8 {
+	let f int8 = Limit // want S108
+	return f
+}

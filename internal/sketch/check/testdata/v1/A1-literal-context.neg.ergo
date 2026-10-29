@@ -1,0 +1,11 @@
+// 196u rule 1: a float literal takes only a float type, and an integer
+// literal is never a duration (only a duration literal is).
+func count() int {
+	let c int = 2.0 // want S108
+	return c
+}
+
+func wait() duration {
+	let d duration = 5 // want S108
+	return d
+}

@@ -1,0 +1,6 @@
+// 196u rule 5 (spec D-A3): a shift by a non-constant count needs an integer
+// left operand; a float context is S108 "write int(1) << n".
+func mask(n int) float64 {
+	let f float64 = 1 << n // want S108
+	return f
+}

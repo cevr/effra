@@ -1,0 +1,9 @@
+// 196u rule 6: mixed defaults (int and rune) bind T twice:
+// S108 "cannot infer T; write the type arguments".
+func Two[T](a, b T) T {
+	return a
+}
+
+func use() rune {
+	return Two(1, 'a') // want S108
+}

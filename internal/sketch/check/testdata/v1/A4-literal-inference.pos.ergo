@@ -1,0 +1,14 @@
+// 196u rule 6: a literal argument does not bind a type parameter when a
+// typed argument binds it; a parameter only literals bind takes their
+// common default.
+func Two[T](a, b T) T {
+	return a
+}
+
+func use(x int8) int8 {
+	let n int = Two(1, 2)
+	if n > 0 {
+		return Two(x, 2)
+	}
+	return x
+}

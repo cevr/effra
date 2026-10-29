@@ -1,0 +1,15 @@
+// 196u rules 2 and 4: with no expected type a literal takes its default
+// (int, float64, rune, string, bool); the operands of a binary operator have
+// one type, and a literal takes the other operand's type.
+func defaults(e int64) int64 {
+	let n = 1
+	let f = 1.0 + 2.5
+	let r = 'a'
+	let s = "x"
+	let ok = true
+	let scaled = e * 2
+	if ok && s == "x" && r == 'a' && f > 3.0 && n == 1 {
+		return scaled
+	}
+	return e
+}

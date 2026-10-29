@@ -48,6 +48,9 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt) {
 	}
 	pop := c.push(brSwitch)
 	defer pop()
+	if valid {
+		c.match(s, &Match{Subjects: subj, Arms: len(s.Clauses)})
+	}
 	sizes := make([]int, n)
 	for i, u := range unions {
 		if u != nil {
@@ -85,6 +88,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt) {
 			}
 			row := make([]int, n)
 			ok := true
+			var elems []*Pattern
 			for j, e := range elts {
 				if !valid {
 					ok = false
@@ -111,10 +115,22 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt) {
 					continue
 				}
 				row[j] = idx
+				p := &Pattern{Kind: PatWildcard}
+				if idx >= 0 {
+					p = &Pattern{Kind: PatTypeTest, Type: unions[j].at(idx)}
+				}
+				c.pattern(core, p)
+				if name != nil {
+					p = c.asPattern(e, p, name)
+				}
+				elems = append(elems, p)
 			}
 			if ok {
 				rowOf[ci][ii] = row
 				all = append(all, row)
+				if n > 1 {
+					c.pattern(item, &Pattern{Kind: PatTuple, Elems: elems})
+				}
 			}
 		}
 	}

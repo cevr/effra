@@ -41,6 +41,7 @@ func (c *checker) declareLocal(id *syntax.Ident, t Type) *Var {
 		t = invalid
 	}
 	v := c.bindLocal(&Var{Name: id.Name, Type: t, Pos: id.Pos()})
+	c.def(id, v)
 	sc.insert(id.Name, v)
 	if isInvalid(t) {
 		v.used = true
@@ -593,8 +594,14 @@ func (c *checker) countRange(s *syntax.RangeStmt, r *syntax.BinaryExpr) {
 	if s.Key != nil {
 		c.errorf(s.Key, CodeType, "for over a range binds one name")
 	}
+	l := &Loop{Domain: LoopRange, Elem: t}
 	if id, ok := s.Value.(*syntax.Ident); ok {
-		c.declareLocal(id, t)
+		if v := c.declareLocal(id, t); v != nil {
+			l.Bindings = append(l.Bindings, v)
+		}
+	}
+	if !isInvalid(t) {
+		c.loop(s, l)
 	}
 	c.rangePatterns(s)
 	pop := c.push(brLoop)
@@ -618,6 +625,7 @@ func (c *checker) rangeStmt(s *syntax.RangeStmt) {
 	}
 	x := c.valueExpr(s.X, nil)
 	var kt, vt Type = invalid, invalid
+	var domain LoopDomain
 	if !x.invalid() {
 		t := x.typ
 		if p, ok := t.(*Pointer); ok {
@@ -625,15 +633,15 @@ func (c *checker) rangeStmt(s *syntax.RangeStmt) {
 		}
 		switch u := under(t).(type) {
 		case *Slice:
-			kt, vt = Typ[Int], u.Elem
+			kt, vt, domain = Typ[Int], u.Elem, LoopSlice
 		case *Map:
-			kt, vt = u.Key, u.Elem
+			kt, vt, domain = u.Key, u.Elem, LoopMap
 		case *Basic:
 			switch {
 			case isString(u):
-				kt, vt = Typ[Int], Typ[Int32]
+				kt, vt, domain = Typ[Int], Typ[Int32], LoopString
 			case isInteger(u):
-				kt, vt = x.typ, nil
+				kt, vt, domain = x.typ, nil, LoopInt
 			default:
 				c.errorf(s.X, CodeType, "cannot range over %s", x.typ)
 			}
@@ -645,11 +653,23 @@ func (c *checker) rangeStmt(s *syntax.RangeStmt) {
 		c.errorf(s.Value, CodeType, "range over %s permits only one iteration variable", x.typ)
 	}
 	c.rangePatterns(s)
+	// for x in xs binds the element; for i, x in xs the position first.
+	l := &Loop{Domain: domain, Elem: vt, Pos: kt}
+	if vt == nil {
+		l.Elem, l.Pos = kt, nil
+	}
 	if id, ok := s.Key.(*syntax.Ident); ok {
-		c.declareLocal(id, kt)
+		if v := c.declareLocal(id, kt); v != nil {
+			l.Bindings = append(l.Bindings, v)
+		}
 	}
 	if id, ok := s.Value.(*syntax.Ident); ok && vt != nil {
-		c.declareLocal(id, vt)
+		if v := c.declareLocal(id, vt); v != nil {
+			l.Bindings = append(l.Bindings, v)
+		}
+	}
+	if domain != 0 {
+		c.loop(s, l)
 	}
 	pop := c.push(brLoop)
 	c.block(s.Body)
@@ -671,6 +691,11 @@ func (c *checker) switchStmt(s *syntax.SwitchStmt) {
 	}
 	pop := c.push(brSwitch)
 	defer pop()
+	if s.Tag == nil {
+		c.match(s, &Match{Arms: len(s.Clauses)})
+	} else if !isInvalid(tagType) {
+		c.match(s, &Match{Subjects: []Type{tagType}, Arms: len(s.Clauses)})
+	}
 	defaults := 0
 	for _, cl := range s.Clauses {
 		if cl.List == nil {
@@ -689,6 +714,9 @@ func (c *checker) switchStmt(s *syntax.SwitchStmt) {
 					c.errorf(e, CodeType, "a case of a match without a subject must be a bool, not %s", op.typ)
 				}
 				continue
+			}
+			if op.mode == modeConst {
+				c.pattern(e, &Pattern{Kind: PatConst, Value: op.val, Type: tagType})
 			}
 			l := operand{mode: modeValue, typ: tagType, expr: s.Tag}
 			bin := &syntax.BinaryExpr{X: s.Tag, Op: syntax.EQL, Y: e, OpPos: cl.Case}

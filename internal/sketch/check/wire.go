@@ -51,6 +51,7 @@ func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
 	c.fn.branches = c.fn.branches[:len(c.fn.branches)-1]
 	done()
 	t.withs = t.withs[:len(t.withs)-1]
+	c.recordWith(x, binds)
 	if res == nil {
 		return bad(x)
 	}

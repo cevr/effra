@@ -1,0 +1,16 @@
+// 196u rule 1: a literal takes the type its context expects. An integer
+// literal may take any integer or float type; a float literal only a float
+// type; a duration literal is a duration.
+let Small int8 = 10
+let Ratio float64 = 2
+
+func scale(x int8, d duration) float64 {
+	let b float64 = 2
+	let y int8 = x + 1
+	let wait duration = d + 500ms
+	let half = b * 0.5
+	if y > Small && wait > 1s {
+		return half * Ratio
+	}
+	return b
+}

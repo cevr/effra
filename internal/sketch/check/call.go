@@ -49,6 +49,9 @@ func (c *checker) callOf(x *syntax.CallExpr, hint Type) operand {
 		// (D3): the call is checked as one of an invalid callee.
 		fun = bad(x.Fun)
 	}
+	if fun.mode != modeInvalid {
+		c.recordCall(x, fun)
+	}
 	switch fun.mode {
 	case modeInvalid:
 		c.silentArgs(x)
@@ -268,6 +271,8 @@ func (c *checker) result(x *syntax.CallExpr, sig *Signature) operand {
 	c.chargeRow(x, c.types.resolve(sig.Uses))
 	c.readRow(sig.Errors)
 	op := operand{mode: modeValue, errs: c.types.resolve(sig.Errors)}
+	call := c.callInfo(x)
+	call.Fails, call.Needs = op.errs, c.types.resolve(sig.Uses)
 	switch len(sig.Results) {
 	case 0:
 		op.mode, op.typ = modeNoValue, NoValue
@@ -642,6 +647,7 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 			targs[i] = in.m[tp]
 		}
 		c.recordInstantiation(fun.fn.Name, sig.TParams, targs, x)
+		c.callInfo(x).TypeArgs = targs
 	}
 	inst := c.subst(sig, in.m).(*Signature)
 	inst.TParams = nil
@@ -762,7 +768,9 @@ func (c *checker) body(t *target, ft *syntax.FuncType, params []*Var, check func
 			c.errorAt(p.Pos, p.Pos+syntax.Pos(len(p.Name)), CodeType, "%s is already a parameter", p.Name)
 			continue
 		}
-		frame.insert(p.Name, &Var{Name: p.Name, Type: p.Type, Pos: p.Pos, param: true, used: true})
+		v := &Var{Name: p.Name, Type: p.Type, Pos: p.Pos, param: true, used: true}
+		c.def(c.paramIdents[p.Pos], v)
+		frame.insert(p.Name, v)
 	}
 	c.bindRequirements(frame, ft)
 	check()
@@ -884,6 +892,7 @@ func (c *checker) yieldingBlock(at syntax.Node, list []syntax.Stmt, results []Ty
 			return nil
 		}
 		c.assign(&op, results[0], "the block's value")
+		c.tail(last, results[0])
 		return results[0]
 	case known && len(results) > 1:
 		if tup, ok := op.typ.(*Tuple); !ok || len(tup.Types) != len(results) {
@@ -896,7 +905,9 @@ func (c *checker) yieldingBlock(at syntax.Node, list []syntax.Stmt, results []Ty
 	if op.mode == modeNoValue {
 		return NoValue
 	}
-	return c.typeOf(&op)
+	t := c.typeOf(&op)
+	c.tail(last, t)
+	return t
 }
 
 // needNoValueOrCall accepts the last expression of a block whose value is

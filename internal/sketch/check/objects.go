@@ -181,35 +181,6 @@ func (s *Scope) insert(name string, o Object) {
 	s.names[name] = o
 }
 
-// Package is a checked package: its scope, its declarations and the types
-// and rows the checker computed.
-type Package struct {
-	Path  string
-	Name  string
-	Scope *Scope
-	// Wires is the wire namespace: wires are named only by with and by
-	// wire embedding, so they do not collide with types (fixture with-name).
-	Wires map[string]*Wire
-	Funcs []*Func
-	Types []*TypeName
-	// Info holds the type of every checked expression and the rows of every
-	// function and literal.
-	Info *Info
-	// ErrorTypes are the struct types this package names in an error row
-	// (types.md, Error types 1); returning a value of one is a failure.
-	ErrorTypes map[*Named]bool
-
-	qualify bool // print its types with the package name
-	files   []*fileInfo
-}
-
-// Info records the checker's results for later passes (#197, #50).
-type Info struct {
-	Types    map[syntax.Expr]Type
-	Uses     map[*syntax.Ident]Object
-	Literals map[syntax.Node]*Signature // function literals and trailing blocks, with their rows
-}
-
 // Exported returns the package's exported objects, sorted by name: its
 // summary for importers (grammar.md, Visibility 2).
 func (p *Package) Exported() []Object {

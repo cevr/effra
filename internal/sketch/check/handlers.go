@@ -20,6 +20,8 @@ func unparen(x syntax.Expr) syntax.Expr {
 func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 	if ce, ok := unparen(x.X).(*syntax.CatchExpr); ok {
 		op := c.catch(ce, hint, true, true)
+		op.expr = ce
+		c.record(ce, op)
 		if op.invalid() {
 			return op
 		}
@@ -125,12 +127,16 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 				valid = false
 				continue
 			}
+			orig := te
 			te = core
 			t := c.catchType(te, row, open, operandOK)
 			if t == nil {
 				continue
 			}
 			types = append(types, t)
+			if p := c.pattern(core, &Pattern{Kind: PatTypeTest, Type: t}); name != nil {
+				c.asPattern(orig, p, name)
+			}
 			// A duplicate arm is a fact of the arms alone: it holds
 			// whatever the row, so a row check on this catch (Catch 1 or
 			// the row half of Catch 2) never hides it (round 13 review M1).
@@ -176,6 +182,11 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 	if !partial && !rest.Empty() {
 		c.errorAt(x.Catch, x.Catch+5, CodeNotTotal, "this catch does not handle %s; a catch without try handles every error of the row (rows.md, Catch 4)", rowText(rest))
 	}
+	m := &Match{Subjects: row.Elems(), Arms: len(x.Arms), Partial: partial}
+	if hasValue && wantValue {
+		m.Result = valueType
+	}
+	c.match(x, m)
 	res := operand{mode: modeValue, typ: valueType}
 	if !hasValue {
 		res = operand{mode: modeNoValue, typ: NoValue}

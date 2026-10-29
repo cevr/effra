@@ -1,0 +1,7 @@
+// 196u rule 3: an overflow of the typed result is S108.
+let Max8 int8 = 300 // want S108
+
+func top() int8 {
+	let y int8 = 100 + 100 // want S108
+	return y
+}

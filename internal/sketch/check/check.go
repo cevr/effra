@@ -118,6 +118,11 @@ type checker struct {
 	nodeCheck      func(*bodyNode) bool
 	convergeChecks int
 	grew           map[*Func][2]bool
+	// paramIdents maps a parameter's position to its declaring name, so a
+	// body's binding of it is its Defs entry.
+	paramIdents map[syntax.Pos]*syntax.Ident
+	// asNames holds each as pattern's binding name until finishInfo.
+	asNames map[*Pattern]*syntax.Ident
 	// literals keeps isLiteral's answer for each operation it has seen.
 	literals map[syntax.Expr]bool
 	// callee is the selector a call is about to check as its callee: only
@@ -259,13 +264,10 @@ func newID() int {
 }
 
 func newChecker(path string, imp Importer, universe *Scope) *checker {
-	pkg := &Package{Path: path, Scope: newScope(universe), Wires: map[string]*Wire{}, Info: &Info{
-		Types:    map[syntax.Expr]Type{},
-		Uses:     map[*syntax.Ident]Object{},
-		Literals: map[syntax.Node]*Signature{},
-	}}
+	pkg := &Package{Path: path, Scope: newScope(universe), Wires: map[string]*Wire{}, Info: newInfo()}
 	c := &checker{
 		pkg:            pkg,
+		paramIdents:    map[syntax.Pos]*syntax.Ident{},
 		imp:            imp,
 		universe:       universe,
 		seen:           map[string]bool{},

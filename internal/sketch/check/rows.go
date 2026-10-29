@@ -922,6 +922,7 @@ func (c *checker) checkFuncBody(f *Func) bool {
 			}
 		}
 		v := &Var{Name: p.Name, Type: p.Type, Pos: p.Pos, param: true, used: true}
+		c.def(c.paramIdents[p.Pos], v)
 		frame.insert(p.Name, v)
 	}
 	c.bindRequirements(frame, d.Type)

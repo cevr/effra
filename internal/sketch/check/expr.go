@@ -44,6 +44,9 @@ type operand struct {
 	// recv is the slice or map that a library call xs.Append(x) or
 	// m.Delete(k) is made on (modeBuiltin); nil for a plain built-in.
 	recv *operand
+	// method is the operation an operation-type or capability selector
+	// names (Info.Calls).
+	method *Method
 }
 
 func (o *operand) invalid() bool { return o.mode == modeInvalid }
@@ -58,6 +61,9 @@ func bad(x syntax.Expr) operand { return operand{mode: modeInvalid, typ: invalid
 func (c *checker) record(x syntax.Expr, op operand) {
 	if c.silent == 0 && op.typ != nil && op.mode != modeInvalid {
 		c.pkg.Info.Types[x] = op.typ
+		if op.mode == modeConst && op.val != nil {
+			c.pkg.Info.Values[x] = op.val
+		}
 	}
 }
 
@@ -815,7 +821,7 @@ func (c *checker) selector(x *syntax.SelectorExpr) operand {
 		if c.fn != nil && c.fn.reach != nil {
 			c.fn.reach.capCalls = append(c.fn.reach.capCalls, capCall{cap: base.cap.(*Named), name: m.Name})
 		}
-		return operand{mode: modeCapFn, typ: m.Sig, cap: base.cap}
+		return operand{mode: modeCapFn, typ: m.Sig, cap: base.cap, method: m}
 	case modeType:
 		c.errorf(x, CodeType, "%s.%s: a method expression is not part of the language; call the method on a value", base.typ, x.Sel.Name)
 		return bad(x)
@@ -852,7 +858,11 @@ func (c *checker) selector(x *syntax.SelectorExpr) operand {
 				c.fn.reach.methodNames = append(c.fn.reach.methodNames, x.Sel.Name)
 			}
 		}
-		return operand{mode: modeValue, typ: sig}
+		var m *Method
+		if it := asInterface(t); it != nil {
+			m = it.method(x.Sel.Name)
+		}
+		return operand{mode: modeValue, typ: sig, method: m}
 	}
 	c.errorf(x.Sel, CodeUnknown, "%s has no field or method %s", base.typ, x.Sel.Name)
 	return bad(x)
@@ -1136,6 +1146,7 @@ func (c *checker) assign(op *operand, t Type, what string) bool {
 		op.mode = modeInvalid
 		return false
 	}
+	c.implicit(op.expr, op.typ, t)
 	return true
 }
 

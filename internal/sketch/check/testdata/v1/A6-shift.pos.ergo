@@ -1,0 +1,11 @@
+// 196u rule 5 (spec D-A3): the left literal of a shift takes the expected
+// integer type, else int; a conversion gives its operand no expected type.
+func mask(n int) int64 {
+	let wide int64 = 1 << n
+	let small = 1 << n
+	let f = float64(1 << n)
+	if f > 0.0 && small > 0 {
+		return wide
+	}
+	return 0
+}

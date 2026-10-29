@@ -1,0 +1,10 @@
+// 196u rule 4: both literals take their defaults, so `1 + 2.5` mixes int
+// and float64 (S108 "write 1.0 + 2.5"); typed operands never convert.
+func mixed() float64 {
+	let d = 1 + 2.5 // want S108
+	return d
+}
+
+func typed(a int32, b int64) int64 {
+	return a + b // want S108
+}
