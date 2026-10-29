@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,8 +39,37 @@ func RefWalkProblems(src string) []string {
 		}
 	}
 	defer func() { refTrace = nil }()
+	// Typed self-call edges (round 6 review M1): every call x.f(…) the
+	// reporting pass resolves to a 196m function with inferred rows was
+	// resolved to that function before the bodies were ordered (by the
+	// walk from declarations, or by resolveSelfCalls), and a source with
+	// no diagnostic leaves no call unresolved.
+	var waited []*syntax.SelectorExpr
+	var pre map[*syntax.SelectorExpr]*Func
+	c.selfFinal = map[*syntax.SelectorExpr]*Func{}
+	selfTrace = func(cc *checker, pending []*syntax.SelectorExpr, resolved map[*syntax.SelectorExpr]*Func) {
+		if cc == c {
+			waited, pre = pending, resolved
+		}
+	}
+	defer func() { selfTrace = nil }()
 	c.run([]*syntax.File{file})
 	var out []string
+	for x, fn := range c.selfFinal {
+		if !fn.inferErrors && !fn.inferUses {
+			continue
+		}
+		if slices.Contains(waited, x) && pre[x] != fn {
+			out = append(out, fmt.Sprintf("%s at %d: typing resolves %s after the bodies were ordered, resolveSelfCalls gave %v", exprText(x), x.Pos(), depName(fn), pre[x]))
+		}
+	}
+	if len(c.diags) == 0 {
+		for _, x := range waited {
+			if _, ok := pre[x]; !ok {
+				out = append(out, fmt.Sprintf("%s at %d: a call of a source with no diagnostic that typing never resolved", exprText(x), x.Pos()))
+			}
+		}
+	}
 	pkgObject := func(o Object) any {
 		switch o := o.(type) {
 		case *Func:

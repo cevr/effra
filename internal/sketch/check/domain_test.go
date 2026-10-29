@@ -42,10 +42,12 @@ func checkWithin(t *testing.T, src string, d time.Duration) (*check.Package, []c
 // TestRowGraphDomain: random reference graphs over four kinds of body:
 // functions and package vars holding function literals (inferred rows),
 // self functions (196m: two names over many first-parameter types, called
-// as R{}.m(), which reaches the one function of R; inferred rows, like any
-// unexported function) and exported functions (closed rows). A body refers
-// to another by a call or by a bare reference (_ = f; never to a self
-// function, which has no method value), and may call C.M itself. The
+// as R{}.m(), MkR().m() or through a local bound to MkR(), which each reach
+// the one function of R: typing, not the name, picks it (round 6 review
+// M1); inferred rows, like any unexported function) and exported functions
+// (closed rows). A body refers to another by a call or by a bare reference
+// (_ = f; never to a self function, which has no method value), and may
+// call C.M itself. The
 // generator writes the old syntax and checks its translation (fromOld). The
 // oracle is independent of the checker:
 //   - the initialization graph is every reference; a var in a cyclic
@@ -70,8 +72,13 @@ func TestRowGraphDomain(t *testing.T) {
 		kMethod
 		kExported
 	)
-	cycles, groups, shadowed := 0, 0, 0
+	cycles, groups, shadowed, hidden := 0, 0, 0, 0
 	shadows := rand.New(rand.NewSource(1964))
+	// A call of a self function names its receiver one of three ways: a
+	// composite literal (its type is written), a call's result, or a
+	// local bound to one (typing alone knows their types; round 6 review
+	// M1). The callee is exact either way: the function on R's type.
+	forms := rand.New(rand.NewSource(1965))
 	for trial := 0; trial < 1500; trial++ {
 		n := 2 + rng.Intn(9)
 		kind := make([]int, n)
@@ -118,6 +125,7 @@ func TestRowGraphDomain(t *testing.T) {
 		for i := range n {
 			if kind[i] == kMethod {
 				fmt.Fprintf(&b, "type R%d struct{}\n", i)
+				fmt.Fprintf(&b, "func MkR%d() R%d { return R%d{} }\n", i, i, i)
 			}
 		}
 		for i := range n {
@@ -131,8 +139,15 @@ func TestRowGraphDomain(t *testing.T) {
 			case kExported:
 				fmt.Fprintf(&b, "func P%d() {\n", i)
 			}
-			for _, e := range edges[i] {
-				if e.call {
+			for k, e := range edges[i] {
+				if e.call && kind[e.to] == kMethod && forms.Intn(3) != 0 {
+					hidden++
+					if forms.Intn(2) == 0 {
+						fmt.Fprintf(&b, "\tMkR%d().m%d()\n", e.to, e.to%2)
+					} else {
+						fmt.Fprintf(&b, "\tx%d := MkR%d()\n\tx%d.m%d()\n", k, e.to, k, e.to%2)
+					}
+				} else if e.call {
 					fmt.Fprintf(&b, "\t%s()\n", name(e.to))
 				} else {
 					fmt.Fprintf(&b, "\t_ = %s\n", name(e.to))
@@ -320,6 +335,9 @@ func TestRowGraphDomain(t *testing.T) {
 		if gotS108 != wantS108 || gotS102 != wantS102 || gotG != wantG {
 			t.Fatalf("trial %d: want %d initialization cycles, %d S102 and %d value uses in a group, got %s\n%s", trial, wantS108, wantS102, wantG, describe(diags), src)
 		}
+		if p := check.RefWalkProblems(src); len(p) > 0 {
+			t.Fatalf("trial %d: %s\n%s", trial, strings.Join(p, "; "), src)
+		}
 		for _, f := range pkg.Funcs {
 			var i int
 			if _, err := fmt.Sscanf(f.Name, "f%d", &i); err != nil {
@@ -338,6 +356,9 @@ func TestRowGraphDomain(t *testing.T) {
 	}
 	if groups < 100 {
 		t.Fatalf("only %d trials held a value use inside its group needing a row; the generator misses class G", groups)
+	}
+	if hidden < 500 {
+		t.Fatalf("only %d calls on a receiver whose type is not written; the generator misses typed self-call edges", hidden)
 	}
 }
 

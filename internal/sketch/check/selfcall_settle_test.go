@@ -1,0 +1,25 @@
+package check_test
+
+import (
+	"strings"
+	"testing"
+
+	"ergo.local/prototype/internal/sketch/check"
+)
+
+// TestSelfCallSettleRounds: a call x.f(…) that typing from empty rows does
+// not resolve (a receiver whose type depends on a row) is resolved by the
+// settling rounds, which type each body with its callees' rows joined in
+// the order of the graph known so far. With the first typing skipped, the
+// settling rounds alone resolve every case to the same verdict, and every
+// call the reporting pass resolves was resolved before the bodies were
+// ordered (RefWalkProblems).
+func TestSelfCallSettleRounds(t *testing.T) {
+	defer check.SelfSettleOnly()()
+	checkEdgeCases(t, typedEdgeCases)
+	for _, tc := range typedEdgeCases {
+		if p := check.RefWalkProblems(tc.src); len(p) > 0 {
+			t.Errorf("%s: %s", tc.name, strings.Join(p, "; "))
+		}
+	}
+}

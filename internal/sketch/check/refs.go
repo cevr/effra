@@ -31,7 +31,11 @@ import "ergo.local/prototype/internal/sketch/syntax"
 // References that need types (a method through a selector, a function of
 // another package) are no edge: a method and an imported function spell
 // their rows. A call x.f(…) that can reach a package function on x's type
-// (196m) is an edge to every such function named f (selfCallee).
+// (196m) is an edge to the one function it resolves to, never to every
+// function named f (round 6 review M1): when the walk fixes x's type from
+// declarations (a typed local, a parameter, a composite literal) it
+// resolves the call itself, and otherwise the call waits for typing
+// (selfCallee, resolveSelfCalls), as go/types records a method use.
 //
 // The walk also finds the class G value uses (rows.go pinGroup), so they do
 // not depend on typing either (round 16). A reference to a package function
@@ -68,6 +72,10 @@ type refWalker struct {
 	// ops counts the literal elements walked (an operation count for the
 	// linear-growth tests).
 	ops int
+	// pending holds the calls x.f(…) whose callee needs x's type from
+	// typing (selfCallee), in walk order, with the value-use sites their
+	// frames give a called function (callSite).
+	pending []pendingSelf
 	// Test builds only (refTrace set): the resolution of each walked
 	// identifier (a package object or nil), the identifiers in type
 	// and wire positions (not value references), the composite-literal
@@ -384,17 +392,35 @@ func (w *refWalker) valueUse(f *Func, called bool, at syntax.Pos) {
 			uses[k] = useSite{ok: true, at: at}
 			continue
 		}
+		uses[k] = w.callSite()[k]
+	}
+	w.values[f] = uses
+}
+
+// callSite is where a call at the current point of the walk uses each row
+// of its callee as a value: the innermost frame that does not pass the row
+// on decides, and only a frame that carries it as a value is a use.
+func (w *refWalker) callSite() [2]useSite {
+	var site [2]useSite
+	for k := range site {
 		for i := len(w.frames) - 1; i >= 0; i-- {
 			fr := w.frames[i]
 			if m := fr.mode[k]; m != framePass {
 				if m == frameValue {
-					uses[k] = useSite{ok: true, at: fr.at, via: fr.via}
+					site[k] = useSite{ok: true, at: fr.at, via: fr.via}
 				}
 				break
 			}
 		}
 	}
-	w.values[f] = uses
+	return site
+}
+
+// A pendingSelf is a call x.f(…) whose callee typing resolves, with the
+// value-use sites of its frames (callSite).
+type pendingSelf struct {
+	sel  *syntax.SelectorExpr
+	site [2]useSite
 }
 
 // frame walks walk inside a value frame.
@@ -417,12 +443,21 @@ func (w *refWalker) callee(fun syntax.Expr) {
 	}
 }
 
-// selfCallee records the edges of a call x.f(…) that can reach a package
-// function on x's type (196m). Which function it reaches needs x's type, so
-// the walk takes every package function named f that some x.f(…) reaches:
-// a lexical over-approximation that keeps the graph independent of typing,
-// as a plain call's edge is. Each is a callee, so a value use only through
-// a frame that carries its row as a value.
+// selfCallee records the edge of a call x.f(…) that can reach a package
+// function on x's type (196m rule 1). The edge goes to the one function the
+// call resolves to, never to every function named f (round 6 review M1):
+// an edge by name merges unrelated bodies into one component, which makes
+// false class G and initialization-cycle refusals, and k same-named
+// functions called m times give k·m edges.
+//
+// A receiver whose type its declaration fixes (a parameter, a typed local,
+// a local bound to a composite literal, a composite literal) resolves here:
+// a field f of that type comes first and is no edge, else the function on
+// that type is. Any other receiver (a call's result, a local bound to one,
+// an element, a field) needs typing: the call is pending, and
+// resolveSelfCalls gives it the callee typing resolves. The callee is
+// called, so its rows are value uses only through a frame that carries
+// them as a value (callSite).
 func (w *refWalker) selfCallee(fun syntax.Expr) {
 	sel, ok := unparen(fun).(*syntax.SelectorExpr)
 	if !ok {
@@ -434,37 +469,31 @@ func (w *refWalker) selfCallee(fun syntax.Expr) {
 		}
 	}
 	first, ok := w.c.pkg.Scope.names[sel.Sel.Name].(*Func)
-	if !ok {
+	if !ok || first.owner == nil {
 		return
 	}
-	edge := func(f *Func) {
-		if f.owner == nil {
+	t := w.staticType(sel.X)
+	if t == nil {
+		w.pending = append(w.pending, pendingSelf{sel: sel, site: w.callSite()})
+		return
+	}
+	if p, ok := t.(*Pointer); ok {
+		t = p.Elem
+	}
+	n, _ := t.(*Named)
+	if n == nil {
+		return
+	}
+	if s := asStruct(n); s != nil {
+		if fld, _ := s.field(sel.Sel.Name); fld != nil {
 			return
 		}
+	}
+	if f := n.method(sel.Sel.Name); f != nil && f.owner != nil {
 		w.refs[f] = true
 		if f.inferErrors || f.inferUses {
 			w.valueUse(f, true, sel.Sel.Pos())
 		}
-	}
-	// A receiver whose type is fixed before bodies (a typed local, a
-	// composite literal) reaches only the function on that type, so k
-	// same-named functions add one edge per call, not k; any other
-	// receiver reaches every one of them.
-	if t := w.staticType(sel.X); t != nil {
-		if p, ok := t.(*Pointer); ok {
-			t = p.Elem
-		}
-		n, _ := t.(*Named)
-		for _, f := range append([]*Func{first}, first.same...) {
-			if n != nil && f.owner != nil && f.owner.Obj == n.Obj {
-				edge(f)
-			}
-		}
-		return
-	}
-	edge(first)
-	for _, f := range first.same {
-		edge(f)
 	}
 }
 

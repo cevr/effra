@@ -122,6 +122,14 @@ type bodyNode struct {
 	onStack    bool
 }
 
+// owner is the node's body: its *Func or its *pkgVar.
+func (n *bodyNode) owner() any {
+	if n.fn != nil {
+		return n.fn
+	}
+	return n.v
+}
+
 // file is the file of the node's declaration.
 func (n *bodyNode) file() *fileInfo {
 	if n.fn != nil {
@@ -145,7 +153,9 @@ func (n *bodyNode) file() *fileInfo {
 // no edge (round 14 M1), and a tentative type error hides none (round 15
 // M1). A method or a function that spells its
 // rows is read by its signature, so it adds no edge: one edge per
-// referenced object, never one per same-named method (round-3 M5).
+// referenced object, never one per same-named method (round-3 M5). A
+// call x.f(…) of a 196m function adds one edge, to the function typing
+// resolves it to (selfcalls.go; round 6 review M1).
 func (c *checker) checkBodies() {
 	var nodes []*bodyNode
 	byFunc := map[*Func]*bodyNode{}
@@ -167,40 +177,24 @@ func (c *checker) checkBodies() {
 	// any body is typed (refs.go).
 	c.refs = make(map[any]map[any]bool, len(nodes))
 	c.valueRefs = make(map[any]map[*Func][2]useSite, len(nodes))
+	pending := map[any][]pendingSelf{}
 	for _, n := range nodes {
-		var owner any = n.v
 		var w *refWalker
 		if n.fn != nil {
-			owner, w = n.fn, c.bodyRefs(n.fn)
+			w = c.bodyRefs(n.fn)
 		} else {
 			w = c.varRefs(n.v)
 		}
+		owner := n.owner()
 		c.refs[owner], c.valueRefs[owner] = w.refs, w.values
+		if len(w.pending) > 0 {
+			pending[owner] = w.pending
+		}
 		c.walkOps += w.ops
 	}
+	c.resolveSelfCalls(nodes, byFunc, byVar, pending)
 	c.discoverInit()
-	c.bodyEdges = 0
-	for _, n := range nodes {
-		var owner any = n.v
-		if n.fn != nil {
-			owner = n.fn
-		}
-		for _, d := range sortedDeps(c.refs[owner]) {
-			var to *bodyNode
-			switch d := d.(type) {
-			case *Func:
-				if d.inferErrors || d.inferUses {
-					to = byFunc[d]
-				}
-			case *pkgVar:
-				to = byVar[d]
-			}
-			if to != nil {
-				n.edges = append(n.edges, to)
-				c.bodyEdges++
-			}
-		}
-	}
+	c.bodyEdges = c.linkBodies(nodes, byFunc, byVar)
 	c.refs = nil
 	for _, scc := range tarjan(nodes) {
 		c.checkComponent(scc)

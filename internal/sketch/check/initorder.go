@@ -195,6 +195,11 @@ func depName(n any) string {
 		if n.Recv != nil {
 			return n.Recv.Obj.Name + "." + n.Name
 		}
+		// A 196m function is named by its first parameter's type, as Go
+		// names the method it lowers to; same-named ones stay apart.
+		if n.owner != nil {
+			return n.owner.Obj.Name + "." + n.Name
+		}
 		return n.Name
 	case *pkgVar:
 		return n.obj.Name

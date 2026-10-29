@@ -934,6 +934,13 @@ func (c *checker) selector(x *syntax.SelectorExpr) operand {
 		}
 	}
 	base := c.expr(x.X, nil)
+	if c.selfRes != nil && base.mode != modeInvalid {
+		// Typing reached the call: it resolves to a 196m function
+		// (selfCall) or to another member, which takes no edge.
+		if _, ok := c.selfRes[x]; !ok {
+			c.selfRes[x] = nil
+		}
+	}
 	switch base.mode {
 	case modeInvalid:
 		return bad(x)
@@ -1012,6 +1019,12 @@ func (c *checker) selfCall(x *syntax.SelectorExpr, base operand, sig *Signature,
 	}
 	if c.monoBad(fn.Sig.TParams) {
 		return bad(x)
+	}
+	if c.selfRes != nil {
+		c.selfRes[x] = fn
+	}
+	if c.selfFinal != nil && c.silent == 0 {
+		c.selfFinal[x] = fn
 	}
 	c.recordDep(fn)
 	if c.fn != nil && c.fn.reach != nil {

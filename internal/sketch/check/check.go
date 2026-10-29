@@ -125,8 +125,15 @@ type checker struct {
 	// callee is the selector a call is about to check as its callee: only
 	// there does x.f reach a package function on x's type (196m rule 4).
 	callee *syntax.SelectorExpr
-	kinds  declKinds // solved bracket kinds of the package's generic types
-	init   initDeps  // references of each package-level body (initialization order)
+	// selfRes, set while resolveSelfCalls types the bodies with pending
+	// calls x.f(…), receives what each such call resolves to: a 196m
+	// function, or nil for another member (selector, selfCall).
+	selfRes map[*syntax.SelectorExpr]*Func
+	// selfFinal, set only by a test, receives the function each x.f(…) of
+	// a 196m function resolves to in the reporting pass.
+	selfFinal map[*syntax.SelectorExpr]*Func
+	kinds     declKinds // solved bracket kinds of the package's generic types
+	init      initDeps  // references of each package-level body (initialization order)
 	// totalitySteps records the solver steps of each type switch reported
 	// (not silent), in check order: the deterministic cost the tests bound.
 	totalitySteps []int

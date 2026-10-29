@@ -125,3 +125,11 @@ func InferOps(src string) (int, []Diagnostic) {
 	}
 	return c.inferOps, diags
 }
+
+// SelfSettleOnly makes resolveSelfCalls skip its typing from empty rows,
+// so the settling rounds alone resolve the pending calls x.f(…) (a test
+// of that path); it returns the function that restores the default.
+func SelfSettleOnly() (restore func()) {
+	selfSettleOnly = true
+	return func() { selfSettleOnly = false }
+}
