@@ -52,7 +52,7 @@ func newTranslator(src string) (*translator, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &translator{src: src, file: file, parent: map[oldsyntax.Node]oldsyntax.Node{}, imports: map[string]bool{}}, nil
+	return &translator{src: src, file: file, parent: map[oldsyntax.Node]oldsyntax.Node{}, imports: map[string][]oldsyntax.Pos{}}, nil
 }
 
 // finish applies the edits, guards the result and formats it.
@@ -98,10 +98,29 @@ func (t *translator) guard(text string) string {
 		}
 		t.note(u.Pos(), "the translation of this %s does not parse (%s); its old text is left in a comment: finish it by hand", strings.TrimPrefix(kindOf(u), "the "), e.Message)
 		t.textOf(u.Pos(), u.End()) // the rewrites inside it are dropped
+		t.dropImports(u.Pos(), u.End())
 		t.replace(u.Pos(), u.End(), t.commented(u))
 		text = t.apply()
 	}
 	return text
+}
+
+// importWhat names the edit that imports a library package.
+func importWhat(name string) string { return "the import of " + name }
+
+// dropImports removes the import of each library package whose every use
+// lies in the span the guard left by hand (round-4 review O2).
+func (t *translator) dropImports(start, end oldsyntax.Pos) {
+	for name, uses := range t.imports {
+		if len(uses) == 0 {
+			continue
+		}
+		uses = slices.DeleteFunc(uses, func(p oldsyntax.Pos) bool { return p >= start && p < end })
+		t.imports[name] = uses
+		if len(uses) == 0 {
+			t.edits = slices.DeleteFunc(t.edits, func(e edit) bool { return e.what == importWhat(name) })
+		}
+	}
 }
 
 // units are the nodes the guard can leave by hand: the statements of a
@@ -211,13 +230,13 @@ type translator struct {
 	// declared in the file.
 	methods map[string]bool
 	types   map[string]bool
-	ops     map[string]bool // operation names of the file's interfaces
-	fields  map[string]bool // field names of the file's structs
-	structs map[string]bool // struct type names of the file
-	fresh   map[string]bool // names the translator added (freshName)
-	imports map[string]bool // library packages the rewrites use (task, scope)
-	cur     string          // the construct being rewritten, for overlap notes
-	seq     int             // the next edit's sequence number
+	ops     map[string]bool            // operation names of the file's interfaces
+	fields  map[string]bool            // field names of the file's structs
+	structs map[string]bool            // struct type names of the file
+	fresh   map[string]bool            // names the translator added (freshName)
+	imports map[string][]oldsyntax.Pos // library packages the rewrites use (task, scope), with the place of each use
+	cur     string                     // the construct being rewritten, for overlap notes
+	seq     int                        // the next edit's sequence number
 }
 
 // ---------------------------------------------------------------- edits and notes
@@ -444,7 +463,7 @@ func (t *translator) addImports() {
 			if err != nil {
 				continue
 			}
-			if s.Name == nil && t.imports[v] {
+			if s.Name == nil && len(t.imports[v]) > 0 {
 				names = slices.DeleteFunc(names, func(n string) bool { return n == v })
 			}
 			end := s.End()
@@ -457,10 +476,14 @@ func (t *translator) addImports() {
 	if len(names) == 0 {
 		return
 	}
+	// Each import is its own edit, named for the guard, which drops it
+	// when the guard leaves every use of the package by hand.
+	defer func(saved string) { t.cur = saved }(t.cur)
 	if first != nil {
 		// Each import goes after the last import whose path sorts before
 		// it, or before the first import.
 		for _, name := range names {
+			t.cur = importWhat(name)
 			var after *spec
 			for i := range specs {
 				if specs[i].path < name {
@@ -475,19 +498,28 @@ func (t *translator) addImports() {
 		}
 		return
 	}
-	text := "import " + strings.Join(names, "\nimport ")
+	var at oldsyntax.Pos
 	switch {
 	case t.file.Name != nil:
-		end := t.file.Name.End()
-		for int(end) < len(t.src) && t.src[end] != '\n' {
-			end++
+		at = t.file.Name.End()
+		for int(at) < len(t.src) && t.src[at] != '\n' {
+			at++
 		}
-		if int(end) < len(t.src) {
-			end++
+		if int(at) < len(t.src) {
+			at++
 		}
-		t.insert(end, text+"\n")
 	case len(t.file.Decls) > 0:
-		t.insert(0, text+"\n\n")
+		at = 0
+	default:
+		return
+	}
+	for _, name := range names {
+		t.cur = importWhat(name)
+		t.insert(at, "import "+name+"\n")
+	}
+	if t.file.Name == nil {
+		t.cur = "the line after the imports"
+		t.insert(at, "\n")
 	}
 }
 
@@ -1094,7 +1126,7 @@ func (t *translator) node(n oldsyntax.Node) {
 			t.note(n.Pos(), "go with arguments that may change before the task runs: start it with task.Go() { … } by hand")
 			return
 		}
-		t.imports["task"] = true
+		t.imports["task"] = append(t.imports["task"], n.Pos())
 	case *oldsyntax.DeferStmt:
 		// scope.OnExit at a function's top level runs when the function
 		// returns, last registered first, as Go's defer does; its block
@@ -1120,7 +1152,7 @@ func (t *translator) node(n oldsyntax.Node) {
 		}
 		t.replace(n.Defer, n.Stmt.Pos(), "scope.OnExit() { ")
 		t.insert(n.Stmt.End(), " }")
-		t.imports["scope"] = true
+		t.imports["scope"] = append(t.imports["scope"], n.Pos())
 	case *oldsyntax.DeclStmt:
 		t.varDecl(n.Decl, false)
 	case *oldsyntax.AssignStmt:
@@ -1229,6 +1261,18 @@ func (t *translator) call(c *oldsyntax.CallExpr) {
 	}
 	switch id.Name {
 	case "with":
+		// A wire written as a composite literal keeps parentheses: in the
+		// decided header its brace would open the body (D1.8).
+		wires := c.Args
+		if c.Trailing == nil && len(c.Args) >= 2 {
+			wires = c.Args[:len(c.Args)-1]
+		}
+		for _, w := range wires {
+			if bareLiteral(w) {
+				t.insert(w.Pos(), "(")
+				t.insert(w.End(), ")")
+			}
+		}
 		switch {
 		case c.Trailing != nil:
 			t.replace(c.Lparen, c.Lparen+1, " ")

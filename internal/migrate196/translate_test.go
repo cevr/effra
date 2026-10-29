@@ -219,6 +219,10 @@ func TestRules(t *testing.T) {
 			"type Point {\n\tX int,\n\tY int,\n}\n\nfunc use(i int) {}\n\nfunc g(p Point, q Point) {\n\tif p == (Point{1, 2}) {\n\t\tuse(1)\n\t} else if p == q {\n\t\tuse(2)\n\t}\n\tif (p == Point{1, 2}) {\n\t\tuse(3)\n\t}\n}\n"},
 		{"map literal in a header", "package p\n\nfunc use(s string) {}\n\nfunc f() {\n\tfor k := range map[string]int{\"b\": 2} {\n\t\tuse(k)\n\t}\n\tif len(map[string]int{}) > 0 {\n\t}\n}\n",
 			"func use(s string) {}\n\nfunc f() {\n\tfor k, _ in (Map[string, int]{\"b\": 2}) {\n\t\tuse(k)\n\t}\n\tif len(Map[string, int]{}) > 0 {\n\t}\n}\n"},
+		// Round-4 review O1: a wire written as a composite literal keeps
+		// its parentheses in the with header.
+		{"with a literal wire", "package p\n\nfunc f() {\n\twith(Cfg{Port: 1}) {\n\t\tuse(1)\n\t}\n\twith(Live, Cfg{}) {\n\t\tuse(2)\n\t}\n\twith(Cfg{}, run)\n}\n",
+			"func f() {\n\twith (Cfg{Port: 1}) {\n\t\tuse(1)\n\t}\n\twith Live, (Cfg{}) {\n\t\tuse(2)\n\t}\n\twith (Cfg{}) { run() }\n}\n"},
 		// Round-3 answer O2: a Map follows the slice rule, so Go's
 		// key-only range keeps two bindings and the value-only range has one.
 		{"map range forms", "package p\n\nfunc use(s string) {}\n\nfunc useI(i int) {}\n\nfunc f(m map[string]int) {\n\tfor k := range m {\n\t\tuse(k)\n\t}\n\tfor _, v := range m {\n\t\tuseI(v)\n\t}\n\tfor k, v := range m {\n\t\tuse(k)\n\t\tuseI(v)\n\t}\n}\n",
@@ -398,5 +402,36 @@ func TestGuard(t *testing.T) {
 	}
 	if _, err := syntax.Parse(out); err != nil {
 		t.Errorf("guarded output does not parse: %v", err)
+	}
+}
+
+// TestGuardImports (round-4 review O2): when the guard leaves a go or
+// defer statement by hand, an import that only that statement caused
+// goes too; an import another statement still uses stays.
+func TestGuardImports(t *testing.T) {
+	guarded := func(src string) (string, []Note) {
+		t.Helper()
+		tr, err := newTranslator(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tr.run()
+		tr.addImports()
+		// A forced bad rewrite in the first go statement's call.
+		at := strings.Index(src, "work(1)")
+		tr.replace(oldsyntax.Pos(at), oldsyntax.Pos(at+7), "work(1")
+		return tr.finish()
+	}
+	src := "package p\n\nfunc f() {\n\tgo work(1)\n\tdefer done(2)\n}\n\nfunc work(i int) {}\n\nfunc done(i int) {}\n"
+	out, notes := guarded(src)
+	want := "import scope\n\nfunc f() {\n\t// migrate196: finish by hand; the old text:\n\t// go work(1)\n\tscope.OnExit() { done(2) }\n}\n\nfunc work(i int) {}\n\nfunc done(i int) {}\n"
+	if out != want || len(notes) != 1 || notes[0].Line != 4 {
+		t.Errorf("only use (notes %v):\n%s\nwant:\n%s", notes, out, want)
+	}
+	src = "package p\n\nfunc f() {\n\tgo work(1)\n\tgo work(2)\n}\n\nfunc work(i int) {}\n"
+	out, notes = guarded(src)
+	want = "import task\n\nfunc f() {\n\t// migrate196: finish by hand; the old text:\n\t// go work(1)\n\ttask.Go() { work(2) }\n}\n\nfunc work(i int) {}\n"
+	if out != want || len(notes) != 1 {
+		t.Errorf("another use (notes %v):\n%s\nwant:\n%s", notes, out, want)
 	}
 }
