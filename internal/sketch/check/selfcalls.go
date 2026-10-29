@@ -23,15 +23,18 @@ import (
 // the bodies), and every call typing reaches is resolved to its function:
 // one edge per call, linear in the source.
 //
-// A receiver whose type depends on a row still empty there (a generic call
-// that unifies a function with an inferred row against one with a written
-// row, round 15's witness shape) does not type from empty rows. While such
+// A receiver whose type could depend on a row still empty there (a
+// function value's row in a generic call's inference, round 15's shape)
+// might not type from empty rows; no such source is known (the probes in
+// the round-7 request type), but the path is kept sound. While unresolved
 // calls remain, the rows are settled silently in the order of the graph
 // known so far, every body is typed again with them, and the newly
 // resolved calls add their edges; each round resolves at least one call or
-// stops. A call that typing never resolves is in code with a type error of
-// its own, which the reporting pass reports, and its callee's rows are
-// never read.
+// stops. A call typing never resolves sits in code that does not type, so
+// the reporting pass reads none of its callee's rows. RefWalkProblems
+// checks, over the fixtures, the generators and the fuzz inputs, that the
+// reporting pass resolves no call to another function than this did
+// (TestSelfCallSettleRounds runs the settling rounds alone).
 //
 // Prior art: go/types records a method's use when it resolves the selector
 // (Info.Uses, LookupFieldOrMethod) and orders initialization by those
