@@ -1,0 +1,8 @@
+// 196p rule 2: a pattern in a binding must be irrefutable, or the binding
+// is S103 (Rust's `let` rule).
+type Payment = Pending{} | Authorized{AuthID string}
+
+func id(p Payment) string {
+	let Authorized{AuthID: a} = p // want S103
+	return a
+}

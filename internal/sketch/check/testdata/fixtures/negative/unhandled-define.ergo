@@ -1,6 +1,6 @@
 type Fault {}
 
-func fail() string fails Fault { return Fault{} }
+func fail() string fails Fault { return Fault }
 
 func main() needs Console {
 	let v = fail() // want S105

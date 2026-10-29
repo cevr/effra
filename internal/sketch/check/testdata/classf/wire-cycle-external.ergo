@@ -2,7 +2,7 @@ type A { M() }
 type P {}
 func M(_ P) {}
 let X = wire {
-	A: P{},
+	A: P,
 }
 let W1 = wire { // want S108
 	X,

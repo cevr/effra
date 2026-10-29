@@ -266,7 +266,7 @@ func syntaxNodes(t *testing.T, src string) int {
 // each Wi embeds W(i-1), and one function per wire runs with Wi.
 func withChain(n int) string {
 	var b strings.Builder
-	b.WriteString("type Store { M() }\ntype P {}\nfunc M(_ P) {}\nlet W0 = wire { Store: P{} }\n")
+	b.WriteString("type Store { M() }\ntype P {}\nfunc M(_ P) {}\nlet W0 = wire { Store: P }\n")
 	for i := 1; i < n; i++ {
 		fmt.Fprintf(&b, "let W%d = wire { W%d }\n", i, i-1)
 	}

@@ -4,5 +4,5 @@ func f() string {
 	with wire {} { return "ok" }
 	return "after"
 }
-func row() fails Fault    { return Fault{} }
+func row() fails Fault    { return Fault }
 func main() needs Console { Console.Println("\(f())") }

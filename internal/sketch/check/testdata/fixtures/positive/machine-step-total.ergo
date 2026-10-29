@@ -20,7 +20,7 @@ func step(s State, sig Signal) Decision[State, string] fails ProbeDown needs Pro
 		}
 		return Stay{st}
 	case (Closed, Retry):
-		return Ignore{}
+		return Ignore
 	case (Open, Failure):
 		return Done{"open"}
 	}

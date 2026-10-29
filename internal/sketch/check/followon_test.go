@@ -38,9 +38,9 @@ const armHeader = `type E {}
 type Q {}
 type G[T] {}
 type H[T] {}
-func load() fails G[int] { return G[int]{} }
-func boom() fails E { return E{} }
-func quit() fails Q { return Q{} }
+func load() fails G[int] { return G[int] }
+func boom() fails E { return E }
+func quit() fails Q { return Q }
 func keep[T, F](g H[T], f F) {}
 func walk() {
 	try boom()
@@ -90,8 +90,8 @@ var followOnRows = []followOnRow{
 		src: `type E {}
 type G[T] {}
 type H[T] {}
-func load() fails G[int] { return G[int]{} }
-func boom() fails E { return E{} }
+func load() fails G[int] { return G[int] }
+func boom() fails E { return E }
 func keep[T, F](g H[T], f F) {}
 func walk() {
 	try boom()
@@ -187,8 +187,8 @@ func main() {}
 		src: `type E {}
 type G[T] {}
 type H[T] {}
-func load() fails G[int] { return G[int]{} }
-func boom() fails E { return E{} }
+func load() fails G[int] { return G[int] }
+func boom() fails E { return E }
 func keep[T, F](g H[T], f F) {}
 func walk() {
 	try boom()
@@ -296,8 +296,8 @@ func main() {}
 		src: `type Cap { M() }
 type Q {}
 type G[T] {}
-func load() fails G[int] { return G[int]{} }
-func quit() fails Q { return Q{} }
+func load() fails G[int] { return G[int] }
+func quit() fails Q { return Q }
 func keep[T, F](g G[T], f F) {}
 func walk() {
 	Cap.M()
@@ -312,8 +312,8 @@ func main() {}
 		fixed: `type Cap { M() }
 type Q {}
 type G[T] {}
-func load() fails G[int] { return G[int]{} }
-func quit() fails Q { return Q{} }
+func load() fails G[int] { return G[int] }
+func quit() fails Q { return Q }
 func keep[T, F](g G[T], f F) {}
 func walk() needs Cap {
 	Cap.M()
@@ -334,7 +334,7 @@ func main() {}
 		name: "p9: an absence check inside the component, S108 kept",
 		src: `type Cap { M() }
 type G[T] {}
-func load() fails G[int] { return G[int]{} }
+func load() fails G[int] { return G[int] }
 func keep[T, F](g G[T], f F) {}
 func walk() {
 	Cap.M()
@@ -355,7 +355,7 @@ func main() {}
 `,
 		fixed: `type Cap { M() }
 type G[T] {}
-func load() fails G[int] { return G[int]{} }
+func load() fails G[int] { return G[int] }
 func keep[T, F](g G[T], f F) {}
 func walk() needs Cap {
 	Cap.M()
@@ -389,8 +389,8 @@ func main() {}
 type Q {}
 type G[T] {}
 type H[T] {}
-func load() fails G[int] { return G[int]{} }
-func boom() fails E { return E{} }
+func load() fails G[int] { return G[int] }
+func boom() fails E { return E }
 func keep[T, F](g H[T], f F) {}
 func walk() {
 	try boom()
@@ -430,8 +430,8 @@ func main() {}
 type Q {}
 type G[T] {}
 type H[T] {}
-func load() fails G[int] { return G[int]{} }
-func boom() fails E { return E{} }
+func load() fails G[int] { return G[int] }
+func boom() fails E { return E }
 func keep[T, F](g H[T], f F) {}
 func walk() {
 	try boom()
@@ -479,8 +479,8 @@ func main() {}
 type Q {}
 type G[T] {}
 type H[T] {}
-func load() fails G[int] { return G[int]{} }
-func boom() fails E { return E{} }
+func load() fails G[int] { return G[int] }
+func boom() fails E { return E }
 func keep[T, F](g H[T], f F) {}
 func walk() {
 	try boom()
@@ -517,8 +517,8 @@ func main() {}
 type Q {}
 type G[T] {}
 type H[T] {}
-func load() fails G[int] { return G[int]{} }
-func boom() fails E { return E{} }
+func load() fails G[int] { return G[int] }
+func boom() fails E { return E }
 func keep[T, F](g H[T], f F) {}
 func walk() {
 	try boom()
@@ -559,8 +559,8 @@ func main() {}
 		src: `type E {}
 type G[T] {}
 type H[T] {}
-func load() fails G[int] { return G[int]{} }
-func boom() fails E { return E{} }
+func load() fails G[int] { return G[int] }
+func boom() fails E { return E }
 func keep[T, F](g H[T], f F) {}
 func walk() {
 	try boom()
@@ -608,8 +608,8 @@ func main() {}
 type Q {}
 type G[T] {}
 type H[T] {}
-func load() fails G[int] { return G[int]{} }
-func boom() fails E { return E{} }
+func load() fails G[int] { return G[int] }
+func boom() fails E { return E }
 func keep[T, F](g H[T], f F) {}
 func walk() {
 	try boom()
@@ -657,8 +657,8 @@ func main() {}
 		src: `type E {}
 type G[T] {}
 type H[T] {}
-func load() fails G[int] { return G[int]{} }
-func boom() fails E { return E{} }
+func load() fails G[int] { return G[int] }
+func boom() fails E { return E }
 func keep[T, F](g H[T], f F) {}
 func walk() {
 	try load()
@@ -699,7 +699,7 @@ func main() {}
 		name: "k1: try and catch on a pinned row that is empty",
 		src: `type E {}
 type H[T] {}
-func boom() fails E { return E{} }
+func boom() fails E { return E }
 func keep[T, F](g H[T], f F) {}
 func walk() {
 	try boom()
@@ -714,7 +714,7 @@ func main() {}
 `,
 		fixed: `type E {}
 type H[T] {}
-func boom() fails E { return E{} }
+func boom() fails E { return E }
 func keep[T, F](g H[T], f F) {}
 func walk() {
 	try boom()
@@ -744,8 +744,8 @@ func main() {}
 		src: `type E {}
 type Q {}
 type G[T] {}
-func boom() fails E { return E{} }
-func load() fails G[int] { return G[int]{} }
+func boom() fails E { return E }
+func load() fails G[int] { return G[int] }
 func keep[T, F](g G[T], f F) {}
 func walk() {
 	try boom()
@@ -973,7 +973,7 @@ func main() {
 		}},
 		{"beside a type the row lacks", `type E {}
 type Q {}
-func f() fails E { return E{} }
+func f() fails E { return E }
 func main() {
 	f() catch {
 	case E:
@@ -986,7 +986,7 @@ func main() {
 			"8:7 S108 main.Q is caught twice (rows.md, Catch 2)",
 		}},
 		{"in the row", `type E {}
-func f() fails E { return E{} }
+func f() fails E { return E }
 func main() {
 	f() catch {
 	case E:

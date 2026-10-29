@@ -1050,6 +1050,17 @@ func (c *checker) checkPkgVar(pv *pkgVar) {
 	if pv.done || pv.checking {
 		return
 	}
+	if g := pv.group; g != nil && g.members[0] != pv {
+		// A let that binds several names from one value is checked once,
+		// by its first name, for all of them.
+		lead := g.members[0]
+		c.checkPkgVar(lead)
+		pv.done = lead.done
+		if pv.obj.Type == nil || pv.initCycle {
+			pv.obj.Type = invalid
+		}
+		return
+	}
 	c.workNodes += pv.bodySize()
 	pv.checking = true
 	defer c.beginBodyCheck(pv)()
@@ -1067,6 +1078,15 @@ func (c *checker) checkPkgVar(pv *pkgVar) {
 	prev := c.fn
 	c.fn = &funcCtx{t: t, scope: newScope(c.pkg.Scope)}
 	defer func() { c.fn = prev }()
+	if g := pv.group; g != nil {
+		c.pkgPatternCheck(g)
+		for _, m := range g.members {
+			if m.obj.Type == nil || m.initCycle {
+				m.obj.Type = invalid
+			}
+		}
+		return
+	}
 	var declared Type
 	if pv.spec.Type != nil {
 		declared = c.typExpr(pv.spec.Type, nil)

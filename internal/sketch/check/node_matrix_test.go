@@ -64,8 +64,8 @@ var nodeMatrix = []struct {
 	{"InterfaceType", `type I { M(Nope) }`, "S104", "Nope"},
 	{"InterpolatedString", `func F() string { return "a \(nope) b" }`, "S104", "nope"},
 	{"KeyValueExpr", `func F() S { return S{X: nope} }`, "S104", "nope"},
-	{"MachineType", `type M machine[Nope, U] { initial: A{}, step: Step }
-func Step(s U, e U) Decision[U, int] { return Ignore{} }`, "S104", "Nope"},
+	{"MachineType", `type M machine[Nope, U] { initial: A, step: Step }
+func Step(s U, e U) Decision[U, int] { return Ignore }`, "S104", "Nope"},
 	{"MapType", `func F(m Map[string, Nope]) {}`, "S104", "Nope"},
 	{"ParenExpr", `func F() int { return (nope) }`, "S104", "nope"},
 	{"SelectorExpr", `func F(s S) int { return s.Nope }`, "S104", "Nope"},
@@ -74,21 +74,16 @@ func Step(s U, e U) Decision[U, int] { return Ignore{} }`, "S104", "Nope"},
 	{"StructType", `type T { X Nope }`, "S104", "Nope"},
 	{"TryExpr", `func F() fails A {
 	try Fail(nope)
-	return A{}
+	return A
 }`, "S104", "nope"},
-	{"TupleExpr", `func F(x U, y U) {
-	match (x, y) {
-	case (A, Nope):
-	case _:
-	}
-}`, "S104", "Nope"},
+	{"TupleExpr", `func F() { _ = (1, nope) }`, "S104", "nope"},
 	{"TypeGuard", `func F() {
 	match nope {
 	case _:
 	}
 }`, "S104", "nope"},
 	{"UnaryExpr", `func F() int { return -nope }`, "S104", "nope"},
-	{"VariantSpec", `type V = A | Paid{ID Nope}`, "S109", "Paid{ID Nope}"},
+	{"VariantSpec", `type V = A | Paid{ID Nope}`, "S104", "Nope"},
 	{"WireLit", `func F() { with wire { Nope: S{} } { G(1) } }`, "S104", "Nope"},
 	// Statements.
 	{"AssertStmt", `test T {
@@ -124,6 +119,7 @@ func Step(s U, e U) Decision[U, int] { return Ignore{} }`, "S104", "Nope"},
 	match x {
 	case 1:
 		G(nope)
+	case _:
 	}
 }`, "S104", "nope"},
 	{"TypeSwitchStmt", `func F(x U) {

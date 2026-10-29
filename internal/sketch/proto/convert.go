@@ -32,6 +32,44 @@ type converter struct {
 	// parameter's type (#196, 196m: receivers are first parameters).
 	methods     map[*syntax.FuncDecl]bool
 	methodNames map[string]bool
+	// bare are the records with no fields, written bare as values (D-B2):
+	// the file's and the prelude's. The prototype reads each as T{}.
+	bare map[string]bool
+}
+
+// preludeBare are the prelude's records with no fields.
+var preludeBare = []string{"LiveScheduler", "None", "Ignore", "Reject"}
+
+// findBare collects the records with no fields that a bare name denotes.
+func (c *converter) findBare(f *syntax.File) {
+	c.bare = map[string]bool{}
+	for _, n := range preludeBare {
+		c.bare[n] = true
+	}
+	for _, d := range f.Decls {
+		if t, ok := d.(*syntax.TypeDecl); ok {
+			if s, ok := t.Spec.(*syntax.StructType); ok && (s.Fields == nil || len(s.Fields.List) == 0) {
+				c.bare[t.Name.Name] = true
+			}
+		}
+	}
+	// A name the file binds as a value (a let, a parameter, an as) shadows
+	// the record; the prototype has no scopes here, so it keeps the name.
+	syntax.Inspect(f, func(n syntax.Node) bool {
+		var names []*syntax.Ident
+		switch n := n.(type) {
+		case *syntax.VarSpec:
+			names = n.Names
+		case *syntax.Field:
+			names = n.Names
+		case *syntax.AsPattern:
+			names = []*syntax.Ident{n.Name}
+		}
+		for _, id := range names {
+			delete(c.bare, id.Name)
+		}
+		return true
+	})
 }
 
 func (c *converter) pos(p syntax.Pos) Pos {
@@ -53,6 +91,7 @@ func (c *converter) file(f *syntax.File) *File {
 		out.Package = f.Name.Name
 	}
 	c.findMethods(f)
+	c.findBare(f)
 	for _, d := range f.Decls {
 		switch d := d.(type) {
 		case *syntax.ImportDecl:
@@ -539,6 +578,9 @@ var binaryOps = map[syntax.Token]bool{
 func (c *converter) expr(x syntax.Expr) Expr {
 	switch x := x.(type) {
 	case *syntax.Ident:
+		if c.bare[x.Name] {
+			return &CompositeLit{Pos: c.pos(x.Pos()), Type: x.Name}
+		}
 		return &Ident{Pos: c.pos(x.Pos()), Name: x.Name}
 	case *syntax.BasicLit:
 		kinds := map[syntax.Token]tokKind{syntax.INT: tInt, syntax.DURATION: tDuration, syntax.STRING: tString}

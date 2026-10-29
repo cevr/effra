@@ -1,6 +1,6 @@
 // out: outer
 type Fault {}
-func unused() fails Fault { return Fault{} }
+func unused() fails Fault { return Fault }
 func main() needs Console {
 	let x = "outer"
 	if "a" == "a" {

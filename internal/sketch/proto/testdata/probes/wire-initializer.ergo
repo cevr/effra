@@ -1,6 +1,6 @@
 // want S102
 type Fault {}
-func unused() fails Fault { return Fault{} }
+func unused() fails Fault { return Fault }
 type Store { Get() string }
 type Box { Get() string }
 type Holder { Value string }

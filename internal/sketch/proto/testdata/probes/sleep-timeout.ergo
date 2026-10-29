@@ -23,7 +23,7 @@ func block() string needs Scheduler {
 }
 
 let Clock = wire {
-	Scheduler: LiveScheduler{},
+	Scheduler: LiveScheduler,
 }
 
 func main() needs Console {

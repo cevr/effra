@@ -1,7 +1,7 @@
 type A {}
 type B {}
 
-func fail() string fails A { return A{} }
+func fail() string fails A { return A }
 
 func main() needs Console {
 	let v = fail() catch {

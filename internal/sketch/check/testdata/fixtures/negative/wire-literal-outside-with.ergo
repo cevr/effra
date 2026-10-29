@@ -4,6 +4,6 @@ type Mem {}
 func Get(_ Mem) string { return "m" }
 
 func main() needs Console {
-	let w = wire { Store: Mem{} } // want S109
+	let w = wire { Store: Mem } // want S109
 	Console.Println("\(w)")
 }

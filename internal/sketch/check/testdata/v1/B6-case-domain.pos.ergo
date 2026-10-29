@@ -1,0 +1,14 @@
+// 196p: each case pattern is a variant of the subject's union, a field of
+// it, or `_`; every case adds something the earlier cases do not cover.
+type Payment = Pending{} | Paid{ID string, Amount int}
+
+func label(p Payment) string {
+	match p {
+	case Paid{Amount: 0}:
+		return "free"
+	case Paid{ID: id}:
+		return id
+	case Pending:
+		return "waiting"
+	}
+}

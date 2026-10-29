@@ -1,7 +1,7 @@
 type A {}
 type B {}
 
-func fail() string fails A | B { return A{} }
+func fail() string fails A | B { return A }
 
 func Run() string fails B {
 	let v = try fail() catch { // want S101

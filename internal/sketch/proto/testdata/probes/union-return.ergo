@@ -3,12 +3,12 @@ type Item {}
 type Other {}
 type Choice = Item | Other
 type Fault {}
-func inner() Item fails Fault   { return Item{} }
+func inner() Item fails Fault   { return Item }
 func outer() Choice fails Fault { return inner() }
 func main() needs Console {
 	let line = outer() catch {
 	case Fault:
-		Other{}
+		Other
 	}
 	Console.Println("\(line)")
 }

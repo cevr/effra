@@ -1,9 +1,9 @@
 // want S106
 type Fault {}
-func unused() fails Fault { return Fault{} }
+func unused() fails Fault { return Fault }
 type Store { Get(id string) string }
 type Mem {}
 func Get(_ Mem, id int) string { return "ok" }
 func main() needs Console {
-	with wire { Store: Mem{} } { Console.Println("\(Store.Get("42"))") }
+	with wire { Store: Mem } { Console.Println("\(Store.Get("42"))") }
 }

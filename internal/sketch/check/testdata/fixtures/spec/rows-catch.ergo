@@ -29,9 +29,9 @@ func Charge(g FakeGateway, order Order) string fails GatewayDown {
 }
 
 let Live = wire {
-	Orders:    MemoryOrders{},
+	Orders:    MemoryOrders,
 	Gateway:   FakeGateway{AuthID: "auth-7"},
-	Scheduler: LiveScheduler{},
+	Scheduler: LiveScheduler,
 }
 
 func checkout(id string) string fails OrderNotFound | GatewayDown | timeout.Expired needs Orders, Gateway, Scheduler {

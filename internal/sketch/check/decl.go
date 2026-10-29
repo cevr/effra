@@ -157,11 +157,17 @@ func (c *checker) collect() {
 			case *syntax.TypeDecl:
 				tn := &TypeName{Name: d.Name.Name, Pkg: c.pkg, Pos: d.Name.Pos(), Decl: d, file: fi, id: newID()}
 				tn.Type = &Named{Obj: tn}
-				if isDefinedSpec(d.Spec) {
-					c.outside(d.Spec, definedNoun)
-				}
 				if c.declare(d.Name, tn) {
 					c.pkg.Types = append(c.pkg.Types, tn)
+				}
+				// An inline variant declares a record in the package scope
+				// (spec D-B1), after its union in source order.
+				if it, ok := d.Spec.(*syntax.InterfaceType); ok {
+					for _, x := range it.Union {
+						if vs, ok := x.(*syntax.VariantSpec); ok {
+							c.declareVariant(fi, d, vs)
+						}
+					}
 				}
 			case *syntax.FuncDecl:
 				if d.Recv != nil {
@@ -191,10 +197,20 @@ func (c *checker) collect() {
 						patterns = append(patterns, patternSpec{spec, fi})
 						continue
 					}
+					var group *pkgPattern
+					if len(spec.Names) > 1 && len(spec.Values) == 1 {
+						// `let q, r = e` destructures one tuple (196t).
+						group = &pkgPattern{spec: spec}
+						c.pkgPatterns[spec] = group
+					}
 					for i, name := range spec.Names {
 						v := &Var{Name: name.Name, Pos: name.Pos(), pkg: true, used: true}
 						c.declare(name, v)
-						c.vars = append(c.vars, &pkgVar{obj: v, spec: spec, idx: i, file: fi})
+						pv := &pkgVar{obj: v, spec: spec, idx: i, file: fi, name: name, group: group}
+						if group != nil {
+							group.members = append(group.members, pv)
+						}
+						c.vars = append(c.vars, pv)
 					}
 				}
 			case *syntax.TestDecl:
@@ -212,14 +228,25 @@ func (c *checker) collect() {
 			}
 		}
 	}
-	// The pattern is S109 until check-v1, and its names are invalid package
-	// vars: never accepted unchecked, and no use of them cascades (D3;
-	// round 6 review B1).
+	// A package-level let with a pattern declares the names the pattern
+	// binds, read with every type declared (a type name in it tests the
+	// type, D-B3 rule 1); checkPkgVar types them all from the one value.
 	for _, p := range patterns {
 		c.cur = p.file
-		c.outside(p.spec.Pattern, patternNoun("let", p.spec.Pattern))
-		for _, id := range patternNames(p.spec.Pattern, c.isTypeName) {
-			c.declare(id, &Var{Name: id.Name, Pos: id.Pos(), Type: invalid, pkg: true, used: true})
+		group := &pkgPattern{spec: p.spec}
+		c.pkgPatterns[p.spec] = group
+		for _, id := range patternNames(p.spec.Pattern, c.isPatternType) {
+			v := &Var{Name: id.Name, Pos: id.Pos(), pkg: true, used: true}
+			c.declare(id, v)
+			pv := &pkgVar{obj: v, spec: p.spec, file: p.file, name: id, group: group}
+			group.members = append(group.members, pv)
+			c.vars = append(c.vars, pv)
+		}
+		if len(group.members) == 0 {
+			// A pattern that binds nothing still checks its value once.
+			pv := &pkgVar{obj: &Var{Name: "_", Pos: p.spec.Pos(), pkg: true, used: true}, spec: p.spec, file: p.file, group: group}
+			group.members = append(group.members, pv)
+			c.vars = append(c.vars, pv)
 		}
 	}
 	// The export guard: the step of an exported machine type spells its
@@ -398,7 +425,7 @@ func (c *checker) resolveNamed(n *Named) {
 		n.under = &MachineType{State: c.typExpr(spec.State, ctx), Signal: c.typExpr(spec.Signal, ctx)}
 		c.machines = append(c.machines, n.Obj)
 	default:
-		n.under = invalid
+		n.under = c.definedType(n, spec, ctx)
 	}
 	n.state = 2
 }
@@ -517,15 +544,26 @@ func (c *checker) unionType(n *Named, spec *syntax.InterfaceType, ctx *typeCtx) 
 			continue
 		}
 		vn, ok := t.(*Named)
-		if !ok || vn.origin().Obj.Pkg != c.pkg {
-			c.errorf(x, CodeType, "a union variant must be a struct type declared in this package, not %s", t)
+		if !ok {
+			c.errorf(x, CodeType, "a union variant is a record declared in this package, not %s (types.md, Unions 1)", t)
+			u.Bad = true
+			continue
+		}
+		if p := vn.origin().Obj.Pkg; p != c.pkg {
+			// A variant from another package needs a sealed interface over
+			// a foreign type (spec Q7): 196b's.
+			c.errorf(x, CodeOutside, "a union variant from another package (%s) is 196b's (packages); declare the record in this package", t)
 			u.Bad = true
 			continue
 		}
 		// The variant's kind comes from its declaration, so a variant that is
 		// still resolving (a struct whose field is this union) is accepted.
-		if _, isStruct := vn.origin().Obj.Decl.Spec.(*syntax.StructType); !isStruct {
-			c.errorf(x, CodeType, "a union variant must be a struct type, not %s", t)
+		if decl := vn.origin().Obj.Decl; decl == nil {
+			c.errorf(x, CodeType, "a union variant is a record declared in this package, not %s (types.md, Unions 1)", t)
+			u.Bad = true
+			continue
+		} else if _, isStruct := decl.Spec.(*syntax.StructType); !isStruct {
+			c.errorf(x, CodeType, "a union variant is a record declared in this package; %s is %s (types.md, Unions 1)", t, shapeNoun(decl.Spec))
 			u.Bad = true
 			continue
 		}
@@ -675,10 +713,25 @@ func (c *checker) typExpr0(x syntax.Expr, ctx *typeCtx) Type {
 		c.errorf(x, CodeType, "an error row appears only after fails in a signature")
 		return invalid
 	case *syntax.TupleExpr:
-		c.outside(x, "a tuple type (196t, tuples)")
-		return invalid
-	case *syntax.VariantSpec, *syntax.AsPattern:
-		c.notYet(x)
+		// A tuple type is structural (196t): two or more elements, which
+		// the parser guarantees.
+		inner := typeCtx{}
+		if ctx != nil {
+			inner = *ctx
+		}
+		inner.param = false
+		tup := &Tuple{Types: make([]Type, len(x.Elts))}
+		for i, e := range x.Elts {
+			tup.Types[i] = c.typExpr(e, &inner)
+			if isInvalid(tup.Types[i]) {
+				return invalid
+			}
+		}
+		return tup
+	case *syntax.VariantSpec:
+		return c.variantType(x, ctx)
+	case *syntax.AsPattern:
+		c.errorf(x, CodeType, "expected a type")
 		return invalid
 	case *syntax.BasicLit, *syntax.CompositeLit, *syntax.KeyValueExpr, *syntax.FuncLit, *syntax.SliceExpr,
 		*syntax.TypeGuard, *syntax.CallExpr, *syntax.UnaryExpr, *syntax.BinaryExpr, *syntax.TryExpr,
@@ -711,9 +764,6 @@ func (c *checker) typeName(x *syntax.Ident, ctx *typeCtx) Type {
 	case *TypeName:
 		if o == universeOnce.errorName {
 			c.errorf(x, CodeType, "error is only the head of an error row or a constraint")
-			return invalid
-		}
-		if refusedType(o.Type) {
 			return invalid
 		}
 		if n, ok := o.Type.(*Named); ok {

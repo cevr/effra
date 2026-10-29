@@ -4,7 +4,7 @@ type Fault {}
 
 func work(n int64) int64 fails Fault {
 	if n < 0 {
-		return Fault{}
+		return Fault
 	}
 	return n * 2
 }

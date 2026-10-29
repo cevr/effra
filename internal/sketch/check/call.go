@@ -165,32 +165,8 @@ func (c *checker) arity(x *syntax.CallExpr, sig *Signature, n int) bool {
 // callSig checks a call to a function value of a known, non-generic type.
 func (c *checker) callSig(x *syntax.CallExpr, sig *Signature, fun operand) operand {
 	args := argsOf(x)
-	// f(g()) with a multi-value g spreads its results.
-	if len(args.exprs) == 1 && args.trailing == nil && len(sig.Params) > 1 {
-		if _, isCall := args.exprs[0].(*syntax.CallExpr); isCall {
-			c.silent++
-			peek := c.expr(args.exprs[0], nil)
-			c.silent--
-			_, multi := peek.typ.(*Tuple)
-			var op operand
-			if multi {
-				op = c.expr(args.exprs[0], nil)
-			}
-			if tup, ok := op.typ.(*Tuple); multi && ok && op.mode == modeValue {
-				c.handled(&op)
-				if len(tup.Types) != len(sig.Params) {
-					c.errorf(x, CodeType, "%d values for %d parameters", len(tup.Types), len(sig.Params))
-					return bad(x)
-				}
-				for i, t := range tup.Types {
-					if ok, why := c.assignable(t, sig.Params[i].Type); !ok {
-						c.errorf(args.exprs[0], CodeType, "cannot use %s as %s: %s", t, sig.Params[i].Type, why)
-					}
-				}
-				return c.result(x, sig)
-			}
-		}
-	}
+	// A tuple is one value (196t): f(g()) passes g's tuple as one argument
+	// and never spreads it over f's parameters.
 	if !c.arity(x, sig, args.n()) {
 		for _, a := range args.exprs {
 			if _, isLit := a.(*syntax.FuncLit); !isLit {

@@ -33,7 +33,7 @@ func orElse(m Maybe[int64], d int64) int64 {
 
 func wrap(n int64) Maybe[int64] {
 	if n < 0 {
-		return Nothing{}
+		return Nothing
 	}
 	return Just{n}
 }
@@ -48,7 +48,7 @@ type Sleepy { Nap(d duration) }
 func main() needs Console {
 	let p = Pair[string, int64]{Key: "a", Value: 1}
 	let ys = Map([]int64{1, 2}, double)
-	let n = On[Fault](func() int64 fails Fault { return Fault{} }) catch {
+	let n = On[Fault](func() int64 fails Fault { return Fault }) catch {
 	case Fault:
 		0
 	}

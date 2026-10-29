@@ -39,7 +39,7 @@ var typedEdgeCases = []edgeCase{
 type Log { Write(s string) }
 type A {}
 type B {}
-func getB() B { return B{} }
+func getB() B { return B }
 func m(a A) {
 	_ = f
 }
@@ -55,7 +55,7 @@ func main() {}
 type Log { Write(s string) }
 type A {}
 type B {}
-func getB() B { return B{} }
+func getB() B { return B }
 func m(a A) {
 	_ = f
 }
@@ -71,7 +71,7 @@ func main() {}
 	{"an initializer through a call's result", `
 type A {}
 type B {}
-func getB() B { return B{} }
+func getB() B { return B }
 func m(a A) int { return v }
 func m(b B) int { return 1 }
 let v = getB().m()
@@ -82,7 +82,7 @@ func main() {}
 	{"a real initialization cycle names the owner", `
 type A {}
 type B {}
-func getB() B { return B{} }
+func getB() B { return B }
 func m(a A) int { return v }
 func m(b B) int { return v }
 let v = getB().m()
@@ -178,7 +178,7 @@ func TestSelfCallEdgesLinear(t *testing.T) {
 	for _, n := range []int{1000, 2000, 4000} {
 		var b strings.Builder
 		for i := range n {
-			fmt.Fprintf(&b, "type R%d {}\nfunc mk%d() R%d { return R%d{} }\nfunc m(_ R%d) {}\nfunc f%d() {\n\tlet x = mk%d()\n\tx.m()\n}\n", i, i, i, i, i, i, i)
+			fmt.Fprintf(&b, "type R%d {}\nfunc mk%d() R%d { return R%d }\nfunc m(_ R%d) {}\nfunc f%d() {\n\tlet x = mk%d()\n\tx.m()\n}\n", i, i, i, i, i, i, i)
 		}
 		b.WriteString("func main() {}\n")
 		start := time.Now()

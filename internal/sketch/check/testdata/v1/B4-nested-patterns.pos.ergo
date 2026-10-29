@@ -1,0 +1,15 @@
+// 196p rules 2 and 3: a variant pattern matches a union-typed field by
+// variant, nested; exhaustiveness treats each variant as a constructor.
+type Reason = Fraud{Rule string} | CardExpired{}
+type Payment = Pending{} | Declined{Reason Reason}
+
+func label(p Payment) string {
+	match p {
+	case Pending:
+		return "waiting"
+	case Declined{Reason: Fraud{Rule: r}}:
+		return r
+	case Declined{Reason: CardExpired}:
+		return "expired"
+	}
+}

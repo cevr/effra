@@ -41,7 +41,9 @@ func infoCorpus(t *testing.T) map[string]string {
 // infoGaps lists what Info misses in a clean package (invariant 1) and
 // the types it holds that are not final (invariant 2): every expression in
 // a body or a package let has a Types entry, every identifier a Defs or
-// Uses entry, every call a Calls entry, every type-match case a Patterns
+// Uses entry, every call a Calls entry, every pattern node of a match,
+// let or for a Patterns entry of its form (a binding holding the Var its
+// Defs entry holds), every catch arm a Patterns
 // entry, every match and catch a Matches entry, every for-in a Loops entry
 // and every with a Withs entry. Declarations count too: every declared
 // name (function, type, wire, type parameter, parameter, record field,
@@ -78,6 +80,78 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 			return true
 		})
 	}
+	// pattern checks a pattern tree (stage B): every node has a Patterns
+	// entry of the node's form, a record or tuple pattern one sub-pattern
+	// per element, and a binding the Var its Defs entry holds. The subtree
+	// holds no value expression.
+	var pattern func(p syntax.Expr)
+	pattern = func(p syntax.Expr) {
+		pat := info.Patterns[p]
+		if pat == nil {
+			at(p, fmt.Sprintf("a pattern %T with no Patterns entry", p))
+			skip(p, false)
+			return
+		}
+		notValue[p] = true
+		bound := func(id *syntax.Ident) {
+			if id.Name != "_" && (pat.Var == nil || info.Defs[id] != pat.Var) {
+				at(id, "the pattern binding "+id.Name+" whose Var is not its Defs entry")
+			}
+		}
+		switch x := p.(type) {
+		case *syntax.ParenExpr:
+			pattern(x.X)
+		case *syntax.Ident:
+			switch pat.Kind {
+			case PatBind:
+				bound(x)
+			case PatTypeTest:
+				if pat.Type == nil || info.Uses[x] == nil {
+					at(x, "the type test "+x.Name+" with no Type or no Uses entry")
+				}
+			case PatWildcard, PatConst:
+			default:
+				at(x, fmt.Sprintf("the pattern name %s of kind %d", x.Name, pat.Kind))
+			}
+		case *syntax.CompositeLit:
+			if pat.Kind != PatRecord || pat.Type == nil || len(pat.Fields) != len(x.Elts) {
+				at(x, "a record pattern whose Pattern is not a record of its fields")
+			}
+			skip(x.Type, false)
+			for _, e := range x.Elts {
+				if kv, ok := e.(*syntax.KeyValueExpr); ok {
+					notValue[kv] = true
+					if id, ok := kv.Key.(*syntax.Ident); ok {
+						notValue[id], notObject[id] = true, true
+					}
+					pattern(kv.Value)
+					continue
+				}
+				pattern(e)
+			}
+		case *syntax.TupleExpr:
+			if pat.Kind != PatTuple || len(pat.Elems) != len(x.Elts) {
+				at(x, "a tuple pattern whose Pattern is not a tuple of its elements")
+			}
+			for _, e := range x.Elts {
+				pattern(e)
+			}
+		case *syntax.AsPattern:
+			if pat.Kind != PatAs || len(pat.Elems) != 1 {
+				at(x, "an as pattern whose Pattern is not an as")
+			}
+			bound(x.Name)
+			notValue[x.Name] = true
+			pattern(x.X)
+		default:
+			// A constant (a literal, a signed literal, a qualified
+			// constant) or a qualified type test.
+			if pat.Kind != PatConst && pat.Kind != PatTypeTest {
+				at(x, fmt.Sprintf("a %T pattern of kind %d", x, pat.Kind))
+			}
+			skip(x, false)
+		}
+	}
 	var visit func(n syntax.Node) bool
 	visit = func(n syntax.Node) bool {
 		switch n := n.(type) {
@@ -85,6 +159,9 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 			for _, spec := range n.Decl.Specs {
 				if spec.Type != nil {
 					skip(spec.Type, false)
+				}
+				if spec.Pattern != nil {
+					pattern(spec.Pattern)
 				}
 			}
 		case *syntax.InterpolatedString:
@@ -146,10 +223,7 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 			}
 			for _, cl := range n.Clauses {
 				for _, item := range cl.List {
-					if info.Patterns[item] == nil {
-						at(item, "a case with no Patterns entry")
-					}
-					skip(item, false)
+					pattern(item)
 				}
 			}
 		case *syntax.SwitchStmt:
@@ -158,9 +232,7 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 			}
 			for _, cl := range n.Clauses {
 				for _, item := range cl.List {
-					if info.Patterns[item] == nil {
-						at(item, "a value case with no Patterns entry")
-					}
+					pattern(item)
 				}
 			}
 		case *syntax.CatchExpr:
@@ -178,6 +250,11 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 		case *syntax.RangeStmt:
 			if info.Loops[n] == nil {
 				at(n, "a for-in with no Loops entry")
+			}
+			for _, b := range []syntax.Expr{n.Key, n.Value} {
+				if _, plain := b.(*syntax.Ident); b != nil && !plain {
+					pattern(b)
+				}
 			}
 		case *syntax.CallExpr:
 			if info.Calls[n] == nil {
@@ -294,6 +371,11 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 			for _, spec := range d.Specs {
 				for _, v := range spec.Values {
 					syntax.Inspect(v, visit)
+				}
+				if spec.Pattern != nil {
+					pattern(spec.Pattern)
+					// Its names are package values: each has its Defs entry.
+					syntax.Inspect(spec.Pattern, visit)
 				}
 			}
 		case *syntax.WireDecl:

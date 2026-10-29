@@ -1,0 +1,14 @@
+// Seventh round, item 2 (spec D-B2): `Pending{}` in use is S108 "a record
+// with no fields is written bare: Pending"; a bare name of a record with
+// fields in value position is S108 "Paid has fields; write Paid{…}".
+type Pending {}
+type Paid { ID string }
+type State = Pending | Paid
+
+func start() State {
+	return Pending{} // want S108
+}
+
+func paid() State {
+	return Paid // want S108
+}

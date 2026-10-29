@@ -1,6 +1,6 @@
 // out: handled
 type Fault {}
-func f() fails Fault { return Fault{} }
+func f() fails Fault { return Fault }
 func g() fails Fault {
 	try f()
 	return

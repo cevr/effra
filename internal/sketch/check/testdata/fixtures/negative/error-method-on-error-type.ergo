@@ -2,6 +2,6 @@ type Fault {}
 
 func Error(_ Fault) string { return "manual" } // want S108
 
-func fail() fails Fault { return Fault{} }
+func fail() fails Fault { return Fault }
 
 func main() {}

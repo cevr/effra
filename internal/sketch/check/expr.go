@@ -105,6 +105,20 @@ func (c *checker) needValue(op *operand) {
 	case modeNoValue:
 		c.errorf(op.expr, CodeType, "this expression has no value")
 	case modeType:
+		// A record with no fields is written bare in value position, and
+		// a record with fields keeps its braces (spec D-B2).
+		if isZeroRecord(op.typ) {
+			op.mode = modeValue
+			return
+		}
+		if s, ok := under(op.typ).(*Struct); ok && len(s.Fields) > 0 && isRecordName(op.typ) {
+			name := exprText(op.expr)
+			if name == "this expression" {
+				name = op.typ.String()
+			}
+			c.errorf(op.expr, CodeType, "%s has fields; write %s{…} (types.md, Structs 2)", name, name)
+			break
+		}
 		c.errorf(op.expr, CodeType, "%s is a type, not a value", op.typ)
 	case modePkg:
 		c.errorf(op.expr, CodeType, "package %s is not a value", exprText(op.expr))
@@ -246,7 +260,7 @@ func (c *checker) expr0(x syntax.Expr, hint Type) operand {
 		c.errorf(x, CodeType, "a key: value pair belongs in a composite literal")
 		return bad(x)
 	case *syntax.TupleExpr:
-		return c.outside(x, "a tuple (196t, tuples)")
+		return c.tupleValue(x, hint)
 	case *syntax.TypeGuard:
 		c.errorf(x, CodeType, "x.(type) is not an expression; write match x { case T: … }")
 		return bad(x)
@@ -261,8 +275,10 @@ func (c *checker) expr0(x syntax.Expr, hint Type) operand {
 		return bad(x)
 	case *syntax.InterpolatedString:
 		return c.interpolated(x)
-	case *syntax.AsPattern, *syntax.VariantSpec, *syntax.IfStmt, *syntax.SwitchStmt, *syntax.TypeSwitchStmt:
+	case *syntax.IfStmt, *syntax.SwitchStmt, *syntax.TypeSwitchStmt:
 		return c.notYet(x)
+	case *syntax.AsPattern, *syntax.VariantSpec:
+		return c.undecided(x, "a pattern or a variant in value position")
 	}
 	return c.undecided(x, "")
 }
@@ -296,14 +312,10 @@ func (c *checker) notYet(n syntax.Node) operand {
 // decidedNoun names a node for notYet, with the stage that decided it.
 func decidedNoun(n syntax.Node) string {
 	switch n := n.(type) {
-	case *syntax.AsPattern:
-		return "an as pattern here (196p, patterns)"
 	case *syntax.Ident:
-		return "a catch arm that binds the whole failure (196p, patterns)"
+		return "a catch arm that binds the whole failure (196r, one catch)"
 	case *syntax.CompositeLit:
-		return "a record pattern (196p, patterns)"
-	case *syntax.VariantSpec:
-		return "a variant declared in place (196 fifth round, unions)"
+		return "a record pattern in a catch arm (196r, one catch)"
 	case *syntax.AssertStmt:
 		return "assert (196l, laws and tests)"
 	case *syntax.TestDecl:
@@ -420,9 +432,6 @@ func (c *checker) ident(x *syntax.Ident) operand {
 		if n, ok := o.Type.(*Named); ok {
 			c.resolveNamed(n)
 		}
-		if refusedType(o.Type) {
-			return bad(x)
-		}
 		if o == universeOnce.errorName {
 			return operand{mode: modeType, typ: invalid, obj: o}
 		}
@@ -480,6 +489,19 @@ func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 	}
 	if isInvalid(t) {
 		return bad(x)
+	}
+	if isZeroRecord(t) && len(x.Elts) == 0 {
+		// One form per job (spec D-B2): a record with no fields is a value
+		// by its name alone.
+		name := c.localTypeText(t)
+		if x.Type != nil {
+			name = exprText(x.Type)
+			if name == "this expression" {
+				name = c.localTypeText(t)
+			}
+		}
+		c.errorf(x, CodeType, "a record with no fields is written bare: %s (types.md, Structs 2)", name)
+		return operand{mode: modeValue, typ: t}
 	}
 	switch u := under(t).(type) {
 	case *Struct:
@@ -589,6 +611,9 @@ func (c *checker) literalType(x *syntax.CompositeLit, hint Type) Type {
 			c.silent++
 			op := c.expr(val, nil)
 			c.silent--
+			if op.mode == modeType && isZeroRecord(op.typ) {
+				op.mode = modeValue // a bare record with no fields is a value (D-B2)
+			}
 			if op.invalid() || op.mode == modeType {
 				continue
 			}
@@ -823,8 +848,12 @@ func (c *checker) selector(x *syntax.SelectorExpr) operand {
 		}
 		return operand{mode: modeCapFn, typ: m.Sig, cap: base.cap, method: m}
 	case modeType:
-		c.errorf(x, CodeType, "%s.%s: a method expression is not part of the language; call the method on a value", base.typ, x.Sel.Name)
-		return bad(x)
+		if !isZeroRecord(base.typ) {
+			c.errorf(x, CodeType, "%s.%s: a method expression is not part of the language; call the method on a value", base.typ, x.Sel.Name)
+			return bad(x)
+		}
+		// A record with no fields is its own value (D-B2): R.M() calls M
+		// on R; there are no method expressions to confuse it with.
 	}
 	c.needValue(&base)
 	c.handled(&base)
@@ -1160,9 +1189,40 @@ func (c *checker) typeOf(op *operand) Type {
 		c.errorf(op.expr, CodeType, "this expression has no value")
 		return invalid
 	}
-	if tup, ok := op.typ.(*Tuple); ok {
-		c.errorf(op.expr, CodeType, "%d values where one is expected", len(tup.Types))
-		return invalid
-	}
 	return op.typ
+}
+
+// tupleValue checks a tuple value `(a, b, …)` (196t): one value of the
+// structural tuple type of its elements. An expected tuple type, or a
+// defined type over one, gives each element its expected type (D-A2).
+func (c *checker) tupleValue(x *syntax.TupleExpr, hint Type) operand {
+	var hints []Type
+	if ht, ok := under0(hint).(*Tuple); ok && len(ht.Types) == len(x.Elts) {
+		hints = ht.Types
+	}
+	tup := &Tuple{Types: make([]Type, len(x.Elts))}
+	ok := true
+	for i, e := range x.Elts {
+		var h Type
+		if hints != nil {
+			h = hints[i]
+		}
+		op := c.valueExpr(e, h)
+		t := c.typeOf(&op)
+		if isInvalid(t) {
+			ok = false
+			continue
+		}
+		if h != nil {
+			if !c.assign(&op, h, "tuple element") {
+				ok = false
+			}
+			t = h
+		}
+		tup.Types[i] = t
+	}
+	if !ok {
+		return bad(x)
+	}
+	return operand{mode: modeValue, typ: tup}
 }

@@ -1,0 +1,11 @@
+// 196p: a union variant is a record type declared in the package; a basic
+// type or an operation type is not a variant (S108).
+type Store {
+	Find(id string) string,
+}
+
+type Pending {}
+
+type Bad = int | Pending // want S108
+
+type Worse = Store | Pending // want S108

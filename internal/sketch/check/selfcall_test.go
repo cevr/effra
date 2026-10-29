@@ -490,7 +490,7 @@ func TestSelfCallEdgesByStaticType(t *testing.T) {
 	var b strings.Builder
 	n := 50
 	for i := range n {
-		fmt.Fprintf(&b, "type R%d {}\nlet v%d = func() { R%d{}.M() }\nfunc M(_ R%d) { _ = v%d }\n", i, i, i, i, i)
+		fmt.Fprintf(&b, "type R%d {}\nlet v%d = func() { R%d.M() }\nfunc M(_ R%d) { _ = v%d }\n", i, i, i, i, i)
 	}
 	c, diags := selfChecker(t, b.String())
 	cycles := 0

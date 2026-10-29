@@ -184,7 +184,11 @@ func (c *checker) reportInitCycles(nodes []any, in func(any) bool) {
 		sort.Strings(names)
 		saved := c.cur
 		c.cur = first.file
-		c.errorf(first.spec.Names[first.idx], CodeType, "initialization cycle: the initializer of %s refers to itself through %s (Go's initialization order)", first.obj.Name, strings.Join(names, ", "))
+		var at syntax.Node = first.spec
+		if first.name != nil {
+			at = first.name
+		}
+		c.errorf(at, CodeType, "initialization cycle: the initializer of %s refers to itself through %s (Go's initialization order)", first.obj.Name, strings.Join(names, ", "))
 		c.cur = saved
 	}
 }

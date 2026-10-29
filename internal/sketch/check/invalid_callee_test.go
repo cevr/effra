@@ -104,7 +104,7 @@ var invalidRoutes = map[string][]route{
 		{name: "a parenthesised value", callee: "(task.Go)"},
 	},
 	"TupleExpr": {
-		{name: "a tuple binding", local: "let (launch, _) = (task.Go, 1)", callee: "launch", staged: "S109"},
+		{name: "a tuple binding", local: "let (launch, _) = (task.Go, 1)", callee: "launch"},
 	},
 	"TryExpr": {
 		{name: "a value through try", decls: "func mkf() task.Fn fails Bang { return task.Go }\n", local: "let launch = try mkf()", callee: "launch"},
@@ -191,7 +191,7 @@ func TestInvalidCalleeDomain(t *testing.T) {
 						local = r.local + "\n\t"
 					}
 					src := "import task\n" + r.decls +
-						"func a(" + r.params + ") {\n\t" + local + strings.ReplaceAll(cb.cb, "@", r.callee) + "\n\treturn Bang{}\n}\n" +
+						"func a(" + r.params + ") {\n\t" + local + strings.ReplaceAll(cb.cb, "@", r.callee) + "\n\treturn Bang\n}\n" +
 						"func b() { return a(" + r.args + ") }\n" +
 						"type Bang {}\nfunc F() fails Bang { return b() }\nfunc main() {}\n"
 					_, diags := check.CheckSource(src)
@@ -228,7 +228,7 @@ func TestInvalidCalleeUnknownName(t *testing.T) {
 	}
 	for _, f := range forms {
 		for _, cb := range []string{"@() { b() }", "@(func() { b() })"} {
-			src := "func a() {\n\t" + f.local + strings.ReplaceAll(cb, "@", f.callee) + "\n\treturn Bang{}\n}\nfunc b() { return a() }\n" +
+			src := "func a() {\n\t" + f.local + strings.ReplaceAll(cb, "@", f.callee) + "\n\treturn Bang\n}\nfunc b() { return a() }\n" +
 				"type Bang {}\nfunc F() fails Bang { return b() }\nfunc main() {}\n"
 			_, diags := check.CheckSource(src)
 			var got []string

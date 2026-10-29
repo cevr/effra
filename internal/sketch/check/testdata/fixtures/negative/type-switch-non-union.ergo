@@ -1,8 +1,10 @@
 type Order { ID string }
 
+type Other {}
+
 func kind(o Order) string {
-	match o { // want S108
-	case _:
+	match o {
+	case Other: // want S108
 		return "x"
 	}
 }

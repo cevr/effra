@@ -1,0 +1,26 @@
+// Seventh round, item 2: a record with no fields is written bare in use,
+// in values, patterns and rows; a record with fields keeps its braces.
+type Pending {}
+type Frozen {}
+type Paid { ID string }
+type State = Pending | Paid
+
+func start() State {
+	return Pending
+}
+
+func pay(id string) State fails Frozen {
+	if id == "" {
+		return Frozen
+	}
+	return Paid{ID: id}
+}
+
+func name(s State) string {
+	match s {
+	case Pending:
+		return "pending"
+	case Paid:
+		return "paid"
+	}
+}

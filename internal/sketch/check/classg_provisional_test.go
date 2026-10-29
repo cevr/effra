@@ -14,7 +14,7 @@ import (
 // invalid. A callback frame that typing skips under it keeps its class G
 // uses, so the member is refused as when the arm writes `case G[int]`
 // (round 9 review M1; rows.md, Capability rows 6).
-const garmHeader = "type Cap { M() }\ntype G[T] {}\nfunc load() fails G[int] { return G[int]{} }\n"
+const garmHeader = "type Cap { M() }\ntype G[T] {}\nfunc load() fails G[int] { return G[int] }\n"
 
 var provisionalRows = []struct {
 	name, src string
@@ -30,7 +30,7 @@ var provisionalRows = []struct {
 	{
 		name: "garm-classg-errors (error row, try w() catch)",
 		src: "type Bang {}\ntype G[T] {}\nextern go fixture.mark func mark() fails Bang\n" +
-			"func load() fails G[int] { return G[int]{} }\nfunc keep[T, F](g G[T], f F) {}\n" +
+			"func load() fails G[int] { return G[int] }\nfunc keep[T, F](g G[T], f F) {}\n" +
 			"func walk() {\n\ttry mark()\n\ttry w() catch {\n\tcase G as g:\n\t\tg.keep(func() { try walk() })\n\t}\n}\n" +
 			"func w() { try load(); try walk() }\nfunc main() {}\n",
 		want: []string{"6:6 S108 walk is used as a value through the function literal at 10:10 inside its own recursive group; write its error row: func walk() fails …"},
@@ -102,7 +102,7 @@ var provisionalRows = []struct {
 	// use, so only the arm's error is reported (round 10 ruling).
 	{
 		name: "v7: the row never holds the arm's instance",
-		src: "type Cap { M() }\ntype G[T] {}\ntype H[T] {}\nfunc load() fails G[int] { return G[int]{} }\n" +
+		src: "type Cap { M() }\ntype G[T] {}\ntype H[T] {}\nfunc load() fails G[int] { return G[int] }\n" +
 			"func keep[T, F](g H[T], f F) {}\n" +
 			"func walk() {\n\tCap.M()\n\tw() catch {\n\tcase G[int]:\n\tcase H as h:\n\t\th.keep(func() { walk() })\n\t}\n}\n" +
 			"func w() { try load(); walk() }\nfunc main() {}\n",
@@ -111,7 +111,7 @@ var provisionalRows = []struct {
 	// The same with a use of walk that stays: the S108 names that use.
 	{
 		name: "v7 with a value use that stays",
-		src: "type Cap { M() }\ntype G[T] {}\ntype H[T] {}\nfunc load() fails G[int] { return G[int]{} }\n" +
+		src: "type Cap { M() }\ntype G[T] {}\ntype H[T] {}\nfunc load() fails G[int] { return G[int] }\n" +
 			"func keep[T, F](g H[T], f F) {}\n" +
 			"func walk() {\n\tCap.M()\n\tw() catch {\n\tcase G[int]:\n\tcase H as h:\n\t\th.keep(func() { walk() })\n\t}\n\tlet k = walk\n\t_ = k\n}\n" +
 			"func w() { try load(); walk() }\nfunc main() {}\n",
@@ -129,8 +129,8 @@ var provisionalRows = []struct {
 		src: `type E {}
 type G[T] {}
 type H[T] {}
-func load() fails G[int] { return G[int]{} }
-func boom() fails E { return E{} }
+func load() fails G[int] { return G[int] }
+func boom() fails E { return E }
 func keep[T, F](g H[T], f F) {}
 func walk() {
 	try boom()
@@ -161,8 +161,8 @@ func main() {}
 		src: `type E {}
 type G[T] {}
 type H[T] {}
-func load() fails G[int] { return G[int]{} }
-func boom() fails E { return E{} }
+func load() fails G[int] { return G[int] }
+func boom() fails E { return E }
 func keep[T, F](g H[T], f F) {}
 func walk() {
 	try boom()
@@ -219,7 +219,7 @@ func main() {}
 		name: "b2: the arm catches a refused member",
 		src: `type Cap { M() }
 type G[T] {}
-func load() fails G[int] { return G[int]{} }
+func load() fails G[int] { return G[int] }
 func keep[T, F](g G[T], f F) {}
 func walk() {
 	Cap.M()
@@ -244,7 +244,7 @@ func main() {}
 	{
 		name: "b3: the arm catches a refused member, its only use",
 		src: `type G[T] {}
-func load() fails G[int] { return G[int]{} }
+func load() fails G[int] { return G[int] }
 func keep[T, F](g G[T], f F) {}
 func walk() {
 	w() catch {

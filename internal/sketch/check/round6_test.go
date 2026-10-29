@@ -25,11 +25,11 @@ func Pair[T](o Opt[T], p Opt[T]) {}
 		accept     bool
 	}{
 		{"variant-binds", `func G() int { return Get(Some[int]{V: 1}, 2) }`, true},
-		{"plain-variant", `func G() int { return Get(None{}, 2) }`, true},
+		{"plain-variant", `func G() int { return Get(None, 2) }`, true},
 		{"variant-then-conflict", `func G(s string) string { return Get(Some[int]{V: 1}, s) }`, false},
 		{"two-variants-agree", `func G() { Pair(Some[int]{V: 1}, Some[int]{V: 2}) }`, true},
 		{"two-variants-conflict", `func G() { Pair(Some[int]{V: 1}, Some[string]{V: "a"}) }`, false},
-		{"not-a-variant", `func G() int { return Get(Some2{}, 2) }
+		{"not-a-variant", `func G() int { return Get(Some2, 2) }
 type Some2 {}`, false},
 	}
 	for _, tc := range cases {
@@ -149,11 +149,11 @@ func FnS[T](a []T, b T) {}
 	}{
 		{"wider-named", `func G(x W) int { return FnI(x) }`, true},
 		{"named-plain", `func G(x J) int { return FnI(x) }`, true},
-		{"concrete", `func G() int { return FnI(S{}) }`, true},
+		{"concrete", `func G(s S) int { return FnI(s) }`, true},
 		{"pointer-receiver", `func G(p *P) int { return FnI(p) }`, true},
-		{"named-generic-concrete", `func G() int { return FnN(S{}) }`, true},
+		{"named-generic-concrete", `func G(s S) int { return FnN(s) }`, true},
 		{"named-generic-interface", `func G(x W) int { return FnN(x) }`, true},
-		{"no-method", `func G() int { return FnI(R{}) }`, false},
+		{"no-method", `func G(r R) int { return FnI(r) }`, false},
 		{"conflict-interface-then-struct", `func G(x E, y R) { _ = Two(x, y) }`, false},
 		{"conflict-struct-then-interface", `func G(x E, y R) { _ = Two(y, x) }`, false},
 		{"explicit-interface-control", `func G(x E, y R) { _ = Two[E](x, y) }`, true},

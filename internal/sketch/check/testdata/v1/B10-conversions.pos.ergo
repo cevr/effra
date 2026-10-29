@@ -1,0 +1,13 @@
+// Round-4 ruling of parse-v1 (spec D-B5): a conversion is a call of a named
+// type. Numeric types convert to each other, and a defined type converts to
+// and from the type it is defined over.
+type Celsius float64
+
+func warm(t float64, n int) int64 {
+	let c = Celsius(t)
+	let back = float64(c)
+	if back > float64(n) {
+		return int64(n)
+	}
+	return int64(back)
+}

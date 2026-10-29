@@ -160,10 +160,10 @@ var nodeTable = map[string]nodeEntry{
 	"MachineType":        {"machine", ""}, "MachineEntry": {"machine", ""},
 	"WireDecl": {"wire declaration", ""}, "WireBody": {"wire declaration", ""}, "WireEntry": {"wire entries", ""},
 	"WireLit": {"wire value", ""}, "ProvidesClause": {"wire header", ""},
-	// A tuple is 196t's as a value and a type, and checked as a match
-	// subject, so the rows decide its verdict.
+	// A tuple is a value and a type (196t); an inline variant declares a
+	// record in the package scope (196 fifth round).
 	"TupleExpr":   {"tuple value", ""},
-	"VariantSpec": {"variant in place", "196 fifth round"},
+	"VariantSpec": {"variant in place", ""},
 	"LawDecl":     {"law", "196l"}, "TestDecl": {"test", "196l"}, "AssertStmt": {"assert", "196l"},
 	// The forms that left the language (#196; syntax TestDecidedOnly):
 	// still declared by the syntax package; the checker keeps no branch for
@@ -179,7 +179,7 @@ var nodeTable = map[string]nodeEntry{
 var notBuiltFields = map[string]string{
 	"ArrayType.Len":        "a fixed-size array [N]T does not parse: the decided grammar has slices only",
 	"BranchStmt.Label":     "Ergo has no labels (S001)",
-	"CatchExpr.Bind":       "a catch binds in a catch-all arm, `case err:` (196p); `catch e {` does not parse",
+	"CatchExpr.Bind":       "a catch binds in a catch-all arm, `case err:` (196r); `catch e {` does not parse",
 	"File.Name":            "a source file has no package clause",
 	"ForStmt.Init":         "there is no three-clause for (S001)",
 	"ForStmt.Post":         "there is no three-clause for (S001)",

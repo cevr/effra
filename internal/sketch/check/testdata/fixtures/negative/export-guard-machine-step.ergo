@@ -5,7 +5,7 @@ type Light = On | Off
 type Flip {}
 type Signal = Flip
 
-func probe() fails Down { return Down{} }
+func probe() fails Down { return Down }
 
 func step(s Light, e Signal) Decision[Light, string] {
 	try probe() // want S101
@@ -13,7 +13,7 @@ func step(s Light, e Signal) Decision[Light, string] {
 }
 
 type Switch machine[Light, Signal] {
-	initial: Off{},
+	initial: Off,
 	step:    step,
 }
 

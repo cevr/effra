@@ -1,5 +1,5 @@
 // want S104
-func fail() fails LiveScheduler { return LiveScheduler{} }
+func fail() fails LiveScheduler { return LiveScheduler }
 func main() needs Console {
 	fail() catch {
 	case LiveScheduler:

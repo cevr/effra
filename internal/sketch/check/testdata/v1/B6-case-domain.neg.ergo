@@ -1,0 +1,32 @@
+// 196p: a type that is not a variant of the subject's union (S108), an
+// unknown field in a record pattern (S104), and a case the earlier cases
+// already cover (S108, unreachable).
+type Card { Number string }
+type Payment = Pending{} | Paid{ID string, Amount int}
+
+func label(p Payment) string {
+	match p {
+	case Card: // want S108
+		return "card"
+	case _:
+		return "other"
+	}
+}
+
+func amount(p Payment) string {
+	match p {
+	case Paid{Total: t}: // want S104
+		return "paid"
+	case _:
+		return "other"
+	}
+}
+
+func late(p Payment) string {
+	match p {
+	case _:
+		return "any"
+	case Pending: // want S108
+		return "waiting"
+	}
+}

@@ -1,6 +1,6 @@
 // want S108
 type Fault {}
-func unused() fails Fault { return Fault{} }
+func unused() fails Fault { return Fault }
 func val() string         { return "global" }
 func main() needs Console {
 	let val = "local"

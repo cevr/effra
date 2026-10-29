@@ -10,7 +10,3 @@ fixtures/spec/types-laws.ergo	196l	laws inside operation types (196l) are S109 u
 fixtures/positive/go-task-wait.ergo	lower-v1	imports task, a std module lower-v1 brings (round 6 review m3)
 classf/go-statement.ergo	lower-v1	imports task, a std module lower-v1 brings (round 6 review m3)
 classf/go-value.ergo	lower-v1	imports task, a std module lower-v1 brings (round 6 review m3)
-TestReviewCases/M4/error-union-rethrow	196p	an as in a catch arm of several types (rows.md, Catch 7)
-TestReviewCases/M4/catch-union-switch	196p	an as in a catch arm of several types (rows.md, Catch 7)
-TestReviewCases/M4/catch-union-switch-not-total	196p	an as in a catch arm of several types (rows.md, Catch 7)
-TestReviewCases/M4/error-union-as-value	196p	an as in a catch arm of several types (rows.md, Catch 7)

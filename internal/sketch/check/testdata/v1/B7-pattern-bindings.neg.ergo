@@ -1,0 +1,27 @@
+// 196p rule 4: every binding a pattern introduces is read (S110); a tuple
+// match must cover the product of its subjects (S103).
+type State = Closed{Failures int} | Open{Endpoint string} | HalfOpen{}
+type Signal = Failure{Endpoint string} | Success{} | Retry{}
+
+func name(s State) string {
+	match s {
+	case Open{Endpoint: e}: // want S110
+		return "open"
+	case HalfOpen as h: // want S110
+		return "half"
+	case _:
+		return "closed"
+	}
+}
+
+func step(s State, sig Signal) State {
+	match (s, sig) { // want S103
+	case (Closed{n}, Failure{e}):
+		if n > 3 {
+			return Open{e}
+		}
+		return Closed{n + 1}
+	case (HalfOpen, Success):
+		return Closed{0}
+	}
+}

@@ -24,22 +24,22 @@ type Ping {}
 type M machine[S, E] { initial: initial(), step: step }
 func initial() S {
 	C.Use()
-	return Idle{}
+	return Idle
 }
-func step(s S, e E) Decision[S, int] { return Ignore{} }`},
+func step(s S, e E) Decision[S, int] { return Ignore }`},
 	{"M2", "package-var-inferred", "S102", `type C { Use() string }
 let v = helper()
 func helper() string { return C.Use() }`},
 	{"M3", "error-row-package-var", "S101", `type Fault {}
 func Identity(v Fault) Fault { return v }
-let _ = func() fails Fault { return Fault{} }`},
+let _ = func() fails Fault { return Fault }`},
 	{"M3", "generic-row-body-order", "S101", `type Fault[T] { Value T }
 func Identity(v Fault[int]) Fault[int] { return v }
 func F()                               { _ = func() fails Fault[int] { return Fault[int]{1} } }`},
 	{"M3", "local-error-row", "S101", `type Fault {}
 func Identity(v Fault) Fault { return v }
-func F()                     { _ = func() fails Fault { return Fault{} } }`},
-	{"M4", "error-union-rethrow", "", `type A {}
+func F()                     { _ = func() fails Fault { return Fault } }`},
+	{"M4", "error-union-rethrow", "S108", `type A {}
 type B {}
 extern go fixture.Fail func Fail() fails A | B
 func F() fails A | B {
@@ -48,7 +48,7 @@ func F() fails A | B {
 		return e
 	}
 }`},
-	{"M4", "catch-union-switch", "", `type A {}
+	{"M4", "catch-union-switch", "S108", `type A {}
 type B {}
 extern go fixture.Fail func Fail() fails A | B
 func F() {
@@ -62,7 +62,7 @@ func F() {
 		}
 	}
 }`},
-	{"M4", "catch-union-switch-not-total", "S103", `type A {}
+	{"M4", "catch-union-switch-not-total", "S108", `type A {}
 type B {}
 extern go fixture.Fail func Fail() fails A | B
 func F() {
@@ -74,7 +74,7 @@ func F() {
 		}
 	}
 }`},
-	{"M4", "error-union-as-value", "S101", `type A {}
+	{"M4", "error-union-as-value", "S108 S101", `type A {}
 type B {}
 type V = A | B
 extern go fixture.Fail func Fail() fails A | B
@@ -83,7 +83,7 @@ func F() V {
 	case A as e, B as e:
 		return e
 	}
-	return A{}
+	return A
 }`},
 	{"M5", "generic-named-constraint-inferred", "S108", `type I { M() }
 type S {}
@@ -94,14 +94,14 @@ func F() { _ = Box{1} }`},
 type B {}
 type I { M() fails A }
 type S {}
-func M(_ S) fails B { return B{} }
+func M(_ S) fails B { return B }
 type Box[T I] { X T }
-func F() { _ = Box{S{}} }`},
+func F() { _ = Box{S} }`},
 	{"M5", "generic-constraint-inferred-ok", "", `type I { M() }
 type S {}
 func M(_ S) {}
 type Box[T I] { X T }
-func F() { _ = Box{S{}} }`},
+func F() { _ = Box{S} }`},
 	{"M6", "implicit-row-in-generic-argument", "", `func Await[T, E](t Task[T, E]) T fails E { return t.Wait() }`},
 	{"M6", "bracket-row-in-generic-field", "", `type Box[T, E] { t Task[T, E] }
 func Open[T, E](b Box[T, E]) T fails E { return b.t.Wait() }`},
@@ -157,21 +157,21 @@ func F() { _ = Await[int] }`},
 	{"M13", "embedded-collision-replaced", "", `type I { M() }
 type S {}
 func M(_ S) {}
-let A = wire { I: S{} }
-let B = wire { I: S{} }
-let W = wire { replace I: S{}, A, B }
+let A = wire { I: S }
+let B = wire { I: S }
+let W = wire { replace I: S, A, B }
 func F() { with W { I.M() } }`},
 	{"M13", "embedded-collision-inline-replaced", "", `type I { M() }
 type S {}
 func M(_ S) {}
-let A = wire { I: S{} }
-let B = wire { I: S{} }
-func F() { with wire { replace I: S{}, A, B } { I.M() } }`},
+let A = wire { I: S }
+let B = wire { I: S }
+func F() { with wire { replace I: S, A, B } { I.M() } }`},
 	{"M13", "embedded-collision-unresolved", "S111", `type I { M() }
 type S {}
 func M(_ S) {}
-let A = wire { I: S{} }
-let B = wire { I: S{} }
+let A = wire { I: S }
+let B = wire { I: S }
 let W = wire { A, B }
 func F() { with W { I.M() } }`},
 	// Two replaces of one capability in one wire are S111 since check-v1
@@ -179,8 +179,8 @@ func F() { with W { I.M() } }`},
 	{"M13", "wire-double-replace", "S111", `type I { M() }
 type S {}
 func M(_ S) {}
-let Base = wire { I: S{} }
-let W = wire { replace I: S{}, replace I: S{}, Base }
+let Base = wire { I: S }
+let W = wire { replace I: S, replace I: S, Base }
 func F() { with W { I.M() } }`},
 	{"M14", "named-wire-internal-capability", "", `type A { M() }
 type B { N() }
@@ -189,9 +189,9 @@ func M(_ S) {}
 func N(_ S) {}
 func Make() B needs A {
 	A.M()
-	return S{}
+	return S
 }
-let W = wire { A: S{}, B: Make() }
+let W = wire { A: S, B: Make() }
 func F() { with W { B.N() } }`},
 	{"M14", "named-wire-internal-cycle", "S108", `type A { M() }
 type B { N() }
@@ -200,11 +200,11 @@ func M(_ S) {}
 func N(_ S) {}
 func MakeA() A needs B {
 	B.N()
-	return S{}
+	return S
 }
 func MakeB() B needs A {
 	A.M()
-	return S{}
+	return S
 }
 let W = wire { A: MakeA(), B: MakeB() }
 func F() { with W { B.N() } }`},
@@ -214,7 +214,7 @@ type S {}
 func N(_ S) {}
 func Make() B needs A {
 	A.M()
-	return S{}
+	return S
 }
 let W = wire { B: Make() }
 func F() needs A { with W { B.N() } }`},
@@ -223,7 +223,7 @@ type S {}
 func M(_ S) {}
 func MakeA() A needs A {
 	A.M()
-	return S{}
+	return S
 }
 let W = wire { A: MakeA() }
 func F() { with W { A.M() } }`},
@@ -236,15 +236,15 @@ func N(_ S) {}
 func O(_ S) {}
 func MakeA() A needs C {
 	C.O()
-	return S{}
+	return S
 }
 func MakeB() B needs A {
 	A.M()
-	return S{}
+	return S
 }
 func MakeC() C needs B {
 	B.N()
-	return S{}
+	return S
 }
 let W = wire { A: MakeA(), B: MakeB(), C: MakeC() }
 func F() { with W { B.N() } }`},
@@ -255,9 +255,9 @@ func M(_ S) {}
 func N(_ S) {}
 func Make() B needs A {
 	A.M()
-	return S{}
+	return S
 }
-let Base = wire { A: S{} }
+let Base = wire { A: S }
 let W = wire { B: Make(), Base }
 func F() { with W { B.N() } }`},
 	{"M14", "inline-wire-stays-open", "S102", `type A { M() }
@@ -267,9 +267,9 @@ func M(_ S) {}
 func N(_ S) {}
 func Make() B needs A {
 	A.M()
-	return S{}
+	return S
 }
-func F() { with wire { A: S{}, B: Make() } { B.N() } }`},
+func F() { with wire { A: S, B: Make() } { B.N() } }`},
 	{"M15", "main-through-alias", "S113", `func main() {}
 func F() {
 	let run = main

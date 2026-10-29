@@ -52,14 +52,14 @@ func chainBodies(b *strings.Builder, n int, order []int) {
 // rowTail is the reviewer's row-dependent receiver: m fails E (inferred),
 // so a catch of E around a call of a function whose row is inferred types
 // its receiver.
-const rowTail = "type E {}\ntype B {}\nfunc load() B fails E { return B{} }\nfunc w() B { return try load() }\nfunc m(b B) { _ = try load() }\n"
+const rowTail = "type E {}\ntype B {}\nfunc load() B fails E { return B }\nfunc w() B { return try load() }\nfunc m(b B) { _ = try load() }\n"
 
 // kchain: k0 fails E (inferred), and each ki catches E around k(i-1)
 // and calls b.m() on the value, so ki's row is inferred too.
 func kchain(b *strings.Builder, n int) {
 	b.WriteString(rowTail + "func main() {}\nfunc k0() B { return try load() }\n")
 	for i := 1; i < n; i++ {
-		fmt.Fprintf(b, "func k%d() B {\n\tlet b = k%d() catch {\n\tcase E:\n\t\tB{}\n\t}\n\ttry b.m()\n\treturn b\n}\n", i, i-1)
+		fmt.Fprintf(b, "func k%d() B {\n\tlet b = k%d() catch {\n\tcase E:\n\t\tB\n\t}\n\ttry b.m()\n\treturn b\n}\n", i, i-1)
 	}
 }
 
@@ -92,7 +92,7 @@ var workCases = []workCase{
 	f0()
 	let b = w() catch {
 	case E:
-		B{}
+		B
 	}
 	try b.m()
 }
@@ -127,7 +127,7 @@ var workCases = []workCase{
 	{"r7 generator: receivers through locals bound to calls", func(n int) string {
 		var b strings.Builder
 		for i := range n {
-			fmt.Fprintf(&b, "type R%d {}\nfunc mk%d() R%d { return R%d{} }\nfunc m(_ R%d) {}\nfunc f%d() {\n\tlet x = mk%d()\n\tx.m()\n}\n", i, i, i, i, i, i, i)
+			fmt.Fprintf(&b, "type R%d {}\nfunc mk%d() R%d { return R%d }\nfunc m(_ R%d) {}\nfunc f%d() {\n\tlet x = mk%d()\n\tx.m()\n}\n", i, i, i, i, i, i, i)
 		}
 		b.WriteString("func main() {}\n")
 		return b.String()
@@ -137,20 +137,20 @@ var workCases = []workCase{
 		kchain(&b, n)
 		b.WriteString("func wide() {\n")
 		for i := 1; i < n; i++ {
-			fmt.Fprintf(&b, "\tlet b%d = k%d() catch {\n\tcase E:\n\t\tB{}\n\t}\n\ttry b%d.m()\n", i, i, i)
+			fmt.Fprintf(&b, "\tlet b%d = k%d() catch {\n\tcase E:\n\t\tB\n\t}\n\ttry b%d.m()\n", i, i, i)
 		}
 		b.WriteString("}\n")
 		return b.String()
 	}, "", nil},
 	{"one body whose receivers each wait for the previous call's row", func(n int) string {
 		var b strings.Builder
-		b.WriteString("type E {}\ntype B {}\nfunc load() B fails E { return B{} }\nfunc main() {}\n")
+		b.WriteString("type E {}\ntype B {}\nfunc load() B fails E { return B }\nfunc main() {}\n")
 		for i := 1; i < n; i++ {
 			fmt.Fprintf(&b, "func m%d(b B) B { return try load() }\n", i)
 		}
-		b.WriteString("func deep() {\n\tlet c0 = load() catch {\n\tcase E:\n\t\tB{}\n\t}\n")
+		b.WriteString("func deep() {\n\tlet c0 = load() catch {\n\tcase E:\n\t\tB\n\t}\n")
 		for i := 1; i < n; i++ {
-			fmt.Fprintf(&b, "\tlet c%d = c%d.m%d() catch {\n\tcase E:\n\t\tB{}\n\t}\n", i, i-1, i)
+			fmt.Fprintf(&b, "\tlet c%d = c%d.m%d() catch {\n\tcase E:\n\t\tB\n\t}\n", i, i-1, i)
 		}
 		fmt.Fprintf(&b, "\t_ = c%d\n}\n", n-1)
 		return b.String()
@@ -163,7 +163,7 @@ var workCases = []workCase{
 	{"M2 witness: one arm error read by n readers through one literal", func(n int) string {
 		var b strings.Builder
 		b.WriteString("type E {}\ntype G[T] {}\ntype H[T] {}\n")
-		b.WriteString("func load() fails G[int] { return G[int]{} }\nfunc boom() fails E { return E{} }\n")
+		b.WriteString("func load() fails G[int] { return G[int] }\nfunc boom() fails E { return E }\n")
 		b.WriteString("func keep[T, F](g H[T], f F) {}\n")
 		b.WriteString("func walk() {\n\ttry boom()\n\ttry w() catch {\n\tcase G[int]:\n\tcase H as h:\n\t\th.keep(func() { walk() })\n\t}\n}\n")
 		b.WriteString("func w() {\n\ttry load()\n\ttry walk()\n}\n")
@@ -261,17 +261,17 @@ func armsSource(n int, mode string, catch bool) string {
 	for i := range n {
 		fmt.Fprintf(&b, "type T%d {}\n", i)
 	}
-	b.WriteString("func e() fails E { return E{} }\n")
+	b.WriteString("func e() fails E { return E }\n")
 	switch mode {
 	case "written":
 		b.WriteString("func f() fails E")
 		for i := range n {
 			fmt.Fprintf(&b, " | T%d", i)
 		}
-		b.WriteString(" { return E{} }\n")
+		b.WriteString(" { return E }\n")
 	case "inferred":
 		for i := range n {
-			fmt.Fprintf(&b, "func g%d() fails T%d { return T%d{} }\n", i, i, i)
+			fmt.Fprintf(&b, "func g%d() fails T%d { return T%d }\n", i, i, i)
 		}
 		b.WriteString("func f() {\n\ttry e()\n")
 		for i := range n {
@@ -349,7 +349,7 @@ func TestCatchArmsWorkLinear(t *testing.T) {
 // until w settles, so g.m() waits for the worklist.
 const gwaitSource = `type G[T] {}
 func m[T](g G[T]) {}
-func load() fails G[int] { return G[int]{} }
+func load() fails G[int] { return G[int] }
 func w() { try load() }
 func k() {
 	w() catch {
@@ -363,7 +363,7 @@ func main() {}
 // TestSelfCallWaitsForRow: a call whose receiver's type comes from a
 // callee's row is resolved to its function before the bodies are ordered,
 // by the worklist, and the source is clean in both modes. The receiver of
-// the reviewer's catch (`let b = w() catch { case E: B{} }`) does not wait:
+// the reviewer's catch (`let b = w() catch { case E: B }`) does not wait:
 // a catch keeps its value's type whatever the row (handlers.go catch), so
 // the typing from empty rows resolves b.m().
 func TestSelfCallWaitsForRow(t *testing.T) {
