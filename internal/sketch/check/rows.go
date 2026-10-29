@@ -30,6 +30,10 @@ type target struct {
 	// entry being checked uses, for the wire's entry-cycle check (M14).
 	internal *capSet
 	charged  *Row
+	// flow holds the functions whose error rows escape into the inferred
+	// error row, where they can hold poison (poison.go flowInto).
+	flow     rowTaint
+	flowSeen map[*Func]bool
 }
 
 func (t *target) row(declared, inferred *Row) *Row {
@@ -83,12 +87,20 @@ func describeCharge(n syntax.Node) string {
 
 // escape records failures that escape to the current target at n (try, a
 // fallible return, a return of an error value, the rest of a partial catch):
-// each must be in the declared error row (S101), or joins the inferred row.
-func (c *checker) escape(n syntax.Node, row *Row) {
-	if row.Empty() || c.fn == nil || c.fn.t == nil {
+// each must be in the declared error row (S101), or joins the inferred row
+// with its taint (poison.go).
+func (c *checker) escape(n syntax.Node, row *Row, taint rowTaint) {
+	if c.fn == nil || c.fn.t == nil {
 		return
 	}
 	t := c.fn.t
+	if t.declErrors == nil {
+		// An empty row flows too: a poisoned row may be empty.
+		t.flowInto(taint)
+	}
+	if row.Empty() {
+		return
+	}
 	if t.declErrors == nil {
 		t.errors = t.errors.union(c.types, row)
 		return
@@ -285,10 +297,8 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 			c.group[n.fn] = true
 		}
 	}
-	c.groupValue, c.grew, c.pinKept, c.provPinned, c.groupUndecided = map[*Func][2]groupSite{}, map[*Func][2]bool{}, map[any][]guardedUse{}, map[*Func]bool{}, false
-	defer func() {
-		c.group, c.groupValue, c.grew, c.pinKept, c.provPinned, c.groupUndecided = nil, nil, nil, nil, nil, false
-	}()
+	c.groupValue, c.grew, c.pinKept = map[*Func][2]groupSite{}, map[*Func][2]bool{}, map[any][]guardedUse{}
+	defer func() { c.group, c.groupValue, c.grew, c.pinKept, c.flowFrozen = nil, nil, nil, nil, false }()
 	cyclic := len(scc) > 1
 	if !cyclic {
 		for _, e := range scc[0].edges {
@@ -347,20 +357,19 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 			}
 		}
 	}
-	// A refused member whose pin rests on a provisional frame ends with a
-	// diagnostic either way: its S108, or, when reportGroup drops every use,
-	// the frame's own. Until reportGroup decides, the members' rows are no
-	// evidence for a row check in the reporting pass (readRow; round 11
-	// review m1).
-	for f := range c.provPinned {
-		if c.refused(f) {
-			c.groupUndecided = true
-		}
+	// Poison (poison.go): a member that a poisoned row of an earlier
+	// component reaches is poisoned before the reporting pass, through the
+	// flow its converge checks recorded, which that pass keeps. An absence
+	// check that reads another member is decided after reportGroup.
+	if c.flowFrozen = cyclic && inferred; c.flowFrozen {
+		c.closePoison(scc)
 	}
 	for _, n := range scc {
 		c.checkNode(n)
 	}
 	c.reportGroup(scc)
+	c.closePoison(scc)
+	c.flushDeferred()
 	for _, n := range scc {
 		if n.fn != nil {
 			delete(c.settled, n.fn)
@@ -423,11 +432,8 @@ func (c *checker) endLit(l *litFrame) bool {
 // choosing a fixpoint.
 func (c *checker) pinGroup(scc []*bodyNode) {
 	c.groupSites(scc, c.groupValue, func(owner any) map[*Func][2]useSite {
-		uses, kept, prov := c.liveUses(owner)
+		uses, kept := c.liveUses(owner)
 		c.pinKept[owner] = kept
-		for _, f := range prov {
-			c.provPinned[f] = true
-		}
 		return uses
 	})
 	var pin []*RowVar
@@ -570,25 +576,14 @@ func (c *checker) refused(f *Func) bool {
 // keeps a use. Its references stay invalid, so nothing cascades from the
 // pinned row either.
 //
-// When a member's S108 is dropped, its pinned row stays (its references
-// stay invalid), and every inferred row of the component was solved
-// under it, so each is poisoned (Func.poisoned, the error-row analogue of
-// Elm and Roc's error type): a row check that reads one is silent
-// (readRow), so nothing cascades from the dropped S108 (round 11 review
-// m1).
+// When a member's S108 for its error row is dropped, its pinned error row
+// stays (its references stay invalid), and that row is a lower bound of
+// its real row that no diagnostic explains: the member is poisoned
+// (Func.poisoned, the error-row analogue of Elm and Roc's error type), and
+// the poison follows row flow from there (poison.go closePoison), so no
+// absence check cascades from the dropped S108 (round 12 review).
 func (c *checker) reportGroup(scc []*bodyNode) {
 	var sites map[*Func][2]groupSite
-	dropped := false
-	defer func() {
-		if !dropped {
-			return
-		}
-		for _, n := range scc {
-			if n.fn != nil && (n.fn.inferErrors || n.fn.inferUses) {
-				n.fn.poisoned = true
-			}
-		}
-	}()
 	for _, n := range scc {
 		f := n.fn
 		if f == nil || !c.refused(f) {
@@ -599,11 +594,13 @@ func (c *checker) reportGroup(scc []*bodyNode) {
 			c.groupSites(scc, sites, c.reportedUses)
 		}
 		ex := c.exceeded(f)
+		if ex[0] && !sites[f][0].ok {
+			f.poisoned = true
+		}
 		for k := range ex {
 			ex[k] = ex[k] && sites[f][k].ok
 		}
 		if !ex[0] && !ex[1] {
-			dropped = true
 			continue
 		}
 		params := "()"
@@ -1023,6 +1020,7 @@ func (c *checker) checkFuncBody(f *Func) bool {
 		c.errorAt(d.Body.Rbrace, d.Body.Rbrace+1, CodeMissingRet, "%s can reach the end of its body without returning a value (rows.md, Totality 3)", name)
 	}
 	c.reportUnused(fc)
+	c.recordFlow(f, t)
 	changed := false
 	// Inference writes the solved rows into the variables, never into the
 	// signature (class F); a final variable keeps its solution. After a

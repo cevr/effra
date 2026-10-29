@@ -151,11 +151,12 @@ func main() {}
 `,
 		want: []string{"11:7 S108 generic type main.H needs type arguments"},
 	},
-	// The arm catches a member's row (b4): the pin keeps the use, the
-	// S108 is dropped, and the component's rows are poisoned, so outer's
-	// catch reports nothing from walk's pinned row (round 11 review m1).
+	// The arm catches a member's row (b4): the pin keeps the use and the
+	// S108 is dropped. walk's row is poisoned, and so is w's, which it
+	// flows into, so outer's catch reports nothing from walk's pinned row
+	// (round 11 review m1; round 12 review: the poison follows row flow).
 	{
-		name: "b4: a dropped S108 poisons the component's rows",
+		name: "b4: a dropped S108 poisons the rows it flows into",
 		src: `type E {}
 type G[T] {}
 type H[T] {}

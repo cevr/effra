@@ -40,6 +40,7 @@ func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
 	done := c.openScope()
 	c.fn.branches = append(c.fn.branches, branch{kind: brBarrier})
 	var errs *Row
+	var taint rowTaint
 	// The with's expected type is the yielded expression's, as a hint: the
 	// block's own result stays its last expression's type (M16).
 	var expect []Type
@@ -47,7 +48,7 @@ func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
 		expect = []Type{hint}
 	}
 	c.typedFrame(x.Trailing)
-	res := c.yieldingBlock(x.Trailing, x.Trailing.List, expect, false, func(op *operand) { errs = op.errs })
+	res := c.yieldingBlock(x.Trailing, x.Trailing.List, expect, false, func(op *operand) { errs, taint = op.errs, op.taint })
 	c.fn.branches = c.fn.branches[:len(c.fn.branches)-1]
 	done()
 	t.withs = t.withs[:len(t.withs)-1]
@@ -55,9 +56,9 @@ func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
 		return bad(x)
 	}
 	if res == NoValue {
-		return operand{mode: modeNoValue, typ: NoValue, errs: errs}
+		return operand{mode: modeNoValue, typ: NoValue, errs: errs, taint: taint}
 	}
-	op := operand{mode: modeValue, typ: res, errs: errs}
+	op := operand{mode: modeValue, typ: res, errs: errs, taint: taint}
 	return op
 }
 

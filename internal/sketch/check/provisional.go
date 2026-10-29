@@ -86,11 +86,7 @@ func (c *checker) rowWaits(open bool) bool {
 
 // readRow counts the reads of a callee's error row r at a call (result,
 // goExpr): an open read when r holds an unsolved variable of a member of
-// the component being checked, and a poisoned read when r holds a
-// poisoned function's variable, or, in the reporting pass of a component
-// whose pin is undecided (groupUndecided), a member's. A function whose
-// inferred row reads a poisoned row is poisoned too, so the poison
-// reaches every caller whose row it shaped.
+// the component being checked. (The row's poison is its taint, poison.go.)
 func (c *checker) readRow(r *Row) {
 	if r == nil || !r.vars {
 		return
@@ -100,19 +96,8 @@ func (c *checker) readRow(r *Row) {
 		if !ok {
 			continue
 		}
-		root := v.root()
-		fn := root.Fn
-		if fn == nil {
-			continue
-		}
-		if !root.final && c.group[fn] {
+		if root := v.root(); root.Fn != nil && !root.final && c.group[root.Fn] {
 			c.openRowSeq++
-		}
-		if fn.poisoned || c.silent == 0 && c.groupUndecided && c.group[fn] {
-			c.poisonSeq++
-			if c.fn != nil && c.fn.fn != nil && fn.poisoned && (c.fn.fn.inferErrors || c.fn.fn.inferUses) {
-				c.fn.fn.poisoned = true
-			}
 		}
 	}
 }

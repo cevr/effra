@@ -177,9 +177,6 @@ type checker struct {
 	// class G uses inside callback frames that the pin counted
 	// (pinGroup), which reportGroup filters with the reporting pass.
 	pinKept map[any][]guardedUse
-	// provPinned holds the members with a pin-counted use in a provisional
-	// frame (pinGroup).
-	provPinned map[*Func]bool
 	// Undiagnosed reads (provisional.go; round 9 review M1): rowsOpen is
 	// set while a cyclic component's rows are still being inferred,
 	// undiagSeq counts the reads of an undiagnosed value, and stmtMark and
@@ -188,12 +185,18 @@ type checker struct {
 	undiagSeq, stmtMark, callMark int
 	// Row reads (provisional.go readRow; round 11 review): openRowSeq
 	// counts the reads of a row that holds an unsolved variable of a
-	// member of the component being checked, and poisonSeq the reads of a
-	// poisoned row. groupUndecided is set when the pin of the component
-	// being checked rests on a provisional frame: until reportGroup
-	// decides, its members' rows are not evidence for a row check.
-	openRowSeq, poisonSeq int
-	groupUndecided        bool
+	// member of the component being checked.
+	openRowSeq int
+	// Poisoned rows (poison.go; round 12 review): sigTaint holds the flow
+	// of each function literal's and block's inferred error row, by its
+	// signature; flowFrozen is set in the reporting pass of a component
+	// whose flow its converge checks recorded; deferring is the taint of
+	// the absence check being reported while its poison is undecided, and
+	// deferred holds those checks until reportGroup decides.
+	sigTaint   map[*Signature]rowTaint
+	flowFrozen bool
+	deferring  rowTaint
+	deferred   []deferredDiag
 	// useGens, set only by a test, receives the body checks in which typing
 	// resolved each identifier (RefWalkProblems: an independent witness
 	// of which frames a check typed).
@@ -289,6 +292,7 @@ func newChecker(path string, imp Importer, universe *Scope) *checker {
 		providers:      map[*Named][]*Named{},
 
 		totalSwitch: map[*syntax.TypeSwitchStmt]bool{},
+		sigTaint:    map[*Signature]rowTaint{},
 	}
 	c.types.substRow = c.substRow
 	return c
@@ -342,6 +346,16 @@ func (c *checker) errorAt(pos, end syntax.Pos, code, format string, args ...any)
 			d.Length = length
 		}
 	}
+	if c.deferring != nil {
+		// An absence check whose row's poison is undecided (poison.go).
+		c.deferred = append(c.deferred, deferredDiag{d: d, taint: c.deferring})
+		return
+	}
+	c.emit(d)
+}
+
+// emit adds d to the diagnostics once.
+func (c *checker) emit(d Diagnostic) {
 	key := fmt.Sprintf("%d:%d:%s:%s", d.File, d.Offset, d.Code, d.Message)
 	if c.seen[key] {
 		return

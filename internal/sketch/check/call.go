@@ -284,7 +284,7 @@ func (c *checker) result(x *syntax.CallExpr, sig *Signature) operand {
 	// An inferred row is read through its variable (class F).
 	c.chargeRow(x, c.types.resolve(sig.Uses))
 	c.readRow(sig.Errors)
-	op := operand{mode: modeValue, errs: c.types.resolve(sig.Errors)}
+	op := operand{mode: modeValue, errs: c.types.resolve(sig.Errors), taint: c.callTaint(sig)}
 	switch len(sig.Results) {
 	case 0:
 		op.mode, op.typ = modeNoValue, NoValue
@@ -842,6 +842,7 @@ func (c *checker) funcLit(x *syntax.FuncLit, expected *Signature, in *inferer) o
 	if !writtenErr && !sig.Errors.Empty() {
 		sig.Fallible = true
 	}
+	c.litFlow(sig, t)
 	if c.silent == 0 {
 		c.pkg.Info.Literals[x] = sig
 	}
@@ -919,7 +920,7 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 		frame = c.pushLit()
 	}
 	c.body(t, nil, nil, func() {
-		res := c.yieldingBlock(b, b.List, t.results, t.resultKnown, func(op *operand) { c.escape(op.expr, op.errs) })
+		res := c.yieldingBlock(b, b.List, t.results, t.resultKnown, func(op *operand) { c.escape(op.expr, op.errs, op.taint) })
 		if resultFree {
 			if res != nil && res != NoValue {
 				sig.Results = []Type{res}
@@ -931,6 +932,7 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 	sig.Errors = t.row(t.declErrors, t.errors)
 	sig.Uses = t.row(t.declUses, t.uses)
 	sig.Fallible = !sig.Errors.Empty() || expected != nil && expected.Fallible
+	c.litFlow(sig, t)
 	if frame != nil {
 		refused = c.endLit(frame)
 	}
@@ -946,7 +948,7 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 // untyped constant's default type), or no value; a single unknown result
 // is still the expected type of the last expression, as a hint (M16). pass
 // receives the last expression's failure row, which passes through
-// (rows.md, With 6).
+// (rows.md, With 6), with its taint even when it is empty (poison.go).
 func (c *checker) yieldingBlock(at syntax.Node, list []syntax.Stmt, results []Type, known bool, pass func(*operand)) Type {
 	if len(list) == 0 {
 		if known && len(results) > 0 {
@@ -983,9 +985,7 @@ func (c *checker) yieldingBlock(at syntax.Node, list []syntax.Stmt, results []Ty
 			}
 		}
 	}
-	if op.fallible() {
-		pass(&op)
-	}
+	pass(&op)
 	switch {
 	case known && len(results) == 1:
 		if op.mode == modeNoValue {

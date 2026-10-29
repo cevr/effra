@@ -23,11 +23,10 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 		if op.invalid() {
 			return op
 		}
-		c.escape(x, op.errs)
-		op.errs = nil
+		c.escape(x, op.errs, op.taint)
+		op.errs, op.taint = nil, nil
 		return op
 	}
-	poisonMark := c.poisonSeq
 	op := c.expr(x.X, hint)
 	if op.invalid() {
 		return bad(x)
@@ -40,15 +39,17 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 			return bad(x)
 		}
 	}
-	// A poisoned row is no evidence that the expression cannot fail
-	// (readRow; rows.md, Capability rows 6).
-	if !op.fallible() && c.poisonSeq == poisonMark {
-		c.errorf(x, CodeType, "try on an expression that cannot fail (rows.md, Error rows 6)")
-		op.addressable = false
-		return op
+	// The row escapes with its taint even when it is empty: a poisoned row
+	// may be empty (poison.go).
+	c.escape(x, op.errs, op.taint)
+	// An absence check: a poisoned row is no evidence that the expression
+	// cannot fail.
+	if !op.fallible() {
+		c.absence(op.taint, func() {
+			c.errorf(x, CodeType, "try on an expression that cannot fail (rows.md, Error rows 6)")
+		})
 	}
-	c.escape(x, op.errs)
-	op.errs = nil
+	op.errs, op.taint = nil, nil
 	op.addressable = false
 	return op
 }
@@ -59,14 +60,15 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 // statements: when the catch's value is used, the arm's last statement
 // yields it, and return in an arm leaves the function (rows.md, Catch 7).
 func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool) operand {
-	openMark, poisonMark := c.openRowSeq, c.poisonSeq
+	openMark := c.openRowSeq
 	op := c.expr(x.X, hint)
 	valid := !op.invalid()
-	// open: the row may still grow in this component (rowWaits). rowKnown:
-	// the row is evidence for the row checks below; a poisoned row is not
-	// (readRow; round 11 review m1). operandOK: the caught expression is
-	// valid, so an arm its row lacks is not a cascade of its diagnostic.
-	open, rowKnown, operandOK := c.openRowSeq != openMark, c.poisonSeq == poisonMark, valid
+	// open: the row may still grow in this component (rowWaits). operandOK:
+	// the caught expression is valid, so an arm its row lacks is not a
+	// cascade of its diagnostic. The row's taint decides the absence checks
+	// below (Catch 1 and 2): a poisoned row is no evidence of an absence
+	// (poison.go). Catch 4 reports presence and always runs.
+	open, operandOK := c.openRowSeq != openMark, valid
 	if valid {
 		switch op.mode {
 		case modeValue, modeConst, modeNoValue:
@@ -83,8 +85,9 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 	// on the value resolves before the rows settle (selfcalls.go; round 8
 	// review M1).
 	hasValue := valid && op.mode != modeNoValue
-	if valid && rowKnown && row.Empty() {
+	if valid && row.Empty() && c.absence(op.taint, func() {
 		c.errorf(x.X, CodeType, "catch on an expression that cannot fail (rows.md, Catch 1)")
+	}) {
 		valid = false
 	}
 	var valueType Type
@@ -133,8 +136,9 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 			if !valid {
 				continue
 			}
-			if rowKnown && !row.has(c.types, t) {
+			if !row.has(c.types, t) && c.absence(op.taint, func() {
 				c.errorf(te, CodeType, "%s is not in the caught row %s (rows.md, Catch 2)", t, rowText(row))
+			}) {
 				continue
 			}
 			if covered.has(c.types, t) {
@@ -181,7 +185,7 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 		return bad(x)
 	}
 	rest := row.minus(c.types, covered)
-	if !partial && rowKnown && !rest.Empty() {
+	if !partial && !rest.Empty() {
 		c.errorAt(x.Catch, x.Catch+5, CodeNotTotal, "this catch does not handle %s; a catch without try handles every error of the row (rows.md, Catch 4)", rowText(rest))
 	}
 	res := operand{mode: modeValue, typ: valueType}
@@ -189,7 +193,9 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 		res = operand{mode: modeNoValue, typ: NoValue}
 	}
 	if partial {
-		res.errs = rest
+		// The rest passes on with the row's taint; a total catch
+		// discharges the row and stops the poison (poison.go).
+		res.errs, res.taint = rest, op.taint
 	}
 	return res
 }

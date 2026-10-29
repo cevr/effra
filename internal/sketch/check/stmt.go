@@ -163,7 +163,7 @@ func (c *checker) exprStmt(s *syntax.ExprStmt) {
 		if ce, ok := unparen(e.X).(*syntax.CatchExpr); ok {
 			op = c.catch(ce, nil, false, true)
 			if !op.invalid() {
-				c.escape(e, op.errs)
+				c.escape(e, op.errs, op.taint)
 				op.errs = nil
 			}
 			return
@@ -584,8 +584,10 @@ func (c *checker) returnStmt(s *syntax.ReturnStmt) {
 				return
 			}
 		}
+		// The returned call's row escapes with its taint even when it is
+		// empty: a poisoned row may be empty (poison.go).
+		c.escape(s.Results[0], op.errs, op.taint)
 		if op.fallible() {
-			c.escape(s.Results[0], op.errs)
 			op.errs = nil
 			switch {
 			case len(results) == 0 && op.mode != modeNoValue:
@@ -598,7 +600,7 @@ func (c *checker) returnStmt(s *syntax.ReturnStmt) {
 			return
 		}
 		if row := c.errorValueRow(op.typ); row != nil && op.mode == modeValue {
-			c.escape(s.Results[0], row)
+			c.escape(s.Results[0], row, nil)
 			return
 		}
 		switch {
