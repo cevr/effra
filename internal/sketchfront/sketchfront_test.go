@@ -181,14 +181,14 @@ func TestSketchBuildRunsProgram(t *testing.T) {
 // Build refuses it with S109 naming #50 and writes nothing (spec D12). A
 // checker diagnostic refuses the build with its own code.
 func TestSketchBuildRefusesWhatTheEmitterCannotLower(t *testing.T) {
-	source := "package demo\n\nfunc main() needs Console {\n\tfor i := 0; i < 3; i++ {\n\t\tConsole.Println(i)\n\t}\n}\n"
+	source := "func main() needs Console {\n\tfor i in 0..3 {\n\t\tConsole.Println(\"\\(i)\")\n\t}\n}\n"
 	analysis := Check(source)
 	if len(analysis.Diagnostics) != 0 {
 		t.Fatalf("checker diagnostics: %+v", analysis.Diagnostics)
 	}
 	output := filepath.Join(t.TempDir(), "program")
 	var stderr bytes.Buffer
-	err := Build(analysis, "main.ef", output, &stderr)
+	err := Build(analysis, "main.ergo", output, &stderr)
 	var refusal *BuildError
 	if !errors.As(err, &refusal) || len(refusal.Diagnostics) == 0 {
 		t.Fatalf("build gave %v, want a BuildError", err)
@@ -200,9 +200,9 @@ func TestSketchBuildRefusesWhatTheEmitterCannotLower(t *testing.T) {
 	if _, statErr := os.Stat(output); statErr == nil {
 		t.Fatal("a refused build wrote its output")
 	}
-	bad := Check("package demo\n\nfunc main() needs Console {\n\tConsole.Println(missing)\n}\n")
-	err = Build(bad, "main.ef", output, &stderr)
-	if !errors.As(err, &refusal) || refusal.Diagnostics[0].Code != "S104" || !strings.HasPrefix(err.Error(), "S104 at 4:18: ") {
+	bad := Check("func main() needs Console {\n\tConsole.Println(missing)\n}\n")
+	err = Build(bad, "main.ergo", output, &stderr)
+	if !errors.As(err, &refusal) || refusal.Diagnostics[0].Code != "S104" || !strings.HasPrefix(err.Error(), "S104 at 2:18: ") {
 		t.Fatalf("build of a checker error gave %v", err)
 	}
 }
