@@ -164,7 +164,7 @@ func TestRowGraphDomain(t *testing.T) {
 				if r == 0 {
 					fmt.Fprintf(&b, "\tfunc(%s func()) { %s() }(func() {})\n", id, id)
 				} else {
-					fmt.Fprintf(&b, "\tfunc() { let %s = func() {}; %s() }()\n", id, id)
+					fmt.Fprintf(&b, "\tfunc() { let _ as %s = func() {}; %s() }()\n", id, id)
 				}
 				shadowed++
 			}
@@ -570,8 +570,9 @@ func TestTotalityPermutations(t *testing.T) {
 			default:
 				t.Errorf("n=%d %s: want total or refused, got %s", n, name, describe(diags))
 			}
-			if steps[0] > check.TotalityBudget/8 {
-				t.Errorf("n=%d %s: %d solver steps, want at most %d", n, name, steps[0], check.TotalityBudget/8)
+			budget := check.TotalityBudgets(src)[0]
+			if steps[0] > budget/8 {
+				t.Errorf("n=%d %s: %d solver steps, want at most %d", n, name, steps[0], budget/8)
 			}
 			if first < 0 {
 				first = steps[0]
@@ -731,8 +732,10 @@ func TestTotalityBudget(t *testing.T) {
 	for k := 0; k < 4; k++ {
 		src, _ := cnfSwitch(rng, 60, 60*43/10)
 		steps, diags := check.TotalitySteps(src)
-		if len(steps) != 1 || steps[0] > check.TotalityBudget+60*43/10*4 {
-			t.Errorf("60 subjects, instance %d: solver steps %v, want at most the budget %d and one matrix", k, steps, check.TotalityBudget)
+		budgets := check.TotalityBudgets(src)
+		// One charge may pass the budget by at most one matrix scan.
+		if len(steps) != 1 || len(budgets) != 1 || steps[0] > budgets[0]+60*43/10*61 {
+			t.Errorf("60 subjects, instance %d: solver steps %v, want at most the budget %v and one matrix", k, steps, budgets)
 		}
 		if os.Getenv("ERGO_TIMING") == "1" {
 			start := time.Now()

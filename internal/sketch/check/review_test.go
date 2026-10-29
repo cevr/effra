@@ -284,7 +284,7 @@ func F() func() { return main }`},
 func F() { (main)() }`},
 	{"M15", "local-main-is-ordinary", "", `func main() {}
 func F() {
-	let main = func() {}
+	let _ as main = func() {}
 	main()
 }`},
 	{"M16", "with-default-hint", "", `type Box[T] { X T }
@@ -510,15 +510,15 @@ func TestTotalityCost(t *testing.T) {
 	for _, n := range []int{11, 15, 19, 21, 41} {
 		src := oddCycleSwitch(n)
 		start := time.Now()
-		_, diags := check.CheckSource(src)
+		ts, us, diags := check.SolverSteps(src)
 		elapsed := time.Since(start)
+		t.Logf("subjects=%d bytes=%d elapsed=%s total=%v useful=%v budgets=%v", n, len(src), elapsed, ts, us, check.TotalityBudgets(src))
 		if len(diags) != 0 {
 			t.Fatalf("n=%d: %s", n, describe(diags))
 		}
 		if elapsed > 500*time.Millisecond {
 			t.Fatalf("n=%d: %s, want under 500ms", n, elapsed)
 		}
-		t.Logf("subjects=%d bytes=%d elapsed=%s", n, len(src), elapsed)
 	}
 	// An even cycle is two-colourable with unequal neighbours: not total, and
 	// an alternating vector is the witness. Its closing edge's two cases are

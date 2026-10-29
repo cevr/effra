@@ -1,6 +1,7 @@
 package check
 
 import (
+	"math/bits"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,6 +46,12 @@ const matchLen = syntax.Pos(len("match"))
 // Prior art: rustc's pattern_complexity_limit, GHC's -fmax-pmcheck-models.
 const totalityBudget = 200_000
 
+// cellBudget is the budget per cell of a match's matrix (rows times
+// columns) above totalityBudget: a step is one cell scanned, so a pass
+// that scans the matrix a bounded number of times fits, and a superlinear
+// one meets the budget (rows.md, Totality 5).
+const cellBudget = 512
+
 // ctorOther is a witness constructor of a column whose constructors never
 // complete it (constants): a value no listed constant equals.
 const ctorOther = -1
@@ -73,7 +80,7 @@ type column struct {
 	parent, ctor, field int
 	consts              map[string]int // a constant column's constructors, by exact value
 	label               func(w witness, col int) string
-	children            map[int][]int // ctor → its child columns, in field order
+	children            map[int][]int // ctor → its child columns, in the order patterns name them
 }
 
 // matrixSolver decides usefulness and totality over one match's case
@@ -97,9 +104,11 @@ type column struct {
 //   - a step budget (totalityBudget).
 type matrixSolver struct {
 	*patSpace
-	memo  map[string]missingResult
-	steps int
-	over  bool // the budget ran out: nothing more is proved
+	memo   map[string]missingResult
+	rowIDs map[string]int // residual rows keyed once, then compared by identity
+	steps  int
+	budget int  // the step bound (solverFor)
+	over   bool // the budget ran out: nothing more is proved
 }
 
 // patSpace holds a match's columns and interned patterns, shared by its
@@ -110,15 +119,29 @@ type patSpace struct {
 	child  map[[3]int]int // (parent column, constructor, field) → child column
 	pats   []patNode
 	patKey map[string]int
+	work   int // columns, local pattern keys and the initial flattening
 }
 
 func newPatSpace() *patSpace {
 	return &patSpace{child: map[[3]int]int{}, patKey: map[string]int{}}
 }
 
-// solver returns a fresh solver over the space.
+// solver returns a fresh solver over the space with the fixed budget.
 func (sp *patSpace) solver() *matrixSolver {
-	return &matrixSolver{patSpace: sp, memo: map[string]missingResult{}}
+	return &matrixSolver{patSpace: sp, memo: map[string]missingResult{}, rowIDs: map[string]int{}, budget: totalityBudget}
+}
+
+// solverFor returns a fresh solver for a matrix of the given number of
+// rows over the space's columns: its budget is proportional to the matrix,
+// cellBudget steps per row and column, and at least totalityBudget (rows.md,
+// Totality 5; the orchestrator's stage B round 1 ruling).
+func (sp *patSpace) solverFor(rows int) *matrixSolver {
+	s := sp.solver()
+	if b := cellBudget * rows * len(sp.cols); b > s.budget {
+		s.budget = b
+	}
+	s.charge(sp.work)
+	return s
 }
 
 type missingResult struct {
@@ -152,6 +175,7 @@ func (s *patSpace) subjects() []int {
 
 // addColumn adds a subject column of size n and returns it.
 func (s *patSpace) addColumn(col column) int {
+	s.work++
 	col.parent = -1
 	s.cols = append(s.cols, col)
 	return len(s.cols) - 1
@@ -160,6 +184,7 @@ func (s *patSpace) addColumn(col column) int {
 // childColumn returns the child column of constructor ctor at parent for
 // its field (or element) field, made on first use by mk.
 func (s *patSpace) childColumn(parent, ctor, field int, mk func() column) int {
+	s.work++
 	k := [3]int{parent, ctor, field}
 	if j, ok := s.child[k]; ok {
 		return j
@@ -173,14 +198,19 @@ func (s *patSpace) childColumn(parent, ctor, field int, mk func() column) int {
 	if p.children == nil {
 		p.children = map[int][]int{}
 	}
-	kids := append(p.children[ctor], j)
-	sort.Slice(kids, func(a, b int) bool { return s.cols[kids[a]].field < s.cols[kids[b]].field })
-	p.children[ctor] = kids
+	// Children keep the order patterns first name them: the solvers do not
+	// depend on it, and a witness prints its fields in field order
+	// (recordText sorts the few it prints).
+	p.children[ctor] = append(p.children[ctor], j)
 	return j
 }
 
-// node interns the pattern ctor(kids); kids are sorted by column.
+// node interns ctor(kids), with the immediate children sorted by column.
+// Its key names child patterns by id, never by an expanded subtree. A
+// nested record therefore costs its own fields once, rather than copying
+// all descendant cells into every ancestor's key.
 func (s *patSpace) node(ctor int, kids solverRow) int {
+	s.work += len(kids) + 1
 	var b []byte
 	b = strconv.AppendInt(b, int64(ctor), 10)
 	if len(kids) > 0 {
@@ -228,36 +258,50 @@ func (s *patSpace) row(r []int) solverRow {
 			out = append(out, cell{j, s.node(p, nil)})
 		}
 	}
-	return out
+	return s.flat(out)
 }
 
+// at finds r's cell at col by binary search: a row is sorted by column.
 func (r solverRow) at(col int) (int, bool) {
-	for _, c := range r {
-		if c.col == col {
-			return c.pat, true
-		}
+	i := sort.Search(len(r), func(i int) bool { return r[i].col >= col })
+	if i < len(r) && r[i].col == col {
+		return r[i].pat, true
 	}
 	return 0, false
 }
 
-// replace returns r with its cell at col replaced by kids.
-func (r solverRow) replace(col int, kids solverRow) solverRow {
-	out := make(solverRow, 0, len(r)-1+len(kids))
-	for _, c := range r {
-		if c.col != col {
-			out = append(out, c)
+// mergeRows merges rows sorted by column whose columns are disjoint.
+func mergeRows(a, b solverRow) solverRow {
+	out := make(solverRow, 0, len(a)+len(b))
+	i, j := 0, 0
+	for i < len(a) || j < len(b) {
+		if j == len(b) || i < len(a) && a[i].col < b[j].col {
+			out = append(out, a[i])
+			i++
+		} else {
+			out = append(out, b[j])
+			j++
 		}
 	}
-	if len(kids) == 0 {
-		return out
-	}
-	out = append(out, kids...)
-	sort.Slice(out, func(a, b int) bool { return out[a].col < out[b].col })
 	return out
 }
 
+// replace returns r with its cell at col replaced by kids, by one merge.
+func (r solverRow) replace(col int, kids solverRow) solverRow {
+	rest := make(solverRow, 0, len(r))
+	for _, c := range r {
+		if c.col != col {
+			rest = append(rest, c)
+		}
+	}
+	if len(kids) == 0 {
+		return rest
+	}
+	return mergeRows(rest, kids)
+}
+
 // subsumesPat reports whether every value pattern b matches, a matches.
-func (s *patSpace) subsumesPat(a, b int) bool {
+func (s *matrixSolver) subsumesPat(a, b int) bool {
 	if a == b {
 		return true
 	}
@@ -269,11 +313,18 @@ func (s *patSpace) subsumesPat(a, b int) bool {
 }
 
 // subsumes reports whether every value row b matches, row a matches: each
-// cell of a has a cell of b at its column that it subsumes.
-func (s *patSpace) subsumes(a, b solverRow) bool {
+// cell of a has a cell of b at its column that it subsumes. One merge walk
+// over the two sorted rows: O(|a|+|b|) at each level.
+func (s *matrixSolver) subsumes(a, b solverRow) bool {
+	if !s.charge(cost(a, b)) {
+		return false
+	}
+	j := 0
 	for _, ca := range a {
-		pb, ok := b.at(ca.col)
-		if !ok || !s.subsumesPat(ca.pat, pb) {
+		for j < len(b) && b[j].col < ca.col {
+			j++
+		}
+		if j == len(b) || b[j].col != ca.col || !s.subsumesPat(ca.pat, b[j].pat) {
 			return false
 		}
 	}
@@ -281,14 +332,102 @@ func (s *patSpace) subsumes(a, b solverRow) bool {
 }
 
 // compatible reports whether r may match a value q matches: at each
-// column of q, r is a wildcard or has q's constructor.
+// column of q, r is a wildcard or has q's constructor. One merge walk.
 func (s *patSpace) compatible(r, q solverRow) bool {
+	j := 0
 	for _, cq := range q {
-		if p, ok := r.at(cq.col); ok && s.pats[p].ctor != s.pats[cq.pat].ctor {
+		for j < len(r) && r[j].col < cq.col {
+			j++
+		}
+		if j < len(r) && r[j].col == cq.col && s.pats[r[j].pat].ctor != s.pats[cq.pat].ctor {
 			return false
 		}
 	}
 	return true
+}
+
+// cost is the work of scanning rows: their cells, and one per row.
+func cost(rows ...solverRow) int {
+	n := 0
+	for _, r := range rows {
+		n += len(r) + 1
+	}
+	return n
+}
+
+// flat expands one-shape columns once at the boundary of the case matrix.
+// Pattern nodes retain only their immediate children. Construction stays
+// linear through nested records and tuples; expansion during a proof is
+// charged to that solver instead.
+func (s *patSpace) flat(r solverRow) solverRow {
+	return s.flatten(r, func(n int) bool { s.work += n; return true })
+}
+
+func (s *matrixSolver) flat(r solverRow) solverRow {
+	return s.flatten(r, s.charge)
+}
+
+func (s *patSpace) flatten(r solverRow, charge func(int) bool) solverRow {
+	out := solverRow{} // An empty row covers; nil denotes a refused pattern.
+	var walk func(solverRow) bool
+	walk = func(row solverRow) bool {
+		if !charge(len(row) + 1) {
+			return false
+		}
+		for _, c := range row {
+			if s.cols[c.col].size == 1 {
+				if !walk(s.pats[c.pat].kids) {
+					return false
+				}
+			} else {
+				out = append(out, c)
+			}
+		}
+		return true
+	}
+	if !walk(r) {
+		return nil
+	}
+	// Child columns are created in the order patterns name them. Flattening
+	// may combine different branches, so sort once, with comparisons counted.
+	sort.Slice(out, func(a, b int) bool { charge(1); return out[a].col < out[b].col })
+	return out
+}
+
+// expand replaces each column of one constructor in cols by its child
+// columns, recursively (flat's counterpart for the open columns).
+func (s *matrixSolver) expand(cols []int) []int {
+	var out []int
+	var walk func(j int)
+	walk = func(j int) {
+		if !s.charge(1) {
+			return
+		}
+		if s.cols[j].size == 1 {
+			for _, k := range s.cols[j].children[0] {
+				walk(k)
+			}
+			return
+		}
+		out = append(out, j)
+	}
+	for _, j := range cols {
+		walk(j)
+	}
+	return out
+}
+
+// complete fills in a witness the constructor of each column of one
+// constructor above a witnessed column, which flat left implicit.
+func (s *patSpace) complete(w witness) {
+	for j := range w {
+		for p := s.cols[j].parent; p >= 0; p = s.cols[p].parent {
+			if _, ok := w[p]; ok || s.cols[p].size != 1 {
+				break
+			}
+			w[p] = 0
+		}
+	}
 }
 
 // rowSet is a case matrix with its rows indexed by their constructor cells,
@@ -304,10 +443,13 @@ type rowSet struct {
 	lacking map[int][]int // subject column → rows with no cell there
 	empty   []int         // rows with no cell: they cover everything
 	nsubj   []int
+	cover   int // row that alone covered the last query, or -1
 }
 
 func newRowSet(s *matrixSolver) *rowSet {
-	return &rowSet{s: s, byCell: map[[2]int][]int{}, byFirst: map[[2]int][]int{}, lacking: map[int][]int{}, nsubj: s.subjects()}
+	nsubj := s.expand(s.subjects())
+	sort.Ints(nsubj)
+	return &rowSet{s: s, byCell: map[[2]int][]int{}, byFirst: map[[2]int][]int{}, lacking: map[int][]int{}, nsubj: nsubj}
 }
 
 func (m *rowSet) key(c cell) [2]int { return [2]int{c.col, m.s.pats[c.pat].ctor} }
@@ -330,6 +472,9 @@ func (m *rowSet) alive(list *[]int) ([]int, bool) {
 
 // all returns the rows in source order.
 func (m *rowSet) all() []solverRow {
+	if !m.s.charge(len(m.rows)) {
+		return nil
+	}
 	var out []solverRow
 	for i, r := range m.rows {
 		if !m.dead[i] {
@@ -353,8 +498,14 @@ func (m *rowSet) add(r solverRow) {
 		k := m.key(c)
 		m.byCell[k] = append(m.byCell[k], i)
 	}
+	// One merge walk of the row against the open subject columns, charged.
+	m.s.charge(len(r) + len(m.nsubj))
+	k := 0
 	for _, j := range m.nsubj {
-		if _, ok := r.at(j); !ok {
+		for k < len(r) && r[k].col < j {
+			k++
+		}
+		if k == len(r) || r[k].col != j {
 			m.lacking[j] = append(m.lacking[j], i)
 		}
 	}
@@ -392,6 +543,9 @@ func (m *rowSet) compatibleRows(q solverRow) ([]solverRow, bool) {
 	idx := mergeSorted(with, without)
 	var out []solverRow
 	for _, i := range idx {
+		if !m.s.charge(cost(m.rows[i]) + len(q)) {
+			return nil, false
+		}
 		if r := m.rows[i]; m.s.compatible(r, q) {
 			out = append(out, r)
 		}
@@ -440,6 +594,9 @@ func (m *rowSet) addRow(q solverRow) {
 			if m.s.subsumes(q, m.rows[i]) {
 				m.dead[i] = true
 			}
+			if m.s.over {
+				return
+			}
 		}
 	}
 	m.add(q)
@@ -470,9 +627,44 @@ func (m *rowSet) addMaximal(q solverRow) {
 			if m.s.subsumes(m.rows[i], q) {
 				return
 			}
+			if m.s.over {
+				return
+			}
 		}
 	}
 	m.addRow(q)
+}
+
+// subsumer returns the index of a live row that alone covers q, or -1
+// (the rows cover q only together, or the budget ran out). A dead row was
+// subsumed by a live one, so the live rows suffice. A row that subsumes q
+// has its first cell among q's, or no cell.
+func (m *rowSet) subsumer(q solverRow) int {
+	e, ok := m.alive(&m.empty)
+	if !ok {
+		return -1
+	}
+	if len(e) > 0 {
+		return e[0]
+	}
+	for _, c := range q {
+		k := m.key(c)
+		l := m.byFirst[k]
+		cand, ok := m.alive(&l)
+		m.byFirst[k] = cand
+		if !ok {
+			return -1
+		}
+		for _, i := range cand {
+			if m.s.subsumes(m.rows[i], q) {
+				return i
+			}
+			if m.s.over {
+				return -1
+			}
+		}
+	}
+	return -1
 }
 
 // caseUseful reports whether case q matches a value the rows of m do not.
@@ -481,27 +673,34 @@ func (m *rowSet) addMaximal(q solverRow) {
 // totality question over q's wildcard columns, answered with the shared
 // memo. ok is false when the budget ran out.
 func (s *matrixSolver) caseUseful(m *rowSet, q solverRow) (useful, ok bool) {
+	m.cover = m.subsumer(q)
+	if s.over {
+		return false, false
+	}
+	if m.cover >= 0 {
+		return false, true
+	}
 	rows, ok := m.compatibleRows(q)
 	if !ok {
 		return false, false
 	}
-	res := s.useful(rows, q, s.subjects(), true)
+	res := s.useful(rows, q, m.nsubj, true)
 	return res, !s.over
 }
 
 // useful is U(rows, q) over the columns cols: rows are compatible with q
-// when known is set.
+// when known is set. Every row scanned is charged by its cells.
 func (s *matrixSolver) useful(rows []solverRow, q solverRow, cols []int, known bool) bool {
 	for len(q) > 0 {
 		if s.over {
 			return false
 		}
 		if !known {
-			if !s.charge(len(rows)) {
-				return false
-			}
 			kept := rows[:0:0]
 			for _, r := range rows {
+				if !s.charge(cost(r) + len(q)) {
+					return false
+				}
 				if s.compatible(r, q) {
 					kept = append(kept, r)
 				}
@@ -509,46 +708,62 @@ func (s *matrixSolver) useful(rows []solverRow, q solverRow, cols []int, known b
 			rows = kept
 		}
 		known = false
-		// Specialize the rows and q by q's constructors.
+		// Specialize the rows and q by q's constructors: a fixed cell
+		// becomes its sub-patterns (flat already), merged in by column.
+		fixed := make(map[int]bool, len(q))
 		var next solverRow
-		fixed := map[int]bool{}
 		for _, cq := range q {
 			fixed[cq.col] = true
 			next = append(next, s.pats[cq.pat].kids...)
 		}
+		next = s.flat(next)
 		residual := make([]solverRow, 0, len(rows))
 		for _, r := range rows {
-			out := make(solverRow, 0, len(r))
+			if !s.charge(cost(r)) {
+				return false
+			}
+			var keep, kids solverRow
 			for _, c := range r {
 				if fixed[c.col] {
-					out = append(out, s.pats[c.pat].kids...)
+					kids = append(kids, s.pats[c.pat].kids...)
 				} else {
-					out = append(out, c)
+					keep = append(keep, c)
 				}
 			}
-			sort.Slice(out, func(a, b int) bool { return out[a].col < out[b].col })
-			residual = append(residual, out)
+			if len(kids) == 0 {
+				residual = append(residual, keep)
+				continue
+			}
+			kids = s.flat(kids)
+			residual = append(residual, mergeRows(keep, kids))
 		}
-		var rest []int
+		if !s.charge(len(cols) + len(q)) {
+			return false
+		}
+		rest := make([]int, 0, len(cols))
 		for _, c := range cols {
 			if !fixed[c] {
 				rest = append(rest, c)
 			}
 		}
 		for _, cq := range q {
-			rest = append(rest, s.cols[cq.col].children[s.pats[cq.pat].ctor]...)
+			rest = append(rest, s.expand(s.cols[cq.col].children[s.pats[cq.pat].ctor])...)
 		}
-		sort.Slice(next, func(a, b int) bool { return next[a].col < next[b].col })
 		rows, q, cols = residual, next, rest
 	}
 	return s.missing(rows, cols).found
+}
+
+// sortRow sorts a pattern's immediate child cells once during resolution.
+func sortRow(r solverRow) {
+	sort.Slice(r, func(a, b int) bool { return r[a].col < r[b].col })
 }
 
 // total decides whether the case rows cover every value of the subjects.
 // It returns a witness the rows miss, and ok false when the budget ran
 // out.
 func (s *matrixSolver) total(rows []solverRow) (w witness, missing, ok bool) {
-	cols := s.subjects()
+	cols := s.expand(s.subjects())
 	// A subject of no variant (its variants were all reported unknown) has
 	// no value, so no value vector exists and none is missing (D3).
 	for _, j := range cols {
@@ -563,10 +778,17 @@ func (s *matrixSolver) total(rows []solverRow) (w witness, missing, ok bool) {
 	if !res.found {
 		return nil, false, true
 	}
-	return res.witness, true, true
+	w = make(witness, len(res.witness))
+	for k, v := range res.witness {
+		w[k] = v
+	}
+	s.complete(w)
+	return w, true, true
 }
 
-// missing finds a value of the columns cols that no row matches.
+// missing finds a value of the columns cols that no row matches. Building
+// the residual's key scans every cell, so each call charges the matrix's
+// cells and columns (rows.md, Totality 5).
 func (s *matrixSolver) missing(rows []solverRow, cols []int) missingResult {
 	for _, r := range rows {
 		if len(r) == 0 {
@@ -576,15 +798,15 @@ func (s *matrixSolver) missing(rows []solverRow, cols []int) missingResult {
 	if len(rows) == 0 {
 		return missingResult{witness: witness{}, found: true}
 	}
+	if !s.charge(cost(rows...) + len(cols)) {
+		return missingResult{}
+	}
+	rows, key := s.canonical(rows, cols)
 	if s.over {
 		return missingResult{}
 	}
-	rows, key := canonical(rows, cols)
 	if r, ok := s.memo[key]; ok {
 		return r
-	}
-	if !s.charge(len(rows)) {
-		return missingResult{}
 	}
 	res := s.split(rows, cols)
 	if !s.over {
@@ -600,7 +822,7 @@ func (s *matrixSolver) charge(w int) bool {
 		return false
 	}
 	s.steps += w
-	if s.steps > totalityBudget {
+	if s.steps > s.budget {
 		s.over = true
 		return false
 	}
@@ -617,20 +839,27 @@ func (s *matrixSolver) split(rows []solverRow, cols []int) missingResult {
 		}
 	}
 	present := map[int]bool{}
+	wild := 0
 	for _, r := range rows {
 		if p, ok := r.at(col); ok {
 			present[s.pats[p].ctor] = true
+		} else {
+			wild++
 		}
 	}
 	size := s.cols[col].size
 	if size >= 0 && len(present) == size {
 		// Every constructor appears: one pass puts each row in the
 		// residual of its constructor, a wildcard row in every one.
+		if !s.charge(cost(rows...) + wild*size) {
+			return missingResult{}
+		}
 		buckets := make([][]solverRow, size)
 		for _, r := range rows {
 			if p, ok := r.at(col); ok {
 				k := s.pats[p].ctor
-				buckets[k] = append(buckets[k], r.replace(col, s.pats[p].kids))
+				kids := s.flat(s.pats[p].kids)
+				buckets[k] = append(buckets[k], r.replace(col, kids))
 				continue
 			}
 			for k := range buckets {
@@ -640,7 +869,7 @@ func (s *matrixSolver) split(rows []solverRow, cols []int) missingResult {
 		for ctor := 0; ctor < size; ctor++ {
 			sub := rest
 			if kids := s.cols[col].children[ctor]; len(kids) > 0 {
-				sub = append(append([]int(nil), rest...), kids...)
+				sub = append(append([]int(nil), rest...), s.expand(kids)...)
 			}
 			res := s.missing(buckets[ctor], sub)
 			if res.found {
@@ -716,12 +945,17 @@ func defaultCol(rows []solverRow, col int) []solverRow {
 	return out
 }
 
-// canonical sorts and deduplicates the rows and returns them with a key
-// that names the residual question independently of column order: the
-// remaining columns as a set and the rows as a set of cell sets.
-func canonical(rows []solverRow, cols []int) ([]solverRow, string) {
-	keys := make([]string, len(rows))
-	byKey := make(map[string]solverRow, len(rows))
+// canonical interns each row's cells once and sorts row identities, so a
+// comparison never rescans a wide row's string key. The matrix key names
+// the remaining columns and rows as sets, independently of column order.
+func (s *matrixSolver) canonical(rows []solverRow, cols []int) ([]solverRow, string) {
+	// Sorting fixed-width identities is bounded before it runs. Keying the
+	// cells and building the final key were charged by missing's matrix scan.
+	if !s.charge(len(rows)*bits.Len(uint(len(rows))) + len(cols)*bits.Len(uint(len(cols)))) {
+		return nil, ""
+	}
+	ids := make([]int, len(rows))
+	byID := make(map[int]solverRow, len(rows))
 	for i, r := range rows {
 		var b []byte
 		for k, c := range r {
@@ -732,10 +966,16 @@ func canonical(rows []solverRow, cols []int) ([]solverRow, string) {
 			b = append(b, ':')
 			b = strconv.AppendInt(b, int64(c.pat), 10)
 		}
-		keys[i] = string(b)
-		byKey[keys[i]] = r
+		key := string(b)
+		id, ok := s.rowIDs[key]
+		if !ok {
+			id = len(s.rowIDs)
+			s.rowIDs[key] = id
+		}
+		ids[i] = id
+		byID[id] = r
 	}
-	sort.Strings(keys)
+	sort.Ints(ids)
 	sortedCols := append([]int(nil), cols...)
 	sort.Ints(sortedCols)
 	var b strings.Builder
@@ -745,16 +985,16 @@ func canonical(rows []solverRow, cols []int) ([]solverRow, string) {
 		}
 		b.WriteString(strconv.Itoa(c))
 	}
-	out := make([]solverRow, 0, len(keys))
-	prev := ""
-	for i, k := range keys {
-		if i > 0 && k == prev {
+	out := make([]solverRow, 0, len(ids))
+	prev := -1
+	for _, id := range ids {
+		if id == prev {
 			continue
 		}
-		prev = k
+		prev = id
 		b.WriteByte('|')
-		b.WriteString(k)
-		out = append(out, byKey[k])
+		b.WriteString(strconv.Itoa(id))
+		out = append(out, byID[id])
 	}
 	return out, b.String()
 }

@@ -145,11 +145,13 @@ type checker struct {
 	selfFinal map[*syntax.SelectorExpr]*Func
 	kinds     declKinds // solved bracket kinds of the package's generic types
 	init      initDeps  // references of each package-level body (initialization order)
-	// totalitySteps records the solver steps of each type switch reported
+	// totalitySteps records each match or irrefutable-pattern proof reported
 	// (not silent), in check order: the deterministic cost the tests bound.
 	totalitySteps []int
-	// usefulSteps records the steps of each switch's reachability checks.
+	// usefulSteps records reachability steps (zero for irrefutable patterns).
 	usefulSteps []int
+	// totalityBudgets records each totality solver's budget (solverFor).
+	totalityBudgets []int
 	// bodyEdges counts the edges of the body graph: linear in the source
 	// (round-3 M5), and bounded by a test.
 	bodyEdges int

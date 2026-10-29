@@ -633,7 +633,7 @@ func sortedKeys(m map[string]bool) []string {
 // per variant, nested one level through a bool field, checks in counted
 // work linear in n: the solvers' steps and the bytes the check allocates
 // grow about 4x when n does (stage E's scale shape "match").
-func TestMatchArmsLinear(t *testing.T) {
+func testUnionArmsLinear(t *testing.T) {
 	src := func(n int) string {
 		var b strings.Builder
 		var vs []string

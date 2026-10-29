@@ -99,10 +99,15 @@ func (c *checker) irrefutable(p syntax.Expr, t Type, what string, own map[*synta
 	default:
 		row := solverRow{}
 		if res.has {
-			row = solverRow{{col, res.pat}}
+			row = r.sp.flat(solverRow{{col, res.pat}})
 		}
-		s := r.sp.solver()
+		s := r.sp.solverFor(1)
 		w, missing, ok := s.total([]solverRow{row})
+		if c.silent == 0 {
+			c.totalitySteps = append(c.totalitySteps, s.steps)
+			c.totalityBudgets = append(c.totalityBudgets, s.budget)
+			c.usefulSteps = append(c.usefulSteps, 0)
+		}
 		switch {
 		case !ok:
 			c.errorf(p, CodeNotTotal, "too many cases to prove this %s pattern irrefutable; split it (rows.md, Totality 6)", what)

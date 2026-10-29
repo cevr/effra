@@ -1,6 +1,7 @@
 package check
 
 import (
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -82,8 +83,9 @@ type patResolver struct {
 	sp      *patSpace
 	info    []colInfo
 	resolve *lookupSteps
-	binds   []patBinding // of the current item
-	bad     bool         // the current item has a reported error
+	binds   []patBinding    // of the current item
+	bound   map[string]bool // the names binds holds
+	bad     bool            // the current item has a reported error
 	// own holds the binding names of a package-level let's pattern, which
 	// the package scope already declares: they bind, not refer.
 	own map[*syntax.Ident]bool
@@ -96,6 +98,7 @@ func (c *checker) newPatResolver() *patResolver {
 // begin starts a pattern item: no binding, no error.
 func (r *patResolver) begin() {
 	r.binds = nil
+	r.bound = nil
 	r.bad = false
 }
 
@@ -186,10 +189,14 @@ func (r *patResolver) columnOf(t Type) (column, colInfo) {
 func (r *patResolver) recordText(w witness, j, ctor int, t Type) string {
 	var parts []string
 	s, _ := under(t).(*Struct)
+	var shown []int
 	for _, k := range r.sp.cols[j].children[ctor] {
-		if _, ok := w[k]; !ok || s == nil {
-			continue
+		if _, ok := w[k]; ok && s != nil {
+			shown = append(shown, k)
 		}
+	}
+	sort.Slice(shown, func(a, b int) bool { return r.sp.cols[shown[a]].field < r.sp.cols[shown[b]].field })
+	for _, k := range shown {
 		parts = append(parts, s.Fields[r.sp.cols[k].field].Name+": "+r.sp.witnessText(w, k))
 	}
 	if len(parts) == 0 {
@@ -217,13 +224,15 @@ func (r *patResolver) bindNames(e syntax.Expr) {
 }
 
 func (r *patResolver) bind(id *syntax.Ident, t Type, info *Pattern, as bool) {
-	for _, b := range r.binds {
-		if b.id.Name == id.Name {
-			r.c.errorf(id, CodeType, "%s is bound twice in this pattern (rows.md, Totality 1)", id.Name)
-			r.bad = true
-			return
-		}
+	if r.bound[id.Name] {
+		r.c.errorf(id, CodeType, "%s is bound twice in this pattern (rows.md, Totality 1)", id.Name)
+		r.bad = true
+		return
 	}
+	if r.bound == nil {
+		r.bound = map[string]bool{}
+	}
+	r.bound[id.Name] = true
 	r.binds = append(r.binds, patBinding{id: id, t: t, info: info, as: as})
 }
 
@@ -507,14 +516,6 @@ func (r *patResolver) tuple(x *syntax.TupleExpr, t Type, col int) resolved {
 	return resolved{pat: r.sp.node(0, kids), has: true, t: t, info: info}
 }
 
-func sortRow(r solverRow) {
-	for i := 1; i < len(r); i++ {
-		for j := i; j > 0 && r[j].col < r[j-1].col; j-- {
-			r[j], r[j-1] = r[j-1], r[j]
-		}
-	}
-}
-
 // isPatternType reports whether a bare name in a pattern is a type test
 // where c checks (D-B3 rule 1).
 func (c *checker) isPatternType(name string) bool {
@@ -605,7 +606,11 @@ func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr
 	// change whether a match near the budget is refused, never a proved
 	// verdict (D16 as amended in round 5). Reachability follows the cases'
 	// order: a case is unreachable when the cases before it cover it.
-	useful := r.sp.solver()
+	nrows := len(all)
+	if hasDefault {
+		nrows++
+	}
+	useful := r.sp.solverFor(nrows)
 	matrix := newRowSet(useful)
 	for ci, cl := range clauses {
 		for ii, item := range cl.List {
@@ -637,9 +642,8 @@ func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr
 	}
 	// Totality is decided over the maximal case rows by a solver of its
 	// own, so it does not depend on which cases reachability judged first.
-	// A match with `case _` needs no proof: its cost stays linear in the
-	// subjects and cases (round-4 M4).
-	total := r.sp.solver()
+	// A case _ covers totality; its reachability was proved above.
+	total := r.sp.solverFor(len(all))
 	set := newRowSet(total)
 	if valid && patternsOK && !hasDefault {
 		for _, row := range all {
@@ -656,6 +660,7 @@ func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr
 	}
 	if c.silent == 0 {
 		c.totalitySteps = append(c.totalitySteps, total.steps)
+		c.totalityBudgets = append(c.totalityBudgets, total.budget)
 		c.usefulSteps = append(c.usefulSteps, useful.steps)
 	}
 	c.totalSwitch[s] = true
@@ -702,7 +707,7 @@ func (r *patResolver) caseItem(item syntax.Expr, n int, subj []Type, cols []int,
 		if !res.has {
 			return solverRow{}, true
 		}
-		return solverRow{{cols[0], res.pat}}, true
+		return r.sp.flat(solverRow{{cols[0], res.pat}}), true
 	}
 	tup, ok := unparen(item).(*syntax.TupleExpr)
 	if !ok || len(tup.Elts) != n {
@@ -727,7 +732,7 @@ func (r *patResolver) caseItem(item syntax.Expr, n int, subj []Type, cols []int,
 	if tup != item {
 		c.pattern(tup, info)
 	}
-	return row, true
+	return r.sp.flat(row), true
 }
 
 // armVar is one binding of an arm with the group that records a read.
