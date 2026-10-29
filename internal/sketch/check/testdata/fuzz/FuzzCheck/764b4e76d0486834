@@ -1,0 +1,2 @@
+go test fuzz v1
+string("package A\ntype Invoice interface{A()}\nwire Invoices{e\nInvoice=0}\nwire App{Invoices}\nwire e{App}\nfunc A()")

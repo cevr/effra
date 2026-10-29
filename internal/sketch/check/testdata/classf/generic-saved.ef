@@ -1,0 +1,6 @@
+package p
+type Bang struct{}
+func fail() error[Bang]
+func pass[E error](f func() error[E]) {return f()}
+var saved = pass[Bang]
+func F() error[Bang] {return saved(fail)}

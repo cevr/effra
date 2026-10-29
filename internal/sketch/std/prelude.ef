@@ -1,0 +1,53 @@
+package prelude
+
+// The prelude of the language (docs/spec/stdlib.md, Prelude). It is
+// ordinary Ergo source, checked by internal/sketch/check like any other
+// package; its exported names are in scope in every package without an
+// import. The method sets of the four capabilities are provisional: they
+// hold only what the fixtures and the v0 corpus call (#209).
+
+// Console writes lines to the host's standard output.
+type Console interface {
+	Println(values ...any)
+}
+
+// Scheduler suspends the calling task.
+type Scheduler interface {
+	Sleep(d duration)
+}
+
+// LiveScheduler is the host's Scheduler provider.
+type LiveScheduler struct{}
+
+func (LiveScheduler) Sleep(d duration)
+
+// Clock reads the current time.
+type Clock interface {
+	Now() int64
+}
+
+// Random draws random numbers.
+type Random interface {
+	Int63() int64
+}
+
+// Option is a value that may be absent (#99).
+type Some[T] struct{ Value T }
+type None struct{}
+type Option[T] interface{ Some[T] | None }
+
+// Decision is the result of a machine's step (docs/spec/runtime.md,
+// Machines and actors).
+type Enter[S] struct{ Next S }
+type Stay[S] struct{ Next S }
+type Ignore struct{}
+type Reject struct{}
+type Done[O] struct{ Output O }
+type Decision[S, O] interface{ Enter[S] | Stay[S] | Ignore | Reject | Done[O] }
+
+// Task is a started task: go f(x) and go { … } yield one
+// (docs/spec/runtime.md, Tasks). E is an error row.
+type Task[T, E] interface {
+	Wait() (T, error[E])
+	Stop()
+}

@@ -1,0 +1,8 @@
+package p
+type Cap interface{ M() }
+type Box[T any] interface{ M(T) }
+func BoxOf[T any](x T) Box[T]
+func Choose[T any](x T,y T) needs Cap
+func a() {Choose(BoxOf(a),BoxOf(b))} // want S108
+func b() {_ = a;Choose(BoxOf(b),BoxOf(b))} // want S108
+

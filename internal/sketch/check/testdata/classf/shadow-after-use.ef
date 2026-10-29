@@ -1,0 +1,4 @@
+package p
+type Cap interface{M()}
+func a(){b();b:=func(){};b();Cap.M()} // want S108
+func b(){_ = a}

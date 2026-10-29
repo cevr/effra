@@ -1,0 +1,5 @@
+package p
+type Fault[T any] struct{ F T }
+func marker[T any]() error[Fault[T]]
+func fail[T any](x T) {return Fault{x}}
+func F() error[Fault[int]] {return fail(1)}

@@ -1,0 +1,3 @@
+package p
+var x = map[int]int{y: 1} // want S108
+var y = len(x)

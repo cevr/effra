@@ -9,7 +9,7 @@
 // produces stay declared until their consumers are rewritten, and the
 // parser never builds them (TestDecidedOnly).
 //
-// The package resolves no names; the checker (#196), the LSP (#38) and the
+// The package resolves no names; the checker (internal/sketch/check), the LSP (#38) and the
 // formatter (internal/sketch/format) consume its AST. Every syntax error is
 // S001 (docs/spec/diagnostics.md), or S108 for a type that mixes fields and
 // operations, with a byte span, line and byte column; Parse reports the

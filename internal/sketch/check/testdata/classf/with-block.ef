@@ -1,0 +1,9 @@
+package p
+type Bang struct{}
+type Cap interface{ M() }
+type Impl struct{}
+func (Impl) M() {}
+func mark() error[Bang]
+func a() { with(wire{ Cap = Impl{} }) { try b() } }
+func b() { try mark(); try a() }
+func F() error[Bang] { try a() }

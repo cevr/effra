@@ -1,0 +1,13 @@
+package demo
+
+type Fault struct{}
+type Store interface{ Get() string }
+type Mem struct{}
+
+func (Mem) Get() (string, error[Fault]) { return Fault{} }
+
+func NewStore() Store {
+	return Mem{} // want S108
+}
+
+func main() {}

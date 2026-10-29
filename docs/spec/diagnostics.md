@@ -1,8 +1,8 @@
 # Diagnostics
 
-Status: S001 is **implemented** by the parser `internal/sketch/syntax` ([#195](https://github.com/cevr/ergo/issues/195)); the other codes are **implemented in prototype** (the prototype checker, `internal/sketch/proto/check.go`, copied from `prototypes/sketch9/sketch/check.go`), and the bridge `internal/sketch/proto/convert.go` adds the S109 refusals of parsed forms the checker lacks. Each fixture's first line is `// want CODE`; `TestProbes` and `accept.sh` run them. The main compiler maps each rule to a code in its EF registry ([#79](https://github.com/cevr/ergo/issues/79); README Gap 18).
+Status: S001 is **implemented** by the parser `internal/sketch/syntax` ([#195](https://github.com/cevr/ergo/issues/195)). The other codes are **implemented** by the checker `internal/sketch/check` ([#196](https://github.com/cevr/ergo/issues/196)), which `ergo check` and `ergo diagnostics` run. The checker's code table (`internal/sketch/check/codes.go`) mirrors this page; a test keeps the table, the emitted codes and the rows below in step. `ergo build` and `ergo run` run the checker first, then lower through the prototype emitter (`internal/sketch/proto`) until [#50](https://github.com/cevr/ergo/issues/50) lowers from the checker's output; a program the prototype cannot lower is refused at build with S109 naming #50, and nothing is written. The checker's fixtures are in `internal/sketch/check/testdata/fixtures`; the prototype's fixtures (first line `// want CODE`) keep their outcome except the changes [the parity table](../../internal/sketch/check/testdata/parity.overrides) lists. The main compiler maps each rule to a code in its EF registry ([#79](https://github.com/cevr/ergo/issues/79); README Gap 18).
 
-A diagnostic has a position, a code and a message: `file:line:col: CODE message`. A file with any diagnostic does not build. Fixture paths are relative to [`prototypes/sketch9/testdata`](../../prototypes/sketch9/testdata).
+A diagnostic has a position, a code and a message: `file:line:col: CODE message`. A file with any diagnostic does not build. The checker reports every diagnostic, sorted by position; an invalid operand or type suppresses every diagnostic that would follow from it, so one mistake gives one diagnostic. Prototype fixture paths are relative to [`prototypes/sketch9/testdata`](../../prototypes/sketch9/testdata); checker fixture names are files in `internal/sketch/check/testdata/fixtures/negative`.
 
 ## Codes
 
@@ -10,19 +10,20 @@ A diagnostic has a position, a code and a message: `file:line:col: CODE message`
 | --- | --- | --- | --- |
 | S001 | Source text must lex and parse: valid identifiers, terminated strings, known number suffixes, no Go form outside the language, no mixed keyed and positional literal. | [grammar](grammar.md) | `probes/nonletter-name.ergo` |
 | S101 | Every error that can escape a function must be in its declared `fails` row. | [rows: error rows](rows.md#error-rows) | `reject/undeclared-error.ergo` |
-| S102 | Every capability a body charges must be in its `needs` row or discharged by an enclosing `with`. | [rows: capability rows](rows.md#capability-rows) | `reject/missing-capability.ergo` |
-| S103 | A `catch` without `try` must handle every error in the caught row. | [rows: catch](rows.md#catch) | `reject/catch-not-total.ergo` |
-| S104 | Every name must resolve: locals, functions, types, fields, methods, capabilities, wires and error types. | [types](types.md), [rows](rows.md) | `reject/unknown-name.ergo` |
+| S102 | Every capability a body charges must be in its capability row or discharged by an enclosing `with`. | [rows: capability rows](rows.md#capability-rows) | `reject/missing-capability.ergo` |
+| S103 | Totality: a `catch` without `try` must handle every error in the caught row, and a `match` over unions must name every variant (or tuple of variants) or have `case _`. | [rows: catch](rows.md#catch), [rows: totality](rows.md#totality) | `reject/catch-not-total.ergo`, `type-switch-not-total` |
+| S104 | Every name must resolve, in the role its position gives it: locals, functions, types, fields, methods, capabilities, wires and error types. | [types](types.md), [rows](rows.md) | `reject/unknown-name.ergo` |
 | S105 | A fallible expression must be tried, caught or returned; it cannot stand in a value position. | [rows: error rows](rows.md#error-rows) | `probes/composite-error.ergo` |
 | S106 | A wire provider must implement its capability, with the same signatures and no wider error row. | [rows: wire](rows.md#wire) | `probes/provider-parameter.ergo` |
-| S107 | A function with a result must not reach the end of its body. | [rows: totality](rows.md#totality) | `sketch/sketch_test.go`, case "a missing return" (README Gap 19) |
-| S108 | Types and declarations must be used consistently: no type mismatch, duplicate declaration, invalid literal or misuse of a construct. | [types](types.md), [rows](rows.md) | `probes/duplicate-field.ergo` |
-| S109 | The program must stay inside the implemented subset, and source names must not collide with the prototype's generated Go. | [grammar](grammar.md#reserved-names), README Gaps 6, 10, 16, 17 | `probes/with-return.ergo` |
-| S110 | A declared local must be read, and an expression statement must be a call, `try` or `catch`, as in Go. | [grammar: statements](grammar.md#statements) | `probes/unused-expression.ergo` |
-| S111 (designed) | A wire must not have two entries for one capability, except a `replace` of an embedded entry. | [rows: wire](rows.md#wire), README Gap 28 | none yet: the prototype accepts the program, and the later entry wins |
-| S112 (designed) | A map's key type must not be a resource in v0. | [resources: containers](resources.md#containers), README Gap 32 | none yet: the prototype has no maps; negative example `map[Key]string{openKey(): "v"}` in resources.md |
+| S107 | A function with a result must not reach the end of its body. | [rows: totality](rows.md#totality) | `missing-return` |
+| S108 | Types and declarations must be used consistently: no type mismatch, duplicate declaration, invalid literal, unsatisfied constraint, kind conflict, wire cycle or misuse of a construct. | [types](types.md), [rows](rows.md) | `probes/duplicate-field.ergo` |
+| S109 | A construct another ticket owns is refused, naming that ticket; at build only, a program the prototype emitter cannot lower. | README Gaps 6 and 33, [runtime: G1](runtime.md) | `wire-constructor-is-37` |
+| S110 | A declared local, binding or import must be read, and an expression statement must be a call, a receive, `try` or `catch`, as in Go. | [grammar: statements](grammar.md#statements) | `probes/unused-expression.ergo` |
+| S111 | A wire must not have two entries for one capability, except a `replace` of an embedded entry. | [rows: wire](rows.md#wire), README Gap 28 | `duplicate-wire-entry` |
+| S112 (designed) | A map's key type must not be a resource in v0. | [resources: containers](resources.md#containers), README Gap 32 | none yet: negative example `Map[Key, string]{openKey(): "v"}` in resources.md |
+| S113 | The entry function `main` takes no parameters, returns no value (an error row is allowed) and is not called. | [rows: capability rows](rows.md#capability-rows), README Gap 4 | `main-parameter`, `main-called`, `main-value-result` |
 
-Designed codes are not in the prototype. Other designed errors in `docs/spec/` (resources, visibility, capability values, channels of resources) get codes when [#196](https://github.com/cevr/ergo/issues/196) and [#197](https://github.com/cevr/ergo/issues/197) implement them.
+Designed codes are not emitted yet. Other designed errors in `docs/spec/` (resources, escape, exclusivity, channels of resources) get codes when [#197](https://github.com/cevr/ergo/issues/197) implements them; construction authority (types.md Zero values 6) gets S114 with packages (#196, second part).
 
 ## Rules by code
 
@@ -47,91 +48,132 @@ A type that mixes fields with operations or laws is S108 from the parser ([gramm
 
 ### S101: undeclared error
 
-- An error escapes through `try` and is not declared (`reject/undeclared-error.ergo`).
-- A function with no row returns a value of an error type (`probes/error-as-value.ergo`).
-- A partial `try … catch` leaves an undeclared error (`sketch/sketch_test.go`, "partial catch under try still needs the rest declared").
+- An error escapes through `try` and is not in the declared row (`reject/undeclared-error.ergo`, `undeclared-error`).
+- A function returns a value of an error type, a type named in an error row of its package, and its row does not list it (`probes/error-as-value.ergo`).
+- A partial `try … catch` leaves an undeclared error (`partial-catch-rest`).
 - An inline wire's provider expression can fail, and the enclosing function does not declare it (`probes/wire-initializer-error.ergo`).
-- A named wire's provider can fail while it is built (`probes/named-wire-failure.ergo`; README Gap 6).
+- A named wire's provider can fail while it is built: a named wire is closed (`probes/named-wire-failure.ergo`; README Gap 6).
+- The step of an exported machine type spells its rows (the export guard), so an error it does not list is S101 (`export-guard-machine-step`).
 
 ### S102: missing capability
 
-- A body calls a capability its `needs` row does not list (`reject/missing-capability.ergo`).
-- A callee needs a capability that no `with` provides (`reject/unprovided.ergo`, `probes/function-needs-control.ergo`).
+- A body calls a capability its capability row does not list (`reject/missing-capability.ergo`, `missing-capability`).
+- A callee needs a capability that no `with` provides (`reject/unprovided.ergo`, `unprovided-callee`).
 - A provider expression of an inline wire needs a capability of its own wire (`probes/wire-sibling.ergo`) or one the enclosing function lacks (`probes/wire-initializer.ergo`).
-- A named wire needs a capability from its caller (`probes/named-wire-requirement.ergo`; README Gap 6).
-- `timeout.After` without `Scheduler` (`sketch/sketch_test.go`, "timeout requires Scheduler").
-- `main` lists a capability the host does not provide (`sketch/sketch_test.go`, "main cannot require what the host lacks"; README Gap 5).
+- A named wire needs a capability from its caller: a named wire is closed (`probes/named-wire-requirement.ergo`; README Gap 6).
+- `timeout.After` without `Scheduler`: `timeout.After` is an ordinary library function whose row lists `Scheduler` (`timeout-is-a-library-function`).
+- An inferred capability reaches an exported function, which spells its row (`inferred-needs-reaches-exported`).
 
-### S103: catch not total
+The checker does not restrict `main`'s capability row; the build refuses what the host cannot supply (README Gap 5).
 
-- A `catch` without `try` omits an error of the caught row (`reject/catch-not-total.ergo`).
+### S103: not total
+
+- A `catch` without `try` omits an error of the caught row (`reject/catch-not-total.ergo`, `catch-not-total`).
+- A `match` over a union names neither every variant nor `case _` (`type-switch-not-total`).
+- A multi-subject `match` leaves a tuple of variants unhandled; `_` matches any variant. Totality is decided by a usefulness check over the case matrix, never by enumerating the product (`product-not-total`). The message names one missing tuple.
+- A type switch whose proof, or the resolution of its cases in the variant index, needs more than the fixed solver budget: "too many cases to prove this switch total; split it or add default", or, when the reachability of its cases needs more, "too many cases to prove which cases of this switch are reachable; split it". The checker never accepts a switch it has not proved. The solver is deterministic for a given source; reordering the subjects may change whether a switch near the budget is refused, never a proved verdict ([rows: totality](rows.md#totality) 5). A case of a union that lost a variant to a reported error adds no diagnostic of its own (D3). No missing-return diagnostic follows an S103 for the same switch (D3).
 
 ### S104: unknown name
 
-- An unknown local, function, type, struct type, field, method, capability or wire (`reject/unknown-name.ergo`).
-- An error row names a type that is not a struct declared in the file (`probes/host-error.ergo`).
-- Prototype limit: `duration` as a type name, as in `func delay(d duration)` (README Gap 25).
-- A capability name used as a bare expression, such as `f(Orders)` (README Gap 29).
+- An unknown local, function, type, field, method, label, package or wire (`reject/unknown-name.ergo`, `unknown-local`, `unknown-type`, `unknown-field`, `unknown-selector`, `unknown-wire`).
+- A capability name in an expression position other than a method call's receiver, such as `f(Orders)` (`capability-as-value`; README Gap 29).
+- A local of the same name as a capability that the function's written row lists, in the same frame (`local-and-binding-one-frame`; rows-and-constraints §7 amendment 3). A local in an inner frame may shadow a package capability.
+- A capability row or a wire key names a type that is not a capability (`needs-non-capability`, `wire-entry-non-capability`).
+- An error row names a type that is not a named struct type (`error-row-non-struct`).
 
 ### S105: unhandled failure
 
 - A fallible call in a struct field value (`probes/composite-error.ergo`).
 - A fallible `timeout.After` duration (`probes/fallible-duration.ergo`).
-- A fallible expression as a `let` value, an expression statement, an operand, a selector receiver, a call argument, an `if` condition, a `match` subject or a `catch` arm value (`sketch/sketch_test.go`, "an unhandled fallible call").
+- A fallible expression as a `let` value, an expression statement, an operand, a selector receiver, a call argument, an `if` condition, a `match` subject or a `catch` arm value (`unhandled-define`, `unhandled-argument`, `unhandled-condition`).
+- A call of an unexported helper whose inferred error row is not empty, in an exported function that does not handle it (`inferred-error-reaches-exported`).
 
 ### S106: bad provider
 
 - A provider method's parameter types differ from the capability's (`probes/provider-parameter.ergo`).
-- A provider that the host capability `Scheduler` does not take (`probes/provider-scheduler.ergo`).
-- A provider without the capability's method, or whose method row is wider (`sketch/sketch_test.go`, "a provider without the method", "a provider whose row is wider").
+- A provider without the capability's method, or whose method's error row is wider (`provider-missing-method`, `provider-wider-row`).
+- A provider method that writes a capability row: its row is wider than the capability method's, which writes none (`provider-method-needs`; README Gap 17 stays with #37).
 
 ### S107: missing return
 
-- A function with a result whose body can reach its end (`sketch/sketch_test.go`, "a missing return"). A body terminates only through a final `return`, an `if` with an `else` whose branches terminate, or a type `match` whose cases all terminate and name every variant.
+- A function or function literal with a result whose body can reach its end (`missing-return`). A body terminates as in Go's terminating statements: a final `return`, an `if` with an `else` whose branches terminate, a `for` without a condition or `break`, and a `match` that is total (names every variant or has `case _`) and whose cases all terminate.
 
 ### S108: type or declaration misuse
 
 | Rule | Fixture |
 | --- | --- |
-| A type, function, wire, method, capability method, field or parameter is declared twice; a type and a function share a name | `probes/duplicate-field.ergo`, `duplicate-function`, `duplicate-wire`, `duplicate-method`, `duplicate-cap-method`, `duplicate-parameter`, `type-function-name` |
+| A type, function, wire, method, field, parameter or local is declared twice in one scope; a type and a function share a name | `duplicate-function`, `probes/duplicate-field.ergo`, `duplicate-method`, `duplicate-parameter` |
 | A parameter repeats the receiver's name | `probes/receiver-parameter.ergo` |
 | A field and a method of one type share a name | `probes/field-method-name.ergo` |
-| A receiver or union variant is not a struct declared in the file | `probes/host-method.ergo`, `host-union` |
-| A struct contains itself by value | `probes/recursive-product.ergo` |
-| An integer literal has a leading zero or overflows `int64`; a constant sum overflows | `probes/decimal-leading-zero.ergo`, `octal-value`, `integer-constant` |
-| A duration overflows `int64` nanoseconds | `probes/duration-overflow.ergo` |
-| A string literal has an invalid escape | `probes/string-escape.ergo` |
-| A keyed literal omits a field that has no zero value | `probes/union-field-zero.ergo`, `transitive-nondefaultable` |
-| A type is caught twice | `probes/duplicate-catch.ergo` |
-| A `catch` over a no-value expression has an arm with a value | `probes/void-catch-value.ergo` |
-| An argument has no value | `probes/void-argument.ergo` |
-| A no-value function returns a value, including `return try f()` | `probes/void-fallible-return-value.ergo`, `try-unit-return` |
-| A local shadows a function and is then called | `probes/shadowed-call.ergo` |
-| Prototype limit: a struct value assigned to an interface type, such as `return Mem{}` from `func NewStore() Store`; the designed rule is [interface assignability](types.md#interface-assignability) (README Gap 29) | the checker's type-mismatch message |
-| Others: `try` or `catch` on an infallible expression; a caught type not in the row; an arm value of the wrong type; `let` with no value or a redeclared name; a non-`bool` condition; a type `match` on a non-union; a case that is not a variant or is repeated; wrong return type; a field set twice or of the wrong type; a wrong argument count or type; an uncalled capability method; a wire literal outside `with`; wrong `with` or `timeout.After` arguments; mismatched `==` or `+` operands | `sketch/sketch_test.go` and the checker's messages |
+| A receiver is not a struct type declared in the package | `receiver-not-local` |
+| A union variant is not a struct type declared in the package | `union-variant-interface` |
+| A struct contains itself by value, also through an instance of a generic struct (`type U { F Wrap[U] }`), at any depth; one report per cycle | `recursive-struct`; checker domain tests (`TestFiniteChains`) |
+| An instantiation cycle: a generic type or function instantiates itself, through any path, with an argument that grows (`type T[A] { F *T[[]A] }`, `func f[T]() { f[[]T]() }`), so its instances never end (Go's rule, `go/types` "instantiation cycle"), also through a method's receiver parameters and through any containing type, interface method signatures included; reported once, before rows are inferred | checker domain tests (`TestExpandingInstantiation`); the go/types differential test (`TestDifferentialGoTypes`, `FuzzDifferential`) |
+| An initialization cycle: a package `var`'s initializer refers to itself through vars, functions or methods (Go's initialization order, `go/types` initorder). The cycle's vars become invalid, so no capability or error diagnostic follows from them | checker domain tests (`TestRowGraphDomain`) |
+| A value of one type where another is expected: an assignment, an argument, a return, a field or an element | `var-mismatch`, `argument-mismatch`, `return-mismatch` |
+| A type does not implement an interface, or its method's rows are wider (interface assignability) | `interface-missing-method`, `interface-wider-row` |
+| A keyed literal omits a field that has no zero value; `let x T` of a type with no zero value | `keyed-literal-nondefaultable`, `var-nondefaultable` |
+| A positional literal lists fewer values than the struct's fields | `positional-literal-short` |
+| A struct field's value is a composite literal with no type, keyed or positional: "missing type in composite literal; write S{h: 1}" (`S{…}` past 40 characters or across a line; Go elides a type only for elements and map keys) ([types: structs](types.md#structs) 3) | checker tests (`TestMissingLiteralType`), classf `generic-elided-struct` |
+| A type switch on a non-union; a case that is not a variant of its subject's union; a case already covered by the cases before it (unreachable) | `type-switch-non-union`, `case-not-variant` |
+| An operator on operands it is not defined for; `==` on values that are not comparable or of different types; an untyped constant as the left operand of a shift by a non-constant count, "the left operand of a shift by a non-constant count needs a type; write int(1) << n" ([types: operators](types.md) 1) | `equality-mismatch`, `plus-on-bool`; checker tests (`TestNonConstantShift`) |
+| An untyped integer where a `duration` is expected (only a duration literal is a duration) | `untyped-integer-as-duration` |
+| A constant that overflows its type; an integer literal with a leading zero; an invalid escape; a duration that overflows `int64` nanoseconds. A typed `float32`, `float64`, `complex64` or `complex128` constant holds its type's rounded value, so `1/int(float32(16777217)-float32(16777216))` divides by zero | `constant-overflow`, `probes/decimal-leading-zero.ergo`, `probes/string-escape.ergo`, `probes/duration-overflow.ergo`; checker review tests (M12) |
+| A constant index overflows `int`; a constant index, slice bound or `make` size is negative; a constant index or bound is out of range of an array or a constant string; constant slice bounds are out of order; a constant `make` length exceeds its capacity (Go's rules) | checker review tests (M11) |
+| A constant key appears twice in a map literal, compared after conversion to the key type | checker review tests (N3) |
+| `:=` declares no new name, or repeats a name on its left (reported once per name, and then no "no new names" follows); a name already declared in the block is assigned, not redeclared (Go's rule) | checker domain tests (`TestDefineTargetsDomain`) |
+| `try` or `catch` on an expression that cannot fail; a caught type not in the row or caught twice | `try-infallible`, `catch-arm-not-in-row` |
+| A type argument outside the inferred subset, reported at the call as "cannot infer T; write the type arguments, e.g. Fn[int](…)" with no other diagnostic ([types: generics](types.md) 6: a channel binding Go would refine, a parameter only a constraint determines, a parameter bound only by untyped constants that a constraint mentions (`G(1, s)` for `G[T any, P interface{ M(T) }]`), a generic function as an argument, an inference from the expected result); untyped constants of different kinds for one parameter; a typed argument, a function literal included, that does not unify with its parameter or conflicts with what an earlier argument inferred (`Two(x, y)` with `x` an interface and `y` a struct; Go's "does not match"); a generic function inside parentheses not instantiated there (`(Fn)[int]`); a constraint the argument does not satisfy, written, inferred or given by explicit instantiation `Id[int]`; a parameter used as a type and as a row; a method that would have type parameters of its own; a function with implicit parameters used as a value without a call; a function used as a value inside its own recursive group whose body needs more than its unwritten row, directly or through a function literal, trailing block or go expression that is a value and calls f, reported at f's declaration as "f is used as a value at L:C inside its own recursive group; write its error row: func f(…) error[…]" (or "through the function literal at L:C", the trailing block or the go task that carries the use; or its capability row); an inferred row of a recursive component past the fixpoint's bound (2·(bodies + edges)·(distinct row elements + 1) checks), reported at the function as "cannot infer the error row of f; write it" ([rows](rows.md), Capability rows 6) | `type-argument-not-inferred`, `constraint-unsatisfied`, `parameter-kind-conflict`, `method-type-parameter` |
+| `*T` outside a parameter or receiver type | `borrow-in-field` |
+| A function value whose rows are wider than the function type's, such as a fallible function where an infallible type is expected | `fallible-function-value` |
+| A wire literal outside `with` | `wire-literal-outside-with` |
+| An interface or capability method writes a capability row | `interface-method-needs` |
+| `return`, `break` or `continue` crosses a `with` block, a block argument or a bare block | `return-in-with-block` |
+| An error type declares a method named `Error` | `error-method-on-error-type` |
+| A named wire whose build can reach itself: a `with` of the wire in its providers, through a function, a method or a capability provider that enters it, or an embedding; entries of one named wire whose providers use each other's capabilities, so none can be built first | `wire-cycle`, `probes/cyclic-wire.ergo`, `probes/wire-method-cycle.ergo`; checker review tests (M14) |
+| A machine's state or signal type is not a union; its initial value is not a value of the state type; its step is not a function from the state and signal types to `Decision[S, O]` | runtime.md, Machines and actors 1 |
+| An argument or an operand has no value; a no-value function returns a value | `probes/void-argument.ergo`, `probes/void-fallible-return-value.ergo` |
+| Others: a wrong argument or result count; a call of a non-function; a non-`bool` condition; a field set twice; an assignment to a package `var` (immutable) or to a non-addressable value, such as a field of a map element `m[k].f = v` (a map element itself is assignable, not addressable); a label defined twice; `break` or `continue` outside a loop, switch or select; `with` without a block; builtins called with the wrong arguments | the checker's messages |
 
-### S109: outside the subset or reserved
+### S109: owned by another ticket
 
-| Rule | Fixture |
+The checker refuses a construct that another ticket owns, and names it, instead of checking it partly.
+
+| Rule | Owner |
 | --- | --- |
-| `return` inside a `with` or `timeout.After` block | `probes/with-return.ergo`, `with-nonlocal-return` |
-| A block that does not end with an expression | `probes/empty-block.ergo`, `timeout-statement-last` |
-| A wire that needs itself, directly or through provider methods | `probes/cyclic-wire.ergo`, `wire-method-cycle` |
-| An operator other than `==` and `+`, or `==` on a type other than `string`, `int64` and `bool`, including `duration` (README Gaps 10, 26) | `probes/operators.ergo` |
-| A method call on a value, such as `S{}.M()`, or on an interface-typed parameter (README Gaps 27, 29) | the checker's "unsupported call" message |
-| A `needs` clause on a capability method or method; a capability call in a provider method | `probes/capability-method-needs.ergo` |
-| `main` is called, takes parameters, returns a value or is missing | `probes/main-call.ergo`, `main-parameter` |
-| A source name is reserved by the prototype's Go output: Go's predeclared names, `rt`, `time`, `fmt`, `init`, `Error`, `timeout`, `duration`, names with `__` or ending in `_` | `probes/predeclared-error.ergo`, `predeclared-local`, `predeclared-panic`, `function-reserved`, `init-name`, `timeout-capability`, `duration-type-name`, `wire-predeclared-name`, `capability-parameter-name` |
-| A field or method name collides with generated names (`Error`, marker methods) | `probes/marker-field.ergo`, `marker-method`, `error-method` |
-| A wire entry that is not a provider literal; an unsupported expression or call | the checker's messages |
-| A parsed form the prototype checker does not implement, refused by the bridge (`internal/sketch/proto/convert.go`) before the checker runs, with the message "X is outside the implemented subset": a top-level `let` that is not a wire, a local `let` with a type, several names or no value, type-parameter lists and instantiation, `machine` types, `extern` declarations, aliased and `import go` imports, unnamed parameters, tuple results, pointers, `=` and assignment operators, `for`, `break`, `continue`, a `match` on values, a `match` on a tuple, a type `match` without an `as` binding or with two binding names, `case _`, rune literals, unary operators, index and slice expressions, function literals, a trailing block on a call other than `with` and `timeout.After`, elided or qualified composite-literal types, a `catch` arm that is not one expression, a wire value's `provides` and `needs` (the message names #196, which checks them), an embedded wire, `replace`, a wire entry with several or qualified keys. A refused program never reaches the checker, so no part of it is dropped | `internal/sketch/proto/bridge_test.go`, `TestBridgeRefusesOutsideTheSubset` |
-
-The S109 rules are prototype limits, not language rules (README Gaps 4, 6, 7, 10, 16, 17, 26, 27, 29, 31). The main compiler replaces each with the designed rule or with mangled output.
+| A wire entry whose provider is a function (a constructor entry), such as `Orders: OpenOrders` | [#37](https://github.com/cevr/ergo/issues/37), wire constructors (`wire-constructor-is-37`) |
+| A wire header, `wire provides A, B { … }` or `wire needs C, D { … }` (#217) | [#196](https://github.com/cevr/ergo/issues/196) stage b, the wire header ([rows.md](rows.md#wire) rule 8; README Gap 33; `wire-exposure-hides-entry`) |
+| A `with` argument that is not a wire: a context value | G1, [runtime.md](runtime.md) |
+| `import go net/url` | [#202](https://github.com/cevr/ergo/issues/202), Go imports |
+| A dot import | [#206](https://github.com/cevr/ergo/issues/206), the standard library |
+| At build only: any refusal of the prototype bridge, checker or emitter, with the message "the prototype emitter cannot lower this program yet (#50): CODE message" at its position | [#50](https://github.com/cevr/ergo/issues/50) |
 
 ### S110: unused
 
-- A local is declared and never read (`sketch/sketch_test.go`, "an unused variable"; `probes/same-local-as-cap.ergo`).
-- An `as` binding of a type `match` is read in no case.
-- An expression statement is not a call, `try` or `catch` (`probes/unused-expression.ergo`, `temp-collision`).
+- A local is declared and never read (`unused-local`; `probes/same-local-as-cap.ergo`).
+- A type-switch binding is read in no case (`unused-type-switch-binding`). A `catch` binding is read in no arm.
+- An expression statement is not a call, a receive, `try` or `catch` (`unused-expression`, `probes/unused-expression.ergo`).
+- An import or a label is not used (Go's rules).
 
-*Prior art:* Go rejects unused locals and unused expression values; Rust and Gleam warn instead. Ergo keeps Go's errors because its output is Go and because an unread value usually hides a dropped result.
+*Prior art:* Go rejects unused locals, imports and unused expression values; Rust and Gleam warn instead. Ergo keeps Go's errors because its output is Go and because an unread value usually hides a dropped result.
+
+### S111: duplicate wire entry
+
+- A wire has two entries for one capability, and neither is a `replace` of an embedded entry (`duplicate-wire-entry`; README Gap 28).
+- Two embedded wires bind one capability, and no `replace` entry of the embedding wire overrides it (rows.md, Wire 7).
+- A wire whose embedding graph needs more than the package's fixed wire budget to check: "this wire's embedding graph is too large to check for duplicate entries; split it". The budget is 128 × (wire declarations and literals + entries + embeddings + capability names written in wire keys and `needs` rows + 1) steps of repeatable work (set nodes, union elements, probes against a summary, sorts), shared by every wire of the package and fixed by the source alone; each such step is charged before it runs, and the pass's single-pass reading of the wire source is at most 12 × the same size. The S111 is at the wire whose summary or body was being checked when the next step would pass the budget, or at each inline wire of the declarations of one name, and no other wire diagnostic follows from it. Neither the verdict nor the place of the S111 depends on the order of the declarations ([rows: wire](rows.md#wire) 5; checker tests `TestWireBudget`, `TestWireBudgetRefusal`, `TestWireBudgetPrefixes`, `TestWireBudgetOrder`).
+
+*Prior art:* Google Wire rejects two providers of one type; Effect's `Layer.merge` keeps the last silently, which Ergo refuses. For the budget: TypeScript stops instantiation past a fixed count (TS2589), and rustc refuses past `recursion_limit` (default 128). For the order: Elixir's typer sorts definitions before its recursive traversal (module/types.ex).
+
+### S112: resource map key
+
+Designed: a map's key type must not be a resource in v0 ([resources: containers](resources.md#containers), README Gap 32). It is emitted when [#197](https://github.com/cevr/ergo/issues/197) implements resources.
+
+### S113: entry and test functions
+
+- `main` takes parameters (`main-parameter`) or type parameters.
+- `main` returns a value; only an error row is allowed, as Go's `main` returns nothing (`main-value-result`; README Gap 4).
+- `main` is called (`main-called`, `probes/main-call.ergo`); only the host calls it.
+- `main` is used as a value, such as `run := main` or `call(main)`: a value would let ordinary code call it.
+
+*Prior art:* Go's `func main()` takes nothing and returns nothing (Go still allows a call of `main`; Ergo refuses it, so the host is its only caller); Gleam's `main` takes no arguments.

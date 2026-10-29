@@ -1,0 +1,72 @@
+package demo
+
+func sum(xs []int64) int64 {
+	total := int64(0)
+	for _, x := range xs {
+		if x < 0 {
+			continue
+		}
+		total += x
+	}
+	return total
+}
+
+func count(n int) int {
+	c := 0
+	for i := 0; i < n; i++ {
+		c++
+	}
+	for range n {
+		c--
+	}
+	return c
+}
+
+func classify(n int64) string {
+	switch {
+	case n < 0:
+		return "neg"
+	case n == 0:
+		return "zero"
+	default:
+		return "pos"
+	}
+}
+
+func keys(m map[string]int64) []string {
+	out := []string{}
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+func main() needs Console {
+	var label string = classify(3)
+	m := map[string]int64{"a": 1}
+	m["b"] = 2
+	delete(m, "a")
+	xs := []int64{1, -2, 3}
+	ch := make(chan int64, 1)
+	ch <- sum(xs)
+	got := <-ch
+	select {
+	case v := <-ch:
+		Console.Println(v)
+	default:
+		Console.Println("empty")
+	}
+outer:
+	for i := 0; i < 3; i++ {
+		for j := 0; j < 3; j++ {
+			if j == 1 {
+				continue outer
+			}
+			if i == 2 {
+				break outer
+			}
+		}
+	}
+	defer Console.Println("done")
+	Console.Println(label, len(keys(m)), got, count(2), len(xs), cap(xs))
+}

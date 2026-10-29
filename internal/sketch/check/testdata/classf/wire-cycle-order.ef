@@ -1,0 +1,7 @@
+package A
+type Invoice interface{A()}
+wire Invoices{e // want S108
+Invoice=0} // want S106
+wire App{Invoices} // want S108
+wire e{App} // want S108
+func A()

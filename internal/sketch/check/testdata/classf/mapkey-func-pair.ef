@@ -1,0 +1,6 @@
+package p
+type Bang struct{}
+func mark() error[Bang]
+func a() { m := map[any]int{b: 1}; _ = m; try mark() }
+func b() { try a() } // want S108
+func F() error[Bang] { try b() } // want S108

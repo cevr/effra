@@ -1,0 +1,11 @@
+package demo
+
+type Fault struct{}
+
+func fallible() error[Fault] { return Fault{} }
+
+func Identity(v Fault) Fault {
+	return v // want S101
+}
+
+func main() {}

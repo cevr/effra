@@ -1,0 +1,7 @@
+package p
+type Bang struct{}
+type Runner struct{}
+func mark() error[Bang]
+func (Runner) Each(f func() error[Bang]) error[Bang] { return f() }
+func a() error[Bang] { try mark(); return Runner{}.Each(func() { return a() }) }
+func F() error[Bang] { return a() }

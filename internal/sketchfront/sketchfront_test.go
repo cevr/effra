@@ -17,7 +17,7 @@ import (
 // report's position index.
 func utf16Column(text string) int { return len(utf16.Encode([]rune(text))) }
 
-func TestSketchCheckReportsPrototypeDiagnostics(t *testing.T) {
+func TestSketchCheckReportsLocatedDiagnostics(t *testing.T) {
 	cases := []struct {
 		name, source, code, at, token string
 	}{
@@ -173,5 +173,36 @@ func TestSketchBuildRunsProgram(t *testing.T) {
 	// An analysis with diagnostics never builds.
 	if err := Build(Check("func main() {}\n$"), "bad.ergo", filepath.Join(t.TempDir(), "bad"), &stderr); err == nil {
 		t.Fatal("an analysis with diagnostics built")
+	}
+}
+
+// TestSketchBuildRefusesWhatTheEmitterCannotLower: the checker accepts a
+// program with a for loop, and the prototype emitter cannot lower it, so
+// Build refuses it with S109 naming #50 and writes nothing (spec D12). A
+// checker diagnostic refuses the build with its own code.
+func TestSketchBuildRefusesWhatTheEmitterCannotLower(t *testing.T) {
+	source := "package demo\n\nfunc main() needs Console {\n\tfor i := 0; i < 3; i++ {\n\t\tConsole.Println(i)\n\t}\n}\n"
+	analysis := Check(source)
+	if len(analysis.Diagnostics) != 0 {
+		t.Fatalf("checker diagnostics: %+v", analysis.Diagnostics)
+	}
+	output := filepath.Join(t.TempDir(), "program")
+	var stderr bytes.Buffer
+	err := Build(analysis, "main.ef", output, &stderr)
+	var refusal *BuildError
+	if !errors.As(err, &refusal) || len(refusal.Diagnostics) == 0 {
+		t.Fatalf("build gave %v, want a BuildError", err)
+	}
+	d := refusal.Diagnostics[0]
+	if d.Code != "S109" || !strings.Contains(d.Message, "#50") || d.Span.Line == 0 {
+		t.Fatalf("refusal %+v, want a located S109 naming #50", d)
+	}
+	if _, statErr := os.Stat(output); statErr == nil {
+		t.Fatal("a refused build wrote its output")
+	}
+	bad := Check("package demo\n\nfunc main() needs Console {\n\tConsole.Println(missing)\n}\n")
+	err = Build(bad, "main.ef", output, &stderr)
+	if !errors.As(err, &refusal) || refusal.Diagnostics[0].Code != "S104" || !strings.HasPrefix(err.Error(), "S104 at 4:18: ") {
+		t.Fatalf("build of a checker error gave %v", err)
 	}
 }

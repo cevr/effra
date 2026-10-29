@@ -1,0 +1,11 @@
+package demo
+
+type Fault struct{}
+
+func check() (bool, error[Fault]) { return true }
+
+func main() needs Console {
+	if check() { // want S105
+		Console.Println("yes")
+	}
+}

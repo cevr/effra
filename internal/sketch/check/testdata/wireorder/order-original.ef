@@ -1,0 +1,619 @@
+package p
+type P struct{}
+func (P) M() {}
+type C0 interface{ M() }
+type C1 interface{ M() }
+type C2 interface{ M() }
+type C3 interface{ M() }
+type C4 interface{ M() }
+type C5 interface{ M() }
+type C6 interface{ M() }
+type C7 interface{ M() }
+type C8 interface{ M() }
+type C9 interface{ M() }
+type C10 interface{ M() }
+type C11 interface{ M() }
+type C12 interface{ M() }
+type C13 interface{ M() }
+type C14 interface{ M() }
+type C15 interface{ M() }
+type C16 interface{ M() }
+type C17 interface{ M() }
+type C18 interface{ M() }
+type C19 interface{ M() }
+type C20 interface{ M() }
+type C21 interface{ M() }
+type C22 interface{ M() }
+type C23 interface{ M() }
+type C24 interface{ M() }
+type C25 interface{ M() }
+type C26 interface{ M() }
+type C27 interface{ M() }
+type C28 interface{ M() }
+type C29 interface{ M() }
+type C30 interface{ M() }
+type C31 interface{ M() }
+type C32 interface{ M() }
+type C33 interface{ M() }
+type C34 interface{ M() }
+type C35 interface{ M() }
+type C36 interface{ M() }
+type C37 interface{ M() }
+type C38 interface{ M() }
+type C39 interface{ M() }
+type C40 interface{ M() }
+type C41 interface{ M() }
+type C42 interface{ M() }
+type C43 interface{ M() }
+type C44 interface{ M() }
+type C45 interface{ M() }
+type C46 interface{ M() }
+type C47 interface{ M() }
+type C48 interface{ M() }
+type C49 interface{ M() }
+type C50 interface{ M() }
+type C51 interface{ M() }
+type C52 interface{ M() }
+type C53 interface{ M() }
+type C54 interface{ M() }
+type C55 interface{ M() }
+type C56 interface{ M() }
+type C57 interface{ M() }
+type C58 interface{ M() }
+type C59 interface{ M() }
+type C60 interface{ M() }
+type C61 interface{ M() }
+type C62 interface{ M() }
+type C63 interface{ M() }
+type C64 interface{ M() }
+type C65 interface{ M() }
+type C66 interface{ M() }
+type C67 interface{ M() }
+type C68 interface{ M() }
+type C69 interface{ M() }
+type C70 interface{ M() }
+type C71 interface{ M() }
+type C72 interface{ M() }
+type C73 interface{ M() }
+type C74 interface{ M() }
+type C75 interface{ M() }
+type C76 interface{ M() }
+type C77 interface{ M() }
+type C78 interface{ M() }
+type C79 interface{ M() }
+type C80 interface{ M() }
+type C81 interface{ M() }
+type C82 interface{ M() }
+type C83 interface{ M() }
+type C84 interface{ M() }
+type C85 interface{ M() }
+type C86 interface{ M() }
+type C87 interface{ M() }
+wire A0 {
+	C0 = P{}
+}
+wire B0 {
+	C44 = P{}
+}
+wire A1 {
+	C1 = P{}
+	A0
+}
+wire B1 {
+	C45 = P{}
+	B0
+}
+wire A2 {
+	C2 = P{}
+	A1
+}
+wire B2 {
+	C46 = P{}
+	B1
+}
+wire A3 {
+	C3 = P{}
+	A2
+}
+wire B3 {
+	C47 = P{}
+	B2
+}
+wire A4 {
+	C4 = P{}
+	A3
+}
+wire B4 {
+	C48 = P{}
+	B3
+}
+wire A5 {
+	C5 = P{}
+	A4
+}
+wire B5 {
+	C49 = P{}
+	B4
+}
+wire A6 {
+	C6 = P{}
+	A5
+}
+wire B6 {
+	C50 = P{}
+	B5
+}
+wire A7 {
+	C7 = P{}
+	A6
+}
+wire B7 {
+	C51 = P{}
+	B6
+}
+wire A8 {
+	C8 = P{}
+	A7
+}
+wire B8 {
+	C52 = P{}
+	B7
+}
+wire A9 {
+	C9 = P{}
+	A8
+}
+wire B9 {
+	C53 = P{}
+	B8
+}
+wire A10 {
+	C10 = P{}
+	A9
+}
+wire B10 {
+	C54 = P{}
+	B9
+}
+wire A11 {
+	C11 = P{}
+	A10
+}
+wire B11 {
+	C55 = P{}
+	B10
+}
+wire A12 {
+	C12 = P{}
+	A11
+}
+wire B12 {
+	C56 = P{}
+	B11
+}
+wire A13 {
+	C13 = P{}
+	A12
+}
+wire B13 {
+	C57 = P{}
+	B12
+}
+wire A14 {
+	C14 = P{}
+	A13
+}
+wire B14 {
+	C58 = P{}
+	B13
+}
+wire A15 {
+	C15 = P{}
+	A14
+}
+wire B15 {
+	C59 = P{}
+	B14
+}
+wire A16 {
+	C16 = P{}
+	A15
+}
+wire B16 {
+	C60 = P{}
+	B15
+}
+wire A17 {
+	C17 = P{}
+	A16
+}
+wire B17 {
+	C61 = P{}
+	B16
+}
+wire A18 {
+	C18 = P{}
+	A17
+}
+wire B18 {
+	C62 = P{}
+	B17
+}
+wire A19 {
+	C19 = P{}
+	A18
+}
+wire B19 {
+	C63 = P{}
+	B18
+}
+wire A20 {
+	C20 = P{}
+	A19
+}
+wire B20 {
+	C64 = P{}
+	B19
+}
+wire A21 {
+	C21 = P{}
+	A20
+}
+wire B21 {
+	C65 = P{}
+	B20
+}
+wire A22 {
+	C22 = P{}
+	A21
+}
+wire B22 {
+	C66 = P{}
+	B21
+}
+wire A23 {
+	C23 = P{}
+	A22
+}
+wire B23 {
+	C67 = P{}
+	B22
+}
+wire A24 {
+	C24 = P{}
+	A23
+}
+wire B24 {
+	C68 = P{}
+	B23
+}
+wire A25 {
+	C25 = P{}
+	A24
+}
+wire B25 {
+	C69 = P{}
+	B24
+}
+wire A26 {
+	C26 = P{}
+	A25
+}
+wire B26 {
+	C70 = P{}
+	B25
+}
+wire A27 {
+	C27 = P{}
+	A26
+}
+wire B27 {
+	C71 = P{}
+	B26
+}
+wire A28 {
+	C28 = P{}
+	A27
+}
+wire B28 {
+	C72 = P{}
+	B27
+}
+wire A29 {
+	C29 = P{}
+	A28
+}
+wire B29 {
+	C73 = P{}
+	B28
+}
+wire A30 {
+	C30 = P{}
+	A29
+}
+wire B30 {
+	C74 = P{}
+	B29
+}
+wire A31 {
+	C31 = P{}
+	A30
+}
+wire B31 {
+	C75 = P{}
+	B30
+}
+wire A32 {
+	C32 = P{}
+	A31
+}
+wire B32 {
+	C76 = P{}
+	B31
+}
+wire A33 {
+	C33 = P{}
+	A32
+}
+wire B33 {
+	C77 = P{}
+	B32
+}
+wire A34 {
+	C34 = P{}
+	A33
+}
+wire B34 {
+	C78 = P{}
+	B33
+}
+wire A35 {
+	C35 = P{}
+	A34
+}
+wire B35 {
+	C79 = P{}
+	B34
+}
+wire A36 {
+	C36 = P{}
+	A35
+}
+wire B36 {
+	C80 = P{}
+	B35
+}
+wire A37 {
+	C37 = P{}
+	A36
+}
+wire B37 {
+	C81 = P{}
+	B36
+}
+wire A38 {
+	C38 = P{}
+	A37
+}
+wire B38 {
+	C82 = P{}
+	B37
+}
+wire A39 {
+	C39 = P{}
+	A38
+}
+wire B39 {
+	C83 = P{}
+	B38
+}
+wire A40 {
+	C40 = P{}
+	A39
+}
+wire B40 {
+	C84 = P{}
+	B39
+}
+wire A41 {
+	C41 = P{}
+	A40
+}
+wire B41 {
+	C85 = P{}
+	B40
+}
+wire A42 {
+	C42 = P{}
+	A41
+}
+wire B42 {
+	C86 = P{}
+	B41
+}
+wire A43 {
+	C43 = P{}
+	A42
+}
+wire B43 {
+	C87 = P{}
+	B42
+}
+wire W0 {
+	A0
+	B0
+}
+wire W1 {
+	A1
+	B1
+}
+wire W2 {
+	A2
+	B2
+}
+wire W3 {
+	A3
+	B3
+}
+wire W4 {
+	A4
+	B4
+}
+wire W5 {
+	A5
+	B5
+}
+wire W6 {
+	A6
+	B6
+}
+wire W7 {
+	A7
+	B7
+}
+wire W8 {
+	A8
+	B8
+}
+wire W9 {
+	A9
+	B9
+}
+wire W10 {
+	A10
+	B10
+}
+wire W11 {
+	A11
+	B11
+}
+wire W12 {
+	A12
+	B12
+}
+wire W13 {
+	A13
+	B13
+}
+wire W14 {
+	A14
+	B14
+}
+wire W15 {
+	A15
+	B15
+}
+wire W16 {
+	A16
+	B16
+}
+wire W17 {
+	A17
+	B17
+}
+wire W18 {
+	A18
+	B18
+}
+wire W19 {
+	A19
+	B19
+}
+wire W20 {
+	A20
+	B20
+}
+wire W21 {
+	A21
+	B21
+}
+wire W22 {
+	A22
+	B22
+}
+wire W23 {
+	A23
+	B23
+}
+wire W24 {
+	A24
+	B24
+}
+wire W25 {
+	A25
+	B25
+}
+wire W26 {
+	A26
+	B26
+}
+wire W27 {
+	A27
+	B27
+}
+wire W28 {
+	A28
+	B28
+}
+wire W29 {
+	A29
+	B29
+}
+wire W30 {
+	A30
+	B30
+}
+wire W31 {
+	A31
+	B31
+}
+wire W32 {
+	A32
+	B32
+}
+wire W33 {
+	A33
+	B33
+}
+wire W34 {
+	A34
+	B34
+}
+wire W35 {
+	A35
+	B35
+}
+wire W36 {
+	A36
+	B36
+}
+wire W37 {
+	A37
+	B37
+}
+wire W38 {
+	A38
+	B38
+}
+wire W39 {
+	A39
+	B39
+}
+wire W40 {
+	A40
+	B40
+}
+wire W41 {
+	A41
+	B41
+}
+wire W42 {
+	A42
+	B42
+}
+wire W43 {
+	A43
+	B43
+}
+func F() { with(W43) { C0.M() } }
+

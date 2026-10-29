@@ -1,0 +1,6 @@
+package demo
+
+func main() needs Console {
+	var b int8 = 300 // want S108
+	Console.Println(b)
+}

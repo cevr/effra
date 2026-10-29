@@ -1,0 +1,236 @@
+package check_test
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+
+	"ergo.local/prototype/internal/sketch/check"
+)
+
+// sharedTuple writes the reviewer's round-7 TestR7ReviewGenericTuple
+// shape: V[T, Q], n structs Ai, a union U[T] of V[T, A0] … V[T, A(n-1)],
+// n subjects xi of type U[Ai], and one tuple case (V[A0, A(n-1)], …,
+// V[A(n-1), A(n-1)]) with default and underscore bindings. Every variant
+// of every subject shares the origin V. With noSwitch, the function only
+// returns (the control).
+func sharedTuple(n int, noSwitch bool) string {
+	var b strings.Builder
+	b.WriteString("package main\ntype V[T, Q any] struct{}\n")
+	for i := range n {
+		fmt.Fprintf(&b, "type A%d struct{}\n", i)
+	}
+	b.WriteString("type U[T any] interface{")
+	for i := range n {
+		if i > 0 {
+			b.WriteString(" | ")
+		}
+		fmt.Fprintf(&b, "V[T, A%d]", i)
+	}
+	b.WriteString("}\nfunc F(")
+	for i := range n {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "x%d U[A%d]", i, i)
+	}
+	b.WriteString(") int {\n")
+	if !noSwitch {
+		b.WriteString("\tswitch ")
+		for i := range n {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString("_")
+		}
+		b.WriteString(" := ")
+		for i := range n {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "x%d.(type)", i)
+		}
+		b.WriteString(" {\n\tcase (")
+		for i := range n {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "V[A%d, A%d]", i, n-1)
+		}
+		b.WriteString("):\n\t\treturn 1\n\tdefault:\n\t\treturn 0\n\t}\n")
+	}
+	b.WriteString("\treturn 0\n}\n")
+	return b.String()
+}
+
+// sharedCases writes one subject whose n variants share one origin, and a
+// switch with a case for each variant and default. The variants are
+// V[Ai] of a plain union (the reviewer's TestR7ReviewSharedOrigin), V[B,
+// Ai] of an instance U[B] of a generic union, or V[func() Ai], whose type
+// arguments are signatures.
+func sharedCases(n int, shape string, noSwitch bool) string {
+	var b strings.Builder
+	b.WriteString("package main\n")
+	variant := func(i int) string { return fmt.Sprintf("V[A%d]", i) }
+	param := "U"
+	switch shape {
+	case "plain":
+		b.WriteString("type V[T any] struct{}\n")
+	case "generic":
+		b.WriteString("type V[T, Q any] struct{}\ntype B struct{}\n")
+		variant = func(i int) string { return fmt.Sprintf("V[T, A%d]", i) }
+		param = "U[B]"
+	case "signature":
+		b.WriteString("type V[T any] struct{}\n")
+		variant = func(i int) string { return fmt.Sprintf("V[func() A%d]", i) }
+	}
+	for i := range n {
+		fmt.Fprintf(&b, "type A%d struct{}\n", i)
+	}
+	if shape == "generic" {
+		b.WriteString("type U[T any] interface{")
+	} else {
+		b.WriteString("type U interface{")
+	}
+	for i := range n {
+		if i > 0 {
+			b.WriteString(" | ")
+		}
+		b.WriteString(variant(i))
+	}
+	fmt.Fprintf(&b, "}\nfunc F(x %s) int {\n", param)
+	if !noSwitch {
+		b.WriteString("\tswitch x.(type) {\n")
+		for i := range n {
+			c := variant(i)
+			if shape == "generic" {
+				c = fmt.Sprintf("V[B, A%d]", i)
+			}
+			fmt.Fprintf(&b, "\tcase %s:\n\t\treturn %d\n", c, i)
+		}
+		b.WriteString("\tdefault:\n\t\treturn -1\n\t}\n")
+	}
+	b.WriteString("\treturn 0\n}\n")
+	return b.String()
+}
+
+// TestVariantIdentity: the variant index resolves a case to the variant
+// identical to it, through type arguments bound by an instance, nested
+// constructors and signatures, and names every other case "not a variant"
+// (rows.md, Totality 1 and 5).
+func TestVariantIdentity(t *testing.T) {
+	const decls = `type A struct{}
+type B struct{}
+type C struct{}
+type V[T any] struct{}
+type W[T, Q any] struct{}
+type P interface{ V[A] | V[B] }
+type G[T any] interface{ W[T, A] | W[T, []T] | W[A, T] }
+type S interface{ V[func() A] | V[func(A) []B] | V[map[A][]B] }
+`
+	cases := []struct {
+		name, body, want string
+	}{
+		{"plain-total", `func F(x P) int { switch x.(type) { case V[A]: return 1
+	case V[B]: return 2 }
+	return 0 }`, ""},
+		{"plain-missing", `func F(x P) int { switch x.(type) { case V[A]: return 1 }
+	return 0 }`, "S103"},
+		{"plain-not-variant", `func F(x P) int { switch x.(type) { case V[C]: return 1
+	default: return 0 } }`, "is not a variant"},
+		{"generic-total", `func F(x G[B]) int { switch x.(type) { case W[B, A]: return 1
+	case W[B, []B]: return 2
+	case W[A, B]: return 3 }
+	return 0 }`, ""},
+		{"generic-bound-mismatch", `func F(x G[B]) int { switch x.(type) { case W[B, []A]: return 1
+	default: return 0 } }`, "is not a variant"},
+		// G[A] lists W[A, A] twice (W[T, A] and W[A, T]): both index paths
+		// reach the case, which names the first, as before the index; the
+		// second stays unhandled.
+		{"generic-collapsed", `func F(x G[A]) int { switch x.(type) { case W[A, A]: return 1
+	case W[A, []A]: return 2 }
+	return 0 }`, "S103"},
+		{"generic-collapsed-default", `func F(x G[A]) int { switch x.(type) { case W[A, A]: return 1
+	case W[A, []A]: return 2
+	default: return 0 } }`, ""},
+		{"signature-total", `func F(x S) int { switch x.(type) { case V[func() A]: return 1
+	case V[func(A) []B]: return 2
+	case V[map[A][]B]: return 3 }
+	return 0 }`, ""},
+		{"signature-not-variant", `func F(x S) int { switch x.(type) { case V[func() B]: return 1
+	default: return 0 } }`, "is not a variant"},
+		{"slice-not-variant", `func F(x S) int { switch x.(type) { case V[map[A]B]: return 1
+	default: return 0 } }`, "is not a variant"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, d := check.CheckSource("package main\n" + decls + tc.body + "\n")
+			got := describe(d)
+			switch {
+			case tc.want == "" && len(d) > 0:
+				t.Fatalf("want valid, got %s", got)
+			case tc.want != "" && (len(d) != 1 || !strings.Contains(got, tc.want)):
+				t.Fatalf("want one %q, got %s", tc.want, got)
+			}
+		})
+	}
+}
+
+// variantWork checks src and returns its variant operations and generic
+// instances.
+func variantWork(t *testing.T, src string) (int, int) {
+	t.Helper()
+	ops, d := check.VariantOps(src)
+	for _, x := range d {
+		if x.Code != check.CodeNotTotal {
+			t.Fatalf("diagnostics %s", describe(d))
+		}
+	}
+	inst, _ := check.InstancesMade(src)
+	return ops, inst
+}
+
+// TestSharedOriginLinear: a case resolves its variant by instance
+// identity, so the variant operations and the generic instances a switch
+// adds grow linearly with the source, for variants that share one origin
+// across subjects, cases and type arguments (round-7 M4; D16 as amended
+// in round 8: nothing before the solvers' counters is superlinear). Round
+// 7 took n × k operations and instances here (3720 and 58080 at n=k=60 and
+// 240 for the tuple; 502500 and 8010000 operations for the plain union at
+// n=1000 and 4000). Counted, not timed: each count is at most a constant
+// times the source size, and the switch's instances at most a constant per
+// subject or case over the no-switch control's.
+func TestSharedOriginLinear(t *testing.T) {
+	type shape struct {
+		name  string
+		sizes []int
+		src   func(n int, noSwitch bool) string
+	}
+	for _, s := range []shape{
+		{"tuple", []int{60, 240}, sharedTuple},
+		{"plain", []int{1000, 4000}, func(n int, ns bool) string { return sharedCases(n, "plain", ns) }},
+		{"generic", []int{1000, 4000}, func(n int, ns bool) string { return sharedCases(n, "generic", ns) }},
+		{"signature", []int{1000, 4000}, func(n int, ns bool) string { return sharedCases(n, "signature", ns) }},
+	} {
+		t.Run(s.name, func(t *testing.T) {
+			var prevN, prevOps int
+			for _, n := range s.sizes {
+				src := s.src(n, false)
+				ops, inst := variantWork(t, src)
+				_, base := variantWork(t, s.src(n, true))
+				t.Logf("n=%d bytes=%d variant ops=%d instances=%d control instances=%d", n, len(src), ops, inst, base)
+				if ops > 16*n {
+					t.Errorf("n=%d: %d variant operations, more than 16 per subject or case: superlinear", n, ops)
+				}
+				if inst-base > 3*n {
+					t.Errorf("n=%d: the switch adds %d instances, more than 3 per subject or case: superlinear", n, inst-base)
+				}
+				// Four times the size, at most about four times the work.
+				if prevN > 0 && ops*prevN*10 > prevOps*n*11 {
+					t.Errorf("n=%d→%d: variant operations grow from %d to %d, faster than the source", prevN, n, prevOps, ops)
+				}
+				prevN, prevOps = n, ops
+			}
+		})
+	}
+}

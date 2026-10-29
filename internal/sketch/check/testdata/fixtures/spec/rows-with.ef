@@ -1,0 +1,45 @@
+package demo
+
+type OrderNotFound struct{ ID string }
+type GatewayDown struct{}
+
+type Order struct {
+	ID    string
+	Total int64
+}
+
+type Orders interface {
+	Find(id string) (Order, error[OrderNotFound])
+}
+
+type Gateway interface {
+	Charge(order Order) (string, error[GatewayDown])
+}
+
+type MemoryOrders struct{}
+
+func (MemoryOrders) Find(id string) (Order, error[OrderNotFound]) {
+	return Order{ID: id, Total: 1999}
+}
+
+type FakeGateway struct{ AuthID string }
+
+func (g FakeGateway) Charge(order Order) (string, error[GatewayDown]) {
+	return g.AuthID
+}
+
+wire Live {
+	Orders  = MemoryOrders{}
+	Gateway = FakeGateway{AuthID: "auth-7"}
+}
+
+func checkout(id string) string needs Orders, Gateway { return id }
+func report(id string) string needs Orders            { return id }
+
+func demo(id string) needs Console {
+value := with(Live) { checkout(id) }
+local := with(wire{ Orders = MemoryOrders{} }) { report(id) }
+	Console.Println(value, local)
+}
+
+func main() {}

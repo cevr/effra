@@ -1,0 +1,6 @@
+package p
+type Bang struct{}
+func mark() error[Bang]
+func a() {go b();return Bang{}}
+func b() {return a()}
+func F() error[Bang] {return b()}

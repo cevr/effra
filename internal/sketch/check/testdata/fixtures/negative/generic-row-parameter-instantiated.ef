@@ -1,0 +1,12 @@
+package demo
+
+type Fault struct{}
+
+func fail() error[Fault] { return Fault{} }
+func apply(f func() error[E]) error[E] { return f() }
+
+func Run() {
+	apply(fail) // want S105
+}
+
+func main() {}

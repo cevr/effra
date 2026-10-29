@@ -1,11 +1,14 @@
 // Package sketchfront is Ergo's one front end: a thin adapter
-// that parses with internal/sketch/syntax, checks and emits through the
-// prototype checker and emitter behind the bridge (internal/sketch/proto),
+// that parses with internal/sketch/syntax, checks with internal/sketch/check,
 // and formats with internal/sketch/format. It maps every diagnostic to a
 // report diagnostic with a UTF-8 byte span, so every surface projects it
-// with the shared report code, and it builds a checked program to a native
-// executable through the prototype's direct-Go emitter. CLI, MCP and LSP
-// format 2026 sources only through Format, so they report one identity.
+// with the shared report code. The CLI checks and formats sources only
+// through Check and Format, so it reports one identity.
+//
+// Build lowers a checked program through the prototype's bridge, checker and
+// direct-Go emitter (internal/sketch/proto) until #50 lowers from the
+// checker's output: a program the checker accepts and the prototype cannot
+// lower is refused with S109 naming #50, and nothing is written (spec D12).
 //
 // No runtime or generated-code package may import it.
 package sketchfront
@@ -21,6 +24,7 @@ import (
 
 	"ergo.local/prototype/internal/receipt"
 	"ergo.local/prototype/internal/report"
+	"ergo.local/prototype/internal/sketch/check"
 	"ergo.local/prototype/internal/sketch/format"
 	"ergo.local/prototype/internal/sketch/proto"
 	"ergo.local/prototype/internal/sketch/syntax"
@@ -28,35 +32,74 @@ import (
 
 // Analysis is the 2026 front-end's outcome for one source text.
 type Analysis struct {
-	// Diagnostics are the front-end's diagnostics in source order, with
-	// UTF-8 byte spans into the analysed text.
+	// Diagnostics are the checker's diagnostics in source order, with UTF-8
+	// byte spans into the analysed text.
 	Diagnostics []report.Diagnostic
-	checked     *proto.Checked
+	source      string
+	file        *syntax.File
 }
 
-// Check parses source, converts it through the bridge and checks it with
-// the prototype checker. A syntax error is the only diagnostic; a bridge
-// refusal (S109) stops before the checker, which never sees a partial
-// program.
+// Check parses source and checks it as one package with the 2026 checker.
+// A syntax error is the only diagnostic of a source that does not parse.
 func Check(source string) Analysis {
 	file, err := syntax.Parse(source)
 	if err != nil {
-		return Analysis{Diagnostics: []report.Diagnostic{syntaxDiagnostic(err)}}
+		return Analysis{Diagnostics: []report.Diagnostic{syntaxDiagnostic(err)}, source: source}
 	}
-	lines := lineStarts(source)
-	converted, refusals := proto.FromSyntax(file)
-	var analysis Analysis
-	diagnostics := refusals
-	if converted != nil {
-		analysis.checked, diagnostics = proto.Check(converted)
-	}
-	for _, diagnostic := range diagnostics {
-		analysis.Diagnostics = append(analysis.Diagnostics, report.Diagnostic{Code: diagnostic.Code, Message: diagnostic.Msg, Span: span(source, lines, diagnostic.Pos.Line, diagnostic.Pos.Col)})
-	}
-	if len(analysis.Diagnostics) > 0 {
-		analysis.checked = nil
+	analysis := Analysis{source: source, file: file}
+	_, diagnostics := check.Check("main", []*syntax.File{file}, nil)
+	for _, d := range diagnostics {
+		analysis.Diagnostics = append(analysis.Diagnostics, report.Diagnostic{
+			Code:    d.Code,
+			Message: d.Message,
+			Span:    report.Span{Offset: d.Offset, Length: d.Length, Line: d.Line, Column: d.Column},
+		})
 	}
 	return analysis
+}
+
+// EmitterTicket owns lowering from the checker's output; until it lands, a
+// program the prototype emitter cannot lower is refused at build.
+const EmitterTicket = "#50"
+
+// lower converts a checked program through the bridge and checks it with
+// the prototype checker, the emitter's input. Every refusal is re-coded
+// S109 at its position, naming #50 (spec D12).
+func (a Analysis) lower() (*proto.Checked, []report.Diagnostic) {
+	converted, refusals := proto.FromSyntax(a.file)
+	var checked *proto.Checked
+	diagnostics := refusals
+	if converted != nil {
+		checked, diagnostics = proto.Check(converted)
+	}
+	if len(diagnostics) == 0 {
+		return checked, nil
+	}
+	lines := lineStarts(a.source)
+	var out []report.Diagnostic
+	for _, d := range diagnostics {
+		out = append(out, report.Diagnostic{
+			Code:    check.CodeOutside,
+			Message: fmt.Sprintf("the prototype emitter cannot lower this program yet (%s): %s %s", EmitterTicket, d.Code, d.Msg),
+			Span:    span(a.source, lines, d.Pos.Line, d.Pos.Col),
+		})
+	}
+	return nil, out
+}
+
+// BuildError is a build refusal: the diagnostics that stop the build, with
+// their positions. Nothing is written.
+type BuildError struct{ Diagnostics []report.Diagnostic }
+
+func (e *BuildError) Error() string {
+	if len(e.Diagnostics) == 0 {
+		return "the 2026 front-end refused the build"
+	}
+	d := e.Diagnostics[0]
+	if d.Span.Line > 0 {
+		return fmt.Sprintf("%s at %d:%d: %s", d.Code, d.Span.Line, d.Span.Column, d.Message)
+	}
+	return fmt.Sprintf("%s: %s", d.Code, d.Message)
 }
 
 // syntaxDiagnostic is the report diagnostic of a parse error, located by
@@ -106,7 +149,7 @@ func Format(source string, maxOutputBytes int) (report.FormatResult, error) {
 }
 
 // FailureMessage is the refusal text of a 2026 formatting failure: it names
-// the first diagnostic's code and position, as the LSP does for legacy.
+// the first diagnostic's code and position.
 func FailureMessage(failure report.FormatFailure) string {
 	if len(failure.Diagnostics) == 0 {
 		return failure.Error()
@@ -162,16 +205,22 @@ func span(source string, lines []int, line, col int) report.Span {
 	return report.Span{Offset: offset, Length: length, Line: line, Column: col}
 }
 
-// Build emits the checked analysis as a Go module in a fresh temporary
-// directory, builds it to output with the go command and removes the
-// module. lineName is the source path //line directives name. The go
-// command's output goes to stderr.
+// Build lowers the checked analysis through the prototype emitter as a Go
+// module in a fresh temporary directory, builds it to output with the go
+// command and removes the module. lineName is the source path //line
+// directives name. The go command's output goes to stderr. An analysis
+// with diagnostics, or one the prototype cannot lower, is refused with a
+// *BuildError before anything is written.
 func Build(a Analysis, lineName, output string, stderr io.Writer) error {
-	if a.checked == nil {
-		return fmt.Errorf("the 2026 front-end has diagnostics; nothing to build")
+	if len(a.Diagnostics) > 0 || a.file == nil {
+		return &BuildError{Diagnostics: a.Diagnostics}
 	}
-	a.checked.File.Name = lineName
-	code, err := proto.Emit(a.checked)
+	checked, refusals := a.lower()
+	if len(refusals) > 0 {
+		return &BuildError{Diagnostics: refusals}
+	}
+	checked.File.Name = lineName
+	code, err := proto.Emit(checked)
 	if err != nil {
 		return fmt.Errorf("2026 emission failed: %w", err)
 	}

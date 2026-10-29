@@ -1,0 +1,7 @@
+package demo
+
+func main() needs Console {
+	x := "v"
+	x // want S110
+	Console.Println(x)
+}

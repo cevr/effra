@@ -1,0 +1,7 @@
+package demo
+
+type Box struct{}
+
+func (b Box) Get(x A) A // want S108
+
+func main() {}

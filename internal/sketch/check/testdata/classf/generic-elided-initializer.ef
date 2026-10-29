@@ -1,0 +1,4 @@
+package p
+type Wrap[T any] struct{ value T }
+type S struct{ h int }
+var h = Wrap[S]{value: {h: 1}} // want S108

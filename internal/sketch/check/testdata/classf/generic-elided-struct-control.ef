@@ -1,0 +1,6 @@
+package p
+type Cap interface{ M() }
+type Wrap[T any] struct{ value T }
+type S struct{ a int }
+func f() { _ = Wrap[S]{value: S{a: 1}}; Cap.M() }
+func a() { _ = f }

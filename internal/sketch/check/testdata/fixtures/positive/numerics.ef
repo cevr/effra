@@ -1,0 +1,12 @@
+package demo
+
+func main() needs Console {
+	n := 3
+	var big int64 = 1 << 40
+	f := float64(5) / 2
+	ratio := float64(n) * f
+	b := byte('a')
+	r := 'x'
+	total := int64(n) + big
+	Console.Println(n, big, ratio, b, r, total, uint8(200), 7/2)
+}

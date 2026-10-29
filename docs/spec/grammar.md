@@ -175,7 +175,7 @@ ForStmt        = "for" [ Expression | Pattern { "," Pattern } "in" Expression ] 
 2. **Assignment** has one left side and one right side: `x = e`, `x += 1`. It needs a `let mut` name (196v). There is no `++` or `--` and no multiple assignment.
 3. **`break` and `continue`** act on the innermost `for`, also inside a `match` arm (seventh round, item 4). There are no labels.
 4. There is no bare block statement, and no init statement in an `if` or `match` header (eighth round): write `let x = f()` on the line before.
-5. A `with` block and a trailing block yield their last expression. `return`, `break` and `continue` are errors inside them. A `func` literal's `return` returns from the literal, as in Go. A `catch` arm or a `match` arm holds statements; a `return` there leaves the enclosing function.
+5. A `with` block and a trailing block yield their last expression. `return`, `break` and `continue` that would leave them are errors (S108). A `func` literal's `return` returns from the literal, as in Go. A `catch` arm or a `match` arm holds statements; a `return` there leaves the enclosing function.
 
 ## Expressions
 

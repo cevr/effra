@@ -60,7 +60,7 @@ let same = Order{"42", 1999}
 
 1. Field names in one struct are distinct (S108). A field and a method of the same type cannot share a name (S108).
 2. A composite literal is all keyed or all positional (S001). A positional literal lists every field in order (S108). A keyed literal sets each field at most once (S108) and names only declared fields (S104).
-3. Each field value must be assignable to the field's type (S108). A field value whose failure is not handled is S105.
+3. Each field value must be assignable to the field's type (S108). A field value whose failure is not handled is S105. A field value that is a composite literal writes its type, keyed or positional: `Wrap[S]{value: {h: 1}}` is S108 "missing type in composite literal; write S{h: 1}" (the literal's source is `{…}` past 40 characters or across a line). As in Go, a composite literal may elide its type only as an element of an array, slice or map literal or as a map literal's key (Go spec, "Composite literals"; #196 round 17 C1). *Prior art:* go/types reports "missing type in composite literal" there, and Ergo adds the fix; Rust and Gleam always name a record's constructor.
 4. A struct must not contain itself by value, directly or through other structs (S108). Recursion behind a union is allowed, because a union value is a reference in the lowered Go. *Prior art:* Swift's `indirect enum` boxes recursion; Go rejects an invalid recursive type.
 5. A struct with a resource field is itself a resource ([resources.md](resources.md#what-is-a-resource)).
 6. Designed: struct embedding is allowed only in `wire` and in interfaces. Value semantics hold: a copy is a snapshot, and move-on-last-use keeps it cheap.
@@ -86,7 +86,7 @@ type Declined { Reason string }
 
 ## Capabilities
 
-Status: **implemented in prototype**.
+Status: **checked** by `internal/sketch/check` ([#196](https://github.com/cevr/ergo/issues/196)); runs.
 
 ```go
 type Orders {
@@ -95,29 +95,29 @@ type Orders {
 ```
 
 1. An interface with method signatures declares a capability. Method names in one capability are distinct (S108).
-2. **A capability is not a first-class value.** The capability name denotes the provider that the nearest `with` binds. `Orders.Find(id)` calls that provider and charges `Orders` ([rows.md](rows.md#capability-rows)). Any other use of the name as an expression is an error: `Orders.Find` without a call (S108), and, designed, passing, returning, storing or capturing `Orders` (README Gap 29). The prototype reports a bare `Orders` as an unknown name (S104).
+2. **A capability is not a first-class value.** The capability name denotes the provider that the nearest `with` binds. `Orders.Find(id)` calls that provider and charges `Orders` ([rows.md](rows.md#capability-rows)). Any other use of the name as an expression is an error: `Orders.Find` without a call (S108), and passing, returning, storing or capturing `Orders` (S104; README Gap 29).
 3. **Capability name against interface type.** The same interface declaration has two roles, told apart by position:
    - in a `needs` clause, a `wire` entry, or as the receiver of a method call `Orders.m(…)`, the name is the **capability**: an ambient requirement that only `with` supplies;
    - in a type position (a parameter, result, field or type argument), the name is an ordinary **interface type**. A value of it is a provider value. Calling its method, `o.Find(id)`, runs that provider's method with the method's declared error row and charges no capability. A constructor that returns `Orders` returns such a value.
 
-   This keeps decision #102: a capability is an ordinary interface bound by `wire`, and only the ambient binding is second-class. Prototype: an interface type is accepted in a parameter or result type, but a method call on such a value is S109 (README Gap 29). *Prior art:* Effect separates a service's tag, the requirement, from a service value; Scala 3 capture checking treats capabilities apart from their types.
-4. A capability method's signature carries its error row. Prototype: a `needs` clause on a capability method is an error (S109). Designed: unchanged, because a provider's requirements are captured at construction (README Gap 17).
-5. The prelude capabilities `Console`, `Clock`, `Scheduler` and `Random` are ordinary interfaces bound by `wire` (decision #102). Prototype: `Console` (with a variadic `Println`) and `Scheduler` exist; `Scheduler` takes only the host provider `LiveScheduler{}`, and `Console` cannot be wired.
-6. Designed: an interface is also a generic constraint, with Go's method-set rules.
+   This keeps decision #102: a capability is an ordinary interface bound by `wire`, and only the ambient binding is second-class. The checker implements both roles (README Gap 29); the build refuses a method call on an interface value until [#50](https://github.com/cevr/ergo/issues/50). *Prior art:* Effect separates a service's tag, the requirement, from a service value; Scala 3 capture checking treats capabilities apart from their types.
+4. A capability method's signature carries its error row. A capability or interface method writes no capability row (S108), because a provider's requirements are captured at construction (README Gap 17).
+5. The prelude capabilities `Console`, `Clock`, `Scheduler` and `Random` are ordinary interfaces bound by `wire` (decision #102). The prelude (`internal/sketch/std/prelude.ef`) declares them with the methods the fixtures and the corpus call, provisionally until [#209](https://github.com/cevr/ergo/issues/209) fixes their method sets.
+6. An interface is also a generic constraint, with Go's method-set rules.
 
 ## Methods
 
-Status: **partly implemented in prototype**: value-receiver methods are declared and checked, but called only through a capability.
+Status: **checked** (#196); the build refuses a direct method call until #50.
 
-1. A method call on a value, `v.M(…)`, including on a composite literal, `S{}.M(…)`, calls `M` with `v` as its receiver, as in Go. Its rows are `M`'s declared rows. Prototype: such a call is S109 (README Gap 27); a method runs only as a provider method reached through `Cap.M(…)`.
+1. A method call on a value, `v.M(…)`, including on a composite literal, `S{}.M(…)`, calls `M` with `v` as its receiver, as in Go. Its rows are `M`'s declared rows (README Gap 27).
 2. A receiver names a struct type declared in the package (S108). A method name is unique per receiver type (S108). A parameter may not repeat the receiver's name (S108).
-3. Prototype: a method may not carry a `needs` clause and may not call a capability (S109); a provider method calls functions with an empty `needs` row.
-4. Designed: a pointer receiver `*T` means the method mutates its receiver ([Borrows](#borrows)).
-5. Prototype: an error type may not declare `Error`, because the emitter generates it (fixture `error-method`, S109). Designed: the same rule. An error type's text comes from its fields.
+3. A method may write a capability row, and a call of it charges that row. Such a method cannot implement a capability method (S106) or an interface method (S108), because its row is wider (README Gap 17).
+4. A pointer receiver `*T` means the method mutates its receiver ([Borrows](#borrows)).
+5. An error type may not declare a method named `Error` (S108), because the emitter generates it; an error type's text comes from its fields (fixture `error-method-on-error-type`).
 
 ## Interface assignability
 
-Status: **designed, not yet implemented**. The prototype reports S108 for assigning a struct value to an interface type, a prototype limit (README Gap 29).
+Status: **checked** (#196); runs where the prototype emitter can lower the program.
 
 ```go
 type Store { Get() string }
@@ -140,23 +140,23 @@ func NewStore() Store  { return Mem{} } // Mem implements Store
 
 ## Error types
 
-Status: **implemented in prototype**.
+Status: **checked** (#196).
 
-1. A type named in any error row is an error type. It must be a struct declared in the package (S104), or `timeout.Expired` when `timeout` is imported.
+1. A type named in any error row is an error type. It must be a named struct type, of this package or of an imported one such as `timeout.Expired` (S104). Inside a package, a struct type is an error type when an error row of that package, or of the package that declares the type, names it; a struct type that no such row names is an ordinary value type.
 2. An error type is not an ordinary value: returning a value of an error type is a failure ([rows.md](rows.md#error-rows); fixture `error-as-value`, S101).
 3. Error rows are sets of independent struct types, not one declared sum per function. *Prior art:* Gleam returns one declared `Result` error type per function; OCaml polymorphic variants and Koka effect rows are open sets; Ergo's rows are closed sets of nominal types with no open tail in v0.
 
 ## Operators
 
-Status: **partly implemented in prototype**.
+Status: **checked** (#196); the build refuses operators other than `==` and `+` until #50.
 
-1. `==` compares two values of one basic type: `string`, `int64`, `bool` or `duration` (S108 for mismatched types). Prototype: `==` on `duration` and on any non-basic type is S109 (README Gap 26).
-2. `+` adds two `int64` values or concatenates two `string` values (S108 otherwise).
-3. Prototype: every other operator, including `!=`, `<`, `-`, `&&` and `||`, is S109. Designed: Go's operators on Go's operand types; `&&` and `||` short-circuit (README Gap 10); equality on comparable structs, with `comparable` and `cmp.Ordered` as constraints ([#211](https://github.com/cevr/ergo/issues/211)).
+1. Go's operators on Go's operand types, with Go's untyped constants and exact constant arithmetic (an overflow is S108): arithmetic on numeric types, `+` on strings, ordering on numbers and strings, `==` and `!=` on comparable types (structs whose fields are comparable included; README Gap 26), `&&`, `||` and `!` on `bool`, shifts on integers. S108 otherwise. A shift by a non-constant count needs a typed left operand: in `x << n` with `n` not constant, an untyped constant `x` is S108 "the left operand of a shift by a non-constant count needs a type; write int(1) << n" (round 9). Go types such an operand from the context it would have without the shift, which is a known trap (`float64(1 << n)` is invalid in Go); Ergo refuses that subset, so no shift takes its type from the context. Constant shifts (`1 << 3`) keep Go's exact arithmetic. *Prior art:* Zig requires a fixed-width integer left operand unless the count is comptime-known; Rust and Swift give an integer literal its type before the shift.
+2. `duration` takes `+`, `-`, ordering and `==` between durations; an untyped integer never converts to `duration` implicitly (S108). Its other arithmetic is [#175](https://github.com/cevr/ergo/issues/175)'s.
+3. `&&` and `||` short-circuit (README Gap 10). `comparable` is a constraint; ordering constraints such as `cmp.Ordered` are [#211](https://github.com/cevr/ergo/issues/211)'s.
 
 ## Function values
 
-Status: **designed, not yet implemented**.
+Status: rule 1 is **checked** (#196): a function value converts to a function type with identical parameters and results and rows that are subsets of the type's (S108 otherwise). Rules 2 to 5 are **designed, not yet implemented** ([#197](https://github.com/cevr/ergo/issues/197)).
 
 1. A function type carries its parameters, result, error row and `needs` row. It carries requirements only, never purity ([rows.md](rows.md#footprints)).
 2. A function-typed parameter is non-escaping unless its type says otherwise: the callee may call it and may hand it to a task that the call consumes, but it may not store, return or send it. A trailing block is such an argument. *Prior art:* Swift non-escaping closures by default; Effekt second-class blocks.
@@ -166,7 +166,7 @@ Status: **designed, not yet implemented**.
 
 ## Borrows
 
-Status: **designed, not yet implemented**.
+Status: placement (rule 1, first sentence) is **checked** (#196): `*T` outside a parameter or receiver type is S108. The rest is **designed, not yet implemented** ([#197](https://github.com/cevr/ergo/issues/197)).
 
 1. `*T` appears only on parameters and receivers. A borrow is never nil, stored, returned, sent or captured by `go`.
 2. Two mutable borrows into one value must not overlap. With constant indexes the checker decides; with dynamic indexes it needs a dominating guard or it rejects the call. *Prior art:* Swift's law of exclusivity; Rust `get_many_mut`.
@@ -175,7 +175,7 @@ Status: **designed, not yet implemented**.
 
 ## Generics
 
-Status: **designed, not yet implemented**. The spelling is decided on [#196](https://github.com/cevr/ergo/issues/196) (196g as amended, sixth round); the checker implements it in check-v1.
+Status: the spelling is decided on [#196](https://github.com/cevr/ergo/issues/196) (196g as amended, sixth round). The 196a checker (`internal/sketch/check`) checks the earlier implicit spelling, in which an undeclared one-letter name is a parameter; check-v1 brings it to this spelling. The build refuses generics until [#50](https://github.com/cevr/ergo/issues/50).
 
 ```go
 func Transform[A, B, E, R](xs []A, limit int64, f func(A) B fails E needs R) []B fails E needs R {
@@ -187,11 +187,12 @@ func Transform[A, B, E, R](xs []A, limit int64, f func(A) B fails E needs R) []B
 2. A constraint follows its parameter inline, `[T ordered]`: a method set, or one of the predeclared `comparable`, `ordered` and `number`. There is no `where` clause. Method constraints resolve through the type's owner package, with one answer per type.
 3. Rows in a generic signature may be elided only where they pass through unchanged. A declared requirement is never elided.
 4. Exported signatures spell their rows and type parameters, so clients check against interface summaries, Go's export-data model.
-5. **Lowering.** Generics emit as Go generics, which Go compiles by GC shape. Specialised copies need a measured win under [#190](https://github.com/cevr/ergo/issues/190). *Prior art:* Go GC-shape stenciling; MoonBit and Rust monomorphise; Ergo's earlier measurements refused frontend monomorphisation ([design.md](../design.md#compile-speed-is-a-language-constraint)).
+5. **Lowering.** Generics emit as Go generics, which Go compiles by GC shape. Specialised copies need a measured win under [#190](https://github.com/cevr/ergo/issues/190). An instantiation cycle, a generic type or function that instantiates itself with a growing argument (`func f[T any]() { f[[]T]() }`), is S108, as Go rejects it: its instances never end. A method's receiver parameters count as the type's own, as `go/types` canonicalises them, so `func (r R[T]) M() { R[[]T]{}.M() }` is a cycle too. Signatures count like bodies: a parameter, a result, a bodiless declaration, an interface-typed parameter or a constraint that instantiates with a growing argument (`func (R[T]) M(x R[[]T])`), through a renamed receiver parameter or across two receiver types, is a cycle as well. The checker finds it on the instantiation graph, not by a depth limit, and before rows are inferred, so rows iterate over a finite set. *Prior art:* Go GC-shape stenciling; MoonBit and Rust monomorphise; Ergo's earlier measurements refused frontend monomorphisation ([design.md](../design.md#compile-speed-is-a-language-constraint)).
+6. **Inference.** Type arguments are inferred by unification over the value arguments with Go's unifier (`go/types` unify.go), never from a call's expected result. Inference is sound and a documented subset of Go's (D6 as amended in rounds 7 and 8): when Ergo infers, Go infers the same types for the same call after row erasure. The subset is typed value arguments, structural unification, interfaces through method sets, conflicts between arguments, untyped constants combined across the arguments of one parameter to the widest numeric kind and defaulted once (as `go/types` maxUntyped; `Two(1, 'a')` infers `int32` in either order), and written type arguments. The order is Go's: every typed argument unifies first, in source order, then the untyped constants combine and default. A function literal is a typed argument, since its parameter and result types are written (inferring unwritten ones is #214); only its unwritten rows take the parameter type's, so `Apply(func(v int8) int8 { return v }, 1)` and `Rev(1, func(v int8) int8 { return v })` infer `int8`. A trailing block writes no types and binds what is left after the constants. Outside the subset, the call is S108 "cannot infer T; write the type arguments, e.g. Fn[int](…)", its only diagnostic: a bidirectional channel binding that a later directed channel would refine, a parameter only a method or core-type constraint determines (`Use(x)` for `Use[T any, P interface{ M(T) }]`), a parameter bound only by untyped constants that the constraint of a type parameter mentions, refused before any default is guessed (`G(1, s)` for `G[T any, P interface{ M(T) }]`, where Go infers `T` from `s`'s method), and a generic function passed as an argument without all its type arguments (`Apply(Id, 1)`, `Fix(Id)`). The written forms stay valid: `Two[chan<- int](a, b)`, `Use[int](x)`, `G[int8](1, s)`, `Apply(Id[int], 1)`; a constraint error stays a constraint error when typed or written arguments fix every type argument. A call whose inference fails or is refused reports one diagnostic, and its result is invalid, so nothing cascades from it. An argument that is invalid, or is itself a failed or refused call, fails the enclosing generic call with no diagnostic of its own (one rule, in the inference loop; round 9), so `Id(Apply(Id, 1))` reports one refusal; independent errors in other arguments still report. Each typed argument is assigned to its parameter: the match may be inexact at the top (channel direction ignored; an interface on either side matches a type that has its methods, by unifying the method signatures, so a wider interface, a named generic interface, a concrete type or a pointer infers through its method set), and element types match exactly. A parameter bound by an earlier argument must match every later one: a conflict is S108 at the argument (`Two(x, y)` with `x` an interface and `y` a struct; of an interface and a non-interface neither is chosen, so the order of the arguments never decides), while `Two[interface{ M() }](x, y)`, with every type argument written, infers nothing and only assigns. Ergo departs from Go where its types do: a named type unifies with a type literal only when it is an interface (types are nominal), and a named union unifies with the variant its argument names. A generic function inside parentheses is a value, as in Go: `(Fn[int])` is the instance, and `(Fn)[int]` or `(Fn)(1)` is S108. In `Info`, an explicit instantiation `Fn[int]` and the parentheses around it carry the instance type while the name `Fn` keeps its generic type; in an inferred call `Fn(1)` the name carries the instance, as in `go/types`. An untyped expression carries its final contextual type in `Info`, as `go/types` updateExprType records it: at every site where an untyped operand meets a type (assignment and `var`, a conversion, a call argument, a return, a composite-literal element, field or key, an index or slice bound, a channel send, a binary operation with a typed operand, a comparison, a switch case or tag, and the arguments of `min`, `max`, `append`, `make` and `delete`), the expression and its untyped sub-expressions (parentheses, the operands of a non-constant unary or binary operation) carry the type the site gives it; a conversion `T(x)` gives `T`, the default type for an interface or a type without constants, and keeps an integer converted to a string untyped, as `go/types` does, so in `Id(true)` returning `bool` the literal `true` is `bool`. A comparison's operands keep their own types; the operands of a constant operation keep an untyped kind, the larger of the two for a binary operation (`1` in `1 + 'a'` is untyped rune) and the result's for `min` and `max`. A row parameter binds to the row of a function-typed argument, less the row's written part; `error[E | Expired]` is the union. When several arguments bind one row parameter, it binds to the union of their rows: rows are finite sets, and a function with a narrower row is assignable where a wider one is expected, so the union is the least binding that admits every argument. A written type argument is not widened. A composite literal of a generic type, or a generic variant in a `case`, written without type arguments takes them from the expected type, else from its field values (`Some{n}`, `Enter{x}`). A type parameter left unbound is S108; a row parameter left unbound is empty. A result-position type parameter bound by a block with no value stands for no value, lowered to `struct{}`. *Prior art:* Go `types2/infer.go`; Koka infers effect rows; OCaml and ReScript disambiguate constructors by the expected type; Gleam's `Nil` and Rust's `()` for no value.
 
 ## Prelude types
 
-Status: **designed, not yet implemented**, except the timeout result `timeout.Expired`.
+Status: **declared** in the embedded prelude (`internal/sketch/std/prelude.ef`) and checked by the checker (#196); the build refuses them until #50, except the timeout result `timeout.Expired`. The capabilities' method sets are provisional until [#209](https://github.com/cevr/ergo/issues/209); `Option` is [#99](https://github.com/cevr/ergo/issues/99)'s.
 
 - `Option[T]` with `Some` and `None` ([#99](https://github.com/cevr/ergo/issues/99)).
 - `Task[T, E]`, a resource ([runtime.md](runtime.md#tasks)).

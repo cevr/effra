@@ -1,0 +1,27 @@
+package demo
+
+type Store interface{ Label() string }
+type Account interface{ Label() string }
+type Memory struct{ Text string }
+
+func (m Memory) Label() string { return m.Text }
+
+wire Shared {
+	Store = Memory{Text: "live"}
+}
+
+wire Accounts {
+	Shared
+	Account = Memory{Text: "account"}
+}
+
+wire Fixture {
+	Accounts
+	replace Store = Memory{Text: "fixture"}
+}
+
+func labels() string needs Store, Account { return Store.Label() + Account.Label() }
+
+func main() needs Console {
+	Console.Println(with(Fixture) { labels() })
+}

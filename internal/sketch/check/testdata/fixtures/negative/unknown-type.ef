@@ -1,0 +1,5 @@
+package demo
+
+func Show(o Missing) string { return "x" } // want S104
+
+func main() {}

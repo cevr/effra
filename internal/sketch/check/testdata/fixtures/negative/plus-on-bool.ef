@@ -1,0 +1,5 @@
+package demo
+
+func main() needs Console {
+	Console.Println(true + false) // want S108
+}

@@ -1,0 +1,10 @@
+package demo
+
+func f() string {
+	with(wire{}) { return "x" } // want S108
+	return "after"
+}
+
+func main() needs Console {
+	Console.Println(f())
+}

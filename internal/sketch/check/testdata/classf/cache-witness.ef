@@ -1,0 +1,7 @@
+package p
+type Box[T any] struct{ F T }
+type Bang struct{}
+func mark() error[Bang]
+var old = Box{f}
+func f() { return Bang{} }
+func F() { _ = Box[func()]{f} } // want S108

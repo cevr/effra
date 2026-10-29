@@ -1,0 +1,11 @@
+package demo
+
+type Store interface{ Get() string }
+
+func keep(s Store) string { return s.Get() }
+
+func run() string needs Store {
+	return keep(Store) // want S104
+}
+
+func main() {}

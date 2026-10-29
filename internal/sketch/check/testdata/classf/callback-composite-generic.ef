@@ -1,0 +1,8 @@
+package p
+type Bang struct{}
+func mark() error[Bang]
+func a[E error](run func(func() error[E]) error[E]) { // want S108
+ r := struct{ Run func(func() error[E]) error[E] }{Run: run}
+ try r.Run(func(){ try a[E](run) })
+ try mark()
+}

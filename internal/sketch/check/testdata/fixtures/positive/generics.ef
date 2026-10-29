@@ -1,0 +1,57 @@
+package demo
+
+type Fault struct{}
+
+type Pair[K comparable, V any] struct {
+	Key   K
+	Value V
+}
+
+type Just[T] struct{ Value T }
+type Nothing struct{}
+type Maybe[T] interface{ Just[T] | Nothing }
+
+func Map(xs []A, f func(A) (B, error[E]) needs R) ([]B, error[E]) needs R {
+	out := []B{}
+	for _, x := range xs {
+		out = append(out, try f(x))
+	}
+	return out
+}
+
+func On[F error](f func() (A, error[E]) needs R) (A, error[E]) needs R
+
+func same[T comparable](a, b T) bool { return a == b }
+
+func orElse(m Maybe[int64], d int64) int64 {
+	switch v := m.(type) {
+	case Just:
+		return v.Value
+	case Nothing:
+		return d
+	}
+}
+
+func wrap(n int64) Maybe[int64] {
+	if n < 0 {
+		return Nothing{}
+	}
+	return Just{n}
+}
+
+func double(n int64) int64 { return n * 2 }
+
+func both(f func() int64 needs (Clocky, Sleepy)) int64 needs Clocky, Sleepy { return f() }
+
+type Clocky interface{ Now() int64 }
+type Sleepy interface{ Nap(d duration) }
+
+func main() needs Console {
+	p := Pair[string, int64]{Key: "a", Value: 1}
+	ys := Map([]int64{1, 2}, double)
+	n := On[Fault](func() (int64, error[Fault]) { return Fault{} }) catch {
+	case Fault:
+		0
+	}
+	Console.Println(p.Key, len(ys), n, same("a", "b"), same(int64(1), 2), orElse(wrap(3), 0))
+}

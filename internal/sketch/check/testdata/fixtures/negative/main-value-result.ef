@@ -1,0 +1,3 @@
+package demo
+
+func main() string { return "x" } // want S113

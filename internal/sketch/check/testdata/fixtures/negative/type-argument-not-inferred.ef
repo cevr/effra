@@ -1,0 +1,8 @@
+package demo
+
+func zero() A
+
+func main() needs Console {
+	x := zero() // want S108
+	Console.Println(x)
+}

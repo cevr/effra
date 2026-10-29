@@ -1,0 +1,6 @@
+package p
+type Bang struct{}
+func mark() error[Bang]
+func each(f func() error[Bang]) error[Bang]
+func a() { run := each; try mark(); return run(func() { return a() }) }
+func F() error[Bang] { return a() }

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("package A\ntype d interface{A(r)}\ntype e interface{d}\nfunc A()\ntype r machine[e,A]{initial 0\nstep 0}")

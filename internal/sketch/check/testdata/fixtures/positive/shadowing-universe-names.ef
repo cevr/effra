@@ -1,0 +1,10 @@
+package demo
+
+type Item struct{ ID string }
+
+func main() needs Console {
+	Item := Item{ID: "ok"}
+	string := "shadow"
+	Scheduler := 1
+	Console.Println(Item.ID, string, Scheduler)
+}

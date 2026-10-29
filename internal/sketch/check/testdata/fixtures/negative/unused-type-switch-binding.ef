@@ -1,0 +1,16 @@
+package demo
+
+type A struct{}
+type B struct{}
+type Choice interface{ A | B }
+
+func name(c Choice) string {
+	switch v := c.(type) { // want S110
+	case A:
+		return "a"
+	case B:
+		return "b"
+	}
+}
+
+func main() {}
