@@ -141,7 +141,13 @@ The checker refuses a construct that another ticket owns, and names it, instead 
 | --- | --- |
 | A wire entry whose provider is a function (a constructor entry), such as `Orders: OpenOrders` | [#37](https://github.com/cevr/ergo/issues/37), wire constructors (`wire-constructor-is-37`) |
 | A wire header, `wire provides A, B { … }` or `wire needs C, D { … }` (#217) | [#196](https://github.com/cevr/ergo/issues/196) stage b, the wire header ([rows.md](rows.md#wire) rule 8; README Gap 33; `wire-exposure-hides-entry`) |
-| A `with` argument that is not a wire: a context value | G1, [runtime.md](runtime.md) |
+| A `with` over a local value or over several wires, and a wire value outside `with`, `let w = wire { … }` | 196x, extern and wire values (check-v1) |
+| A pattern after `let` or `for`: a record pattern, an `as` pattern or a literal (196p), or a tuple (196t); a tuple type or value (196t) | 196p and 196t, patterns and tuples (check-v1) |
+| An `if` or `match` in value position | 196r, tail results (check-v1) |
+| A defined type, `type Celsius float64` | 196p, type declarations (check-v1) |
+| The `ordered` constraint; an `escaping` function type | 196g, constraints; 196e, escaping (check-v1) |
+| A law, a `test` declaration, `assert` | 196l, laws and tests (check-v1) |
+| `import task`, `scope`, `slice` or `queue` | lower-v1, the std modules |
 | `import go net/url` | [#202](https://github.com/cevr/ergo/issues/202), Go imports |
 | A dot import | [#206](https://github.com/cevr/ergo/issues/206), the standard library |
 | At build only: any refusal of the prototype bridge, checker or emitter, with the message "the prototype emitter cannot lower this program yet (#50): CODE message" at its position | [#50](https://github.com/cevr/ergo/issues/50) |

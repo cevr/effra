@@ -58,7 +58,7 @@ let order = Order{ID: "42", Total: 1999}
 let same = Order{"42", 1999}
 ```
 
-1. Field names in one struct are distinct (S108). A field and a method of the same type cannot share a name (S108).
+1. Field names in one struct are distinct (S108). A field and a function on the type (see [Methods](#methods)) may share a name: `x.f` is the field first (196m).
 2. A composite literal is all keyed or all positional (S001). A positional literal lists every field in order (S108). A keyed literal sets each field at most once (S108) and names only declared fields (S104).
 3. Each field value must be assignable to the field's type (S108). A field value whose failure is not handled is S105. A field value that is a composite literal writes its type, keyed or positional: `Wrap[S]{value: {h: 1}}` is S108 "missing type in composite literal; write S{h: 1}" (the literal's source is `{…}` past 40 characters or across a line). As in Go, a composite literal may elide its type only as an element of an array, slice or map literal or as a map literal's key (Go spec, "Composite literals"; #196 round 17 C1). *Prior art:* go/types reports "missing type in composite literal" there, and Ergo adds the fix; Rust and Gleam always name a record's constructor.
 4. A struct must not contain itself by value, directly or through other structs (S108). Recursion behind a union is allowed, because a union value is a reference in the lowered Go. *Prior art:* Swift's `indirect enum` boxes recursion; Go rejects an invalid recursive type.
@@ -107,13 +107,17 @@ type Orders {
 
 ## Methods
 
-Status: **checked** (#196); the build refuses a direct method call until #50.
+Status: **checked** (#196, 196m); the build refuses a direct method call until #50.
 
-1. A method call on a value, `v.M(…)`, including on a composite literal, `S{}.M(…)`, calls `M` with `v` as its receiver, as in Go. Its rows are `M`'s declared rows (README Gap 27).
-2. A receiver names a struct type declared in the package (S108). A method name is unique per receiver type (S108). A parameter may not repeat the receiver's name (S108).
-3. A method may write a capability row, and a call of it charges that row. Such a method cannot implement a capability method (S106) or an interface method (S108), because its row is wider (README Gap 17).
-4. A pointer receiver `*T` means the method mutates its receiver ([Borrows](#borrows)).
-5. An error type may not declare a method named `Error` (S108), because the emitter generates it; an error type's text comes from its fields (fixture `error-method-on-error-type`).
+There are no receivers. A package function whose first parameter is a named type declared in the package is a function on that type, and `x.f(y)` calls `f(x, y)` (196m).
+
+1. `x.f(a)` resolves to a field `f` of `x` first. Otherwise it resolves to the package function `f`, in the package that declares `x`'s type, whose first parameter's type is `x`'s type: `T`, `*T` or, for a generic `T`, `T[A, B]` whose arguments are distinct type parameters of `f`, which a call on an instance binds. A first parameter written as one of the function's own bracket parameters is that parameter, never a package type of the same name. The call checks the other arguments against `f`'s signature without its first parameter, and its rows are `f`'s rows, inferred or written.
+2. `x.f` without a call is only a field (S104 when `x` has no field `f`): a function on a type has no method value.
+3. Several package functions may share a name when their first parameters are distinct named types declared in the package. Such a name is called as `x.f(…)`; a plain call `f(x)` with more than one candidate is S108 "several functions are named f; call it as x.f(…)". Lowering emits them as Go methods on the type, which Go allows.
+4. A named type satisfies an operation type when, for each operation, a function on the type exists with the same remaining signature, no wider error row and no extra `needs` (S106, rows.md Wire 2). A function with type parameters beyond those its first parameter binds can be called as `x.f(…)`, but it cannot satisfy an operation, which takes no type parameters (S106, naming the parameter).
+5. A first parameter `*T` needs an addressable `x` (S108), as Go's pointer receiver does ([Borrows](#borrows)).
+6. An error type may not declare a function named `Error` on itself (S108), because the emitter generates it; an error type's text comes from its fields (fixture `error-method-on-error-type`).
+7. A call `x.f(…)` reaches the one function `x`'s type picks, for the order of row inference and for Go's initialization order, never every function named `f`: an initialization cycle through it names it by its type, `B.m`. *Prior art:* MoonBit resolves `x.f` by `x`'s inferred type in the type's package and allows same-named methods on different types; go/types resolves a selector with LookupFieldOrMethod and orders initialization by the method it resolved.
 
 ## Interface assignability
 
