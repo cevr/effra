@@ -206,6 +206,7 @@ func (c *checker) collect() {
 					continue
 				}
 				c.pkg.Wires[w.Name] = w
+				c.def(d.Name, w)
 			default:
 				c.undecided(d, "")
 			}
@@ -436,7 +437,9 @@ func (c *checker) structType(spec *syntax.StructType, ctx *typeCtx) *Struct {
 				continue
 			}
 			seen[name.Name] = true
-			s.Fields = append(s.Fields, &Field{Name: name.Name, Type: t, Pos: name.Pos()})
+			f := &Field{Name: name.Name, Type: t, Pos: name.Pos()}
+			s.Fields = append(s.Fields, f)
+			c.def(name, f)
 		}
 	}
 	return s
@@ -471,12 +474,37 @@ func (c *checker) interfaceType(spec *syntax.InterfaceType, ctx *typeCtx) *Inter
 			continue
 		}
 		seen[name.Name] = true
-		it.Methods = append(it.Methods, &Method{Name: name.Name, Sig: sig, Pos: name.Pos()})
+		m := &Method{Name: name.Name, Sig: sig, Pos: name.Pos()}
+		it.Methods = append(it.Methods, m)
+		c.def(name, m)
+		c.defParams(ft, sig)
 	}
 	// Sorted once, here, for identity (intern.go shape; round 11 M3).
 	it.byName = slices.Clone(it.Methods)
 	slices.SortStableFunc(it.byName, func(a, b *Method) int { return strings.Compare(a.Name, b.Name) })
 	return it
+}
+
+// defParams records the declaring names of a signature with no body (an
+// operation, an extern function): each named parameter is its Var in sig,
+// in the order signature made them.
+func (c *checker) defParams(ft *syntax.FuncType, sig *Signature) {
+	if ft == nil || ft.Params == nil {
+		return
+	}
+	i := 0
+	for _, field := range ft.Params.List {
+		if len(field.Names) == 0 {
+			i++
+			continue
+		}
+		for _, pn := range field.Names {
+			if i < len(sig.Params) {
+				c.def(pn, sig.Params[i])
+			}
+			i++
+		}
+	}
 }
 
 func (c *checker) unionType(n *Named, spec *syntax.InterfaceType, ctx *typeCtx) Type {
@@ -1239,6 +1267,11 @@ func (c *checker) funcSig(f *Func) *Signature {
 	sig.TParams = tparams
 	f.Sig = sig
 	f.state = 2
+	if d.Body == nil {
+		// A bodiless (extern) function's parameters are declared here; a
+		// body's are declared when it is checked.
+		c.defParams(d.Type, sig)
+	}
 	c.inferFlags(f)
 	// An inferred row is a row variable (class F): the signature never
 	// changes, inference solves the variable.
@@ -1358,6 +1391,7 @@ func (c *checker) collectSelfFuncs() {
 		if valid {
 			for _, g := range group {
 				g.overloaded = true
+				c.def(g.Decl.Name, g) // a later same-named function is in no scope
 			}
 			c.pkg.Funcs = append(c.pkg.Funcs, f.same...)
 			continue

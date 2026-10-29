@@ -43,9 +43,17 @@ func infoCorpus(t *testing.T) map[string]string {
 // a body or a package let has a Types entry, every identifier a Defs or
 // Uses entry, every call a Calls entry, every type-match case a Patterns
 // entry, every match and catch a Matches entry, every for-in a Loops entry
-// and every with a Withs entry. Names that denote no object are not
+// and every with a Withs entry. Declarations count too: every declared
+// name (function, type, wire, type parameter, parameter, record field,
+// operation and operation parameter) has a Defs entry, and every named
+// wire's providers are expressions with an Entries entry and, for one
+// capability, an Implicit conversion. Names that denote no object are not
 // identifiers of the contract: a field or operation name after a dot or
-// before a colon in a record literal, and the blank `_`.
+// before a colon in a record literal, a package name before a dot, and the
+// blank `_`. An inline wire's entries are stage E's (196x), so a with's
+// argument is exempt. Invariant 2 holds for every Types entry, but the
+// name in an explicit instantiation Fn[int] keeps its generic type, as in
+// go/types.
 func infoGaps(file *syntax.File, src string, info *Info) []string {
 	var gaps []string
 	at := func(n syntax.Node, what string) {
@@ -54,6 +62,8 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 	}
 	notObject := map[*syntax.Ident]bool{}
 	notValue := map[syntax.Expr]bool{}
+	instName := map[syntax.Expr]bool{} // the name in an explicit instantiation
+	var own map[*TypeParam]bool        // the enclosing declaration's type parameters
 	// skip marks a subtree that holds no value expression: a written type,
 	// a pattern (Patterns holds it) or a with's wire (Withs holds it; an
 	// inline wire's entries are stage E's).
@@ -86,6 +96,11 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 		case *syntax.SelectorExpr:
 			notValue[n.Sel] = true
 			notObject[n.Sel] = true
+			if id, ok := n.X.(*syntax.Ident); ok {
+				if _, isPkg := info.Uses[id].(*PkgName); isPkg {
+					notValue[id] = true // a package name is no value
+				}
+			}
 		case *syntax.KeyValueExpr:
 			if id, ok := n.Key.(*syntax.Ident); ok {
 				notObject[id] = true
@@ -102,6 +117,7 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 				for _, ix := range n.Indices {
 					skip(ix, false)
 				}
+				instName[n.X] = true
 			}
 		case *syntax.TypeSwitchStmt:
 			if info.Matches[n] == nil {
@@ -118,6 +134,13 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 		case *syntax.SwitchStmt:
 			if info.Matches[n] == nil {
 				at(n, "a value match with no Matches entry")
+			}
+			for _, cl := range n.Clauses {
+				for _, item := range cl.List {
+					if info.Patterns[item] == nil {
+						at(item, "a value case with no Patterns entry")
+					}
+				}
 			}
 		case *syntax.CatchExpr:
 			if info.Matches[n] == nil {
@@ -168,28 +191,145 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 				}
 			}
 		case syntax.Expr:
-			if t, ok := info.Types[n]; ok {
-				if why := notFinal(t); why != "" {
+			if _, ok := info.Types[n]; !ok && !notValue[n] {
+				at(n, fmt.Sprintf("a %T with no Types entry", n))
+			}
+		}
+		// Invariant 2, for every expression with a Types entry. The one
+		// exception: the name in an explicit instantiation Fn[int] keeps
+		// its generic type, as in go/types (round-4 M3).
+		if x, ok := n.(syntax.Expr); ok {
+			if t, ok := info.Types[x]; ok {
+				if why := notFinal(t, own); why != "" {
 					at(n, fmt.Sprintf("a %T whose type %s %s", n, t, why))
 				}
-			} else if !notValue[n] {
-				at(n, fmt.Sprintf("a %T with no Types entry", n))
+				if sig, ok := t.(*Signature); ok && len(sig.TParams) > 0 && !instName[x] {
+					at(n, fmt.Sprintf("a %T whose type %s is generic outside an explicit instantiation", n, t))
+				}
 			}
 		}
 		return true
 	}
+	// declared lists a declaring identifier with no Defs entry.
+	declared := func(id *syntax.Ident, what string) {
+		if id != nil && id.Name != "_" && info.Defs[id] == nil {
+			at(id, what+" "+id.Name+" with no Defs entry")
+		}
+	}
+	fields := func(l *syntax.FieldList, what string) {
+		if l == nil {
+			return
+		}
+		for _, f := range l.List {
+			for _, id := range f.Names {
+				declared(id, what)
+			}
+		}
+	}
 	for _, d := range file.Decls {
+		own = nil
 		switch d := d.(type) {
 		case *syntax.FuncDecl:
+			declared(d.Name, "the function")
+			fields(d.TypeParams, "the type parameter")
+			own = map[*TypeParam]bool{}
+			if d.TypeParams != nil {
+				for _, f := range d.TypeParams.List {
+					for _, id := range f.Names {
+						if tp, ok := info.Defs[id].(*TypeParam); ok {
+							own[tp] = true
+						}
+					}
+				}
+			}
+			if d.Type != nil {
+				fields(d.Type.Params, "the parameter")
+			}
 			if d.Body != nil {
 				syntax.Inspect(d.Body, visit)
 			}
+		case *syntax.TypeDecl:
+			declared(d.Name, "the type")
+			fields(d.TypeParams, "the type parameter")
+			// Record fields, operations and their parameters (m1).
+			syntax.Inspect(d.Spec, func(m syntax.Node) bool {
+				switch m := m.(type) {
+				case *syntax.StructType:
+					fields(m.Fields, "the field")
+				case *syntax.InterfaceType:
+					for _, op := range m.Methods {
+						for _, id := range op.Names {
+							declared(id, "the operation")
+						}
+						if ft, ok := op.Type.(*syntax.FuncType); ok {
+							fields(ft.Params, "the operation parameter")
+						}
+					}
+				}
+				return true
+			})
 		case *syntax.VarDecl:
+			own = map[*TypeParam]bool{}
 			for _, spec := range d.Specs {
 				for _, v := range spec.Values {
 					syntax.Inspect(v, visit)
 				}
 			}
+		case *syntax.WireDecl:
+			// A named wire (spec D-A4; review M4): each provider is an
+			// expression of the contract, its entry is in the wire's
+			// Entries with a conversion per capability, and a provider of
+			// one capability has its Implicit conversion when its type is
+			// not the capability. An inline wire's entries are stage E's
+			// (196x): TestInfoComplete exempts them (the with case above).
+			own = map[*TypeParam]bool{}
+			declared(d.Name, "the wire")
+			wire, _ := info.Defs[d.Name].(*Wire)
+			if wire == nil {
+				at(d, "a named wire with no Wire object")
+				continue
+			}
+			entries := map[syntax.Expr]*WireEntry{}
+			embeds := 0
+			for _, e := range wire.Entries {
+				if e.Provider != nil {
+					entries[e.Provider] = e
+				} else if e.Embedded != nil {
+					embeds++
+				}
+			}
+			wantEmbeds := 0
+			for _, e := range d.Body.Entries {
+				if e.Kind == syntax.WireEmbed {
+					wantEmbeds++
+					continue
+				}
+				syntax.Inspect(e.Value, visit)
+				entry := entries[e.Value]
+				switch {
+				case entry == nil:
+					at(e.Value, "a wire provider with no Entries entry")
+				case len(entry.Conversions) != len(entry.Caps) || len(entry.Caps) != 1+len(e.Keys):
+					at(e.Value, fmt.Sprintf("a wire entry with %d capabilities and %d conversions", len(entry.Caps), len(entry.Conversions)))
+				case len(entry.Caps) == 1 && entry.Conversions[0].Kind != 0:
+					if _, ok := info.Implicit[e.Value]; !ok {
+						at(e.Value, "a wire provider with no Implicit conversion")
+					}
+				}
+			}
+			if embeds != wantEmbeds {
+				at(d, fmt.Sprintf("a named wire with %d embeddings and %d embedded Entries", wantEmbeds, embeds))
+			}
+		}
+	}
+	// Each with of a named wire holds the wire's entries.
+	for x, w := range info.Withs {
+		n := 0
+		for _, wire := range w.Wires {
+			n += len(wire.Entries)
+		}
+		if len(w.Entries) != n {
+			at(x, fmt.Sprintf("a with of %d wire entries with %d Entries", n, len(w.Entries)))
 		}
 	}
 	sort.Strings(gaps)
@@ -213,15 +353,79 @@ func cleanInfoGaps(src string) []string {
 // InfoGaps is cleanInfoGaps for the external tests (FuzzCheck).
 var InfoGaps = cleanInfoGaps
 
-// notFinal says why a type in Info is not final (invariant 2), or "".
-func notFinal(t Type) string {
+// notFinal says why a type in Info is not final (invariant 2), or "": it
+// is invalid or holds an invalid part, it holds a row variable, or it
+// holds a type parameter that own (the enclosing generic declaration's
+// parameters) does not list. A nil own skips the parameter check.
+func notFinal(t Type, own map[*TypeParam]bool) string {
 	switch {
 	case isInvalid(t):
 		return "is invalid"
 	case containsInvalid(t):
 		return "holds an invalid part"
 	}
-	return ""
+	why := ""
+	seen := map[Type]bool{}
+	var walk func(t Type)
+	row := func(r *Row) {
+		for _, e := range r.Elems() {
+			if _, isVar := e.(*RowVar); isVar && why == "" {
+				why = "holds a row variable"
+			}
+			walk(e)
+		}
+	}
+	walk = func(t Type) {
+		if t == nil || why != "" || seen[t] {
+			return
+		}
+		seen[t] = true
+		switch t := t.(type) {
+		case *TypeParam:
+			if own != nil && !own[t] {
+				why = "holds the type parameter " + t.Name + " outside its declaration"
+			}
+		case *Named:
+			for _, a := range t.TArgs {
+				walk(a)
+			}
+		case *Pointer:
+			walk(t.Elem)
+		case *Slice:
+			walk(t.Elem)
+		case *Map:
+			walk(t.Key)
+			walk(t.Elem)
+		case *Tuple:
+			for _, e := range t.Types {
+				walk(e)
+			}
+		case *Struct:
+			for _, f := range t.Fields {
+				walk(f.Type)
+			}
+		case *Union:
+			for _, v := range t.Variants {
+				walk(v)
+			}
+		case *Signature:
+			if len(t.TParams) > 0 {
+				// A generic function's own type: its parameters are bound
+				// here (an explicit instantiation's name keeps it).
+				return
+			}
+			for _, p := range t.Params {
+				walk(p.Type)
+			}
+			for _, r := range t.Results {
+				walk(r)
+			}
+			row(t.Errors)
+			row(t.Uses)
+		}
+	}
+	walk(t)
+	return why
 }
 
 // TestInfoComplete (spec D-A4): over every clean program of the corpus,

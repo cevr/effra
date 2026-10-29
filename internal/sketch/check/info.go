@@ -15,9 +15,14 @@ import (
 //     entry, every identifier a Defs or Uses entry, every call a Calls
 //     entry, every pattern a Patterns entry, every match and catch a
 //     Matches entry, every for-in a Loops entry and every with a Withs
-//     entry (TestInfoComplete).
+//     entry, whose Entries hold its named wires' providers with their
+//     conversions (TestInfoComplete). A package name before a dot and a
+//     built-in callee are no values and have no Types entry. An inline
+//     wire value's entries are stage E's (196x).
 //  2. Final: no type in Info is invalid or holds a row variable; a type
-//     parameter appears only inside its own generic declaration.
+//     parameter appears only inside its own generic declaration. The one
+//     exception is go/types': the name in an explicit instantiation
+//     Fn[int] keeps its generic type (round-4 M3).
 //  3. Proved: a Match is total, so the lowering adds no default arm except
 //     a catch's defect re-panic (rows.md, Catch 6).
 //  4. Deterministic: every slice in Package and in Info's values is in
@@ -247,8 +252,29 @@ type With struct {
 	// Wires are the named wires bound, in nesting order; an inline wire
 	// value's entries are stage E's (196x).
 	Wires []*Wire
+	// Entries are the entries of Wires, in nesting and source order: each
+	// maps capabilities to a provider expression or names an embedded
+	// wire, whose own Entries hold its providers.
+	Entries []*WireEntry
 	// Discharged are the capability types the site binds, by name.
 	Discharged []Type
+}
+
+// WireEntry is one entry of a named wire: a provider for capabilities, or
+// an embedded wire.
+type WireEntry struct {
+	// Caps are the capabilities the entry provides, in key order; none for
+	// an embedding.
+	Caps []Type
+	// Provider is the provider expression; nil for an embedding.
+	Provider syntax.Expr
+	// Conversions put the provider into each capability, in Caps order: a
+	// ConvOperations table, or the zero Conversion when the provider's type
+	// is the capability itself. Implicit holds the same conversion at
+	// Provider when the entry has one capability.
+	Conversions []Conversion
+	// Embedded is the embedded wire; nil for a provider entry.
+	Embedded *Wire
 }
 
 // Test is a test block (stage E, 196l).
@@ -360,6 +386,89 @@ func (c *checker) finishInfo() {
 	for p, name := range c.asNames {
 		p.Var, _ = c.pkg.Info.Defs[name].(*Var)
 	}
+	// A function's type keeps its row variables (inference writes the
+	// solution beside them); Info holds the solved rows (invariant 2).
+	memo := map[Type]Type{}
+	for x, t := range c.pkg.Info.Types {
+		if r := c.finalType(t, memo); r != t {
+			c.pkg.Info.Types[x] = r
+		}
+	}
+	// A with's entries are its named wires' entries, final once every
+	// wire body is checked.
+	for _, w := range c.pkg.Info.Withs {
+		w.Entries = nil
+		for _, wire := range w.Wires {
+			w.Entries = append(w.Entries, wire.Entries...)
+		}
+	}
+}
+
+// finalType is t with every row variable in a function type's rows
+// replaced by its solution; t itself when it holds none. Named types are
+// not entered: their bodies are declared, with written rows.
+func (c *checker) finalType(t Type, memo map[Type]Type) Type {
+	if r, ok := memo[t]; ok {
+		return r
+	}
+	out := t
+	switch t := t.(type) {
+	case *Signature:
+		if len(t.TParams) > 0 {
+			break // a generic function's own type (an explicit instantiation's name)
+		}
+		s := *t
+		changed := false
+		s.Params = make([]*Var, len(t.Params))
+		for i, p := range t.Params {
+			s.Params[i] = p
+			if pt := c.finalType(p.Type, memo); pt != p.Type {
+				q := *p
+				q.Type = pt
+				s.Params[i] = &q
+				changed = true
+			}
+		}
+		s.Results = make([]Type, len(t.Results))
+		for i, r := range t.Results {
+			s.Results[i] = c.finalType(r, memo)
+			changed = changed || s.Results[i] != r
+		}
+		if e := c.types.resolve(t.Errors); e != t.Errors {
+			s.Errors, changed = e, true
+		}
+		if u := c.types.resolve(t.Uses); u != t.Uses {
+			s.Uses, changed = u, true
+		}
+		if changed {
+			out = &s
+		}
+	case *Slice:
+		if e := c.finalType(t.Elem, memo); e != t.Elem {
+			out = &Slice{Elem: e}
+		}
+	case *Pointer:
+		if e := c.finalType(t.Elem, memo); e != t.Elem {
+			out = &Pointer{Elem: e}
+		}
+	case *Map:
+		k, e := c.finalType(t.Key, memo), c.finalType(t.Elem, memo)
+		if k != t.Key || e != t.Elem {
+			out = &Map{Key: k, Elem: e}
+		}
+	case *Tuple:
+		ts := make([]Type, len(t.Types))
+		changed := false
+		for i, e := range t.Types {
+			ts[i] = c.finalType(e, memo)
+			changed = changed || ts[i] != e
+		}
+		if changed {
+			out = &Tuple{Types: ts}
+		}
+	}
+	memo[t] = out
+	return out
 }
 
 // tail records a block-final expression statement whose value is the
@@ -409,12 +518,24 @@ func (c *checker) loop(s *syntax.RangeStmt, l *Loop) {
 // type from to t makes (Info.Implicit): a variant into its union, or a
 // value into an operation type with its operations' functions.
 func (c *checker) implicit(x syntax.Expr, from, t Type) {
-	if c.silent > 0 || x == nil || c.identical(from, t) {
+	if c.silent > 0 || x == nil {
 		return
+	}
+	if conv, ok := c.conversionOf(from, t); ok {
+		c.pkg.Info.Implicit[x] = conv
+	}
+}
+
+// conversionOf is the implicit conversion of a value of type from to t,
+// and false when there is none (the types are identical, or the value
+// already is an interface).
+func (c *checker) conversionOf(from, t Type) (Conversion, bool) {
+	if c.identical(from, t) {
+		return Conversion{}, false
 	}
 	switch {
 	case isUnion(t) && !isUnion(from):
-		c.pkg.Info.Implicit[x] = Conversion{Kind: ConvVariant, From: from, To: t}
+		return Conversion{Kind: ConvVariant, From: from, To: t}, true
 	case asInterface(t) != nil && asInterface(from) == nil:
 		table := map[string]*Func{}
 		for _, m := range asInterface(t).Methods {
@@ -422,8 +543,9 @@ func (c *checker) implicit(x syntax.Expr, from, t Type) {
 				table[m.Name] = fn
 			}
 		}
-		c.pkg.Info.Implicit[x] = Conversion{Kind: ConvOperations, From: from, To: t, Table: table}
+		return Conversion{Kind: ConvOperations, From: from, To: t, Table: table}, true
 	}
+	return Conversion{}, false
 }
 
 func isUnion(t Type) bool {

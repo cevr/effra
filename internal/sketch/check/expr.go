@@ -59,7 +59,7 @@ func bad(x syntax.Expr) operand { return operand{mode: modeInvalid, typ: invalid
 // its one type when it is checked (196u rule 7), so Info records each
 // expression once, with no update pass.
 func (c *checker) record(x syntax.Expr, op operand) {
-	if c.silent == 0 && op.typ != nil && op.mode != modeInvalid {
+	if c.silent == 0 && !isInvalid(op.typ) && op.mode != modeInvalid {
 		c.pkg.Info.Types[x] = op.typ
 		if op.mode == modeConst && op.val != nil {
 			c.pkg.Info.Values[x] = op.val

@@ -128,6 +128,9 @@ type Wire struct {
 	// wire budget (wiresum.go): it gets the budget S111.
 	budget bool
 	pkg    *Package
+	// Entries are the wire's entries in source order, made when its body is
+	// checked (Info: With.Entries).
+	Entries []*WireEntry
 }
 
 func (o *TypeName) name() string { return o.Name }
@@ -137,6 +140,13 @@ func (o *Const) name() string    { return o.Name }
 func (o *PkgName) name() string  { return o.Name }
 func (o *Builtin) name() string  { return o.Name }
 func (o *Wire) name() string     { return o.Name }
+
+// A record field and an operation are Objects, so Defs records their
+// declaring names (spec D-A4, invariant 1).
+func (o *Field) name() string     { return o.Name }
+func (o *Field) pos() syntax.Pos  { return o.Pos }
+func (o *Method) name() string    { return o.Name }
+func (o *Method) pos() syntax.Pos { return o.Pos }
 
 func (o *TypeName) pos() syntax.Pos { return o.Pos }
 func (o *Func) pos() syntax.Pos     { return o.Pos }

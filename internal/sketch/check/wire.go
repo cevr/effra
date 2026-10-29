@@ -125,16 +125,20 @@ func (c *checker) wireLit(w *syntax.WireLit) (binds *capSet, known bool) {
 	if w.Needs != nil {
 		c.errorf(w.Needs, CodeOutside, "a wire's needs clause is #196 stage b's (the wire header, rows.md Wire 8); it is not checked yet")
 	}
-	return c.wireBody(w.Body)
+	return c.wireBody(w.Body, nil)
 }
 
 // wireBody checks the body of a named or an inline wire and returns what
 // it binds. The duplicate and replace rules are decided once
 // per body by its summary (bodySummary), whose findings are reported on
 // every pass; the embedded names, the keys and the providers are checked
-// here, on every pass.
-func (c *checker) wireBody(body *syntax.WireBody) (*capSet, bool) {
+// here, on every pass. For a named wire (named is not nil) it makes the
+// wire's Entries (an inline wire's entries are stage E's, 196x).
+func (c *checker) wireBody(body *syntax.WireBody, named *Wire) (*capSet, bool) {
 	sum := c.bodySummary(body)
+	if named != nil && c.silent == 0 {
+		named.Entries = nil
+	}
 	for _, f := range sum.findings {
 		c.errorf(f.at, f.code, "%s", f.msg)
 	}
@@ -151,12 +155,18 @@ func (c *checker) wireBody(body *syntax.WireBody) (*capSet, bool) {
 			} else if c.fn != nil && c.fn.reach != nil {
 				c.fn.reach.wires = append(c.fn.reach.wires, inner)
 			}
+			if inner != nil && named != nil && c.silent == 0 {
+				named.Entries = append(named.Entries, &WireEntry{Embedded: inner})
+			}
 			continue
 		}
 		if build != nil {
 			build.charged = newRow()
 		}
-		caps := c.wireEntry(e)
+		caps, entry := c.wireEntry(e)
+		if named != nil && c.silent == 0 {
+			named.Entries = append(named.Entries, entry)
+		}
 		if build != nil {
 			deps.add(caps, build.charged, e.Key)
 		}
@@ -262,16 +272,17 @@ func (c *checker) checkEntryCycles(name string, d *wireDeps) {
 // Gap 28 and 34). A constructor entry is #37's (S109). The second-entry
 // and replace rules are the body summary's (wiresum.go). It returns the
 // capabilities the entry names.
-func (c *checker) wireEntry(e *syntax.WireEntry) []Type {
+func (c *checker) wireEntry(e *syntax.WireEntry) ([]Type, *WireEntry) {
 	var caps []Type
 	for _, k := range append([]syntax.Expr{e.Key}, e.Keys...) {
 		if t := c.wireKey(k); t != nil {
 			caps = append(caps, t)
 		}
 	}
+	entry := &WireEntry{Caps: caps, Provider: e.Value}
 	if c.isConstructor(e.Value) {
 		c.errorf(e.Value, CodeOutside, "a constructor entry is #37's (wire constructors); write a provider value, not a function")
-		return caps
+		return caps, entry
 	}
 	op := c.valueExpr(e.Value, nil)
 	for _, cap := range caps {
@@ -294,8 +305,15 @@ func (c *checker) wireEntry(e *syntax.WireEntry) []Type {
 			cn := cap.(*Named)
 			c.providers[cn] = append(c.providers[cn], pn)
 		}
+		// The provider becomes the capability: its operations' functions
+		// (196m), which the lowering reads and never re-derives.
+		conv, _ := c.conversionOf(pt, cap)
+		entry.Conversions = append(entry.Conversions, conv)
 	}
-	return caps
+	if len(caps) == 1 && len(entry.Conversions) == 1 && entry.Conversions[0].Kind != 0 && c.silent == 0 {
+		c.pkg.Info.Implicit[e.Value] = entry.Conversions[0]
+	}
+	return caps, entry
 }
 
 // isConstructor reports whether a provider expression names a function
@@ -366,7 +384,7 @@ func (c *checker) checkWires() {
 			t.withs = []*capSet{nil}
 		}
 		c.fn = &funcCtx{t: t, scope: newScope(c.pkg.Scope), reach: c.reachOf(w)}
-		c.wireBody(d.Body)
+		c.wireBody(d.Body, w)
 		c.fn = nil
 	}
 }
