@@ -201,23 +201,23 @@ func withChain(n int) string {
 
 // TestWireInfoChainScale (round-3 review M1): checking the with chain at
 // 4n takes under 8 times as long as at n (the acceptance rule's ratio),
-// the best of two runs each.
+// the best of three runs each, taken in turn so a load change on the
+// machine (the gate runs packages in parallel) reaches both sizes.
 func TestWireInfoChainScale(t *testing.T) {
-	best := func(n int) time.Duration {
-		src := withChain(n)
-		var min time.Duration
-		for range 2 {
+	srcs := map[int]string{4000: withChain(4000), 16000: withChain(16000)}
+	best := map[int]time.Duration{}
+	for range 3 {
+		for _, n := range []int{4000, 16000} {
 			start := time.Now()
-			if _, diags := CheckSource(src); len(diags) > 0 {
+			if _, diags := CheckSource(srcs[n]); len(diags) > 0 {
 				t.Fatalf("n = %d: want a clean check, got %s", n, describeDiags(diags[:1]))
 			}
-			if d := time.Since(start); min == 0 || d < min {
-				min = d
+			if d := time.Since(start); best[n] == 0 || d < best[n] {
+				best[n] = d
 			}
 		}
-		return min
 	}
-	small, large := best(4000), best(16000)
+	small, large := best[4000], best[16000]
 	if ratio := float64(large) / float64(small); ratio >= 8 {
 		t.Fatalf("t(16000) = %v is %.1f × t(4000) = %v; want under 8", large, ratio, small)
 	} else {
