@@ -5,13 +5,12 @@
 // with the shared report code. The CLI checks and formats sources only
 // through Check and Format, so it reports one identity.
 //
-// Build emits a checked program into the content-addressed emission cache
-// (internal/sketch/build, #224) and links it with the go command. Until
-// checked-tree lowering (internal/sketch/lower) replaces it, emission goes
-// through the prototype's bridge, checker and direct-Go emitter
-// (internal/sketch/proto): a program the checker accepts and the prototype
-// cannot lower is refused with S109 naming #50, and nothing is published
-// (spec D12).
+// Build lowers a checked program from the checker's own Package and Info
+// (internal/sketch/lower) into the content-addressed emission cache
+// (internal/sketch/build, #224) and links it with the go command. There is
+// no second checker: a program the checker accepts and the lowering cannot
+// lower yet is refused with a located S109 that names the stage owning the
+// form, and nothing is published.
 //
 // No runtime or generated-code package may import it.
 package sketchfront
@@ -33,7 +32,6 @@ import (
 	"ergo.local/prototype/internal/sketch/check"
 	"ergo.local/prototype/internal/sketch/format"
 	"ergo.local/prototype/internal/sketch/lower"
-	"ergo.local/prototype/internal/sketch/proto"
 	"ergo.local/prototype/internal/sketch/std"
 	"ergo.local/prototype/internal/sketch/syntax"
 )
@@ -70,33 +68,20 @@ func Check(source string) Analysis {
 	return analysis
 }
 
-// EmitterTicket owns lowering from the checker's output; until it lands, a
-// program the prototype emitter cannot lower is refused at build.
-const EmitterTicket = "#50"
-
-// lower converts a checked program through the bridge and checks it with
-// the prototype checker, the emitter's input. Every refusal is re-coded
-// S109 at its position, naming #50 (spec D12).
-func (a Analysis) lower() (*proto.Checked, []report.Diagnostic) {
-	converted, refusals := proto.FromSyntax(a.file)
-	var checked *proto.Checked
-	diagnostics := refusals
-	if converted != nil {
-		checked, diagnostics = proto.Check(converted)
-	}
-	if len(diagnostics) == 0 {
-		return checked, nil
-	}
+// refusals maps the lowering's refusals to located S109 diagnostics: the
+// checker accepted the program, and its form waits for the stage the
+// message names.
+func (a Analysis) refusals(refused *lower.Refused) []report.Diagnostic {
 	lines := lineStarts(a.source)
 	var out []report.Diagnostic
-	for _, d := range diagnostics {
+	for _, r := range refused.Refusals {
 		out = append(out, report.Diagnostic{
 			Code:    check.CodeOutside,
-			Message: fmt.Sprintf("the prototype emitter cannot lower this program yet (%s): %s %s", EmitterTicket, d.Code, d.Msg),
-			Span:    span(a.source, lines, d.Pos.Line, d.Pos.Col),
+			Message: r.Message,
+			Span:    span(a.source, lines, r.Line, r.Column),
 		})
 	}
-	return nil, out
+	return out
 }
 
 // BuildError is a build refusal: the diagnostics that stop the build, with
@@ -173,8 +158,8 @@ func FailureMessage(failure report.FormatFailure) string {
 	return fmt.Sprintf("source cannot be formatted: %s: %s", d.Code, d.Message)
 }
 
-// lineStarts are the byte offsets where the prototype's lines start: it
-// counts LF only.
+// lineStarts are the byte offsets where the source's lines start: the
+// syntax package counts LF only.
 func lineStarts(source string) []int {
 	starts := []int{0}
 	for offset := 0; offset < len(source); offset++ {
@@ -185,9 +170,9 @@ func lineStarts(source string) []int {
 	return starts
 }
 
-// span maps a prototype position to a byte span. The prototype's column is
-// one-based and counts bytes (its lexer advances the column once per byte),
-// so the offset is the line start plus the column minus one. The span covers
+// span maps a line and column to a byte span. The column is one-based and
+// counts bytes (syntax.File.Position), so the offset is the line start plus
+// the column minus one. The span covers
 // the identifier or number at that offset, else one character, and is empty
 // at the end of the text. A position outside the text has no location.
 func span(source string, lines []int, line, col int) report.Span {
@@ -221,9 +206,9 @@ func span(source string, lines []int, line, col int) report.Span {
 // #196 v1 contract of 2026-10-28. There is no user edition selector.
 const LanguageRevision = "ergo-v1-2026-10-28"
 
-// emitterRevision names the emitter that builds use. Stage 2 of lower-v1
-// replaces the prototype emitter with internal/sketch/lower.
-const emitterRevision = "proto-emit/1"
+// emitterRevision names the lowering that builds use: checked-tree lowering
+// from Info (lower-v1 stage 2).
+const emitterRevision = "lower/2"
 
 // BuildRequest is one build of a checked analysis.
 type BuildRequest struct {
@@ -243,9 +228,8 @@ type BuildRequest struct {
 // published module, and links the module to the request's output with the
 // go command. It returns the module whenever one is published, also when
 // the link fails, so the caller can name it. An analysis with diagnostics,
-// one whose source path cannot be anchored, or one the prototype cannot
-// lower is refused before anything is published; a refusal by the
-// prototype is a *BuildError.
+// one whose source path cannot be anchored, or one the lowering refuses is
+// refused before anything is published; a refusal is a *BuildError.
 func Build(a Analysis, req BuildRequest) (build.Module, error) {
 	if len(a.Diagnostics) > 0 || a.file == nil || a.pkg == nil {
 		return build.Module{}, &BuildError{Diagnostics: a.Diagnostics}
@@ -262,24 +246,29 @@ func Build(a Analysis, req BuildRequest) (build.Module, error) {
 		Dependencies: stdDependencies(),
 		Compiler:     compiler,
 		Emitter:      emitterRevision,
-		Runtime:      []build.File{{Path: "rt/rt.go", Data: []byte(proto.RuntimeSource())}},
 		Language:     LanguageRevision,
 		Mode:         build.ModeBuild,
+	}
+	for _, f := range lower.Runtime() {
+		input.Runtime = append(input.Runtime, build.File{Path: f.Path, Data: f.Data})
 	}
 	for _, s := range unit.Sources {
 		input.Sources = append(input.Sources, build.Source{Path: s.Path, Text: []byte(s.Text)})
 	}
 	module, err := req.Cache.Module(input, func() ([]build.File, error) {
-		checked, refusals := a.lower()
-		if len(refusals) > 0 {
-			return nil, &BuildError{Diagnostics: refusals}
+		files, err := lower.Lower(unit)
+		var refused *lower.Refused
+		if errors.As(err, &refused) {
+			return nil, &BuildError{Diagnostics: a.refusals(refused)}
 		}
-		checked.File.Name = unit.Sources[0].Path
-		code, err := proto.Emit(checked)
 		if err != nil {
-			return nil, fmt.Errorf("2026 emission failed: %w", err)
+			return nil, err
 		}
-		return []build.File{{Path: "go.mod", Data: []byte(proto.GoMod)}, {Path: "main.go", Data: []byte(code)}}, nil
+		out := make([]build.File, len(files))
+		for i, f := range files {
+			out[i] = build.File{Path: f.Path, Data: f.Data}
+		}
+		return out, nil
 	})
 	if err != nil {
 		return build.Module{}, err
