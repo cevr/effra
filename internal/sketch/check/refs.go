@@ -561,6 +561,22 @@ func (w *refWalker) calleeSig(fun syntax.Expr) *Signature {
 	return nil
 }
 
+// brokenCallee reports whether a call's callee is pkg.F of a package the
+// checker refused at its import (PkgName.broken): typing checks none of
+// the call's function literals or its block (call.go silentArgs).
+func (w *refWalker) brokenCallee(fun syntax.Expr) bool {
+	sel, ok := unparen(fun).(*syntax.SelectorExpr)
+	if !ok {
+		return false
+	}
+	id, ok := sel.X.(*syntax.Ident)
+	if !ok || w.local(id.Name) {
+		return false
+	}
+	pn, ok := w.c.typeObject(id.Name, w.c.cur).(*PkgName)
+	return ok && pn.broken
+}
+
 // declaredSig is the signature of a declared function that is not generic
 // in a way the call must infer: a function, not a method.
 func declaredSig(o Object) *Signature {
@@ -790,14 +806,24 @@ func (w *refWalker) expr(x syntax.Expr) {
 			w.selfCallee(x.Fun)
 			sig := w.calleeSig(x.Fun)
 			spread := x.Ellipsis.IsValid()
+			// A callee of a package refused at its import (S109: a std
+			// module lower-v1 brings) is not checked, nor are the literals
+			// and block passed to it (silentArgs): they carry no row, so no
+			// class G use follows from them (D3; round 6 review m3).
+			broken := w.brokenCallee(x.Fun)
 			for i, a := range x.Args {
-				if lit, ok := unparen(a).(*syntax.FuncLit); ok && sig != nil {
+				if lit, ok := unparen(a).(*syntax.FuncLit); ok && broken {
+					w.argRows[lit] = [2]bool{true, true}
+				} else if ok && sig != nil {
 					w.argRows[lit] = closedRows(paramType(sig, i, spread))
 				}
 				w.expr(a)
 			}
 			if x.Trailing != nil {
 				f := valueFrame{mode: [2]frameMode{frameValue, frameValue}, at: x.Trailing.Pos(), via: "the trailing block"}
+				if broken {
+					f.mode = [2]frameMode{frameStop, frameStop}
+				}
 				if sig != nil {
 					closed := closedRows(paramType(sig, len(x.Args), spread))
 					for k := range closed {

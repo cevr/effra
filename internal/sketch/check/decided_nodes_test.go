@@ -57,6 +57,14 @@ func main() {}
 import task
 func main() { task.Go() { 1 } }
 `, []string{"S109:2"}},
+		{"import std", "a std import adds no cascade", `
+import task
+type Bang {}
+func a() { task.Go() { b() }; return Bang{} }
+func b() { return a() }
+func F() fails Bang { return b() }
+func main() {}
+`, []string{"S109:2"}},
 		{"let", "let names a value", `
 func f() int64 {
 	let x int64 = 1
