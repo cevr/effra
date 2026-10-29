@@ -116,6 +116,9 @@ func f() P {
 	{"signed literal", `func f() int8 {
 	return -77
 }`, "77", "int8"},
+	{"signed literal in parentheses", `func f() int8 {
+	return -(77)
+}`, "77", "int8"},
 	// No expected type: the default.
 	{"let without a type", `func f() int {
 	let v = 77
@@ -205,6 +208,20 @@ func f() int8 {
 	return y
 }`, 2, "the constant 200 overflows int8"},
 	{"3: a literal overflows its type", `let Max8 int8 = 300`, 1, "the constant 300 overflows int8"},
+	{"3: each typed step fits", `func f() int8 {
+	let y int8 = 100 + 100 - 100
+	return y
+}`, 2, "the constant 200 overflows int8"},
+	{"3: a signed literal in parentheses fits after its sign", `func f() int8 {
+	let a int8 = -(129)
+	return a
+}`, 2, "the constant -129 overflows int8"},
+	{"1: a signed float literal is not an int", `func f() int64 {
+	return -1e3
+}`, 2, "a float literal takes only a float type, not int64; write -1000"},
+	{"D-A3: a conversion's literal takes int", `func f() uint64 {
+	return uint64(18446744073709551615)
+}`, 2, "the constant 18446744073709551615 overflows int, the type a conversion's literal takes; write it where uint64 is expected: let x uint64 = 18446744073709551615"},
 	{"4: two literals take their defaults", `func f() float64 {
 	let d = 1 + 2.5
 	return d
@@ -216,6 +233,10 @@ func f() int8 {
 	let v = 1 + 'a'
 	return v
 }`, 2, "mismatched types int and int32; both literals take their defaults"},
+	{"4: a string and a rune literal", `func f() string {
+	let v = "a" + 'b'
+	return v
+}`, 2, "mismatched types string and int32; both literals take their defaults"},
 	{"6: mixed defaults", `func Two[T](a, b T) T {
 	return a
 }

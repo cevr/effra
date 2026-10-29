@@ -131,12 +131,19 @@ func (c *checker) unary(x *syntax.UnaryExpr, hint Type) operand {
 		return c.undecided(x, "the unary operator "+x.Op.String())
 	}
 	var op operand
-	if lit, ok := x.X.(*syntax.BasicLit); ok && (x.Op == syntax.SUB || x.Op == syntax.ADD) {
-		// A signed literal fits its type after the sign: -128 is an int8
-		// (literal checks the unsigned value everywhere else).
+	if lit, ok := unparen(x.X).(*syntax.BasicLit); ok && (x.Op == syntax.SUB || x.Op == syntax.ADD) {
+		// A signed literal fits its type after the sign: -128 and -(128)
+		// are int8 (literal checks the unsigned value everywhere else).
 		op = c.basicLit(lit, hint)
 		op.expr = lit
-		c.record(lit, op)
+		for y := x.X; ; {
+			c.record(y, op)
+			p, ok := y.(*syntax.ParenExpr)
+			if !ok {
+				break
+			}
+			y = p.X
+		}
 	} else {
 		op = c.valueExpr(x.X, hint)
 	}
@@ -416,6 +423,10 @@ func (c *checker) conversion(x *syntax.CallExpr, t Type) operand {
 	hint := t
 	if c.isLiteral(x.Args[0]) {
 		hint = nil
+		if msg := convertedLiteralOverflow(x.Args[0], t); msg != "" {
+			c.errorf(x.Args[0], CodeType, "%s", msg)
+			return bad(x)
+		}
 	}
 	op := c.valueExpr(x.Args[0], hint)
 	if op.invalid() || isInvalid(t) {
@@ -459,6 +470,39 @@ func (c *checker) conversion(x *syntax.CallExpr, t Type) operand {
 	}
 	c.errorf(x, CodeType, "cannot convert %s to %s", op.typ, t)
 	return bad(x)
+}
+
+// convertedLiteralOverflow is the S108 message for an integer literal,
+// signed or not, that a conversion to the numeric type t would take but
+// its default int cannot hold: uint64(18446744073709551615). A
+// conversion's literal takes its default (D-A3), so the fix writes the
+// literal where t is expected. It is "" for any other operand.
+func convertedLiteralOverflow(x syntax.Expr, t Type) string {
+	lit, sign, ok := signedLit(x)
+	tb, isBasic := under0(t).(*Basic)
+	if !ok || lit.Kind != syntax.INT || !isBasic || !isNumeric(tb) || len(lit.Value) > 1 && lit.Value[0] == '0' {
+		return ""
+	}
+	v := constant.MakeFromLiteral(lit.Value, token.INT, 0)
+	if v.Kind() != constant.Int {
+		return ""
+	}
+	if sign == "-" {
+		v = constant.UnaryOp(token.SUB, v, 0)
+	}
+	lo, hi := intBounds(Int)
+	if !constant.Compare(v, token.LSS, lo) && !constant.Compare(v, token.GTR, hi) {
+		return ""
+	}
+	if isInteger(tb) {
+		// Only a fix that fits t is named; else the plain overflow stands.
+		if lo, hi := intBounds(tb.Kind); constant.Compare(v, token.LSS, lo) || constant.Compare(v, token.GTR, hi) {
+			return ""
+		}
+	} else if !isFloat(tb) {
+		return ""
+	}
+	return "the constant " + v.ExactString() + " overflows int, the type a conversion's literal takes; write it where " + t.String() + " is expected: let x " + t.String() + " = " + v.ExactString()
 }
 
 func (c *checker) convertible(v, t Type) bool {

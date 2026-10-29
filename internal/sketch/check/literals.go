@@ -244,7 +244,11 @@ func (c *checker) mismatchText(x *syntax.BinaryExpr, l, r Type) string {
 		if lt != "" && rt != "" && (lok || rok) {
 			return msg + "; write " + lt + " " + x.Op.String() + " " + rt
 		}
-		return msg + "; both literals take their defaults, so convert one to the other's type, e.g. " + r.String() + "(…)"
+		if isNumeric(l) && isNumeric(r) {
+			return msg + "; both literals take their defaults, so convert one to the other's type, e.g. " + r.String() + "(…)"
+		}
+		// "a" + 'b': no conversion of one literal gives the other's type.
+		return msg + "; both literals take their defaults"
 	}
 	if id, ok := unparen(x.X).(*syntax.Ident); ok && isNumeric(l) && isNumeric(r) {
 		return msg + "; write " + r.String() + "(" + id.Name + ")"
@@ -267,20 +271,33 @@ func floatForm(x syntax.Expr, other Type) (string, bool) {
 	return lit.Value, false
 }
 
+// signedLit is x's basic literal and its sign ("-", "+" or ""), in
+// parentheses or not: the forms unary folds into one literal.
+func signedLit(x syntax.Expr) (*syntax.BasicLit, string, bool) {
+	x = unparen(x)
+	sign := ""
+	if u, ok := x.(*syntax.UnaryExpr); ok && (u.Op == syntax.SUB || u.Op == syntax.ADD) {
+		sign, x = u.Op.String(), unparen(u.X)
+	}
+	lit, ok := x.(*syntax.BasicLit)
+	return lit, sign, ok
+}
+
 // literalMismatch is the S108 message for a literal that cannot take its
-// target type t (196u rule 1), or "" when x is not a basic literal.
+// target type t (196u rule 1), or "" when x is not a basic literal, signed
+// or not.
 func literalMismatch(x syntax.Expr, t Type) string {
-	lit, ok := unparen(x).(*syntax.BasicLit)
+	lit, sign, ok := signedLit(x)
 	if !ok {
 		return ""
 	}
 	switch {
 	case lit.Kind == syntax.INT && isDuration(t):
-		return "an integer literal is not a duration: write a duration literal such as " + lit.Value + "s"
+		return "an integer literal is not a duration: write a duration literal such as " + sign + lit.Value + "s"
 	case lit.Kind == syntax.FLOAT && isInteger(t):
 		fix := "write an integer literal"
 		if iv := constant.ToInt(constant.MakeFromLiteral(lit.Value, token.FLOAT, 0)); iv.Kind() == constant.Int {
-			fix = "write " + iv.ExactString()
+			fix = "write " + strings.TrimPrefix(sign, "+") + iv.ExactString()
 		}
 		return "a float literal takes only a float type, not " + t.String() + "; " + fix
 	case lit.Kind == syntax.RUNE && !isInteger(t):
