@@ -124,6 +124,18 @@ func (c *checker) condition(x syntax.Expr) {
 	}
 }
 
+// recordDown records op for inner and for each parenthesis from outer down
+// to it: a catch checked as a statement, not through expr, still has its
+// Types entry (Info invariant 1).
+func (c *checker) recordDown(outer, inner syntax.Expr, op operand) {
+	for x := outer; ; x = x.(*syntax.ParenExpr).X {
+		c.record(x, op)
+		if x == inner {
+			return
+		}
+	}
+}
+
 // exprStmt checks an expression statement: a call, try, catch or with
 // (S110 otherwise). A fallible statement is S105.
 func (c *checker) exprStmt(s *syntax.ExprStmt) {
@@ -133,13 +145,16 @@ func (c *checker) exprStmt(s *syntax.ExprStmt) {
 	case *syntax.CatchExpr:
 		op = c.catch(e, nil, false, false)
 		op.expr = s.X
+		c.recordDown(s.X, e, op)
 	case *syntax.TryExpr:
 		if ce, ok := unparen(e.X).(*syntax.CatchExpr); ok {
 			op = c.catch(ce, nil, false, true)
+			c.recordDown(e.X, ce, op)
 			if !op.invalid() {
 				c.escape(e, op.errs)
 				op.errs = nil
 			}
+			c.recordDown(s.X, e, op)
 			return
 		}
 		op = c.expr(s.X, nil)

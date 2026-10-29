@@ -761,6 +761,10 @@ func TestDifferentialGoTypes(t *testing.T) {
 		if p := RefWalkProblems(src.ergoSrc); len(p) > 0 {
 			t.Fatalf("seed %d (reference walk): %s", seed, strings.Join(p, "; "))
 		}
+		// Info is complete on every accepted generated program (spec D-A4).
+		if gaps := cleanInfoGaps(src.ergoSrc); len(gaps) > 0 {
+			t.Fatalf("seed %d (Info):\n\t%s\n%s", seed, strings.Join(gaps, "\n\t"), src.ergoSrc)
+		}
 		if _, diags := CheckSource(src.ergoSrc); len(diags) == 0 {
 			accepted++
 		} else {
@@ -1001,6 +1005,9 @@ func TestDifferentialInference(t *testing.T) {
 		if refusal {
 			refused++
 		}
+		if gaps := cleanInfoGaps(src.ergoSrc); len(gaps) > 0 {
+			t.Fatalf("seed %d (Info):\n\t%s\n%s", seed, strings.Join(gaps, "\n\t"), src.ergoSrc)
+		}
 		if _, diags := CheckSource(src.ergoSrc); len(diags) == 0 {
 			accepted++
 		} else {
@@ -1033,9 +1040,15 @@ func FuzzDifferential(f *testing.F) {
 		if p := RefWalkProblems(src.ergoSrc); len(p) > 0 {
 			t.Fatalf("seed %d (reference walk): %s", seed, strings.Join(p, "; "))
 		}
+		if gaps := cleanInfoGaps(src.ergoSrc); len(gaps) > 0 {
+			t.Fatalf("seed %d (Info):\n\t%s", seed, strings.Join(gaps, "\n\t"))
+		}
 		src = inferProgram(rand.New(rand.NewSource(seed)), wrapNone)
 		if d := diffCheck(src, false); len(d) > 0 {
 			t.Fatalf("seed %d (inference):\n%s\n%s", seed, strings.Join(d, "\n"), src.goSrc)
+		}
+		if gaps := cleanInfoGaps(src.ergoSrc); len(gaps) > 0 {
+			t.Fatalf("seed %d (inference Info):\n\t%s", seed, strings.Join(gaps, "\n\t"))
 		}
 		if d := nestedCheck(seed); len(d) > 0 {
 			t.Fatalf("seed %d (nested):\n%s", seed, strings.Join(d, "\n"))

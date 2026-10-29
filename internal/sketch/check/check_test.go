@@ -172,13 +172,14 @@ func TestRegistry(t *testing.T) {
 }
 
 // corpus returns every source the checker's tests and the fuzz seeds use:
-// the fixture mirror, the prototype's fixtures and the parser's corpus,
-// as translated into the decided syntax (#196; the frozen old .sketch
-// copies no longer parse).
+// the fixture mirror, the acceptance rule fixtures copied into testdata/v1,
+// the prototype's fixtures and the parser's corpus, as translated into the
+// decided syntax (#196; the frozen old .sketch copies no longer parse).
 func corpus(t testing.TB) map[string]string {
 	out := map[string]string{}
 	for _, pattern := range []string{
 		"testdata/fixtures/*/*.ergo",
+		"testdata/v1/*.ergo",
 		"../proto/testdata/*.ergo",
 		"../proto/testdata/*/*.ergo",
 		"../syntax/testdata/corpus/*/*.ergo",
@@ -231,8 +232,9 @@ func assertWellFormed(t testing.TB, name, src string, diags []check.Diagnostic) 
 	}
 }
 
-// FuzzCheck: no input panics the checker, and its output is deterministic,
-// located and registered (spec Work rules).
+// FuzzCheck: no input panics the checker, its output is deterministic,
+// located and registered, and an accepted program's Info is complete and
+// final (spec Work rules; D-A4 invariants 1 and 2).
 func FuzzCheck(f *testing.F) {
 	for _, src := range corpus(f) {
 		f.Add(src)
@@ -251,6 +253,9 @@ func FuzzCheck(f *testing.F) {
 		}
 		if p := check.OrderProblems(src, 2); len(p) > 0 {
 			t.Fatalf("declaration order: %s", p[0])
+		}
+		if gaps := check.InfoGaps(src); len(gaps) > 0 {
+			t.Fatalf("Info of an accepted program:\n\t%s", strings.Join(gaps, "\n\t"))
 		}
 	})
 }

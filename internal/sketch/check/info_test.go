@@ -11,14 +11,22 @@ import (
 	"ergo.local/prototype/internal/sketch/syntax"
 )
 
-// infoCorpus is every program TestInfoComplete reads: the positive and
-// spec fixtures and the stage fixtures copied into testdata/v1. A program
-// with a diagnostic is not lowered, so only the clean ones count.
+// infoCorpus is every program TestInfoComplete reads: the fixtures, the
+// stage fixtures copied into testdata/v1, the prototype's translated
+// fixtures and the syntax corpus. A program with a diagnostic is not
+// lowered, so only the clean ones count.
 func infoCorpus(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	for _, pattern := range []string{"fixtures/positive/*.ergo", "fixtures/spec/*.ergo", "v1/*.pos.ergo"} {
-		files, _ := filepath.Glob(filepath.Join("testdata", pattern))
+	for _, pattern := range []string{
+		"testdata/fixtures/*/*.ergo",
+		"testdata/v1/*.ergo",
+		"../proto/testdata/*.ergo",
+		"../proto/testdata/*/*.ergo",
+		"../syntax/testdata/corpus/*/*.ergo",
+		"../syntax/testdata/corpus/*/*/*.ergo",
+	} {
+		files, _ := filepath.Glob(pattern)
 		for _, f := range files {
 			data, err := os.ReadFile(f)
 			if err != nil {
@@ -187,6 +195,23 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 	sort.Strings(gaps)
 	return gaps
 }
+
+// cleanInfoGaps checks src as one package and returns infoGaps when the
+// package is clean, and nil when it has a diagnostic (it is not lowered).
+func cleanInfoGaps(src string) []string {
+	file, err := syntax.Parse(src)
+	if err != nil {
+		return nil
+	}
+	pkg, diags := Check("main", []*syntax.File{file}, nil)
+	if len(diags) > 0 {
+		return nil
+	}
+	return infoGaps(file, src, pkg.Info)
+}
+
+// InfoGaps is cleanInfoGaps for the external tests (FuzzCheck).
+var InfoGaps = cleanInfoGaps
 
 // notFinal says why a type in Info is not final (invariant 2), or "".
 func notFinal(t Type) string {
