@@ -149,3 +149,41 @@ var bridgeTable = []struct {
 	{"assignment", "func main() needs Console {\n\tlet mut s = \"a\"\n\ts = \"b\"\n\tConsole.Println(s)\n}\n", 3},
 	{"multi-subject-switch", "type A = X | Y\ntype X {}\ntype Y {}\n\nfunc pair(a A, b A) string {\n\tmatch (a, b) {\n\tcase (X, X):\n\t\treturn \"xx\"\n\tcase (_, _):\n\t\treturn \"other\"\n\t}\n}\n\nfunc main() needs Console {\n\tConsole.Println(pair(X{}, Y{}))\n}\n", 6},
 }
+
+// TestPrintlnOperands (round-6 ruling A3): the decided one-line
+// Console.Println("a \(x) \(y)") reads as the prototype's variadic call
+// that prints the same line; a spacing Println cannot print is refused.
+func TestPrintlnOperands(t *testing.T) {
+	for _, c := range []struct{ arg, want string }{
+		{`"total \(n) \(f(n))"`, `"total" n f(n)`},
+		{`"\(n)"`, `n`},
+		{`" \(n)"`, `"" n`},
+		{`"\(a)  \(b)"`, `a "" b`},
+		{`"\(a) x \(b) "`, `a "x" b ""`},
+		{`"\(a)\(b)"`, `refused`},
+		{`"a\(b)"`, `refused`},
+		{`"\(a)b"`, `refused`},
+	} {
+		file, err := syntax.Parse("let v = Console.Println(" + c.arg + ")\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		call := file.Decls[0].(*syntax.VarDecl).Specs[0].Values[0].(*syntax.CallExpr)
+		ops, ok := printlnOperands(call)
+		got := "refused"
+		if ok {
+			var parts []string
+			for _, o := range ops {
+				if lit, isLit := o.(*syntax.BasicLit); isLit && lit.Kind == syntax.STRING {
+					parts = append(parts, lit.Value)
+				} else {
+					parts = append(parts, file.Src[o.Pos():o.End()])
+				}
+			}
+			got = strings.Join(parts, " ")
+		}
+		if got != c.want {
+			t.Errorf("%s: got %s, want %s", c.arg, got, c.want)
+		}
+	}
+}

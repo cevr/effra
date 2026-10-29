@@ -656,6 +656,9 @@ func (c *converter) call(x *syntax.CallExpr) Expr {
 		return nil
 	}
 	args := x.Args
+	if spread, ok := printlnOperands(x); ok {
+		args = spread
+	}
 	var fun Expr
 	if id, ok := x.Fun.(*syntax.Ident); ok && c.methodNames[id.Name] && len(args) > 0 {
 		// A call by name of a function read as a method: `f(x, a)` is
@@ -685,6 +688,66 @@ func (c *converter) call(x *syntax.CallExpr) Expr {
 		return nil
 	}
 	return out
+}
+
+// printlnOperands reads `Console.Println("a \(x) \(y)")`, the decided
+// prelude's one-line call (round-6 ruling A3), as the prototype's
+// `Console.Println("a", x, y)`, which prints the same line: Go's Println
+// separates its operands by one space, and an interpolation prints its
+// value as %v does. It applies only when every boundary between a text and
+// an expression is one space; any other interpolation is refused, as before.
+func printlnOperands(x *syntax.CallExpr) ([]syntax.Expr, bool) {
+	sel, ok := x.Fun.(*syntax.SelectorExpr)
+	if !ok || sel.Sel.Name != "Println" || len(x.Args) != 1 {
+		return nil, false
+	}
+	if id, ok := sel.X.(*syntax.Ident); !ok || id.Name != "Console" {
+		return nil, false
+	}
+	is, ok := x.Args[0].(*syntax.InterpolatedString)
+	if !ok {
+		return nil, false
+	}
+	var out []syntax.Expr
+	lit := func(t *syntax.BasicLit, text string) {
+		out = append(out, &syntax.BasicLit{ValuePos: t.ValuePos, Kind: syntax.STRING, Value: `"` + text + `"`, ValueEnd: t.ValueEnd})
+	}
+	for i, t := range is.Texts {
+		// The raw segment keeps its delimiters: `"…\(`, `)…\(` or `)…"`;
+		// each of the three starts with one delimiter byte.
+		text := t.Value[1:]
+		exprAfter := i < len(is.Exprs)
+		if exprAfter {
+			text = strings.TrimSuffix(text, `\(`)
+		} else {
+			text = strings.TrimSuffix(text, `"`)
+		}
+		if i > 0 && text != "" {
+			// The space Println writes after the expression before.
+			if !strings.HasPrefix(text, " ") {
+				return nil, false
+			}
+			text = text[1:]
+			if !exprAfter {
+				lit(t, text) // a final " " is the operand ""
+			}
+		} else if i > 0 && exprAfter {
+			return nil, false // two expressions with no space between
+		}
+		if exprAfter {
+			if text != "" {
+				// The space Println writes before the next expression.
+				if !strings.HasSuffix(text, " ") {
+					return nil, false
+				}
+				lit(t, text[:len(text)-1])
+			}
+			out = append(out, is.Exprs[i])
+		} else if i == 0 && text != "" {
+			lit(t, text)
+		}
+	}
+	return out, true
 }
 
 func (c *converter) compositeLit(x *syntax.CompositeLit) Expr {

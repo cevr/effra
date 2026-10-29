@@ -219,6 +219,11 @@ func TestRules(t *testing.T) {
 			"type Point {\n\tX int,\n\tY int,\n}\n\nfunc use(i int) {}\n\nfunc g(p Point, q Point) {\n\tif p == (Point{1, 2}) {\n\t\tuse(1)\n\t} else if p == q {\n\t\tuse(2)\n\t}\n\tif (p == Point{1, 2}) {\n\t\tuse(3)\n\t}\n}\n"},
 		{"map literal in a header", "package p\n\nfunc use(s string) {}\n\nfunc f() {\n\tfor k := range map[string]int{\"b\": 2} {\n\t\tuse(k)\n\t}\n\tif len(map[string]int{}) > 0 {\n\t}\n}\n",
 			"func use(s string) {}\n\nfunc f() {\n\tfor k, _ in (Map[string, int]{\"b\": 2}) {\n\t\tuse(k)\n\t}\n\tif len(Map[string, int]{}) > 0 {\n\t}\n}\n"},
+		// Round-6 ruling A3: the prelude's Console.Println takes one line.
+		{"Console.Println operands", "package main\n\nfunc main() needs Console {\n\tn := 3\n\tConsole.Println(\"total\", n, f(n))\n\tConsole.Println(n)\n\tConsole.Println(\"plain\")\n\tConsole.Println()\n\tConsole.Println(map[string]int{\"a\": n})\n}\n\nfunc f(i int) int { return i }\n",
+			"func main() needs Console {\n\tlet n = 3\n\tConsole.Println(\"total \\(n) \\(f(n))\")\n\tConsole.Println(\"\\(n)\")\n\tConsole.Println(\"plain\")\n\tConsole.Println(\"\")\n\tConsole.Println(\"\\(Map[string, int]{\"a\": n})\")\n}\n\nfunc f(i int) int { return i }\n"},
+		{"Console.Println operand with a block", "package main\n\ntype Fault struct{}\n\nfunc f() (string, error[Fault]) { return \"x\" }\n\nfunc main() needs Console {\n\tConsole.Println(\"got\", f() catch { case Fault: \"none\" })\n}\n",
+			"type Fault {}\n\nfunc f() string fails Fault { return \"x\" }\n\nfunc main() needs Console {\n\tlet line = f() catch {\n\tcase Fault:\n\t\t\"none\"\n\t}\n\tConsole.Println(\"got \\(line)\")\n}\n"},
 		// Merge round: an any constraint on a generic type is dropped,
 		// with no note (`[T any]` is written `[T]`).
 		{"any constraint on a type", "package p\n\ntype Box[T any] interface{ M(T) }\n\ntype Pair[A any, B any] struct {\n\tX A\n\tY B\n}\n",

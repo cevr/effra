@@ -1258,6 +1258,10 @@ func (t *translator) call(c *oldsyntax.CallExpr) {
 		t.note(c.Ellipsis, "a spread argument: pass the slice")
 		return
 	}
+	if s, ok := c.Fun.(*oldsyntax.SelectorExpr); ok && t.text(s) == "Console.Println" {
+		t.println(c)
+		return
+	}
 	id, ok := c.Fun.(*oldsyntax.Ident)
 	if !ok {
 		return
@@ -2283,6 +2287,66 @@ func groupingText(x oldsyntax.Expr, text string, prec int) (string, string) {
 		return "(", ")"
 	}
 	return grouping(x, prec)
+}
+
+// println rewrites a call of the prelude's Console.Println, which takes one
+// line in the decided prelude (round-6 ruling A3), to one interpolated
+// string: Go's Println writes its operands as %v does, separated by one
+// space. A single interpreted string literal stays as written; any other
+// operand is interpolated, and a string literal among several gives its
+// text.
+func (t *translator) println(c *oldsyntax.CallExpr) {
+	if len(c.Args) == 1 {
+		if lit, ok := c.Args[0].(*oldsyntax.BasicLit); ok && lit.Kind == oldsyntax.STRING && lit.Value[0] == '"' {
+			return
+		}
+	}
+	// An operand with a block (a catch, a function literal, a trailing
+	// block) prints on several lines, which an interpolation cannot hold:
+	// then every operand is bound with let first, in order, so the
+	// evaluation order stays.
+	hoist := false
+	for _, a := range c.Args {
+		oldsyntax.Inspect(a, func(n oldsyntax.Node) bool {
+			switch n := n.(type) {
+			case *oldsyntax.CatchExpr, *oldsyntax.FuncLit:
+				hoist = true
+			case *oldsyntax.CallExpr:
+				hoist = hoist || n.Trailing != nil
+			}
+			return !hoist
+		})
+	}
+	var stmt oldsyntax.Node
+	if hoist {
+		es, ok := t.parent[c].(*oldsyntax.ExprStmt)
+		if ok {
+			switch t.parent[es].(type) {
+			case *oldsyntax.BlockStmt, *oldsyntax.CaseClause:
+				stmt = es
+			}
+		}
+		if stmt == nil {
+			t.note(c.Pos(), "Console.Println of an operand with a block, outside a statement: bind the operand with let and print it by hand")
+			return
+		}
+	}
+	parts := make([]string, len(c.Args))
+	for i, a := range c.Args {
+		if lit, ok := a.(*oldsyntax.BasicLit); ok && lit.Kind == oldsyntax.STRING && lit.Value[0] == '"' {
+			parts[i] = lit.Value[1 : len(lit.Value)-1]
+			continue
+		}
+		text := t.translated(a)
+		if hoist {
+			name := t.freshName("line")
+			t.insert(stmt.Pos(), "let "+name+" = "+text+"\n"+t.indentOf(stmt.Pos()))
+			text = name
+		}
+		parts[i] = `\(` + text + `)`
+	}
+	t.textOf(c.Lparen, c.Rparen+1)
+	t.replace(c.Lparen, c.Rparen+1, `("`+strings.Join(parts, " ")+`")`)
 }
 
 // inHeader reports whether x stands bare in a control clause header: the
