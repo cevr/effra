@@ -516,6 +516,12 @@ func TestRoundFiveForms(t *testing.T) {
 			{"header-positional-literal", "Point{", "write (Point{…}), or bind it with let first"},
 			{"header-positional-names", "Point{", "write (Point{…}), or bind it with let first"},
 			{"header-positional-one", "Box{", "write (Box{…}), or bind it with let first"},
+			// Round 7 review m1: a complete element, not only one token.
+			{"header-positional-unary", "Point{", "write (Point{…}), or bind it with let first"},
+			{"header-positional-call", "Point{", "write (Point{…}), or bind it with let first"},
+			{"header-positional-selector-index", "Point{", "write (Point{…}), or bind it with let first"},
+			{"header-positional-paren", "Point{", "write (Point{…}), or bind it with let first"},
+			{"header-positional-one-call", "Box{", "write (Box{…}), or bind it with let first"},
 		} {
 			src, e := malformedError(t, c.name)
 			if !strings.HasSuffix(e.Message, c.msg) || !strings.HasPrefix(src[e.Offset:], c.at) {
@@ -526,6 +532,21 @@ func TestRoundFiveForms(t *testing.T) {
 		_, err := Parse("func main() {\n\tfor x in xs {\n\t\tdone: f()\n\t}\n}\n")
 		if err == nil || !strings.Contains(err.Error(), "Ergo has no labels") {
 			t.Errorf("label in a body: %v", err)
+		}
+		// A body whose first statement holds a comma only inside brackets,
+		// or starts with a keyword, is a body.
+		for _, src := range []string{
+			"func main() {\n\tif ok {\n\t\tuse(1)\n\t}\n}\n",
+			"func main() {\n\tif ok { use(a, b) }\n}\n",
+			"func main() {\n\tif ok { xs[f(a, b)] = g(c, d) }\n}\n",
+			"func main() {\n\tif ok { use(Point{1, 2}) }\n}\n",
+			"func f() int {\n\tif ok { return g(1, 2) }\n\treturn 3\n}\n",
+			"func main() {\n\tif ok { let p = Point{-1, 2} }\n}\n",
+			"func main() {\n\tif ok { run() { use(a, b) } }\n}\n",
+		} {
+			if _, err := Parse(src); err != nil {
+				t.Errorf("%q: %v", src, err)
+			}
 		}
 	})
 	t.Run("Map stays a literal and a type argument", func(t *testing.T) {

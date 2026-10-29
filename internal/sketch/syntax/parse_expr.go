@@ -214,8 +214,8 @@ func (p *parser) isLiteralType(x Expr) bool {
 // clause header, `with Cfg{Port: 1} { … }`: the brace there opens the
 // body, so without this the body's `Port:` would read as a label. A body
 // that starts on the brace's line never starts with `name:`, nor with `}`
-// followed by a `{` (round-4 review O1). A `name:` on the next line stays
-// the label habit's.
+// followed by a `{` (round-4 review O1), nor with a positional element
+// (positionalElement). A `name:` on the next line stays the label habit's.
 func (p *parser) headerLiteral(x Expr) {
 	if p.exprLev >= 0 || strings.Contains(p.src[p.tok.end:p.peek(1).pos], "\n") {
 		return
@@ -227,14 +227,53 @@ func (p *parser) headerLiteral(x Expr) {
 		return
 	}
 	next, after := p.peek(1).tok, p.peek(2).tok
-	// A positional literal, `Point{1, 2}` or `Box{x}`: no statement starts
-	// with an operand and a comma (an assignment has one left side), and a
-	// body of one operand is not followed by another block.
-	operand := next == IDENT || next == INT || next == FLOAT || next == STRING || next == RUNE || next == DURATION
-	positional := operand && (after == COMMA || after == RBRACE && p.peek(3).tok == LBRACE)
-	if next == IDENT && after == COLON || next == RBRACE && after == LBRACE || positional {
+	if next == IDENT && after == COLON || next == RBRACE && after == LBRACE || p.positionalElement() {
 		name := p.src[x.Pos():x.End()]
 		p.errorAt(x.Pos(), int(x.End()-x.Pos()), "a composite literal in a header needs parentheses: write (%s{…}), or bind it with let first", name)
+	}
+}
+
+// positionalElement reports whether the tokens after the brace p.tok
+// begin a positional literal, `Point{1, 2}`, `Point{-1, 2}`,
+// `Point{one(), 2}`, `Point{a.b, c[0]}` or `Box{x} {`: one complete element
+// on the brace's line (a unary, call, selector, index, literal or
+// parenthesised expression, any operator between them, brackets
+// balanced) followed by a comma, or by the literal's `}` and the body's
+// `{`. No statement starts so: an assignment has one left side, and every
+// other statement that holds a comma starts with a keyword (return, let,
+// case) or a label's `name:`. It scans only the brace's line (round 7
+// review m1).
+func (p *parser) positionalElement() bool {
+	depth := 0
+	prev := p.tok
+	for i := 1; ; i++ {
+		t := p.peek(i)
+		if t.tok == EOF || strings.Contains(p.src[prev.end:t.pos], "\n") {
+			return false
+		}
+		prev = t
+		switch {
+		case t.tok > keywordBeg && t.tok < keywordEnd && t.tok != FUNC:
+			return false
+		case t.tok == LPAREN || t.tok == LBRACK || t.tok == LBRACE:
+			depth++
+		case t.tok == RPAREN || t.tok == RBRACK:
+			depth--
+		case t.tok == RBRACE:
+			if depth == 0 {
+				after := p.peek(i + 1)
+				return i > 1 && after.tok == LBRACE && !strings.Contains(p.src[t.end:after.pos], "\n")
+			}
+			depth--
+		case depth > 0:
+		case t.tok == COMMA:
+			return i > 1
+		case t.tok == COLON || t.tok == SEMICOLON || t.tok == ASSIGN || t.tok == DEFINE || t.tok >= ADD_ASSIGN && t.tok <= AND_NOT_ASSIGN:
+			return false
+		}
+		if depth < 0 {
+			return false
+		}
 	}
 }
 

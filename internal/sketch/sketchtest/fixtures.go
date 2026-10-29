@@ -174,6 +174,11 @@ var MalformedTable = []Malformed{
 	{Name: "header-positional-literal", Src: "func main() {\n\tif x == Point{1, 2} {\n\t\tuse(1)\n\t}\n}\n", Lines: []int{2}},
 	{Name: "header-positional-names", Src: "func main() {\n\tif p == Point{a, b} {\n\t\tuse(1)\n\t}\n}\n", Lines: []int{2}},
 	{Name: "header-positional-one", Src: "func main() {\n\tif p == Box{1} {\n\t\tuse(1)\n\t}\n}\n", Lines: []int{2}},
+	{Name: "header-positional-unary", Src: "func f(p Point) {\n\tif p == Point{-1, 2} {\n\t\tuse(1)\n\t}\n}\n", Lines: []int{2}},
+	{Name: "header-positional-call", Src: "func f(p Point) {\n\tif p == Point{one(), 2} {\n\t\tuse(1)\n\t}\n}\n", Lines: []int{2}},
+	{Name: "header-positional-selector-index", Src: "func f(p Point) {\n\tif p == Point{a.b, c[0]} {\n\t\tuse(1)\n\t}\n}\n", Lines: []int{2}},
+	{Name: "header-positional-paren", Src: "func f(p Point) {\n\tif p == Point{(a + 1) * 2, -b.c(d, e)} {\n\t\tuse(1)\n\t}\n}\n", Lines: []int{2}},
+	{Name: "header-positional-one-call", Src: "func f(b Box) {\n\tif b == Box{one()} {\n\t\tuse(1)\n\t}\n}\n", Lines: []int{2}},
 	{Name: "uses", Src: "func f() uses Clock {}\n", Lines: []int{1}},
 	// Decided-grammar rules (#196, D1).
 	{Name: "mixed-members", Src: "type Card { Number string, Valid() bool }\n", Code: "S108", Lines: []int{1}},
