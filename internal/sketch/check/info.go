@@ -61,7 +61,10 @@ type Package struct {
 	ErrorTypes map[*Named]bool
 
 	qualify bool // print its types with the package name
-	files   []*fileInfo
+	// bindWork counts the steps that resolved the named wires' bindings
+	// (finishInfo): wires, entries and the nodes and entries read.
+	bindWork int
+	files    []*fileInfo
 }
 
 // Info records the checker's results for the lowering (#197, #50).
@@ -266,14 +269,19 @@ type With struct {
 	// capability's index in its Caps. Empty for an inline wire value
 	// (stage E, 196x).
 	Entries []*WireEntry
-	// Overridden are the provider entries a replace overrode, each with the
-	// entry that replaced it, outermost replace first, so a replaced
-	// provider stays traceable; none of them is built.
+	// Overridden are the bindings a replace overrode, outermost replace
+	// first, so a replaced provider stays traceable: each names the
+	// capability, the overridden entry and the entry that replaced it for
+	// that capability. The overridden entry is not built for that
+	// capability; an entry of several capabilities that still binds another
+	// one is in Entries for it and is built for it.
 	Overridden []Override
 }
 
-// Override is a provider entry a replace overrode (With.Overridden).
+// Override is a binding a replace overrode (With.Overridden): Entry no
+// longer binds Cap, By does.
 type Override struct {
+	Cap       Type
 	Entry, By *WireEntry
 }
 
@@ -415,76 +423,139 @@ func (c *checker) finishInfo() {
 	}
 	// A with's bindings, final once every wire body is checked: the entry
 	// that binds each discharged capability, and what a replace overrode.
-	wires := map[*Wire]*wireBinding{}
+	b := &binder{c: c, nodes: map[*Wire]*bindNode{}, results: map[*bindNode]*bindResult{}}
 	for _, w := range c.pkg.Info.Withs {
 		w.Entries, w.Overridden = nil, nil
 		if len(w.Wires) != 1 {
 			continue
 		}
-		b := wires[w.Wires[0]]
-		if b == nil {
-			b = c.bindingOf(w.Wires[0])
-			wires[w.Wires[0]] = b
-		}
+		r := b.result(b.node(w.Wires[0], map[*Wire]bool{}))
 		for _, d := range w.Discharged {
-			w.Entries = append(w.Entries, b.bound[c.types.id(d)])
+			w.Entries = append(w.Entries, r.bound[c.types.id(d)])
 		}
-		w.Overridden = b.overridden
+		w.Overridden = r.overridden
 	}
+	c.pkg.bindWork = b.work
 }
 
-// wireBinding is a named wire's resolved bindings (rows.md, Wire 7): the
-// provider entry for each capability, keyed by its interned id, and
-// the entries a replace overrode.
-type wireBinding struct {
+// The bindings of named wires (rows.md, Wire 7), resolved once per
+// package (round-3 review M1). Each wire gets one bindNode, made once:
+// its own entries and the nodes of its embedded wires. A wire with no own
+// entry and one embedding shares its embedding's node, and an empty node
+// is dropped, so a chain of wires that only embed shares one node. A with
+// reads the result of its wire's node, made once per node: the entry that
+// binds each capability and the overrides. work counts the wires and the
+// entries each step reads; the result of a node is made by one walk of the
+// nodes it reaches, each node once, so work is at most twice the wires
+// and entries plus the nodes and entries the results read. In a clean
+// package every own entry a walk reads is in its result (it binds, or a
+// replace overrode it) and a node of several embeddings joins disjoint
+// capabilities (a capability two embeddings bind is S111 unless replaced),
+// so the results' reading is bounded by their size (TestWireInfoLinear).
+type binder struct {
+	c       *checker
+	nodes   map[*Wire]*bindNode
+	results map[*bindNode]*bindResult
+	work    int
+}
+
+// bindNode is a wire's own entries, by capability, in source order, and
+// the distinct non-empty nodes of its embedded wires, in source order.
+type bindNode struct {
+	own   []ownBinding
+	bases []*bindNode
+}
+
+type ownBinding struct {
+	id    int32
+	cap   Type
+	entry *WireEntry
+}
+
+// bindResult is a node's resolved bindings: the provider entry for each
+// capability, keyed by its interned id, and the overrides.
+type bindResult struct {
 	bound      map[int32]*WireEntry
 	overridden []Override
 }
 
-// bindingOf resolves w's bindings in one walk of its embedding graph,
-// depth first, a wire's own entries before its embeddings', each wire
-// once (a shared node is one build). The first entry the walk meets for a
-// capability is the outermost on its path, so it binds (an own entry wins
-// over an embedded one, which in a clean package it replaces); a later
-// entry for the capability is overridden by the nearest entry for it on
-// the path above. The walk reads each wire and entry once, so the work and
-// the result are linear in the wires w reaches; a with of the same wire
-// reuses it (finishInfo). Embedding cycles are S108, so a wire already
-// visited adds nothing.
-func (c *checker) bindingOf(root *Wire) *wireBinding {
-	b := &wireBinding{bound: map[int32]*WireEntry{}}
-	visited := map[*Wire]bool{}
+var emptyBind = &bindNode{}
+
+// node makes w's node once. Embedding cycles are S108 (rows.md, Wire 5),
+// so a wire already on the walk adds nothing.
+func (b *binder) node(w *Wire, walk map[*Wire]bool) *bindNode {
+	if n, ok := b.nodes[w]; ok {
+		return n
+	}
+	if walk[w] {
+		return emptyBind
+	}
+	walk[w] = true
+	b.work++ // the wire
+	n := &bindNode{}
+	seen := map[*bindNode]bool{}
+	for _, e := range w.Entries {
+		b.work++ // the entry
+		if e.Embedded != nil {
+			if base := b.node(e.Embedded, walk); base != emptyBind && !seen[base] {
+				seen[base] = true
+				n.bases = append(n.bases, base)
+			}
+			continue
+		}
+		for _, cap := range e.Caps {
+			n.own = append(n.own, ownBinding{id: b.c.types.id(cap), cap: cap, entry: e})
+		}
+	}
+	delete(walk, w)
+	switch {
+	case len(n.own) == 0 && len(n.bases) == 0:
+		n = emptyBind
+	case len(n.own) == 0 && len(n.bases) == 1:
+		n = n.bases[0] // shared: the wire binds what its embedding binds
+	}
+	b.nodes[w] = n
+	return n
+}
+
+// result resolves a node once, in one depth-first walk of the nodes it
+// reaches, each once, a node's own entries before its bases'. The first
+// entry the walk meets for a capability is the outermost on its path, so
+// it binds; a later entry for it is overridden, for that capability, by
+// the nearest entry for it on the path above.
+func (b *binder) result(root *bindNode) *bindResult {
+	if r, ok := b.results[root]; ok {
+		return r
+	}
+	r := &bindResult{bound: map[int32]*WireEntry{}}
+	visited := map[*bindNode]bool{}
 	above := map[int32][]*WireEntry{} // the entries for each capability on the path
-	var walk func(w *Wire)
-	walk = func(w *Wire) {
-		if visited[w] {
+	var walk func(n *bindNode)
+	walk = func(n *bindNode) {
+		if visited[n] {
 			return
 		}
-		visited[w] = true
-		var pushed []int32
-		for _, e := range w.Entries {
-			for _, cap := range e.Caps {
-				k := c.types.id(cap)
-				if stack := above[k]; len(stack) > 0 {
-					b.overridden = append(b.overridden, Override{Entry: e, By: stack[len(stack)-1]})
-				} else if b.bound[k] == nil {
-					b.bound[k] = e
-				}
-				above[k] = append(above[k], e)
-				pushed = append(pushed, k)
+		visited[n] = true
+		b.work++ // the node
+		for _, o := range n.own {
+			b.work++ // the entry
+			if stack := above[o.id]; len(stack) > 0 {
+				r.overridden = append(r.overridden, Override{Cap: o.cap, Entry: o.entry, By: stack[len(stack)-1]})
+			} else if r.bound[o.id] == nil {
+				r.bound[o.id] = o.entry
 			}
+			above[o.id] = append(above[o.id], o.entry)
 		}
-		for _, e := range w.Entries {
-			if e.Embedded != nil {
-				walk(e.Embedded)
-			}
+		for _, base := range n.bases {
+			walk(base)
 		}
-		for _, k := range pushed {
-			above[k] = above[k][:len(above[k])-1]
+		for _, o := range n.own {
+			above[o.id] = above[o.id][:len(above[o.id])-1]
 		}
 	}
 	walk(root)
-	return b
+	b.results[root] = r
+	return r
 }
 
 // finalType is t with every row variable in a function type's rows

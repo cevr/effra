@@ -367,8 +367,16 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 			}
 		}
 		for _, o := range w.Overridden {
-			if o.Entry == nil || o.By == nil || o.Entry.Provider == nil || o.By.Provider == nil {
-				at(x, "a with with an incomplete override")
+			lists := func(e *WireEntry) bool {
+				for _, cap := range e.Caps {
+					if o.Cap != nil && typeString(cap) == typeString(o.Cap) {
+						return true
+					}
+				}
+				return false
+			}
+			if o.Entry == nil || o.By == nil || o.Entry.Provider == nil || o.By.Provider == nil || !lists(o.Entry) || !lists(o.By) {
+				at(x, "a with with an override whose entries do not both list its capability")
 			}
 		}
 	}

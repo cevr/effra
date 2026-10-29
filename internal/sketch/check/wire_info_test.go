@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"ergo.local/prototype/internal/sketch/syntax"
 )
@@ -25,7 +26,7 @@ func Run() string needs Store, Log {
 
 // withSummary writes each with site of src, in source order, as the
 // provider text bound to each discharged capability, then the overrides:
-// "Live: Log=Mem{V: "log"} Store=Mem{V: "pkg"}; Mem{V: "a"} by Mem{V: "b"}".
+// "Live: Log=Mem{V: "log"} Store=Mem{V: "pkg"}; Store: Mem{V: "a"} by Mem{V: "b"}".
 func withSummary(t *testing.T, src string) []string {
 	t.Helper()
 	file, err := syntax.Parse(src)
@@ -53,7 +54,7 @@ func withSummary(t *testing.T, src string) []string {
 		line := w.Wires[0].Name + ": " + strings.Join(parts, " ")
 		var over []string
 		for _, o := range w.Overridden {
-			over = append(over, text(o.Entry.Provider)+" by "+text(o.By.Provider))
+			over = append(over, strings.TrimPrefix(typeString(o.Cap), "main.")+": "+text(o.Entry.Provider)+" by "+text(o.By.Provider))
 		}
 		if len(over) > 0 {
 			line += "; " + strings.Join(over, ", ")
@@ -85,15 +86,21 @@ let Live = wire { Store: Mem{V: "pkg"}, Base }
 `, []string{`Both: Log=Mem{V: "both"} Store=Mem{V: "both"}`}},
 		{"a replace of an embedded entry", `let Live = wire { Store: Mem{V: "live"}, Log: Mem{V: "log"} }
 let Test = wire { replace Store: Mem{V: "test"}, Live }
-`, []string{`Test: Log=Mem{V: "log"} Store=Mem{V: "test"}; Mem{V: "live"} by Mem{V: "test"}`}},
+`, []string{`Test: Log=Mem{V: "log"} Store=Mem{V: "test"}; Store: Mem{V: "live"} by Mem{V: "test"}`}},
 		{"a replace through two levels of embedding", `let Shared = wire { Store: Mem{V: "live"} }
 let Accounts = wire { Log: Mem{V: "log"}, Shared }
 let Fixture = wire { replace Store: Mem{V: "fixture"}, Accounts }
-`, []string{`Fixture: Log=Mem{V: "log"} Store=Mem{V: "fixture"}; Mem{V: "live"} by Mem{V: "fixture"}`}},
+`, []string{`Fixture: Log=Mem{V: "log"} Store=Mem{V: "fixture"}; Store: Mem{V: "live"} by Mem{V: "fixture"}`}},
 		{"a replace of a replace", `let Shared = wire { Store: Mem{V: "live"}, Log: Mem{V: "log"} }
 let Fixture = wire { replace Store: Mem{V: "fixture"}, Shared }
 let Outer = wire { replace Store: Mem{V: "outer"}, Fixture }
-`, []string{`Outer: Log=Mem{V: "log"} Store=Mem{V: "outer"}; Mem{V: "fixture"} by Mem{V: "outer"}, Mem{V: "live"} by Mem{V: "fixture"}`}},
+`, []string{`Outer: Log=Mem{V: "log"} Store=Mem{V: "outer"}; Store: Mem{V: "fixture"} by Mem{V: "outer"}, Store: Mem{V: "live"} by Mem{V: "fixture"}`}},
+		// A shared entry replaced for one capability still binds the other
+		// (round-3 review m1): it is in Entries for Log, overridden for
+		// Store only.
+		{"a replace of one capability of a shared entry", `let Both = wire { Store, Log: Mem{V: "both"} }
+let W = wire { replace Store: Mem{V: "one"}, Both }
+`, []string{`W: Log=Mem{V: "both"} Store=Mem{V: "one"}; Store: Mem{V: "both"} by Mem{V: "one"}`}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -116,24 +123,49 @@ let Outer = wire { replace Store: Mem{V: "outer"}, Fixture }
 // per layer: 2^n entries, which grew to 44 GB at n = 8000 in
 // TestWireBudget. Each shape here checks in bounded memory, with one entry
 // per discharged capability and one override per replace.
+//
+// Round-3 review M1: each wire is resolved once per package and every with
+// reuses the result, so the reviewer's chain (n wires, each embedding the
+// one before, one with per wire) is linear too. The counted work
+// (Package.bindWork: wires, entries, and the nodes and entries a result
+// reads) stays within bindWorkPerUnit × (wires + entries + the size of
+// the bindings the withs hold).
 func TestWireInfoLinear(t *testing.T) {
 	const n = 4000
 	for _, tc := range []struct {
 		shape     string
+		withs     int
 		overrides int
 	}{
-		{"replace diamond", n - 1},
-		{"entry chain", 0},
-		{"large-base chain", 0},
-		{"wide fan-in", 0},
+		{"replace diamond", 1, n - 1},
+		{"entry chain", 1, 0},
+		{"large-base chain", 1, 0},
+		{"wide fan-in", 1, 0},
+		{"with chain", n, 0},
 	} {
 		t.Run(tc.shape, func(t *testing.T) {
-			pkg, diags := CheckSource(wireFamily(tc.shape, n))
+			src := ""
+			if tc.shape == "with chain" {
+				src = withChain(n)
+			} else {
+				src = wireFamily(tc.shape, n)
+			}
+			pkg, diags := CheckSource(src)
 			if len(diags) > 0 {
 				t.Fatalf("want a clean check, got %s", describeDiags(diags[:1]))
 			}
-			if len(pkg.Info.Withs) != 1 {
-				t.Fatalf("want one with, got %d", len(pkg.Info.Withs))
+			if len(pkg.Info.Withs) != tc.withs {
+				t.Fatalf("want %d withs, got %d", tc.withs, len(pkg.Info.Withs))
+			}
+			units := len(pkg.Wires)
+			for _, w := range pkg.Wires {
+				units += len(w.Entries)
+			}
+			for _, w := range pkg.Info.Withs {
+				units += len(w.Entries) + len(w.Overridden)
+			}
+			if pkg.bindWork > bindWorkPerUnit*units {
+				t.Fatalf("the bindings cost %d steps for %d units, over %d per unit", pkg.bindWork, units, bindWorkPerUnit)
 			}
 			for _, w := range pkg.Info.Withs {
 				if len(w.Entries) != len(w.Discharged) || len(w.Overridden) != tc.overrides {
@@ -146,6 +178,50 @@ func TestWireInfoLinear(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// bindWorkPerUnit bounds the counted binding work per wire, entry and
+// binding held (TestWireInfoLinear).
+const bindWorkPerUnit = 4
+
+// withChain is the reviewer's chain (round-3 review M1): W0 binds Store,
+// each Wi embeds W(i-1), and one function per wire runs with Wi.
+func withChain(n int) string {
+	var b strings.Builder
+	b.WriteString("type Store { M() }\ntype P {}\nfunc M(_ P) {}\nlet W0 = wire { Store: P{} }\n")
+	for i := 1; i < n; i++ {
+		fmt.Fprintf(&b, "let W%d = wire { W%d }\n", i, i-1)
+	}
+	for i := range n {
+		fmt.Fprintf(&b, "func F%d() { with W%d { Store.M() } }\n", i, i)
+	}
+	return b.String()
+}
+
+// TestWireInfoChainScale (round-3 review M1): checking the with chain at
+// 4n takes under 8 times as long as at n (the acceptance rule's ratio),
+// the best of two runs each.
+func TestWireInfoChainScale(t *testing.T) {
+	best := func(n int) time.Duration {
+		src := withChain(n)
+		var min time.Duration
+		for range 2 {
+			start := time.Now()
+			if _, diags := CheckSource(src); len(diags) > 0 {
+				t.Fatalf("n = %d: want a clean check, got %s", n, describeDiags(diags[:1]))
+			}
+			if d := time.Since(start); min == 0 || d < min {
+				min = d
+			}
+		}
+		return min
+	}
+	small, large := best(4000), best(16000)
+	if ratio := float64(large) / float64(small); ratio >= 8 {
+		t.Fatalf("t(16000) = %v is %.1f × t(4000) = %v; want under 8", large, ratio, small)
+	} else {
+		t.Logf("t(4000) = %v, t(16000) = %v, ratio %.1f", small, large, ratio)
 	}
 }
 
