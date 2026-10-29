@@ -1,0 +1,10 @@
+func main() needs Console {
+	let n = 3
+	let big int64 = 1 << 40
+	let f = float64(5) / 2
+	let ratio = float64(n) * f
+	let b = byte('a')
+	let r = 'x'
+	let total = int64(n) + big
+	Console.Println("\(n) \(big) \(ratio) \(b) \(r) \(total) \(uint8(200)) \(7 / 2)")
+}

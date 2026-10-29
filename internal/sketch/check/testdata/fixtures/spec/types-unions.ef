@@ -1,8 +1,0 @@
-package demo
-
-type Payment interface{ Pending | Authorized | Declined }
-
-type Pending struct{}
-type Authorized struct{ AuthID string }
-type Declined struct{ Reason string }
-func main() {}

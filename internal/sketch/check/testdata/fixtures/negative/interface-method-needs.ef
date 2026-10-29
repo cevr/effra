@@ -1,6 +1,0 @@
-package demo
-
-type Other interface{ Need() string }
-type Store interface{ Get() string needs Other } // want S108
-
-func main() {}

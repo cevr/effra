@@ -1,8 +1,0 @@
-package demo
-
-type P struct{ A int64; B int64 }
-
-func main() needs Console {
-	p := P{1} // want S108
-	Console.Println(p.A)
-}

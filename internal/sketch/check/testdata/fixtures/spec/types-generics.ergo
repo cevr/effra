@@ -1,0 +1,3 @@
+
+extern go fixture.Map func Map[A, B, E, R](xs []A, limit int64, f func(A) B fails E needs R) []B fails E needs R
+func main() {}

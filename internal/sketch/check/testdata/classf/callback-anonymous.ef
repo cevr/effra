@@ -1,7 +1,0 @@
-package p
-type Bang struct{}
-func mark() error[Bang]
-func a(r struct{ Run func(func() error[Bang]) error[Bang] }) {
- try r.Run(func() { try a(r) })
- try mark()
-}

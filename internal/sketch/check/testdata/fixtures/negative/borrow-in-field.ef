@@ -1,5 +1,0 @@
-package demo
-
-type S struct{ P *int64 } // want S108
-
-func main() {}

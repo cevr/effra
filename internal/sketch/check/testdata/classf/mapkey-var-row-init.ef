@@ -1,8 +1,0 @@
-package p
-type Bang struct{}
-type Key[T any] struct{}
-func KeyOf[T any](x T) Key[T]
-func mark() error[Bang]
-var m = map[Key[func() error[Bang]]]int{h: 1}
-var h = KeyOf(a)
-func a() { try mark() }

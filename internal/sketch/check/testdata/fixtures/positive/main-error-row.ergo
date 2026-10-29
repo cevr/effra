@@ -1,0 +1,8 @@
+type Fault {}
+
+func fail() fails Fault { return Fault{} }
+
+func main() fails Fault needs Console {
+	try fail()
+	Console.Println("unreachable")
+}

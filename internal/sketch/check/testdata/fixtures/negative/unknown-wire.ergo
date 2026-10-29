@@ -1,0 +1,4 @@
+func main() needs Console {
+	let v = with Missing { "x" } // want S104
+	Console.Println("\(v)")
+}

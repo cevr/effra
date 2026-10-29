@@ -108,7 +108,7 @@ var negativeSpans = map[string][2]string{
 func TestNegativeSpans(t *testing.T) {
 	for name, want := range negativeSpans {
 		t.Run(name, func(t *testing.T) {
-			data, err := os.ReadFile(filepath.Join("testdata", "fixtures", "negative", name+".ef"))
+			data, err := os.ReadFile(filepath.Join("testdata", "fixtures", "negative", name+".ergo"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -178,7 +178,7 @@ func TestRegistry(t *testing.T) {
 func corpus(t testing.TB) map[string]string {
 	out := map[string]string{}
 	for _, pattern := range []string{
-		"testdata/fixtures/*/*.ef",
+		"testdata/fixtures/*/*.ergo",
 		"../../../prototypes/sketch9/testdata/*.sketch",
 		"../../../prototypes/sketch9/testdata/*/*.sketch",
 		"../syntax/testdata/corpus/*/*.sketch",

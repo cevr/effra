@@ -1,0 +1,28 @@
+type Closed { Failures int64 }
+type Open { Endpoint string }
+type HalfOpen { Endpoint string }
+type Failure { Endpoint string }
+type Success {}
+type Retry {}
+type ProbeDown {}
+type Probe { Healthy() bool fails ProbeDown }
+
+type State = Closed | Open | HalfOpen
+type Signal = Failure | Success | Retry
+
+func step(s State, sig Signal) Decision[State, string] fails ProbeDown needs Probe {
+	match (s, sig) {
+	case (Closed, Failure as sig):
+		return Enter{Open{sig.Endpoint}}
+	case (HalfOpen, Success):
+		return Enter{Closed{0}}
+	case (_, _):
+		return Ignore{}
+	}
+}
+
+type Breaker machine[State, Signal] {
+	initial: Closed{0},
+	step:    step,
+}
+func main() {}

@@ -1,0 +1,53 @@
+type Cap { M() }
+type Bang {}
+type Other {}
+type Shape = Bang | Other
+extern go fixture.mark func mark() fails Bang
+func h() { Cap.M() }
+func k() { Cap.M() }
+func r() { Cap.M() }
+func s() { Cap.M() }
+func x() { Cap.M() }
+func y() { Cap.M() }
+func e() { Cap.M() }
+func g(h int) int { return h }
+func ranges(xs []int) int {
+	let mut n = 0
+	for k, r in xs {
+		n = n + k + r
+	}
+	return n
+}
+func switches(v Shape) int {
+	match v {
+	case Bang as s:
+		_ = s
+		return 1
+	case Other as s:
+		_ = s
+		return 2
+	}
+}
+func catches() {
+	mark() catch {
+		case Bang as e: _ = e
+	}
+}
+func blocks() int {
+	let x = 1
+	let y = x
+	if y > 0 {
+		return y
+	}
+	for x in 0..2 {
+		_ = x
+	}
+	return x
+}
+func literals() int {
+	let f = func(k int) int { return k }
+	return f(1)
+}
+func F() needs Cap { h(); k(); r(); s(); x(); y(); e() }
+func G() int { return g(1) + ranges([]int{1}) + switches(Bang{}) + blocks() + literals() }
+func C() { catches() }

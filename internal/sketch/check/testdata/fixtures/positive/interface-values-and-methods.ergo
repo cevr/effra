@@ -1,0 +1,12 @@
+type Store { Get() string }
+type Mem { V string }
+
+func Get(m Mem) string { return m.V }
+
+func NewStore(v string) Store { return Mem{V: v} }
+func read(s Store) string     { return s.Get() }
+
+func main() needs Console {
+	let s = NewStore("x")
+	Console.Println("\(read(s)) \(Mem{V: "y"}.Get()) \(s.Get())")
+}

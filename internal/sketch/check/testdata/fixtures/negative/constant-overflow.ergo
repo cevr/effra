@@ -1,0 +1,4 @@
+func main() needs Console {
+	let b int8 = 300 // want S108
+	Console.Println("\(b)")
+}

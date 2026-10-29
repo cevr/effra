@@ -1,7 +1,0 @@
-package demo
-
-func wait() needs Scheduler {
-	Scheduler.Sleep(2) // want S108
-}
-
-func main() {}

@@ -237,7 +237,7 @@ func TestWireContractInline(t *testing.T) {
 func TestWireBudgetOrder(t *testing.T) {
 	var used [2]int
 	var verdict [2]string
-	for i, name := range []string{"order-original.ef", "order-permuted.ef"} {
+	for i, name := range []string{"order-original.ergo", "order-permuted.ergo"} {
 		data, err := os.ReadFile("testdata/wireorder/" + name)
 		if err != nil {
 			t.Fatal(err)

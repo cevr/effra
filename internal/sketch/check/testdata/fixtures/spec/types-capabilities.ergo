@@ -1,0 +1,7 @@
+type Order { ID string }
+type OrderNotFound {}
+
+type Orders {
+	Find(id string) Order fails OrderNotFound,
+}
+func main() {}

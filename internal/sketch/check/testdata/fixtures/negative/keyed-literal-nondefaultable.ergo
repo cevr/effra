@@ -1,0 +1,12 @@
+type A {}
+type B {}
+type Choice = A | B
+type Box {
+	C    Choice,
+	Name string,
+}
+
+func main() needs Console {
+	let b = Box{Name: "x"} // want S108
+	Console.Println("\(b.Name)")
+}

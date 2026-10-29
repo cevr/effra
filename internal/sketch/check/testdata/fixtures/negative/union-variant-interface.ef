@@ -1,7 +1,0 @@
-package demo
-
-type Store interface{ Get() string }
-type A struct{}
-type Choice interface{ A | Store } // want S108
-
-func main() {}

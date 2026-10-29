@@ -1,7 +1,0 @@
-package demo
-
-func twice(n int64) int64 { return n + n }
-
-func main() needs Console {
-	Console.Println(twice("x")) // want S108
-}

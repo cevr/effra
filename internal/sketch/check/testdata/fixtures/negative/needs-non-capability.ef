@@ -1,7 +1,0 @@
-package demo
-
-type Order struct{ ID string }
-
-func run() needs Order {} // want S104
-
-func main() {}

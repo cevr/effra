@@ -1,0 +1,5 @@
+func word() string { return "w" }
+
+func main() needs Console {
+	Console.Println("\(try word())") // want S108
+}

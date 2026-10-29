@@ -1,0 +1,7 @@
+type Cap { M() }
+func a() {
+	let local = func() {}
+	local()
+	Cap.M()
+}
+func b() { _ = a }

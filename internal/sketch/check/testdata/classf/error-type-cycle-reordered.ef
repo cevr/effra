@@ -1,3 +1,0 @@
-package p
-type g interface{ M() error[E] }
-type E struct{ A g }

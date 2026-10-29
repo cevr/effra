@@ -1,0 +1,15 @@
+type A {}
+type B {}
+type C {}
+type Choice = A | B
+
+func kind(c Choice) string {
+	match c {
+	case C: // want S108
+		return "c"
+	case _:
+		return "other"
+	}
+}
+
+func main() {}

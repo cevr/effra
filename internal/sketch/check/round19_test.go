@@ -191,16 +191,16 @@ var usesKeyword = regexp.MustCompile(`\buses\b`)
 func TestWireBudgetHeadroom(t *testing.T) {
 	var files []string
 	for _, pattern := range []string{
-		"testdata/fixtures/*/*.ef",
-		"testdata/classf/*.ef",
-		"testdata/totality/*.ef",
+		"testdata/fixtures/*/*.ergo",
+		"testdata/classf/*.ergo",
+		"testdata/totality/*.ergo",
 		"../../../prototypes/sketch9/testdata/*.sketch",
 		"../../../prototypes/sketch9/testdata/*/*.sketch",
 		"../syntax/testdata/corpus/*/*.sketch",
 		"../syntax/testdata/corpus/*/*/*.sketch",
 		"../syntax/testdata/corpus/*/*/*/*.sketch",
-		"../../../examples/*/*/*.ef",
-		"../../../docs/research/ef-migrate/*.ef",
+		"../../../examples/*/*/*.ergo",
+		"../../../docs/research/ef-migrate/*.ergo",
 	} {
 		m, _ := filepath.Glob(pattern)
 		files = append(files, m...)

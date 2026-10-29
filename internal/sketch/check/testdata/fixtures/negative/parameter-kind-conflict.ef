@@ -1,5 +1,0 @@
-package demo
-
-func pass(e E) error[E] // want S108
-
-func main() {}

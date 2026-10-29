@@ -1,0 +1,4 @@
+type Other { Need() string }
+type Store { Get() string needs Other } // want S108
+
+func main() {}

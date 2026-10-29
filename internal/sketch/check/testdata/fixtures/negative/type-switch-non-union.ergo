@@ -1,0 +1,10 @@
+type Order { ID string }
+
+func kind(o Order) string {
+	match o { // want S108
+	case _:
+		return "x"
+	}
+}
+
+func main() {}

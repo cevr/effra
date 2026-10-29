@@ -1,0 +1,20 @@
+type A {}
+type B {}
+type X {}
+type Y {}
+type AB = A | B
+type XY = X | Y
+
+func label(a A, b X) string { return "ax" }
+
+func pair(p AB, q XY) string {
+	match (p, q) { // want S103
+	case (A as a, X as b):
+		return label(a, b)
+	case (B, Y):
+		return "by"
+	}
+	return "other"
+}
+
+func main() {}

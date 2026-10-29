@@ -1,0 +1,12 @@
+type A {}
+type B {}
+
+func fail() string fails A | B { return A{} }
+
+func main() needs Console {
+	let v = fail() catch { // want S103
+	case A:
+		"a"
+	}
+	Console.Println("\(v)")
+}

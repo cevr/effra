@@ -1,0 +1,1 @@
+func main() string { return "x" } // want S113

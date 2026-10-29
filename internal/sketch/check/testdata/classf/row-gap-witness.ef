@@ -1,9 +1,0 @@
-package p
-type Fault[T any] struct{}
-type Hold[T any] struct{ F func() error[Fault[T]] }
-type Bang struct{}
-func mark() error[Bang]
-func newHold[T any](x T) Hold[T]
-var old = newHold(f).F
-func f() { return Bang{} }
-func F() { _ = Hold[func()]{func() error[Fault[func()]] {}} }

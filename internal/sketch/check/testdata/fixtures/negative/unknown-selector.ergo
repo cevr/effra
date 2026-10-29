@@ -1,0 +1,6 @@
+type Order { ID string }
+
+func main() needs Console {
+	let o = Order{ID: "x"}
+	Console.Println("\(o.Total)") // want S104
+}

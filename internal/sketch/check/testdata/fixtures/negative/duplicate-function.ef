@@ -1,8 +1,0 @@
-package demo
-
-func helper() string { return "a" }
-func helper() string { return "b" } // want S108
-
-func main() needs Console {
-	Console.Println(helper())
-}

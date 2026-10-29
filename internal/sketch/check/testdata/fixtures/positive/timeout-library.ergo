@@ -1,0 +1,19 @@
+import timeout
+
+func pause() string needs Scheduler {
+	Scheduler.Sleep(1ms)
+	return "slept"
+}
+
+func nap() string fails timeout.Expired needs Scheduler {
+	let v = try timeout.After(1s) { pause() }
+	return v
+}
+
+func main() needs Console {
+	let v = with wire { Scheduler: LiveScheduler{} } { nap() } catch {
+	case timeout.Expired:
+		"timed out"
+	}
+	Console.Println("\(v)")
+}

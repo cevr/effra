@@ -1,0 +1,8 @@
+type Store { Get() string }
+type Mem {}
+
+func NewStore() Store {
+	return Mem{} // want S108
+}
+
+func main() {}

@@ -1,0 +1,7 @@
+
+extern go fixture.zero func zero[A]() A
+
+func main() needs Console {
+	let x = zero() // want S108
+	Console.Println("\(x)")
+}

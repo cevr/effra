@@ -1,0 +1,6 @@
+type Order { ID string }
+
+func main() needs Console {
+	let o = Order{Name: "x"} // want S104
+	Console.Println("\(o.ID)")
+}

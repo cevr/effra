@@ -1,0 +1,6 @@
+
+type Box {}
+
+extern go fixture.Get func Get[A](b Box, x A) A // want S108
+
+func main() {}

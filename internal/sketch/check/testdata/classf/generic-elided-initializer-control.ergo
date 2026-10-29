@@ -1,0 +1,3 @@
+type Wrap[T] { value T }
+type S { h int }
+let h = Wrap[S]{value: S{h: 1}}

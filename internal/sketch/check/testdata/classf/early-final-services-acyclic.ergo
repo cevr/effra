@@ -1,0 +1,10 @@
+type Bang {}
+type Cap { M() }
+type Box[T] { M(T) }
+extern go fixture.marker func marker() fails Bang
+extern go fixture.BoxOf func BoxOf[T](x T) Box[T]
+extern go fixture.Choose func Choose[T](x T,y T) needs Cap
+func a() { return Bang{} }
+func c() { return Bang{} }
+func b() { Choose(BoxOf(a),BoxOf(c)) }
+func F() { b() } // want S102

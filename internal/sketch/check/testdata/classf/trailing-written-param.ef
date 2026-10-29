@@ -1,6 +1,0 @@
-package p
-type Bang struct{}
-func mark() error[Bang]
-func each(n int, f func() error[Bang]) error[Bang]
-func walk(n int) { try mark(); try each(n) { try walk(n) } }
-func F() error[Bang] { try walk(1) }

@@ -1,0 +1,6 @@
+type Cap { M() }
+func a(b func()) {
+	b()
+	Cap.M()
+}
+func b() { _ = a }

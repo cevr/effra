@@ -1,0 +1,2 @@
+type g { M() fails E }
+type E { A g }

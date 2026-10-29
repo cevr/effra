@@ -1,5 +1,0 @@
-package p
-type Fault[T any] struct{ V T }
-func mark[T any]() error[Fault[T]]
-func raise[T any](x T) {_ = lift[T];return Fault{x}}
-func lift[U any](x U) {return raise[U](x)} // want S108

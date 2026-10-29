@@ -26,7 +26,7 @@
 // cycles), Error methods and unused imports. An invalid operand or type suppresses every diagnostic that
 // would follow from it: one mistake, one diagnostic.
 //
-// The prelude (internal/sketch/std/prelude.ef) and the standard library are
+// The prelude (internal/sketch/std/prelude.ergo) and the standard library are
 // Ergo source checked by this checker, so no library item is a checker
 // branch (timeout.After is an ordinary bodiless declaration).
 //

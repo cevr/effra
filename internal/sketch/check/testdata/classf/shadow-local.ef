@@ -1,4 +1,0 @@
-package p
-type Cap interface{M()}
-func a(){b:=func(){};b();Cap.M()}
-func b(){_ = a}

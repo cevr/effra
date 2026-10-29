@@ -1,0 +1,617 @@
+type P {}
+func M(_ P) {}
+type C0 { M() }
+type C1 { M() }
+type C2 { M() }
+type C3 { M() }
+type C4 { M() }
+type C5 { M() }
+type C6 { M() }
+type C7 { M() }
+type C8 { M() }
+type C9 { M() }
+type C10 { M() }
+type C11 { M() }
+type C12 { M() }
+type C13 { M() }
+type C14 { M() }
+type C15 { M() }
+type C16 { M() }
+type C17 { M() }
+type C18 { M() }
+type C19 { M() }
+type C20 { M() }
+type C21 { M() }
+type C22 { M() }
+type C23 { M() }
+type C24 { M() }
+type C25 { M() }
+type C26 { M() }
+type C27 { M() }
+type C28 { M() }
+type C29 { M() }
+type C30 { M() }
+type C31 { M() }
+type C32 { M() }
+type C33 { M() }
+type C34 { M() }
+type C35 { M() }
+type C36 { M() }
+type C37 { M() }
+type C38 { M() }
+type C39 { M() }
+type C40 { M() }
+type C41 { M() }
+type C42 { M() }
+type C43 { M() }
+type C44 { M() }
+type C45 { M() }
+type C46 { M() }
+type C47 { M() }
+type C48 { M() }
+type C49 { M() }
+type C50 { M() }
+type C51 { M() }
+type C52 { M() }
+type C53 { M() }
+type C54 { M() }
+type C55 { M() }
+type C56 { M() }
+type C57 { M() }
+type C58 { M() }
+type C59 { M() }
+type C60 { M() }
+type C61 { M() }
+type C62 { M() }
+type C63 { M() }
+type C64 { M() }
+type C65 { M() }
+type C66 { M() }
+type C67 { M() }
+type C68 { M() }
+type C69 { M() }
+type C70 { M() }
+type C71 { M() }
+type C72 { M() }
+type C73 { M() }
+type C74 { M() }
+type C75 { M() }
+type C76 { M() }
+type C77 { M() }
+type C78 { M() }
+type C79 { M() }
+type C80 { M() }
+type C81 { M() }
+type C82 { M() }
+type C83 { M() }
+type C84 { M() }
+type C85 { M() }
+type C86 { M() }
+type C87 { M() }
+let A0 = wire {
+	C0: P{},
+}
+let B0 = wire {
+	C44: P{},
+}
+let A1 = wire {
+	C1: P{},
+	A0,
+}
+let B1 = wire {
+	C45: P{},
+	B0,
+}
+let A2 = wire {
+	C2: P{},
+	A1,
+}
+let B2 = wire {
+	C46: P{},
+	B1,
+}
+let A3 = wire {
+	C3: P{},
+	A2,
+}
+let B3 = wire {
+	C47: P{},
+	B2,
+}
+let A4 = wire {
+	C4: P{},
+	A3,
+}
+let B4 = wire {
+	C48: P{},
+	B3,
+}
+let A5 = wire {
+	C5: P{},
+	A4,
+}
+let B5 = wire {
+	C49: P{},
+	B4,
+}
+let A6 = wire {
+	C6: P{},
+	A5,
+}
+let B6 = wire {
+	C50: P{},
+	B5,
+}
+let A7 = wire {
+	C7: P{},
+	A6,
+}
+let B7 = wire {
+	C51: P{},
+	B6,
+}
+let A8 = wire {
+	C8: P{},
+	A7,
+}
+let B8 = wire {
+	C52: P{},
+	B7,
+}
+let A9 = wire {
+	C9: P{},
+	A8,
+}
+let B9 = wire {
+	C53: P{},
+	B8,
+}
+let A10 = wire {
+	C10: P{},
+	A9,
+}
+let B10 = wire {
+	C54: P{},
+	B9,
+}
+let A11 = wire {
+	C11: P{},
+	A10,
+}
+let B11 = wire {
+	C55: P{},
+	B10,
+}
+let A12 = wire {
+	C12: P{},
+	A11,
+}
+let B12 = wire {
+	C56: P{},
+	B11,
+}
+let A13 = wire {
+	C13: P{},
+	A12,
+}
+let B13 = wire {
+	C57: P{},
+	B12,
+}
+let A14 = wire {
+	C14: P{},
+	A13,
+}
+let B14 = wire {
+	C58: P{},
+	B13,
+}
+let A15 = wire {
+	C15: P{},
+	A14,
+}
+let B15 = wire {
+	C59: P{},
+	B14,
+}
+let A16 = wire {
+	C16: P{},
+	A15,
+}
+let B16 = wire {
+	C60: P{},
+	B15,
+}
+let A17 = wire {
+	C17: P{},
+	A16,
+}
+let B17 = wire {
+	C61: P{},
+	B16,
+}
+let A18 = wire {
+	C18: P{},
+	A17,
+}
+let B18 = wire {
+	C62: P{},
+	B17,
+}
+let A19 = wire {
+	C19: P{},
+	A18,
+}
+let B19 = wire {
+	C63: P{},
+	B18,
+}
+let A20 = wire {
+	C20: P{},
+	A19,
+}
+let B20 = wire {
+	C64: P{},
+	B19,
+}
+let A21 = wire {
+	C21: P{},
+	A20,
+}
+let B21 = wire {
+	C65: P{},
+	B20,
+}
+let A22 = wire {
+	C22: P{},
+	A21,
+}
+let B22 = wire {
+	C66: P{},
+	B21,
+}
+let A23 = wire {
+	C23: P{},
+	A22,
+}
+let B23 = wire {
+	C67: P{},
+	B22,
+}
+let A24 = wire {
+	C24: P{},
+	A23,
+}
+let B24 = wire {
+	C68: P{},
+	B23,
+}
+let A25 = wire {
+	C25: P{},
+	A24,
+}
+let B25 = wire {
+	C69: P{},
+	B24,
+}
+let A26 = wire {
+	C26: P{},
+	A25,
+}
+let B26 = wire {
+	C70: P{},
+	B25,
+}
+let A27 = wire {
+	C27: P{},
+	A26,
+}
+let B27 = wire {
+	C71: P{},
+	B26,
+}
+let A28 = wire {
+	C28: P{},
+	A27,
+}
+let B28 = wire {
+	C72: P{},
+	B27,
+}
+let A29 = wire {
+	C29: P{},
+	A28,
+}
+let B29 = wire {
+	C73: P{},
+	B28,
+}
+let A30 = wire {
+	C30: P{},
+	A29,
+}
+let B30 = wire {
+	C74: P{},
+	B29,
+}
+let A31 = wire {
+	C31: P{},
+	A30,
+}
+let B31 = wire {
+	C75: P{},
+	B30,
+}
+let A32 = wire {
+	C32: P{},
+	A31,
+}
+let B32 = wire {
+	C76: P{},
+	B31,
+}
+let A33 = wire {
+	C33: P{},
+	A32,
+}
+let B33 = wire {
+	C77: P{},
+	B32,
+}
+let A34 = wire {
+	C34: P{},
+	A33,
+}
+let B34 = wire {
+	C78: P{},
+	B33,
+}
+let A35 = wire {
+	C35: P{},
+	A34,
+}
+let B35 = wire {
+	C79: P{},
+	B34,
+}
+let A36 = wire {
+	C36: P{},
+	A35,
+}
+let B36 = wire {
+	C80: P{},
+	B35,
+}
+let A37 = wire {
+	C37: P{},
+	A36,
+}
+let B37 = wire {
+	C81: P{},
+	B36,
+}
+let A38 = wire {
+	C38: P{},
+	A37,
+}
+let B38 = wire {
+	C82: P{},
+	B37,
+}
+let A39 = wire {
+	C39: P{},
+	A38,
+}
+let B39 = wire {
+	C83: P{},
+	B38,
+}
+let A40 = wire {
+	C40: P{},
+	A39,
+}
+let B40 = wire {
+	C84: P{},
+	B39,
+}
+let A41 = wire {
+	C41: P{},
+	A40,
+}
+let B41 = wire {
+	C85: P{},
+	B40,
+}
+let A42 = wire {
+	C42: P{},
+	A41,
+}
+let B42 = wire {
+	C86: P{},
+	B41,
+}
+let A43 = wire {
+	C43: P{},
+	A42,
+}
+let B43 = wire {
+	C87: P{},
+	B42,
+}
+let W0 = wire {
+	A0,
+	B0,
+}
+let W1 = wire {
+	A1,
+	B1,
+}
+let W2 = wire {
+	A2,
+	B2,
+}
+let W3 = wire {
+	A3,
+	B3,
+}
+let W4 = wire {
+	A4,
+	B4,
+}
+let W5 = wire {
+	A5,
+	B5,
+}
+let W6 = wire {
+	A6,
+	B6,
+}
+let W7 = wire {
+	A7,
+	B7,
+}
+let W8 = wire {
+	A8,
+	B8,
+}
+let W9 = wire {
+	A9,
+	B9,
+}
+let W10 = wire {
+	A10,
+	B10,
+}
+let W11 = wire {
+	A11,
+	B11,
+}
+let W12 = wire {
+	A12,
+	B12,
+}
+let W13 = wire {
+	A13,
+	B13,
+}
+let W14 = wire {
+	A14,
+	B14,
+}
+let W15 = wire {
+	A15,
+	B15,
+}
+let W16 = wire {
+	A16,
+	B16,
+}
+let W17 = wire {
+	A17,
+	B17,
+}
+let W18 = wire {
+	A18,
+	B18,
+}
+let W19 = wire {
+	A19,
+	B19,
+}
+let W20 = wire {
+	A20,
+	B20,
+}
+let W21 = wire {
+	A21,
+	B21,
+}
+let W22 = wire {
+	A22,
+	B22,
+}
+let W23 = wire {
+	A23,
+	B23,
+}
+let W24 = wire {
+	A24,
+	B24,
+}
+let W25 = wire {
+	A25,
+	B25,
+}
+let W26 = wire {
+	A26,
+	B26,
+}
+let W27 = wire {
+	A27,
+	B27,
+}
+let W28 = wire {
+	A28,
+	B28,
+}
+let W29 = wire {
+	A29,
+	B29,
+}
+let W30 = wire {
+	A30,
+	B30,
+}
+let W31 = wire {
+	A31,
+	B31,
+}
+let W32 = wire {
+	A32,
+	B32,
+}
+let W33 = wire {
+	A33,
+	B33,
+}
+let W34 = wire {
+	A34,
+	B34,
+}
+let W35 = wire {
+	A35,
+	B35,
+}
+let W36 = wire {
+	A36,
+	B36,
+}
+let W37 = wire {
+	A37,
+	B37,
+}
+let W38 = wire {
+	A38,
+	B38,
+}
+let W39 = wire {
+	A39,
+	B39,
+}
+let W40 = wire {
+	A40,
+	B40,
+}
+let W41 = wire {
+	A41,
+	B41,
+}
+let W42 = wire {
+	A42,
+	B42,
+}
+let W43 = wire {
+	A43,
+	B43,
+}
+func F() { with W43 { C0.M() } }

@@ -1,0 +1,4 @@
+
+extern go fixture.Twice func Twice(_ int64) int64 // want S108
+
+func main() {}

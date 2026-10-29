@@ -1,5 +1,0 @@
-package demo
-
-type Node struct{ Next Node } // want S108
-
-func main() {}

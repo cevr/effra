@@ -1,0 +1,13 @@
+type A {}
+type B {}
+type Choice = A | B
+
+func name(c Choice) string {
+	match c { // want S103
+	case A:
+		return "a"
+	}
+	return "other"
+}
+
+func main() {}

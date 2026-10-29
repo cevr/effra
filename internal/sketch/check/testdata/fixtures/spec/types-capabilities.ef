@@ -1,9 +1,0 @@
-package demo
-
-type Order struct{ ID string }
-type OrderNotFound struct{}
-
-type Orders interface {
-	Find(id string) (Order, error[OrderNotFound])
-}
-func main() {}

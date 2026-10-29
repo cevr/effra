@@ -1,0 +1,7 @@
+# The 196a checker's quarantine (#196, round 6 ruling C). Each line is a
+# fixture whose decided form a later stage checks: its path under testdata
+# and the stage. The verdict loaders skip it and name the stage
+# (pendingStage). TestPendingStages requires each one to stay S109 naming
+# its stage, so the line goes when the stage lands. Removed forms are never
+# quarantined: their fixtures are rewritten or deleted.
+fixtures/spec/types-laws.ergo 196l

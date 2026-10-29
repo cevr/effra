@@ -56,13 +56,14 @@ func describe(diags []check.Diagnostic) string {
 // `// want` markers, one per marked line, and no cascade (spec D3).
 func TestFixtures(t *testing.T) {
 	for _, dir := range []string{"negative", "positive", "spec"} {
-		files, _ := filepath.Glob(filepath.Join("testdata", "fixtures", dir, "*.ef"))
+		files, _ := filepath.Glob(filepath.Join("testdata", "fixtures", dir, "*.ergo"))
 		if len(files) == 0 {
 			t.Fatalf("no fixtures in %s", dir)
 		}
 		for _, file := range files {
-			name := dir + "/" + strings.TrimSuffix(filepath.Base(file), ".ef")
+			name := dir + "/" + strings.TrimSuffix(filepath.Base(file), ".ergo")
 			t.Run(name, func(t *testing.T) {
+				skipPending(t, file)
 				data, err := os.ReadFile(file)
 				if err != nil {
 					t.Fatal(err)

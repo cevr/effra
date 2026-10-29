@@ -1,0 +1,24 @@
+type NotFound { ID string }
+type Down {}
+
+func find(id string) string fails NotFound | Down {
+	if id == "" {
+		return Down{}
+	}
+	return NotFound{ID: id}
+}
+
+func lookup(id string) string {
+	let v = find(id) catch {
+	case NotFound as e:
+		let msg = "missing " + e.ID
+		msg
+	case Down:
+		return "down"
+	}
+	return v
+}
+
+func main() needs Console {
+	Console.Println("\(lookup("7"))")
+}

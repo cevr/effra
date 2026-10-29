@@ -1,5 +1,0 @@
-package p
-type Cap interface{ M() }
-func work() needs Cap
-func pass(f func() needs R) {f()}
-func F() needs Cap {pass(work)}

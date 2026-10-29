@@ -1,0 +1,6 @@
+type Payment = Pending | Authorized | Declined
+
+type Pending {}
+type Authorized { AuthID string }
+type Declined { Reason string }
+func main() {}

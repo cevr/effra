@@ -278,7 +278,7 @@ func l(fn func() needs Store, gn func() needs Store, hn func() needs Log) {}
 func TestIdentityMatchesStructure(t *testing.T) {
 	sources := map[string]string{"identity": identitySource}
 	for _, dir := range []string{"positive", "spec", "negative", "../classf"} {
-		files, _ := filepath.Glob(filepath.Join("testdata", "fixtures", dir, "*.ef"))
+		files, _ := filepath.Glob(filepath.Join("testdata", "fixtures", dir, "*.ergo"))
 		for _, file := range files {
 			data, err := os.ReadFile(file)
 			if err != nil {
@@ -456,7 +456,7 @@ func TestTypeStringOnlyPrints(t *testing.T) {
 // each has the id of the same type written with f's solved row, and none
 // has the id of the type written with an empty row.
 func TestRowVariablesAfterInference(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join("testdata", "classf", "cache-witness.ef"))
+	src, err := os.ReadFile(filepath.Join("testdata", "classf", "cache-witness.ergo"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +476,7 @@ func TestRowVariablesAfterInference(t *testing.T) {
 		t.Error("the instance cache does not return Box[func()] for its own key")
 	}
 
-	src, err = os.ReadFile(filepath.Join("testdata", "classf", "row-gap-witness.ef"))
+	src, err = os.ReadFile(filepath.Join("testdata", "classf", "row-gap-witness.ergo"))
 	if err != nil {
 		t.Fatal(err)
 	}

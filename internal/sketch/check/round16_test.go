@@ -14,8 +14,8 @@ import (
 func classHSources(t *testing.T) map[string]string {
 	out := map[string]string{}
 	for _, pattern := range []string{
-		"testdata/fixtures/*/*.ef",
-		"testdata/classf/*.ef",
+		"testdata/fixtures/*/*.ergo",
+		"testdata/classf/*.ergo",
 		"../../../prototypes/sketch9/testdata/*.sketch",
 		"../../../prototypes/sketch9/testdata/*/*.sketch",
 		"../syntax/testdata/corpus/*/*.sketch",

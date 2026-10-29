@@ -1,0 +1,19 @@
+type Pending {}
+type Authorized { AuthID string }
+type Declined { Reason string }
+type Payment = Pending | Authorized | Declined
+
+func describe(p Payment) string {
+	match p {
+	case Pending:
+		return "pending"
+	case Authorized as v:
+		return "authorized " + v.AuthID
+	case Declined as v:
+		return "declined " + v.Reason
+	}
+}
+
+func main() needs Console {
+	Console.Println("\(describe(Authorized{AuthID: "a1"})) \(describe(Declined{"no"})) \(describe(Pending{}))")
+}

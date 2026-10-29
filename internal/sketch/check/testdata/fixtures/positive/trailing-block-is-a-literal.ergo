@@ -1,0 +1,6 @@
+func twice(f func() int64) int64 { return f() + f() }
+
+func main() needs Console {
+	let line = twice() { 21 }
+	Console.Println("\(line)")
+}

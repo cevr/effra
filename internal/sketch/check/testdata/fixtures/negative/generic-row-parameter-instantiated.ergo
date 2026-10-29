@@ -1,0 +1,10 @@
+type Fault {}
+
+func fail() fails Fault                 { return Fault{} }
+func apply[E](f func() fails E) fails E { return f() }
+
+func Run() {
+	apply(fail) // want S105
+}
+
+func main() {}

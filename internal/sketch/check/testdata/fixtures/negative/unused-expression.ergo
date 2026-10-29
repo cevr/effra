@@ -1,0 +1,5 @@
+func main() needs Console {
+	let x = "v"
+	x // want S110
+	Console.Println("\(x)")
+}

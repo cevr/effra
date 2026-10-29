@@ -1,0 +1,20 @@
+type Down {}
+type On {}
+type Off {}
+type Light = On | Off
+type Flip {}
+type Signal = Flip
+
+func probe() fails Down { return Down{} }
+
+func step(s Light, e Signal) Decision[Light, string] {
+	try probe() // want S101
+	return Stay{s}
+}
+
+type Switch machine[Light, Signal] {
+	initial: Off{},
+	step:    step,
+}
+
+func main() {}

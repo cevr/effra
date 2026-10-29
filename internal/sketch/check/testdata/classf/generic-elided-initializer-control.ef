@@ -1,4 +1,0 @@
-package p
-type Wrap[T any] struct{ value T }
-type S struct{ h int }
-var h = Wrap[S]{value: S{h: 1}}

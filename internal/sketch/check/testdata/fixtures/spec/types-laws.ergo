@@ -1,0 +1,22 @@
+type Quantity { units int64 }
+
+type Order { ID string }
+
+// Codec is the round trip of a Quantity: a law is a member of an
+// operation type (types.md, Laws 1), so the old ParseQuantity and
+// Quantity.Wire become its operations.
+type Codec {
+	Parse(s string) Quantity,
+	Wire(q Quantity) string,
+
+	law RoundTrip(q Quantity) { Parse(Wire(q)) == q },
+}
+
+type Store {
+	Put(id string, v Order),
+	Find(id string) Order,
+
+	law FindAfterPut(id string, v Order) { Put(id, v); Find(id) == v },
+}
+
+func main() {}

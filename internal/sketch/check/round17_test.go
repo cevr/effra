@@ -28,7 +28,7 @@ var keyedForms = []string{
 // only through composite-literal keys, in a random declaration order. Each
 // var's type holds the inferred error row of a function, so a missing edge
 // types a body before that row is final and rejects the valid source (round
-// 16 M1, mapkey-var-row.ef). The verdict is acceptance.
+// 16 M1, mapkey-var-row.ergo). The verdict is acceptance.
 func keyedLiterals(seed uint64) string {
 	r := rand.New(rand.NewPCG(seed, seed^0x6b6579))
 	n := 2 + r.IntN(3)

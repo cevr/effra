@@ -1,0 +1,9 @@
+type Order {
+	ID    string,
+	Total int64,
+}
+func main() needs Console {
+	let order = Order{ID: "42", Total: 1999}
+	let same = Order{"42", 1999}
+	Console.Println("\(order) \(same)")
+}

@@ -1,0 +1,10 @@
+type A {}
+type B {}
+type Choice = A | B
+
+func pick() Choice {
+	let c Choice // want S108
+	return c
+}
+
+func main() {}

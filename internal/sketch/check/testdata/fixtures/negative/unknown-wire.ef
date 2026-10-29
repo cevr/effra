@@ -1,6 +1,0 @@
-package demo
-
-func main() needs Console {
-	v := with(Missing) { "x" } // want S104
-	Console.Println(v)
-}

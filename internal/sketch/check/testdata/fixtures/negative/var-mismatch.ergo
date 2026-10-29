@@ -1,0 +1,4 @@
+func main() needs Console {
+	let n int64 = "seven" // want S108
+	Console.Println("\(n)")
+}

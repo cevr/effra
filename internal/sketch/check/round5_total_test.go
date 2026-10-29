@@ -129,7 +129,7 @@ func soundSwitch(t *testing.T, name, src string, rows [][]int, sizes []int, hasD
 	_, diags := check.CheckSource(src)
 	caseLine := map[int]int{}
 	for i, line := range strings.Split(src, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "case ") {
+		if l := strings.TrimSpace(line); strings.HasPrefix(l, "case ") && l != "case _:" {
 			caseLine[i+1] = len(caseLine)
 		}
 	}
@@ -319,7 +319,8 @@ func hornRows(n int, rng *rand.Rand) [][]int {
 }
 
 // readSaved reads a saved switch: its case rows over A and B, and whether
-// it has default.
+// it has default (`case _:`; the decided formatter writes a space after
+// each comma of a tuple case).
 func readSaved(t *testing.T, name string) (string, [][]int, bool) {
 	data, err := os.ReadFile(filepath.Join("testdata", "totality", name))
 	if err != nil {
@@ -335,6 +336,7 @@ func readSaved(t *testing.T, name string) (string, [][]int, bool) {
 		cells := strings.Split(line[len("case ("):strings.Index(line, ")")], ",")
 		r := make([]int, len(cells))
 		for j, c := range cells {
+			c = strings.TrimSpace(c)
 			r[j] = -1
 			if c != "_" {
 				r[j] = abVariant(c)
@@ -342,7 +344,7 @@ func readSaved(t *testing.T, name string) (string, [][]int, bool) {
 		}
 		rows = append(rows, r)
 	}
-	return src, rows, strings.Contains(src, "default")
+	return src, rows, strings.Contains(src, "\tcase _:")
 }
 
 // ---------------------------------------------------------------- the tests
@@ -446,7 +448,7 @@ func TestTotalitySoundness(t *testing.T) {
 // round 5). Every case of the Horn pair has a private witness, so no case
 // may be reported unreachable.
 func TestTotalitySavedPairs(t *testing.T) {
-	for _, name := range []string{"permutation-original.ef", "permutation-reordered.ef", "horn-original.ef", "horn-reordered.ef"} {
+	for _, name := range []string{"permutation-original.ergo", "permutation-reordered.ergo", "horn-original.ergo", "horn-reordered.ergo"} {
 		src, rows, hasDefault := readSaved(t, name)
 		v := soundSwitch(t, name, src, rows, twos(len(rows[0])), hasDefault, abVariant)
 		if v == "not total" {
@@ -461,7 +463,7 @@ func TestTotalitySavedPairs(t *testing.T) {
 func TestTotalityDeterminism(t *testing.T) {
 	rng := rand.New(rand.NewSource(1027))
 	var srcs []string
-	for _, name := range []string{"permutation-original.ef", "horn-original.ef"} {
+	for _, name := range []string{"permutation-original.ergo", "horn-original.ergo"} {
 		src, _, _ := readSaved(t, name)
 		srcs = append(srcs, src)
 	}

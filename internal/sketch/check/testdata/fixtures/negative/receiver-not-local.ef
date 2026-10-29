@@ -1,5 +1,0 @@
-package demo
-
-func (int64) Twice() int64 // want S108
-
-func main() {}

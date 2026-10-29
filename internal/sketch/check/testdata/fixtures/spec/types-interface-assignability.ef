@@ -1,8 +1,0 @@
-package demo
-
-type Store interface{ Get() string }
-type Mem struct{}
-
-func (Mem) Get() string { return "ok" }
-func NewStore() Store { return Mem{} } // Mem implements Store
-func main() {}

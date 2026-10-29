@@ -1,6 +1,0 @@
-package demo
-
-func main() needs Console {
-	var n int64 = "seven" // want S108
-	Console.Println(n)
-}

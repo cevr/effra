@@ -1,0 +1,8 @@
+type Fault {}
+
+func run(f func())      { f() }
+func boom() fails Fault { return Fault{} }
+
+func main() {
+	run(boom) // want S108
+}

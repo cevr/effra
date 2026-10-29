@@ -1,9 +1,0 @@
-package demo
-
-type Store interface{ Get() string }
-type Mem struct{}
-
-func main() needs Console {
-	v := with(wire{ Store = Mem{} }) { Store.Get() } // want S106
-	Console.Println(v)
-}

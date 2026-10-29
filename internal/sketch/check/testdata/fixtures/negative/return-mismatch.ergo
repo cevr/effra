@@ -1,0 +1,7 @@
+func name() string {
+	return true // want S108
+}
+
+func main() needs Console {
+	Console.Println("\(name())")
+}

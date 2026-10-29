@@ -1,0 +1,3 @@
+func main() {
+	let x = "unused" // want S110
+}

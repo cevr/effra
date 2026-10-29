@@ -1,0 +1,4 @@
+type Cap { M() }
+extern go fixture.work func work() needs Cap
+func pass[R](f func() needs R) {f()}
+func F() needs Cap {pass(work)}

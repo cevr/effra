@@ -12,12 +12,12 @@ import (
 )
 
 // TestRowVariableWitnesses: the round-11 review's witnesses (class F).
-// cache-witness.ef: initializer discovery builds Box{f} before f's row is
+// cache-witness.ergo: initializer discovery builds Box{f} before f's row is
 // inferred; Box[func()]{f} must still be refused (S108), since f fails with
-// Bang. row-gap-witness.ef: a row built during discovery, error[Fault[f's
+// Bang. row-gap-witness.ergo: a row built during discovery, error[Fault[f's
 // type]], must not make a valid later instantiation wider than itself.
 func TestRowVariableWitnesses(t *testing.T) {
-	files, _ := filepath.Glob(filepath.Join("testdata", "classf", "*.ef"))
+	files, _ := filepath.Glob(filepath.Join("testdata", "classf", "*.ergo"))
 	if len(files) < 67 {
 		t.Fatalf("want the 44 witnesses and controls of rounds 12 to 16, found %v", files)
 	}

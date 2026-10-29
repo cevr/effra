@@ -1,0 +1,5 @@
+type Store { Get() string }
+type A {}
+type Choice = A | Store // want S108
+
+func main() {}

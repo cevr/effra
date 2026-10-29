@@ -1,6 +1,0 @@
-package p
-type Fault[T any] struct{}
-func mark() error[Fault[int]]
-func run[T any](x T, f func() error[Fault[T]]) error[Fault[T]]
-func a() { try mark(); try run(int(1), func() { try a() }) }
-func F() error[Fault[int]] { return a() }

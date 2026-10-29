@@ -1,0 +1,4 @@
+extern go fixture.A func A()
+extern go fixture.s func s() int
+func M[A](_ A, s int) int { return s + 1 } // want S108
+func F() int { return s() }

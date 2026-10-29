@@ -1,0 +1,10 @@
+type Fault {}
+
+func fail() fails Fault { return Fault{} }
+func helper()           { try fail() }
+
+func Run() {
+	helper() // want S105
+}
+
+func main() {}

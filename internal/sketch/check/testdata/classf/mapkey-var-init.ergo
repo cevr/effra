@@ -1,0 +1,2 @@
+let x = Map[int, int]{y: 1} // want S108
+let y = len(x)

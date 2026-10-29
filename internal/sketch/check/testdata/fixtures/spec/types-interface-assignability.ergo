@@ -1,0 +1,6 @@
+type Store { Get() string }
+type Mem {}
+
+func Get(_ Mem) string { return "ok" }
+func NewStore() Store  { return Mem{} } // Mem implements Store
+func main()            {}

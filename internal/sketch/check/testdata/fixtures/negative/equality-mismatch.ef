@@ -1,5 +1,0 @@
-package demo
-
-func main() needs Console {
-	Console.Println("a" == 1) // want S108
-}

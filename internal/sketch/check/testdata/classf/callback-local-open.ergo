@@ -1,0 +1,8 @@
+type Bang {}
+extern go fixture.mark func mark() fails Bang
+type Runner { Run func(func()) }
+func a(input Runner) {
+ let r Runner = input
+ r.Run(func(){ try a(input) }) // want S101
+ try mark()
+}

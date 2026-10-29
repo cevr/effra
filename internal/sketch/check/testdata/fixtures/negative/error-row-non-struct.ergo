@@ -1,0 +1,5 @@
+type Store { Get() string }
+
+func run() fails Store {} // want S104
+
+func main() {}

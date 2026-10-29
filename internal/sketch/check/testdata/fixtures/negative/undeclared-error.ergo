@@ -1,0 +1,10 @@
+type A {}
+type B {}
+
+func fail() fails A | B { return A{} }
+
+func Run() fails A {
+	try fail() // want S101
+}
+
+func main() {}
