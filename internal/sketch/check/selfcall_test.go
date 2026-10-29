@@ -467,7 +467,7 @@ func TestSelfCallBindsOwnerKinds(t *testing.T) {
 		{"error row", `type Job[E] {}
 func Run[E](j Job[E]) fails E {}
 `, nil},
-		{"service row", `type Job[R] {}
+		{"capability row", `type Job[R] {}
 func Run[R](j Job[R]) needs R {}
 `, nil},
 		{"pointer first parameter", `type Job[E] {}

@@ -62,7 +62,7 @@ type Func struct {
 	size int
 }
 
-// Var is a variable: a parameter, a local or a package-level var.
+// Var is a variable: a parameter, a local or a package-level let.
 type Var struct {
 	Name    string
 	Type    Type

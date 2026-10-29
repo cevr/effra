@@ -325,7 +325,7 @@ func (t *Signature) String() string {
 	case len(results) > 1:
 		b.WriteString(" (" + strings.Join(results, ", ") + ")")
 	}
-	// The failure row is spelled as the decided signature writes it.
+	// The error row is spelled as the decided signature writes it.
 	if errs := t.Errors.String(); errs != "" {
 		b.WriteString(" fails " + errs)
 	} else if t.Fallible {

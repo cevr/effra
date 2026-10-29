@@ -445,7 +445,7 @@ func (c *checker) groupSites(scc []*bodyNode, sites map[*Func][2]groupSite, uses
 				continue
 			}
 			owner = n.v
-			site.key, site.anchor = "var "+n.v.obj.Name, n.v.obj.Pos
+			site.key, site.anchor = "let "+n.v.obj.Name, n.v.obj.Pos
 			if n.v.spec != nil {
 				site.anchor = n.v.spec.Pos()
 			}
@@ -581,11 +581,11 @@ func (c *checker) reportGroup(scc []*bodyNode) {
 		site := sites[f][0]
 		switch {
 		case ex[0] && ex[1]:
-			row = fmt.Sprintf("write its failure row and service row: func %s%s fails … needs …", f.Name, params)
+			row = fmt.Sprintf("write its error row and capability row: func %s%s fails … needs …", f.Name, params)
 		case ex[0]:
-			row = fmt.Sprintf("write its failure row: func %s%s fails …", f.Name, params)
+			row = fmt.Sprintf("write its error row: func %s%s fails …", f.Name, params)
 		default:
-			row = fmt.Sprintf("write its service row: func %s%s needs …", f.Name, params)
+			row = fmt.Sprintf("write its capability row: func %s%s needs …", f.Name, params)
 			site = sites[f][1]
 		}
 		line, col := site.file.syntax.Position(site.at)
@@ -1037,8 +1037,8 @@ func (c *checker) reportUnused(fc *funcCtx) {
 	}
 }
 
-// checkPkgVar checks a package-level var's initializer: a closed context,
-// with no row (grammar.md, Declarations 6: package-level var is immutable).
+// checkPkgVar checks a package-level let's initializer: a closed context,
+// with no row (grammar.md, Declarations 6: package-level let is immutable).
 func (c *checker) checkPkgVar(pv *pkgVar) {
 	if pv.done || pv.checking {
 		return
@@ -1067,13 +1067,13 @@ func (c *checker) checkPkgVar(pv *pkgVar) {
 	switch {
 	case len(pv.spec.Values) == 0:
 		if declared != nil && !isInvalid(declared) && !defaultable(declared) {
-			c.errorf(pv.spec.Names[pv.idx], CodeType, "var %s of type %s needs a value: %s has no zero value (types.md, Zero values 3)", pv.obj.Name, declared, declared)
+			c.errorf(pv.spec.Names[pv.idx], CodeType, "let %s of type %s needs a value: %s has no zero value (types.md, Zero values 3)", pv.obj.Name, declared, declared)
 		}
 		pv.obj.Type = declared
 	case len(pv.spec.Values) == len(pv.spec.Names):
 		op := c.valueExpr(pv.spec.Values[pv.idx], declared)
 		if declared != nil {
-			c.assign(&op, declared, "var "+pv.obj.Name)
+			c.assign(&op, declared, "let "+pv.obj.Name)
 			pv.obj.Type = declared
 		} else {
 			pv.obj.Type = c.typeOf(&op)

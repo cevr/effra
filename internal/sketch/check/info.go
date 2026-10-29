@@ -153,7 +153,7 @@ type Call struct {
 	TypeArgs []Type
 	// Type is a conversion's target type.
 	Type Type
-	// Fails and Needs are the callee's failure and service rows at this
+	// Fails and Needs are the callee's error and capability rows at this
 	// site, after substitution.
 	Fails, Needs *Row
 }
@@ -167,7 +167,7 @@ const (
 	// ConvOperations puts a value into an operation type; Table maps each
 	// operation name to the function that implements it.
 	ConvOperations
-	// ConvRow puts a failure row's value into a union.
+	// ConvRow puts a error row's value into a union.
 	ConvRow
 )
 
@@ -211,7 +211,7 @@ type FieldPattern struct {
 // Match is one match or catch.
 type Match struct {
 	// Subjects are the subject types: one, or a tuple's elements; a catch's
-	// subjects are its failure row's elements.
+	// subjects are its error row's elements.
 	Subjects []Type
 	// Arms counts the arms, a case _ included.
 	Arms int

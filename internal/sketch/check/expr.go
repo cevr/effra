@@ -23,7 +23,7 @@ const (
 	modeGeneric // a generic function not yet instantiated
 )
 
-// operand is the result of checking an expression. errs is its failure row
+// operand is the result of checking an expression. errs is its error row
 // while unhandled: a non-empty row makes the expression fallible (rows.md,
 // Error rows 2).
 type operand struct {

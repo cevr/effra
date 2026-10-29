@@ -25,7 +25,7 @@ var provisionalRows = []struct {
 		src: garmHeader + "func keep[T, F](g G[T], f F) {}\n" +
 			"func walk() {\n\tCap.M()\n\tw() catch {\n\tcase G as g:\n\t\tg.keep(func() { walk() })\n\t}\n}\n" +
 			"func w() { try load(); walk() }\nfunc main() {}\n",
-		want: []string{"5:6 S108 walk is used as a value through the function literal at 9:10 inside its own recursive group; write its service row: func walk() needs …"},
+		want: []string{"5:6 S108 walk is used as a value through the function literal at 9:10 inside its own recursive group; write its capability row: func walk() needs …"},
 	},
 	{
 		name: "garm-classg-errors (error row, try w() catch)",
@@ -33,21 +33,21 @@ var provisionalRows = []struct {
 			"func load() fails G[int] { return G[int]{} }\nfunc keep[T, F](g G[T], f F) {}\n" +
 			"func walk() {\n\ttry mark()\n\ttry w() catch {\n\tcase G as g:\n\t\tg.keep(func() { try walk() })\n\t}\n}\n" +
 			"func w() { try load(); try walk() }\nfunc main() {}\n",
-		want: []string{"6:6 S108 walk is used as a value through the function literal at 10:10 inside its own recursive group; write its failure row: func walk() fails …"},
+		want: []string{"6:6 S108 walk is used as a value through the function literal at 10:10 inside its own recursive group; write its error row: func walk() fails …"},
 	},
 	{
 		name: "garm-classg-block (trailing block)",
 		src: garmHeader + "func run[T, R](g G[T], body func() needs R) needs R { body() }\n" +
 			"func walk() {\n\tCap.M()\n\tw() catch {\n\tcase G as g:\n\t\tg.run() { walk() }\n\t}\n}\n" +
 			"func w() { try load(); walk() }\nfunc main() {}\n",
-		want: []string{"5:6 S108 walk is used as a value through the trailing block at 9:11 inside its own recursive group; write its service row: func walk() needs …"},
+		want: []string{"5:6 S108 walk is used as a value through the trailing block at 9:11 inside its own recursive group; write its capability row: func walk() needs …"},
 	},
 	{
 		name: "garm-classg-control (case G[int] as g)",
 		src: garmHeader + "func keep[T, F](g G[T], f F) {}\n" +
 			"func walk() {\n\tCap.M()\n\tw() catch {\n\tcase G[int] as g:\n\t\tg.keep(func() { walk() })\n\t}\n}\n" +
 			"func w() { try load(); walk() }\nfunc main() {}\n",
-		want: []string{"5:6 S108 walk is used as a value through the function literal at 9:10 inside its own recursive group; write its service row: func walk() needs …"},
+		want: []string{"5:6 S108 walk is used as a value through the function literal at 9:10 inside its own recursive group; write its capability row: func walk() needs …"},
 	},
 	// The same frame reached by other routes: an argument of a generic
 	// call that fails on g, a local bound to g, a value derived from g, a
@@ -57,35 +57,35 @@ var provisionalRows = []struct {
 		src: garmHeader + "func keep[T, F](g G[T], f F) {}\n" +
 			"func walk() {\n\tCap.M()\n\tw() catch {\n\tcase G as g:\n\t\tkeep(g, func() { walk() })\n\t}\n}\n" +
 			"func w() { try load(); walk() }\nfunc main() {}\n",
-		want: []string{"5:6 S108 walk is used as a value through the function literal at 9:11 inside its own recursive group; write its service row: func walk() needs …"},
+		want: []string{"5:6 S108 walk is used as a value through the function literal at 9:11 inside its own recursive group; write its capability row: func walk() needs …"},
 	},
 	{
 		name: "local bound to g",
 		src: garmHeader + "func keep[T, F](g G[T], f F) {}\n" +
 			"func walk() {\n\tCap.M()\n\tw() catch {\n\tcase G as g:\n\t\tlet h = g\n\t\th.keep(func() { walk() })\n\t}\n}\n" +
 			"func w() { try load(); walk() }\nfunc main() {}\n",
-		want: []string{"5:6 S108 walk is used as a value through the function literal at 10:10 inside its own recursive group; write its service row: func walk() needs …"},
+		want: []string{"5:6 S108 walk is used as a value through the function literal at 10:10 inside its own recursive group; write its capability row: func walk() needs …"},
 	},
 	{
 		name: "local bound to a call on g",
 		src: garmHeader + "func keep[T, F](g G[T], f F) {}\nfunc id[T](x T) T { return x }\n" +
 			"func walk() {\n\tCap.M()\n\tw() catch {\n\tcase G as g:\n\t\tlet h = id(g)\n\t\th.keep(func() { walk() })\n\t}\n}\n" +
 			"func w() { try load(); walk() }\nfunc main() {}\n",
-		want: []string{"6:6 S108 walk is used as a value through the function literal at 11:10 inside its own recursive group; write its service row: func walk() needs …"},
+		want: []string{"6:6 S108 walk is used as a value through the function literal at 11:10 inside its own recursive group; write its capability row: func walk() needs …"},
 	},
 	{
 		name: "frame inside the skipped frame",
 		src: garmHeader + "func keep[T, F](g G[T], f F) {}\n" +
 			"func walk() {\n\tCap.M()\n\tw() catch {\n\tcase G as g:\n\t\tg.keep(func() { let k = func() { walk() }\n\t\t\tk() })\n\t}\n}\n" +
 			"func w() { try load(); walk() }\nfunc main() {}\n",
-		want: []string{"5:6 S108 walk is used as a value through the function literal at 9:27 inside its own recursive group; write its service row: func walk() needs …"},
+		want: []string{"5:6 S108 walk is used as a value through the function literal at 9:27 inside its own recursive group; write its capability row: func walk() needs …"},
 	},
 	{
 		name: "trailing block of a valid callee",
 		src: garmHeader + "func run[T, R](g G[T], body func() needs R) needs R { body() }\n" +
 			"func walk() {\n\tCap.M()\n\tw() catch {\n\tcase G as g:\n\t\trun(g) { walk() }\n\t}\n}\n" +
 			"func w() { try load(); walk() }\nfunc main() {}\n",
-		want: []string{"5:6 S108 walk is used as a value through the trailing block at 9:10 inside its own recursive group; write its service row: func walk() needs …"},
+		want: []string{"5:6 S108 walk is used as a value through the trailing block at 9:10 inside its own recursive group; write its capability row: func walk() needs …"},
 	},
 	// A frame under a callee invalid for a diagnosed reason stays invalid
 	// beside a provisional value in the same body: only the S104.
@@ -116,7 +116,7 @@ var provisionalRows = []struct {
 			"func walk() {\n\tCap.M()\n\tw() catch {\n\tcase G[int]:\n\tcase H as h:\n\t\th.keep(func() { walk() })\n\t}\n\tlet k = walk\n\t_ = k\n}\n" +
 			"func w() { try load(); walk() }\nfunc main() {}\n",
 		want: []string{
-			"6:6 S108 walk is used as a value at 13:10 inside its own recursive group; write its service row: func walk() needs …",
+			"6:6 S108 walk is used as a value at 13:10 inside its own recursive group; write its capability row: func walk() needs …",
 			"10:7 S108 generic type main.H needs type arguments",
 		},
 	},
@@ -207,8 +207,8 @@ func w() { walk() }
 func main() {}
 `,
 		want: []string{
-			"3:6 S108 walk is used as a value through the function literal at 6:4 inside its own recursive group; write its service row: func walk() needs …",
-			"9:6 S108 other is used as a value at 5:15 inside its own recursive group; write its service row: func other(…) needs …",
+			"3:6 S108 walk is used as a value through the function literal at 6:4 inside its own recursive group; write its capability row: func walk() needs …",
+			"9:6 S108 other is used as a value at 5:15 inside its own recursive group; write its capability row: func other(…) needs …",
 		},
 	},
 	// The arm catches the row of a refused member (b2, b3): the binding is
@@ -237,8 +237,8 @@ func w() {
 func main() {}
 `,
 		want: []string{
-			"5:6 S108 walk is used as a value through the function literal at 9:10 inside its own recursive group; write its service row: func walk() needs …",
-			"12:6 S108 w is used as a value at 15:10 inside its own recursive group; write its failure row: func w() fails …",
+			"5:6 S108 walk is used as a value through the function literal at 9:10 inside its own recursive group; write its capability row: func walk() needs …",
+			"12:6 S108 w is used as a value at 15:10 inside its own recursive group; write its error row: func w() fails …",
 		},
 	},
 	{
@@ -258,7 +258,7 @@ func w() {
 }
 func main() {}
 `,
-		want: []string{"10:6 S108 w is used as a value through the function literal at 7:10 inside its own recursive group; write its failure row: func w() fails …"},
+		want: []string{"10:6 S108 w is used as a value through the function literal at 7:10 inside its own recursive group; write its error row: func w() fails …"},
 	},
 }
 

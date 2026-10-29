@@ -191,7 +191,7 @@ func Transform[A, B, E, R](xs []A, limit int64, f func(A) B fails E needs R) []B
 }
 ```
 
-1. Type parameters are declared in brackets after the name, `[A, B, E, R]`; a bare upper-case letter is not a parameter by itself. The kinds stay implicit: a parameter may range over types (`A`, `B`), failure rows (`E`, after `fails`) or service rows (`R`, after `needs`). `[T any]` is written `[T]`.
+1. Type parameters are declared in brackets after the name, `[A, B, E, R]`; a bare upper-case letter is not a parameter by itself. The kinds stay implicit: a parameter may range over types (`A`, `B`), error rows (`E`, after `fails`) or capability rows (`R`, after `needs`). `[T any]` is written `[T]`.
 2. A constraint follows its parameter inline, `[T ordered]`: a method set, or one of the predeclared `comparable`, `ordered` and `number`. There is no `where` clause. Method constraints resolve through the type's owner package, with one answer per type.
 3. Rows in a generic signature may be elided only where they pass through unchanged. A declared requirement is never elided.
 4. Exported signatures spell their rows and type parameters, so clients check against interface summaries, Go's export-data model.

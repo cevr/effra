@@ -206,7 +206,7 @@ func (c *checker) varDecl(d *syntax.VarDecl) {
 		switch {
 		case len(spec.Values) == 0:
 			if declared != nil && !isInvalid(declared) && !defaultable(declared) {
-				c.errorf(spec.Names[0], CodeType, "var %s of type %s needs a value: %s has no zero value (types.md, Zero values 3)", spec.Names[0].Name, declared, declared)
+				c.errorf(spec.Names[0], CodeType, "let %s of type %s needs a value: %s has no zero value (types.md, Zero values 3)", spec.Names[0].Name, declared, declared)
 			}
 			for _, n := range spec.Names {
 				c.declareLocal(n, declared)
@@ -216,7 +216,7 @@ func (c *checker) varDecl(d *syntax.VarDecl) {
 			for i, v := range spec.Values {
 				op := c.valueExpr(v, declared)
 				if declared != nil {
-					c.assign(&op, declared, "var "+spec.Names[i].Name)
+					c.assign(&op, declared, "let "+spec.Names[i].Name)
 					types[i] = declared
 				} else {
 					types[i] = c.typeOf(&op)
@@ -364,14 +364,14 @@ func assignOp(t syntax.Token) syntax.Token {
 }
 
 // lhs checks an assignment target: a local, a field or an element. A
-// package-level var is immutable (grammar.md, Declarations 6). Assigning
+// package-level let is immutable (grammar.md, Declarations 6). Assigning
 // does not read the variable.
 func (c *checker) lhs(x syntax.Expr) operand {
 	if id, ok := unparen(x).(*syntax.Ident); ok {
 		o := c.lookup(id.Name)
 		if v, ok := o.(*Var); ok {
 			if v.pkg {
-				c.errorf(x, CodeType, "the package-level var %s is immutable (grammar.md, Declarations 6)", id.Name)
+				c.errorf(x, CodeType, "the package-level let %s is immutable (grammar.md, Declarations 6)", id.Name)
 				return bad(x)
 			}
 			if v.Type == nil || isInvalid(v.Type) {

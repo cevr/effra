@@ -61,12 +61,12 @@ func TestClassGMessage(t *testing.T) {
 			src: "type Bang {}\nextern go fixture.mark func mark() fails Bang\nextern go fixture.keep func keep[T](f T)\n" +
 				"func walk(n int) { try mark(); keep(func() { try walk(n) }) }\n",
 			at:   "func() { try walk",
-			want: "walk is used as a value through the function literal at 4:%d inside its own recursive group; write its failure row: func walk(…) fails …",
+			want: "walk is used as a value through the function literal at 4:%d inside its own recursive group; write its error row: func walk(…) fails …",
 		},
 		{
 			src:  "type Bang {}\nextern go fixture.mark func mark() fails Bang\nfunc walk() { try mark(); let g = walk; _ = g }\n",
 			at:   "walk; _",
-			want: "walk is used as a value at 3:%d inside its own recursive group; write its failure row: func walk() fails …",
+			want: "walk is used as a value at 3:%d inside its own recursive group; write its error row: func walk() fails …",
 		},
 		// run checks its block (its row R is open): a block typing never
 		// checks, as one an arity error refuses, carries no class G use
@@ -75,7 +75,7 @@ func TestClassGMessage(t *testing.T) {
 			src: "type Cap { M() }\nfunc run[R](n int, body func() needs R) needs R { body() }\n" +
 				"func walk(n int) { Cap.M(); run(n) { walk(n) } }\n",
 			at:   "{ walk(n) }",
-			want: "walk is used as a value through the trailing block at 3:%d inside its own recursive group; write its service row: func walk(…) needs …",
+			want: "walk is used as a value through the trailing block at 3:%d inside its own recursive group; write its capability row: func walk(…) needs …",
 		},
 	} {
 		line := tc.src[strings.LastIndex(tc.src[:strings.Index(tc.src, tc.at)], "\n")+1:]

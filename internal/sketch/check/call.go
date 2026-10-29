@@ -266,7 +266,7 @@ func (c *checker) argValue(a syntax.Expr, hint Type, call *syntax.CallExpr) (ope
 	return op, true
 }
 
-// result is the operand of a call: its value results, its failure row, and
+// result is the operand of a call: its value results, its error row, and
 // the charges of its capability row (rows.md, Capability rows 2).
 func (c *checker) result(x *syntax.CallExpr, sig *Signature) operand {
 	// An inferred row is read through its variable (class F).
@@ -846,7 +846,7 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 // expression is assigned to them; otherwise the result is its type (a
 // literal's default type), or no value; a single unknown result
 // is still the expected type of the last expression, as a hint (M16). pass
-// receives the last expression's failure row, which passes through
+// receives the last expression's error row, which passes through
 // (rows.md, With 6).
 func (c *checker) yieldingBlock(at syntax.Node, list []syntax.Stmt, results []Type, known bool, pass func(*operand)) Type {
 	if len(list) == 0 {

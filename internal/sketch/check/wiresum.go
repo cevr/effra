@@ -151,7 +151,7 @@ func declKey(d syntax.Decl) string {
 				names = append(names, n.Name)
 			}
 		}
-		return "var " + strings.Join(names, ",")
+		return "let " + strings.Join(names, ",")
 	case *syntax.WireDecl:
 		return "wire " + d.Name.Name
 	case *syntax.TypeDecl:
