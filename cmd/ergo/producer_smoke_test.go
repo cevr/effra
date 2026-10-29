@@ -155,11 +155,8 @@ func main(){json.NewEncoder(os.Stdout).Encode(map[string]any{"marker":marker,"pr
 		}
 	})
 
-	// A causal sentinel proves formatting stdin does not acquire an
-	// identity, while check and a build refusal, which print facts, do, and
-	// so do build and run: the emission cache key names the executing
-	// compiler (#224), so a changed compiler never reuses another's
-	// generated Go.
+	// A causal sentinel proves build and run do not acquire an identity,
+	// while check and a build refusal, which print facts, do.
 	t.Run("lazy-acquisition", func(t *testing.T) {
 		t.Parallel()
 		directory, file := workspace(t)
@@ -168,11 +165,12 @@ func main(){json.NewEncoder(os.Stdout).Encode(map[string]any{"marker":marker,"pr
 			t.Fatal("identity owner Current anchor is missing")
 		}
 		lazy := producerSmokeOverlays(t, root, directory, ownerPath, map[string]string{"lazy": lazySource})["lazy"]
-		if stdout, stderr, code := runSmokeCLI(t, processDeadline, lazy, directory, sketchCleanSource, "fmt", "--stdin"); code != 0 || len(stdout) == 0 {
-			t.Fatalf("fmt --stdin acquired an identity: exit %d stderr=%s", code, stderr)
+		producerSmokeRun(t, directory, lazy, "build", file, "-o", filepath.Join(directory, "app"))
+		if got := producerSmokeRun(t, directory, lazy, "run", file); got != "ok\n" {
+			t.Fatalf("run printed %q", got)
 		}
 		bad := smokeWrite(t, directory, "bad.ergo", sketchMissingNeeds)
-		for _, args := range [][]string{{"check", file}, {"diagnostics", file}, {"build", bad}, {"build", file, "-o", filepath.Join(directory, "app")}, {"run", file}} {
+		for _, args := range [][]string{{"check", file}, {"diagnostics", file}, {"build", bad}} {
 			_, stderr, code := runSmokeCLI(t, processDeadline, lazy, directory, "", args...)
 			if code == 0 || !strings.Contains(string(stderr), "producer acquisition forbidden") {
 				t.Fatalf("ergo %v did not acquire an identity: exit %d stderr=%s", args, code, stderr)

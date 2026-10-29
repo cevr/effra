@@ -22,11 +22,25 @@ const (
 	rootVariable   = "ERGO_BUILD_TEST_ROOT"
 )
 
+// identityMarker is a string the test binary carries, so a copy of the
+// binary can be changed in exactly one byte.
+var identityMarker = "ergo-identity-marker-0"
+
 // helperMain publishes baseInput into the cache at $ERGO_BUILD_TEST_ROOT
 // and prints the module directory. In mode "crash" the process exits with
 // status 3 once staging is complete and before the rename, as a builder
-// killed mid-publication would: no deferred cleanup runs.
+// killed mid-publication would: no deferred cleanup runs. In mode
+// "identity" it prints the marker and CompilerIdentity.
 func helperMain(mode string) int {
+	if mode == "identity" {
+		identity, err := CompilerIdentity()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Println(identityMarker + " " + identity)
+		return 0
+	}
 	if mode == "crash" {
 		testHookStaged = func(string) error { os.Exit(3); return nil }
 	}

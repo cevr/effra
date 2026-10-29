@@ -43,9 +43,10 @@ func runCommand(args []string) error {
 
 // buildSource checks the source and builds it to its output: -o, or
 // dist/NAME for a source NAME.ergo. A source that does not check prints its
-// check envelope and builds nothing. The generated Go module comes from the
-// emission cache (internal/sketch/build), whose key includes the executing
-// compiler's producer identity.
+// check envelope and builds nothing; only that refusal, which prints
+// facts, acquires a producer identity. The generated Go module comes from
+// the emission cache (internal/sketch/build), whose key includes the
+// digest of the compiler executable (build.CompilerIdentity).
 func buildSource(command string, args []string) (receipt.Location, error) {
 	opts, err := parseFileOptions(command, args)
 	if err != nil {

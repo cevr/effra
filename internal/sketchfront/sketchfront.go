@@ -28,7 +28,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"ergo.local/prototype/internal/producer"
 	"ergo.local/prototype/internal/report"
 	"ergo.local/prototype/internal/sketch/build"
 	"ergo.local/prototype/internal/sketch/check"
@@ -255,9 +254,13 @@ func Build(a Analysis, req BuildRequest) (build.Module, error) {
 	if err := unit.Validate(); err != nil {
 		return build.Module{}, err
 	}
+	compiler, err := build.CompilerIdentity()
+	if err != nil {
+		return build.Module{}, err
+	}
 	input := build.Input{
 		Dependencies: stdDependencies(),
-		Compiler:     producer.Current().Qualifier,
+		Compiler:     compiler,
 		Emitter:      emitterRevision,
 		Runtime:      []build.File{{Path: "rt/rt.go", Data: []byte(proto.RuntimeSource())}},
 		Language:     LanguageRevision,

@@ -25,7 +25,7 @@ A command locates its source once (`internal/receipt.LocateSource`): the spellin
 
 ## Check envelope
 
-`ergo check` prints one JSON object: `schemaVersion` (10), `checked`, `target`, `revision` (a SHA-256 digest that identifies the source), `diagnostics` (at most 100, each with `code`, `message` and a UTF-8 byte `span` with one-based line and column), `diagnosticsTruncated`, the `producer` that made the facts, and the `snapshot` that binds the schema, revision, target and producer together. Producer identity follows the executing artifact: its digest when the executable can be read, and a process-scoped qualifier when it cannot. `ergo build` and `ergo run` acquire a producer identity only when they refuse a source.
+`ergo check` prints one JSON object: `schemaVersion` (10), `checked`, `target`, `revision` (a SHA-256 digest that identifies the source), `diagnostics` (at most 100, each with `code`, `message` and a UTF-8 byte `span` with one-based line and column), `diagnosticsTruncated`, the `producer` that made the facts, and the `snapshot` that binds the schema, revision, target and producer together. Producer identity follows the executing artifact: its digest when the executable can be read, and a process-scoped qualifier when it cannot. `ergo build` and `ergo run` acquire a producer identity only when they refuse a source. The emission cache keys on its own digest of the compiler executable, which needs no producer identity ([runtime.md](spec/runtime.md), Host and lowering notes).
 
 ## Diagnostic reports
 

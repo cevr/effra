@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 )
@@ -21,13 +22,26 @@ import (
 type Cache struct{ Root string }
 
 // DefaultRoot is $XDG_CACHE_HOME/ergo when XDG_CACHE_HOME is absolute,
-// else os.UserCacheDir()/ergo. The XDG base directory specification treats
-// a relative value as invalid; on Linux os.UserCacheDir then fails.
+// else os.UserCacheDir()/ergo. The XDG base directory specification makes
+// a relative value invalid and to be ignored, so on the systems where
+// os.UserCacheDir reads XDG_CACHE_HOME a relative value falls back to
+// $HOME/.cache, which os.UserCacheDir would refuse instead.
 func DefaultRoot() (string, error) {
-	if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" && filepath.IsAbs(xdg) {
+	xdg := os.Getenv("XDG_CACHE_HOME")
+	if xdg != "" && filepath.IsAbs(xdg) {
 		return filepath.Join(xdg, "ergo"), nil
 	}
-	dir, err := os.UserCacheDir()
+	var dir string
+	var err error
+	switch runtime.GOOS {
+	case "windows", "darwin", "ios", "plan9":
+		dir, err = os.UserCacheDir()
+	default:
+		var home string
+		if home, err = os.UserHomeDir(); err == nil {
+			dir = filepath.Join(home, ".cache")
+		}
+	}
 	if err != nil {
 		return "", fmt.Errorf("no cache directory for generated Go: %w", err)
 	}
