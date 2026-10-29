@@ -3,6 +3,7 @@ package build
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,23 +23,67 @@ const (
 	rootVariable   = "ERGO_BUILD_TEST_ROOT"
 )
 
-// identityMarker is a string the test binary carries, so a copy of the
-// binary can be changed in exactly one byte.
+// identityMarker is a string the test binary carries. The linker sets it
+// with -X to build a variant that differs only there, and on Linux a copy
+// can be patched in exactly one byte of it.
 var identityMarker = "ergo-identity-marker-0"
 
 // helperMain publishes baseInput into the cache at $ERGO_BUILD_TEST_ROOT
 // and prints the module directory. In mode "crash" the process exits with
 // status 3 once staging is complete and before the rename, as a builder
 // killed mid-publication would: no deferred cleanup runs. In mode
-// "identity" it prints the marker and CompilerIdentity.
+// "identity" it prints the marker and CompilerIdentity. In mode "replace"
+// it renames other bytes over its own executable's path, as a reinstall
+// does, and then prints the digests of its original bytes and of the
+// replacement, CompilerIdentity, and the identity of the file the path
+// names after the reinstall.
 func helperMain(mode string) int {
+	fail := func(err error) int {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	if mode == "identity" {
 		identity, err := CompilerIdentity()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 1
+			return fail(err)
 		}
 		fmt.Println(identityMarker + " " + identity)
+		return 0
+	}
+	if mode == "replace" {
+		path, err := os.Executable()
+		if err != nil {
+			return fail(err)
+		}
+		original, err := os.ReadFile(path)
+		if err != nil {
+			return fail(err)
+		}
+		replacement := append(bytes.Clone(original), "reinstalled"...)
+		if err := os.WriteFile(path+".new", replacement, 0o755); err != nil {
+			return fail(err)
+		}
+		if err := os.Rename(path+".new", path); err != nil {
+			return fail(err)
+		}
+		identity, err := CompilerIdentity()
+		if err != nil {
+			return fail(err)
+		}
+		late, err := os.Open(path)
+		if err != nil {
+			return fail(err)
+		}
+		defer late.Close()
+		lateIdentity, err := imageIdentity(late)
+		if err != nil {
+			return fail(err)
+		}
+		digest := func(data []byte) string {
+			sum := sha256.Sum256(data)
+			return "sha256:" + hex.EncodeToString(sum[:])
+		}
+		fmt.Println(digest(original), digest(replacement), identity, lateIdentity)
 		return 0
 	}
 	if mode == "crash" {
