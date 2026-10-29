@@ -620,9 +620,13 @@ func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr
 			matrix.addRow(row)
 		}
 		if cl.List == nil && valid && !r.resolve.over {
-			// `case _` covers every value, so a case after it is
-			// unreachable. Its own usefulness is not proved: a match with
-			// `case _` stays linear (rows.md, Totality 5).
+			// A default is unreachable when the earlier cases are total.
+			// Reported patterns leave an incomplete matrix (D3).
+			if patternsOK {
+				if u, ok := useful.caseUseful(matrix, solverRow{}); ok && !u {
+					c.errorf(cl, CodeType, "this case is already covered by the cases before it (unreachable)")
+				}
+			}
 			matrix.addRow(solverRow{})
 		}
 		inner := c.openScope()

@@ -70,8 +70,8 @@ func TestGenericDefaultSwitchLinear(t *testing.T) {
 		if with != without {
 			t.Errorf("n=k=%d: the default-only switch created %d instances beyond the control", n, with-without)
 		}
-		if with > 4*(n+n) || ops != 0 || ts[0] != 0 || us[0] != 0 {
-			t.Errorf("n=k=%d: %d instances (want at most %d), %d variant operations, steps %v/%v (want 0)", n, with, 4*(n+n), ops, ts, us)
+		if with > 4*(n+n) || ops != 0 || ts[0] > 8*n || us[0] > 8*n {
+			t.Errorf("n=k=%d: %d instances (want at most %d), %d variant operations, steps %v/%v (want at most %d each)", n, with, 4*(n+n), ops, ts, us, 8*n)
 		}
 		counts[n] = with
 	}

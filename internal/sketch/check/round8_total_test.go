@@ -94,7 +94,7 @@ func sharedCases(n int, shape string, noSwitch bool) string {
 	fmt.Fprintf(&b, "\nfunc F(x %s) int {\n", param)
 	if !noSwitch {
 		b.WriteString("\tmatch x {\n")
-		for i := range n {
+		for i := range n - 1 { // Leave a variant for the default arm.
 			c := variant(i)
 			if shape == "generic" {
 				c = fmt.Sprintf("V[B, A%d]", i)

@@ -24,6 +24,9 @@ func unionSwitch(variants, cases int) string {
 		fmt.Fprintf(&b, "V%d", v)
 	}
 	b.WriteString("\nfunc F(u U) int {\n\tmatch u {\n")
+	if cases == variants {
+		cases-- // Leave a variant for the default arm.
+	}
 	for v := range cases {
 		fmt.Fprintf(&b, "\tcase V%d:\n\t\treturn %d\n", v, v)
 	}
