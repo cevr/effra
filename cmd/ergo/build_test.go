@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"io/fs"
@@ -37,12 +38,23 @@ const innerRunVariable = "ERGO_CMD_TEST_INNER_RUN"
 // directory to stay empty: building and running programs, in every test,
 // writes only into the tests' own temporary space. Go's own caches and
 // configuration keep the locations this process resolved, so the run
-// measures Ergo's writes, not Go's.
+// measures Ergo's writes, not Go's. The inner run's temporary directory is
+// reached through a symbolic link, with GOTMPDIR unset, so its tests see
+// a logical path that differs from the physical one, as on darwin.
+//
+// HOME is checked whatever the inner run's exit status: a failing test
+// there is reported by this package's own run and must not hide a write
+// under HOME. The inner run fails this test only when it ran no test.
 func TestPackageNeverWritesUnderHome(t *testing.T) {
 	if os.Getenv(innerRunVariable) != "" {
 		t.Skip("inside the run this test started")
 	}
 	home := t.TempDir()
+	temp := t.TempDir()
+	linkedTemp := filepath.Join(t.TempDir(), "linked-tmp")
+	if err := os.Symlink(temp, linkedTemp); err != nil {
+		t.Fatal(err)
+	}
 	out, err := exec.Command("go", "env", "-json", "GOCACHE", "GOMODCACHE", "GOPATH").Output()
 	if err != nil {
 		t.Fatal(err)
@@ -57,15 +69,20 @@ func TestPackageNeverWritesUnderHome(t *testing.T) {
 	}
 	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		name, _, _ := strings.Cut(kv, "=")
-		return slices.Contains([]string{"HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "GOCACHE", "GOMODCACHE", "GOPATH"}, name)
+		return slices.Contains([]string{"HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "GOCACHE", "GOMODCACHE", "GOPATH", "TMPDIR", "GOTMPDIR"}, name)
 	})
-	env = append(env, "HOME="+home, "XDG_CONFIG_HOME="+config, innerRunVariable+"=1",
+	env = append(env, "HOME="+home, "XDG_CONFIG_HOME="+config, innerRunVariable+"=1", "TMPDIR="+linkedTemp,
 		"GOCACHE="+goEnv["GOCACHE"], "GOMODCACHE="+goEnv["GOMODCACHE"], "GOPATH="+goEnv["GOPATH"])
-	child := exec.Command(os.Args[0], "-test.count=1", "-test.skip=^TestPackageNeverWritesUnderHome$")
+	child := exec.Command(os.Args[0], "-test.count=1", "-test.v", "-test.skip=^TestPackageNeverWritesUnderHome$")
 	child.Env = env
 	stdout, stderr, code := runSmokeCommand(t, 10*processDeadline, child)
-	if code != 0 {
-		t.Fatalf("package run with an empty HOME: exit %d\n%s\n%s", code, firstLines(stdout), firstLines(stderr))
+	passed := regexp.MustCompile(`(?m)^--- PASS: `).FindAll(stdout, -1)
+	failed := regexp.MustCompile(`(?m)^--- FAIL: \S+`).FindAll(stdout, -1)
+	switch {
+	case len(passed) == 0:
+		t.Errorf("the package run with an empty HOME ran no test: exit %d\n%s\n%s", code, firstLines(stdout), firstLines(stderr))
+	case code != 0:
+		t.Logf("the package run with an empty HOME exited %d after %d passing tests; failing: %s", code, len(passed), bytes.Join(failed, []byte(", ")))
 	}
 	var written []string
 	_ = filepath.WalkDir(home, func(p string, d fs.DirEntry, err error) error {
@@ -174,6 +191,83 @@ func moduleState(t *testing.T, dir string) map[string]moduleFile {
 	return state
 }
 
+// physicalTempDir is a test temporary directory with its links resolved.
+func physicalTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+var lineDirective = regexp.MustCompile(`(?m)^//line (.+):\d+$`)
+
+// TestBuildWorkMapsASymlinkedSource: when the source is reached through a
+// symbolic link to its directory, by a relative spelling from the linked
+// directory (with and without a shell's PWD) or by an absolute spelling
+// through the link, the //line directives of the published module name an
+// absolute path that is the source file itself (os.SameFile), and the
+// program runs. Which spelling the directive uses follows
+// receipt.LocateSource; the property is that it opens the source. The
+// links are made here, so the case runs on Linux whatever TMPDIR is.
+func TestBuildWorkMapsASymlinkedSource(t *testing.T) {
+	binary := buildTestCLI(t)
+	base := physicalTempDir(t)
+	real := filepath.Join(base, "real-src")
+	if err := os.Mkdir(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(real, "main.ergo")
+	if err := os.WriteFile(source, []byte(sketchCleanSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link-src")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	sourceInfo, err := os.Stat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	xdg := filepath.Join(physicalTempDir(t), "xdg")
+	for _, c := range []struct {
+		name, dir, spelling string
+		env                 []string
+	}{
+		{"relative from the link, PWD inherited", link, "main.ergo", nil},
+		{"relative from the link, PWD set as a shell does", link, "main.ergo", []string{"PWD=" + link}},
+		{"absolute through the link", base, filepath.Join(link, "main.ergo"), nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			output := filepath.Join(physicalTempDir(t), "app")
+			command := exec.Command(binary, "build", c.spelling, "-o", output, "-work")
+			command.Dir = c.dir
+			command.Env = append(append(os.Environ(), "XDG_CACHE_HOME="+xdg), c.env...)
+			stdout, stderr, code := runSmokeCommand(t, processDeadline, command)
+			if code != 0 {
+				t.Fatalf("build: exit %d %s\n%s", code, stdout, stderr)
+			}
+			mainGo, err := os.ReadFile(filepath.Join(workDir(t, string(stderr)), "main.go"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := lineDirective.FindSubmatch(mainGo)
+			if found == nil {
+				t.Fatalf("main.go has no //line directive:\n%s", mainGo)
+			}
+			target := string(found[1])
+			targetInfo, err := os.Stat(target)
+			if err != nil || !filepath.IsAbs(target) || !os.SameFile(targetInfo, sourceInfo) {
+				t.Fatalf("//line names %s (%v), which is not the source %s", target, err, source)
+			}
+			if out, err := exec.Command(output).Output(); err != nil || string(out) != "ok\n" {
+				t.Fatalf("app printed %q (%v)", out, err)
+			}
+		})
+	}
+}
+
 // TestBuildWorkNamesTheCachedModule: build -work prints the executable on
 // stdout and exactly one WORK= line on stderr naming the published module
 // under $XDG_CACHE_HOME/ergo, whose //line directives name the admitted
@@ -183,7 +277,9 @@ func moduleState(t *testing.T, dir string) map[string]moduleFile {
 // takes -work. Spec D7, #224.
 func TestBuildWorkNamesTheCachedModule(t *testing.T) {
 	binary := buildTestCLI(t)
-	root := t.TempDir()
+	// The CLI admits the path it walks, which is physical when the
+	// temporary directory is reached through a link (darwin's /var).
+	root := physicalTempDir(t)
 	xdg := filepath.Join(t.TempDir(), "xdg")
 	source := filepath.Join(root, "main.ergo")
 	write := func(word string) {
