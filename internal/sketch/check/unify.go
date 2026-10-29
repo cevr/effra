@@ -311,6 +311,7 @@ func (in *inferer) nify(x, y Type, mode unifyMode, depth int) bool {
 			}
 		}
 		return true
+	// check-v1: dead. Only an anonymous struct type unifies structurally (ruling C).
 	case *Struct:
 		ys, ok := y.(*Struct)
 		if !ok || len(ys.Fields) != len(x.Fields) {

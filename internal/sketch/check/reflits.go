@@ -86,6 +86,7 @@ func (c *checker) litTypeOf(e syntax.Expr, env *typeEnv) litType {
 				return fromType(tn.Type)
 			}
 		}
+	// check-v1: dead. An anonymous struct literal type (ruling C).
 	case *syntax.StructType:
 		return litType{kind: litStruct, expr: e, env: env}
 	case *syntax.ArrayType, *syntax.MapType:

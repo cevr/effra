@@ -121,6 +121,15 @@ func (c *checker) declareUntyped(id *syntax.Ident) {
 	c.fn.scope.insert(id.Name, &Var{Name: id.Name, Type: invalid, Pos: id.Pos(), used: true})
 }
 
+// catchAll reports whether a catch arm's lone name binds the whole failure
+// (`case err:`, rows.md Catch 7): a lower-case name that names no type.
+func (c *checker) catchAll(id *syntax.Ident) bool {
+	if r, _ := utf8.DecodeRuneInString(id.Name); !unicode.IsLower(r) {
+		return false
+	}
+	return c.lookupType(id.Name, c.localTypeCtx()) == nil
+}
+
 // unusedAs reports each `as` name that its arm never reads (S110), as the
 // old switch binding was reported (rows.md, Totality 1).
 func (c *checker) unusedAs(list []asBinding) {

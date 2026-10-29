@@ -41,6 +41,9 @@ func (c *checker) call(x *syntax.CallExpr, hint Type) operand {
 		}
 		return c.conversion(x, fun.typ)
 	case modeBuiltin:
+		if fun.recv != nil {
+			return c.libraryCall(x, fun.obj.(*Builtin), *fun.recv)
+		}
 		return c.builtin(x, fun.obj.(*Builtin), hint)
 	case modeCapFn:
 		c.charge(x, fun.cap)
@@ -999,6 +1002,61 @@ func isCallLike(x syntax.Expr) bool {
 }
 
 // ---------------------------------------------------------------- builtins
+
+// libraryMethod returns the built-in that a decided library call on t
+// replaces: xs.Append(x) is Go's append(xs, x) on a slice, m.Delete(k)
+// Go's delete(m, k) on a map (#196, 196v: the built-ins append and delete
+// are removed). A slice or map has no field or other method, so the name
+// is unambiguous.
+func libraryMethod(t Type, name string) *Builtin {
+	switch under(t).(type) {
+	case *Slice:
+		if name == "Append" {
+			return &Builtin{Name: "append"}
+		}
+	case *Map:
+		if name == "Delete" {
+			return &Builtin{Name: "delete"}
+		}
+	}
+	return nil
+}
+
+// libraryCall checks xs.Append(a, …) and m.Delete(k) on the checked
+// receiver recv: each element is assignable to the slice's element type
+// and the call yields the slice's type; the key is assignable to the
+// map's key type and the call has no value.
+func (c *checker) libraryCall(x *syntax.CallExpr, b *Builtin, recv operand) operand {
+	name := exprText(x.Fun)
+	if x.Trailing != nil {
+		c.errorf(x.Trailing, CodeType, "%s takes no block", name)
+		c.silentArgs(x)
+		return bad(x)
+	}
+	switch b.Name {
+	case "append":
+		elem := under(recv.typ).(*Slice).Elem
+		if len(x.Args) == 0 {
+			c.errorf(x, CodeType, "%s takes the elements to append", name)
+			return bad(x)
+		}
+		for _, a := range x.Args {
+			op := c.valueExpr(a, elem)
+			c.assign(&op, elem, "argument")
+		}
+		return operand{mode: modeValue, typ: recv.typ}
+	default: // delete
+		key := under(recv.typ).(*Map).Key
+		if len(x.Args) != 1 {
+			c.errorf(x, CodeType, "%s takes one key", name)
+			c.silentArgs(x)
+			return bad(x)
+		}
+		k := c.valueExpr(x.Args[0], key)
+		c.assign(&k, key, "map key")
+		return operand{mode: modeNoValue, typ: NoValue}
+	}
+}
 
 func (c *checker) builtin(x *syntax.CallExpr, b *Builtin, hint Type) operand {
 	if x.Trailing != nil {

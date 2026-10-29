@@ -18,6 +18,30 @@ func TestDecidedNodes(t *testing.T) {
 		src  string
 		want []string // "code:line", sorted as the checker reports them
 	}{
+		{"an unquoted import path", `
+import timeout
+func f() timeout.Expired { return timeout.Expired{} }
+func main() {}
+`, nil},
+		{"append and delete are library calls", `
+func f(m Map[string, int64], xs []int64) []int64 {
+	m.Delete("a")
+	return xs.Append(1).Append(2)
+}
+func main() {}
+`, nil},
+		{"append checks its elements", `
+func f(xs []int64) []int64 { return xs.Append("a") }
+func main() {}
+`, []string{"S108:2"}},
+		{"delete checks its key", `
+func f(m Map[string, int64]) { m.Delete(1) }
+func main() {}
+`, []string{"S108:2"}},
+		{"append is only called", `
+func f(xs []int64) { let g = xs.Append }
+func main() {}
+`, []string{"S104:2"}},
 		{"interpolation is a string", `
 func label(n int, ok bool) string { return "n = \(n), ok = \(ok), \("s"), \(7)" }
 func main() {}
@@ -111,6 +135,17 @@ func f() string {
 }
 func main() {}
 `, nil},
+		{"a catch-all binding", `
+type Gone {}
+func load() int fails Gone { return 1 }
+func f() int {
+	return load() catch {
+	case err:
+		0
+	}
+}
+func main() {}
+`, []string{"S109:6"}},
 		{"counting range", `
 func sum(n int64) int64 {
 	let mut s int64 = 0

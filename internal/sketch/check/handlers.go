@@ -94,12 +94,19 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 					// A binding in an arm with several types is
 					// check-v1's (196p).
 					c.notYet(te)
+					valid = false // no verdict over an unchecked arm
 					continue
 				}
 				asName = name
 			}
 			if _, ok := core.(*syntax.CompositeLit); ok {
 				c.notYet(core) // a record pattern, 196p
+				valid = false
+				continue
+			}
+			if id, ok := core.(*syntax.Ident); ok && c.catchAll(id) {
+				c.notYet(id) // `case err:`, 196p
+				valid = false
 				continue
 			}
 			te = core

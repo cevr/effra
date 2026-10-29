@@ -220,10 +220,15 @@ func (c *checker) declare(id *syntax.Ident, o Object) bool {
 }
 
 func (c *checker) importSpec(fi *fileInfo, spec *syntax.ImportSpec) {
-	path, err := strconv.Unquote(spec.Path.Value)
-	if err != nil {
-		c.errorf(spec.Path, CodeType, "malformed import path %s", spec.Path.Value)
-		return
+	// A decided import path is one unquoted token (grammar.md, Lexical 6).
+	path := spec.Path.Value
+	if spec.Path.Kind != syntax.PATH {
+		p, err := strconv.Unquote(spec.Path.Value)
+		if err != nil {
+			c.errorf(spec.Path, CodeType, "malformed import path %s", spec.Path.Value)
+			return
+		}
+		path = p
 	}
 	switch spec.Kind {
 	case syntax.ImportGo:
@@ -588,6 +593,8 @@ func (c *checker) typExpr0(x syntax.Expr, ctx *typeCtx) Type {
 		}
 		inner.field, inner.param = false, false
 		return c.signature(x, &inner)
+	// check-v1: dead. An anonymous struct type: the decided grammar has no
+	// struct keyword, so only a type declaration names a record (ruling C).
 	case *syntax.StructType:
 		inner := typeCtx{field: true}
 		if ctx != nil {

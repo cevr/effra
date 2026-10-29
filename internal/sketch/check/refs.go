@@ -221,6 +221,7 @@ func (w *refWalker) writtenType(t syntax.Expr) Type {
 	if s, ok := t.(*syntax.StarExpr); ok {
 		t = s.X
 	}
+	// check-v1: dead. The decided grammar has no anonymous struct type (ruling C).
 	if st, ok := t.(*syntax.StructType); ok {
 		return w.structType(st)
 	}
@@ -242,6 +243,7 @@ func (w *refWalker) writtenType(t syntax.Expr) Type {
 // and the imports. Every name in it must be a declared type or package
 // that no local shadows, so the type does not depend on the body; a field
 // name a local shares makes it nil too, which is conservative.
+// check-v1: dead. The decided grammar has no anonymous struct type (ruling C).
 func (w *refWalker) structType(st *syntax.StructType) Type {
 	fixed := true
 	syntax.Inspect(st, func(n syntax.Node) bool {
@@ -542,6 +544,7 @@ func memberSig(t Type, name string) *Signature {
 	if p, ok := t.(*Pointer); ok {
 		t = p.Elem
 	}
+	// check-v1: dead. A written struct type is anonymous (ruling C).
 	if s, ok := t.(*Struct); ok {
 		if fld, _ := s.field(name); fld != nil {
 			sig, _ := under0(fld.Type).(*Signature)

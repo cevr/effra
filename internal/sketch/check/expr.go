@@ -43,6 +43,9 @@ type operand struct {
 	mapElem bool
 	fn      *Func // the function an identifier names (main is S113 when called)
 	recvVar *Var
+	// recv is the slice or map that a library call xs.Append(x) or
+	// m.Delete(k) is made on (modeBuiltin); nil for a plain built-in.
+	recv *operand
 }
 
 func (o *operand) invalid() bool { return o.mode == modeInvalid }
@@ -312,6 +315,7 @@ func (c *checker) expr0(x syntax.Expr, hint Type) operand {
 	case *syntax.TypeGuard:
 		c.errorf(x, CodeType, "x.(type) is the subject of a type switch only")
 		return bad(x)
+	// check-v1: dead for *syntax.StructType below: no anonymous struct type (ruling C).
 	case *syntax.ArrayType, *syntax.MapType, *syntax.ChanType, *syntax.FuncType, *syntax.StructType, *syntax.InterfaceType:
 		t := c.typExpr(x, c.localTypeCtx())
 		if isInvalid(t) {
@@ -362,6 +366,8 @@ func decidedNoun(n syntax.Node) string {
 	switch n := n.(type) {
 	case *syntax.AsPattern:
 		return "an as pattern here (196p, patterns)"
+	case *syntax.Ident:
+		return "a catch arm that binds the whole failure (196p, patterns)"
 	case *syntax.CompositeLit:
 		return "a record pattern (196p, patterns)"
 	case *syntax.VariantSpec:
@@ -956,6 +962,9 @@ func (c *checker) selector(x *syntax.SelectorExpr) operand {
 	t := base.typ
 	if p, ok := t.(*Pointer); ok {
 		t = p.Elem
+	}
+	if b := libraryMethod(t, x.Sel.Name); called && b != nil {
+		return operand{mode: modeBuiltin, obj: b, recv: &base}
 	}
 	if s := asStruct(t); s != nil {
 		if f, _ := s.field(x.Sel.Name); f != nil {
