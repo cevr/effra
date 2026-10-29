@@ -10,53 +10,40 @@ import (
 
 // genericDefaultSwitch writes the reviewer's round-6 M5 family: k generic
 // variants Vj[T], one union U[T] of them, n distinct argument types Ai, and
-// a function whose subjects xi have type U[Ai] and whose switch has only
-// default. With noSwitch, the function returns without a switch (the
+// a function whose subjects xi have type U[Ai] and whose match has only
+// case _. With noSwitch, the function returns without a match (the
 // control).
 func genericDefaultSwitch(n, k int, noSwitch bool) string {
 	var b strings.Builder
-	b.WriteString("package main\n")
 	for j := range k {
-		fmt.Fprintf(&b, "type V%d[T any] struct{}\n", j)
+		fmt.Fprintf(&b, "type V%d[T] {}\n", j)
 	}
-	b.WriteString("type U[T any] interface{")
+	b.WriteString("type U[T] = ")
 	for j := range k {
 		if j > 0 {
 			b.WriteString(" | ")
 		}
 		fmt.Fprintf(&b, "V%d[T]", j)
 	}
-	b.WriteString("}\n")
+	b.WriteString("\n")
 	for i := range n {
-		fmt.Fprintf(&b, "type A%d struct{}\n", i)
+		fmt.Fprintf(&b, "type A%d {}\n", i)
 	}
 	b.WriteString("func F(")
+	subjects := make([]string, n)
 	for i := range n {
 		if i > 0 {
 			b.WriteString(", ")
 		}
 		fmt.Fprintf(&b, "x%d U[A%d]", i, i)
+		subjects[i] = fmt.Sprintf("x%d", i)
 	}
 	b.WriteString(") int {\n")
 	if !noSwitch {
-		b.WriteString("\tswitch ")
-		for i := range n {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			b.WriteString("_")
-		}
-		b.WriteString(" := ")
-		for i := range n {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			fmt.Fprintf(&b, "x%d.(type)", i)
-		}
-		b.WriteString(" {\n\tdefault:\n\t\treturn 0\n\t}\n")
+		b.WriteString("\t" + matchHead(subjects) + "\n\tcase _:\n\t\treturn 0\n\t}\n")
 	}
 	b.WriteString("\treturn 0\n}\n")
-	return check.FromOld(b.String())
+	return check.Decided(b.String())
 }
 
 // TestGenericDefaultSwitchLinear: a default-only switch over n subjects of

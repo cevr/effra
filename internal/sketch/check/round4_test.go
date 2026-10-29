@@ -20,46 +20,33 @@ import (
 // variants, of the struct types V0, V1, ….
 func matrixSwitch(sizes []int, rows [][]int, order []int) string {
 	var b strings.Builder
-	b.WriteString("package main\n")
 	maxSize := 0
 	for _, s := range sizes {
 		maxSize = max(maxSize, s)
 	}
 	for v := range maxSize {
-		fmt.Fprintf(&b, "type V%d struct{}\n", v)
+		fmt.Fprintf(&b, "type V%d {}\n", v)
 	}
 	for s := 1; s <= maxSize; s++ {
-		fmt.Fprintf(&b, "type U%d interface{", s)
+		fmt.Fprintf(&b, "type U%d = ", s)
 		for v := range s {
 			if v > 0 {
 				b.WriteString(" | ")
 			}
 			fmt.Fprintf(&b, "V%d", v)
 		}
-		b.WriteString("}\n")
+		b.WriteString("\n")
 	}
 	b.WriteString("func F(")
+	subjects := make([]string, len(order))
 	for k, j := range order {
 		if k > 0 {
 			b.WriteString(", ")
 		}
 		fmt.Fprintf(&b, "x%d U%d", j, sizes[j])
+		subjects[k] = fmt.Sprintf("x%d", j)
 	}
-	b.WriteString(") int {\n\tswitch ")
-	for k := range order {
-		if k > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString("_")
-	}
-	b.WriteString(" := ")
-	for k, j := range order {
-		if k > 0 {
-			b.WriteString(", ")
-		}
-		fmt.Fprintf(&b, "x%d.(type)", j)
-	}
-	b.WriteString(" {\n")
+	b.WriteString(") int {\n\t" + matchHead(subjects) + "\n")
 	for _, r := range rows {
 		cells := make([]string, len(order))
 		for k, j := range order {
@@ -75,7 +62,24 @@ func matrixSwitch(sizes []int, rows [][]int, order []int) string {
 		}
 	}
 	b.WriteString("\t}\n\treturn 0\n}\n")
-	return check.FromOld(b.String())
+	return check.Decided(b.String())
+}
+
+// matchHead writes the head of a match on the subjects: `match x {`, or
+// `match (x, y) {` on several.
+func matchHead(subjects []string) string {
+	if len(subjects) == 1 {
+		return "match " + subjects[0] + " {"
+	}
+	return "match (" + strings.Join(subjects, ", ") + ") {"
+}
+
+// caseRow writes a case's patterns: one, or a tuple of several.
+func caseRow(cells []string) string {
+	if len(cells) == 1 {
+		return cells[0]
+	}
+	return "(" + strings.Join(cells, ", ") + ")"
 }
 
 // verdict classifies a switch's totality outcome.
@@ -119,29 +123,27 @@ func codes(diags []check.Diagnostic) string {
 func TestBodyGraphScale(t *testing.T) {
 	for _, n := range []int{10, 500, 2000} {
 		var b strings.Builder
-		b.WriteString("package main\n")
 		for i := 0; i < n; i++ {
-			fmt.Fprintf(&b, "type R%d struct{}\nfunc (R%d) M() { R%d{}.M() }\n", i, i, i)
+			fmt.Fprintf(&b, "type R%d {}\nfunc M(_ R%d) { R%d{}.M() }\n", i, i, i)
 		}
-		edges, diags := check.BodyGraphEdges(check.FromOld(b.String()))
+		edges, diags := check.BodyGraphEdges(check.Decided(b.String()))
 		if len(diags) != 0 || edges < 0 || edges > n {
 			t.Errorf("%d self-calling methods: %d edges (want at most %d), %s", n, edges, n, describe(diags))
 		}
 		b.Reset()
-		b.WriteString("package main\ntype C interface{ M() }\n")
+		b.WriteString("type C { M() }\n")
 		for i := 0; i < n; i++ {
-			fmt.Fprintf(&b, "type R%d struct{}\nfunc (R%d) M() { f%d() }\nfunc f%d() { R%d{}.M(); f%d() }\n", i, i, i, i, i, (i+1)%n)
+			fmt.Fprintf(&b, "type R%d {}\nfunc M(_ R%d) { f%d() }\nfunc f%d() { R%d{}.M(); f%d() }\n", i, i, i, i, i, (i+1)%n)
 		}
-		edges, diags = check.BodyGraphEdges(check.FromOld(b.String()))
+		edges, diags = check.BodyGraphEdges(check.Decided(b.String()))
 		if len(diags) != 0 || edges < 0 || edges > 2*n {
 			t.Errorf("%d methods and a ring of functions: %d edges (want at most %d), %s", n, edges, 2*n, describe(diags))
 		}
 		b.Reset()
-		b.WriteString("package main\n")
 		for i := 0; i < n; i++ {
-			fmt.Fprintf(&b, "type R%d struct{}\nvar v%d = func() { R%d{}.M() }\nfunc (R%d) M() { _ = v%d }\n", i, i, i, i, i)
+			fmt.Fprintf(&b, "type R%d {}\nlet v%d = func() { R%d{}.M() }\nfunc M(_ R%d) { _ = v%d }\n", i, i, i, i, i)
 		}
-		edges, diags = check.BodyGraphEdges(check.FromOld(b.String()))
+		edges, diags = check.BodyGraphEdges(check.Decided(b.String()))
 		cycles := 0
 		for _, d := range diags {
 			if d.Code == "S108" && strings.Contains(d.Message, "initialization cycle") {
@@ -204,14 +206,14 @@ func Run[E](_ Job[E]) fails E {}`},
 // adds no case diagnostic, in any subject position (D3; round-3 N1).
 func TestInvalidUnionCases(t *testing.T) {
 	for _, sw := range []string{
-		`switch c.(type) { case A: return A{} }`,
-		`switch c.(type) { case B: return A{} }`,
-		`switch _, _ := c.(type), d.(type) { case (A, A): return A{} }`,
-		`switch _, _ := d.(type), c.(type) { case (A, A): return A{} }`,
-		`switch _, _ := d.(type), c.(type) { case (A, B): return A{} }`,
+		"match c {\n\tcase A:\n\t\treturn A{}\n\t}",
+		"match c {\n\tcase B:\n\t\treturn A{}\n\t}",
+		"match (c, d) {\n\tcase (A, A):\n\t\treturn A{}\n\t}",
+		"match (d, c) {\n\tcase (A, A):\n\t\treturn A{}\n\t}",
+		"match (d, c) {\n\tcase (A, B):\n\t\treturn A{}\n\t}",
 	} {
-		src := "package main\ntype A struct{}\ntype B struct{}\ntype Choice interface{ Missing }\ntype Full interface{ A | B }\nfunc F(c Choice, d Full) A {" + sw + "}\n"
-		_, diags := check.CheckSource(check.FromOld(src))
+		src := "type A {}\ntype B {}\ntype Choice = Missing\ntype Full = A | B\nfunc F(c Choice, d Full) A {\n\t" + sw + "\n}\n"
+		_, diags := check.CheckSource(check.Decided(src))
 		if len(diags) != 1 || diags[0].Code != "S104" {
 			t.Errorf("%s: want only the unknown-name S104, got %s", sw, describe(diags))
 		}

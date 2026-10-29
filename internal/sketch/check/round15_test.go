@@ -39,15 +39,14 @@ func oscillate(t *testing.T, src string) (*checker, []Diagnostic) {
 }
 
 // oscillatingRing is a ring of n functions with inferred rows, each calling
-// the next, and a Bang error type. The bodiless mark is extern go in the
-// decided syntax (fromOld binds it to extern go fixture.mark).
+// the next, and a Bang error type. mark is a Go binding (extern go).
 func oscillatingRing(n int) string {
 	var b strings.Builder
-	b.WriteString("package main\ntype Bang struct{}\nfunc mark() error[Bang]\n")
+	b.WriteString("type Bang {}\nextern go fixture.mark func mark() fails Bang\n")
 	for i := range n {
 		fmt.Fprintf(&b, "func f%d() { try f%d() }\n", i, (i+1)%n)
 	}
-	return fromOld(b.String())
+	return decided(b.String())
 }
 
 // distinctRing is a ring of n functions with inferred rows: f_i fails with
@@ -55,14 +54,13 @@ func oscillatingRing(n int) string {
 // errors: n·n row changes, the most a monotone solve of a ring makes.
 func distinctRing(n int) string {
 	var b strings.Builder
-	b.WriteString("package main\n")
 	for i := range n {
-		fmt.Fprintf(&b, "type E%d struct{}\nfunc mark%d() error[E%d]\n", i, i, i)
+		fmt.Fprintf(&b, "type E%d {}\nextern go fixture.mark%d func mark%d() fails E%d\n", i, i, i, i)
 	}
 	for i := range n {
 		fmt.Fprintf(&b, "func f%d() { try mark%d(); try f%d() }\n", i, i, (i+1)%n)
 	}
-	return fromOld(b.String())
+	return decided(b.String())
 }
 
 // TestConvergeBoundMonotone: a monotone solve fits the bound. The ring of

@@ -8,28 +8,27 @@ import (
 	"ergo.local/prototype/internal/sketch/check"
 )
 
-// unionSwitch writes a one-subject switch over a union of variants struct
-// variants, with one case for each of the first cases variants and a
-// default.
+// unionSwitch writes a one-subject match over a union of variants empty
+// records, with one case for each of the first cases variants and a
+// case _.
 func unionSwitch(variants, cases int) string {
 	var b strings.Builder
-	b.WriteString("package main\n")
 	for v := range variants {
-		fmt.Fprintf(&b, "type V%d struct{}\n", v)
+		fmt.Fprintf(&b, "type V%d {}\n", v)
 	}
-	b.WriteString("type U interface{")
+	b.WriteString("type U = ")
 	for v := range variants {
 		if v > 0 {
 			b.WriteString(" | ")
 		}
 		fmt.Fprintf(&b, "V%d", v)
 	}
-	b.WriteString("}\nfunc F(u U) int {\n\tswitch u.(type) {\n")
+	b.WriteString("\nfunc F(u U) int {\n\tmatch u {\n")
 	for v := range cases {
 		fmt.Fprintf(&b, "\tcase V%d:\n\t\treturn %d\n", v, v)
 	}
-	b.WriteString("\tdefault:\n\t\treturn -1\n\t}\n}\n")
-	return check.FromOld(b.String())
+	b.WriteString("\tcase _:\n\t\treturn -1\n\t}\n}\n")
+	return check.Decided(b.String())
 }
 
 // TestVariantResolutionLinear: resolving a type switch's cases to variants

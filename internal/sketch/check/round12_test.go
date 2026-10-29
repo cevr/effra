@@ -43,7 +43,7 @@ func TestRowVariableWitnesses(t *testing.T) {
 // checked, so its signature's identity is built once.
 func wideSignature(n, m int) string {
 	var b strings.Builder
-	b.WriteString("package main\ntype Box[T any] struct{ F T }\nfunc wide(")
+	b.WriteString("type Box[T] { F T }\nfunc wide(")
 	for i := range m {
 		if i > 0 {
 			b.WriteString(", ")
@@ -54,7 +54,7 @@ func wideSignature(n, m int) string {
 	for i := range n {
 		fmt.Fprintf(&b, "func f%d() { _ = Box{wide} }\n", i)
 	}
-	return check.FromOld(b.String())
+	return check.Decided(b.String())
 }
 
 // TestFinalSignatureShared: the signature of a function whose row is
@@ -88,13 +88,13 @@ func TestFinalSignatureShared(t *testing.T) {
 // delete (ruling C).
 func shuffledInterface(m int) string {
 	var b strings.Builder
-	b.WriteString("package main\ntype V[T any] struct{}\ntype I interface{ ")
+	b.WriteString("type V[T] {}\ntype I { ")
 	rng := rand.New(rand.NewPCG(1, 2))
 	for _, i := range rng.Perm(m) {
-		fmt.Fprintf(&b, "M%d(); ", i)
+		fmt.Fprintf(&b, "M%d(), ", i)
 	}
-	b.WriteString("}\ntype U interface{ V[I] | V[int] }\nfunc F(x U) int {\n\tswitch x.(type) {\n\tcase V[int]:\n\t\treturn 1\n\tdefault:\n\t\treturn 0\n\t}\n}\n")
-	return check.FromOld(b.String())
+	b.WriteString("}\ntype U = V[I] | V[int]\nfunc F(x U) int {\n\tmatch x {\n\tcase V[int]:\n\t\treturn 1\n\tcase _:\n\t\treturn 0\n\t}\n}\n")
+	return check.Decided(b.String())
 }
 
 // TestInterfaceIndexNoSort: an interface literal's methods are sorted once,

@@ -11,19 +11,19 @@ import (
 // variableUnion writes the reviewer's round-8 M3 shape: V[T], k structs
 // Ai, U[T0, …, T(k-1)] listing V[T0] | … | V[T(k-1)], one subject
 // U[A0, …, A(k-1)] (or U[A, …, A] with collapse, so every variant is
-// V[A0]), and a switch with one case V[A(k-1)] or a case per variant, and
-// default. Each variant is a variable edge of its own parameter.
+// V[A0]), and a match with one case V[A(k-1)] or a case per variant, and
+// case _. Each variant is a variable edge of its own parameter.
 func variableUnion(k int, oneCase, collapse bool) string {
-	return check.FromOld(variableUnionOld(k, oneCase, collapse))
+	return check.Decided(variableUnionText(k, oneCase, collapse))
 }
 
-// variableUnionOld is variableUnion in the old syntax, which collapsedCases
-// extends before the translation.
-func variableUnionOld(k int, oneCase, collapse bool) string {
+// variableUnionText is variableUnion before it is formatted, which
+// collapsedCases extends.
+func variableUnionText(k int, oneCase, collapse bool) string {
 	var b strings.Builder
-	b.WriteString("package main\ntype V[T any] struct{}\n")
+	b.WriteString("type V[T] {}\n")
 	for i := range k {
-		fmt.Fprintf(&b, "type A%d struct{}\n", i)
+		fmt.Fprintf(&b, "type A%d {}\n", i)
 	}
 	b.WriteString("type U[")
 	for i := range k {
@@ -32,14 +32,14 @@ func variableUnionOld(k int, oneCase, collapse bool) string {
 		}
 		fmt.Fprintf(&b, "T%d", i)
 	}
-	b.WriteString(" any] interface{")
+	b.WriteString("] = ")
 	for i := range k {
 		if i > 0 {
 			b.WriteString(" | ")
 		}
 		fmt.Fprintf(&b, "V[T%d]", i)
 	}
-	b.WriteString("}\nfunc F(x U[")
+	b.WriteString("\nfunc F(x U[")
 	for i := range k {
 		if i > 0 {
 			b.WriteString(", ")
@@ -50,7 +50,7 @@ func variableUnionOld(k int, oneCase, collapse bool) string {
 			fmt.Fprintf(&b, "A%d", i)
 		}
 	}
-	b.WriteString("]) int {\n\tswitch x.(type) {\n")
+	b.WriteString("]) int {\n\tmatch x {\n")
 	switch {
 	case collapse:
 		b.WriteString("\tcase V[A0]:\n\t\treturn 1\n")
@@ -61,51 +61,51 @@ func variableUnionOld(k int, oneCase, collapse bool) string {
 			fmt.Fprintf(&b, "\tcase V[A%d]:\n\t\treturn %d\n", i, i)
 		}
 	}
-	b.WriteString("\tdefault:\n\t\treturn 0\n\t}\n}\n")
+	b.WriteString("\tcase _:\n\t\treturn 0\n\t}\n}\n")
 	return b.String()
 }
 
 // signatureUnion writes the reviewer's round-8 wildcard shape: U[E error]
-// listing V[func(Ai) error[E]], a subject U[Fault], and one case or a case
-// per variant, with default. Every variant's signature has a row that
+// listing V[func(Ai) fails E], a subject U[Fault], and one case or a case
+// per variant, with case _. Every variant's signature has a row that
 // mentions E.
 func signatureUnion(n int, oneCase bool) string {
 	var b strings.Builder
-	b.WriteString("package main\ntype V[T any] struct{}\n")
+	b.WriteString("type V[T] {}\n")
 	for i := range n {
-		fmt.Fprintf(&b, "type A%d struct{}\n", i)
+		fmt.Fprintf(&b, "type A%d {}\n", i)
 	}
-	b.WriteString("type U[E error] interface{")
+	b.WriteString("type U[E error] = ")
 	for i := range n {
 		if i > 0 {
 			b.WriteString(" | ")
 		}
-		fmt.Fprintf(&b, "V[func(A%d) error[E]]", i)
+		fmt.Fprintf(&b, "V[func(A%d) fails E]", i)
 	}
-	b.WriteString("}\ntype Fault struct{}\nfunc F(x U[Fault]) int {\n\tswitch x.(type) {\n")
+	b.WriteString("\ntype Fault {}\nfunc F(x U[Fault]) int {\n\tmatch x {\n")
 	if oneCase {
-		fmt.Fprintf(&b, "\tcase V[func(A%d) error[Fault]]:\n\t\treturn 1\n", n-1)
+		fmt.Fprintf(&b, "\tcase V[func(A%d) fails Fault]:\n\t\treturn 1\n", n-1)
 	} else {
 		for i := range n {
-			fmt.Fprintf(&b, "\tcase V[func(A%d) error[Fault]]:\n\t\treturn %d\n", i, i)
+			fmt.Fprintf(&b, "\tcase V[func(A%d) fails Fault]:\n\t\treturn %d\n", i, i)
 		}
 	}
-	b.WriteString("\tdefault:\n\t\treturn 0\n\t}\n}\n")
-	return check.FromOld(b.String())
+	b.WriteString("\tcase _:\n\t\treturn 0\n\t}\n}\n")
+	return check.Decided(b.String())
 }
 
 // manyParams writes the reviewer's round-8 M4 shape: Many[T0, …, T(n-1)]
 // called with n integer constants. No constraint mentions a parameter.
 func manyParams(n int) string {
 	var b strings.Builder
-	b.WriteString("package main\nfunc Many[")
+	b.WriteString("func Many[")
 	for i := range n {
 		if i > 0 {
 			b.WriteString(", ")
 		}
 		fmt.Fprintf(&b, "T%d", i)
 	}
-	b.WriteString(" any](")
+	b.WriteString("](")
 	for i := range n {
 		if i > 0 {
 			b.WriteString(", ")
@@ -120,7 +120,7 @@ func manyParams(n int) string {
 		b.WriteString("1")
 	}
 	b.WriteString(")\n}\n")
-	return check.FromOld(b.String())
+	return check.Decided(b.String())
 }
 
 // TestIndexScaling: the reviewer's round-8 index shapes resolve their
@@ -209,12 +209,12 @@ func TestIndexBudget(t *testing.T) {
 // switch with k cases naming V[A0]: each case reaches k candidates, k × k
 // steps in all.
 func collapsedCases(k int) string {
-	src := variableUnionOld(k, true, true)
+	src := variableUnionText(k, true, true)
 	var cases strings.Builder
 	for i := range k {
 		fmt.Fprintf(&cases, "\tcase V[A0]:\n\t\treturn %d\n", i)
 	}
-	return check.FromOld(strings.Replace(src, "\tcase V[A0]:\n\t\treturn 1\n", cases.String(), 1))
+	return check.Decided(strings.Replace(src, "\tcase V[A0]:\n\t\treturn 1\n", cases.String(), 1))
 }
 
 // TestConstraintGuardLinear: the constraint guard collects the parameters

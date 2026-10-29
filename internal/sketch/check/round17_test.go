@@ -13,14 +13,14 @@ import (
 // name, never a reference to the var h0. The decided language has no fixed
 // arrays and no anonymous structs (#196), so their two forms are gone.
 var keyedForms = []string{
-	"m := map[KT]int{h%[1]d: 1}; return len(m)",
-	"m := []map[KT]int{{h%[1]d: 1}}; return len(m)",
-	"m := map[KT]S{h%[1]d: {h0: 1}}; return len(m)",
-	"m := map[S]int{{h0: 1, K: h%[1]d}: 2}; return len(m)",
-	"m := map[KT]map[KT]int{h%[1]d: {h%[2]d: 1}}; return len(m)",
-	"m := []S{{K: h%[1]d}}; return len(m)",
-	"m := map[KT][]S{h%[1]d: {{h0: 1, K: h%[2]d}}}; return len(m)",
-	"m := S{h0: 1, K: h%[1]d}; return m.h0",
+	"let m = Map[KT, int]{h%[1]d: 1}; return len(m)",
+	"let m = []Map[KT, int]{{h%[1]d: 1}}; return len(m)",
+	"let m = Map[KT, S]{h%[1]d: {h0: 1}}; return len(m)",
+	"let m = Map[S, int]{{h0: 1, K: h%[1]d}: 2}; return len(m)",
+	"let m = Map[KT, Map[KT, int]]{h%[1]d: {h%[2]d: 1}}; return len(m)",
+	"let m = []S{{K: h%[1]d}}; return len(m)",
+	"let m = Map[KT, []S]{h%[1]d: {{h0: 1, K: h%[2]d}}}; return len(m)",
+	"let m = S{h0: 1, K: h%[1]d}; return m.h0",
 }
 
 // keyedLiterals generates a source in which bodies refer to package vars
@@ -32,21 +32,21 @@ func keyedLiterals(seed uint64) string {
 	r := rand.New(rand.NewPCG(seed, seed^0x6b6579))
 	n := 2 + r.IntN(3)
 	decls := []string{
-		"type Bang struct{}",
-		"type Key[T any] struct{}",
-		"func KeyOf[T any](x T) Key[T]",
-		"func mark() error[Bang]",
-		"type S struct{ h0 int; K KT }",
+		"type Bang {}",
+		"type Key[T] {}",
+		"extern go fixture.KeyOf func KeyOf[T](x T) Key[T]",
+		"extern go fixture.mark func mark() fails Bang",
+		"type S { h0 int, K KT }",
 	}
 	for i := range n {
 		decls = append(decls,
 			fmt.Sprintf("func a%d() { try mark() }", i),
-			fmt.Sprintf("var h%d = KeyOf(a%d)", i, i),
+			fmt.Sprintf("let h%d = KeyOf(a%d)", i, i),
 			fmt.Sprintf("func f%d() int { %s }", i, fmt.Sprintf(keyedForms[r.IntN(len(keyedForms))], i, r.IntN(n))))
 	}
 	r.Shuffle(len(decls), func(i, j int) { decls[i], decls[j] = decls[j], decls[i] })
-	src := "package p\n" + strings.Join(decls, "\n") + "\n"
-	return fromOld(strings.ReplaceAll(src, "KT", "Key[func() error[Bang]]"))
+	src := strings.Join(decls, "\n") + "\n"
+	return decided(strings.ReplaceAll(src, "KT", "Key[func() fails Bang]"))
 }
 
 // TestClassGMessage: the class G S108 names the value use, or the literal

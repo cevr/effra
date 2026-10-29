@@ -25,6 +25,20 @@ type IM[T any] interface{ M(T) }
 
 func G[T comparable, P IM[T]](v T, p P) T { return v }
 `
+	const ergoDecls = `func Id[U](x U) U { return x }
+
+func Apply[T](f func(T) T, x T) T { return f(x) }
+
+func Pair[A, B](a A, b B) A { return a }
+
+type S {}
+
+func M(S, int8) {}
+
+type IM[T] { M(T) }
+
+func G[T comparable, P IM[T]](v T, p P) T { return v }
+`
 	cases := []struct {
 		name, body string
 		causes     int
@@ -42,8 +56,8 @@ func G[T comparable, P IM[T]](v T, p P) T { return v }
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			src := "package p\n\n" + decls + "\n" + tc.body + "\n"
-			_, diags := CheckSource(fromOld(src))
+			src := newTwin("package p\n\n"+decls+"\n"+tc.body+"\n", ergoDecls+"\n"+tc.body+"\n")
+			_, diags := CheckSource(src.ergoSrc)
 			var ds []string
 			for _, d := range diags {
 				ds = append(ds, d.String())

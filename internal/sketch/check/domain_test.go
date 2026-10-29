@@ -47,9 +47,7 @@ func checkWithin(t *testing.T, src string, d time.Duration) (*check.Package, []c
 // M1); inferred rows, like any unexported function) and exported functions
 // (closed rows). A body refers to another by a call or by a bare reference
 // (_ = f; never to a self function, which has no method value), and may
-// call C.M itself. The
-// generator writes the old syntax and checks its translation (fromOld). The
-// oracle is independent of the checker:
+// call C.M itself. The oracle is independent of the checker:
 //   - the initialization graph is every reference; a var in a cyclic
 //     strongly connected component of it is on an initialization cycle:
 //     one S108 per such component (go/types initorder), and the var is
@@ -121,10 +119,10 @@ func TestRowGraphDomain(t *testing.T) {
 			return fmt.Sprintf("f%d", j)
 		}
 		var b strings.Builder
-		b.WriteString("package main\ntype C interface{ M() }\n")
+		b.WriteString("type C { M() }\n")
 		for i := range n {
 			if kind[i] == kMethod {
-				fmt.Fprintf(&b, "type R%d struct{}\n", i)
+				fmt.Fprintf(&b, "type R%d {}\n", i)
 				fmt.Fprintf(&b, "func MkR%d() R%d { return R%d{} }\n", i, i, i)
 			}
 		}
@@ -133,9 +131,9 @@ func TestRowGraphDomain(t *testing.T) {
 			case kFunc:
 				fmt.Fprintf(&b, "func f%d() {\n", i)
 			case kVar:
-				fmt.Fprintf(&b, "var f%d = func() {\n", i)
+				fmt.Fprintf(&b, "let f%d = func() {\n", i)
 			case kMethod:
-				fmt.Fprintf(&b, "func (R%d) m%d() {\n", i, i%2)
+				fmt.Fprintf(&b, "func m%d(_ R%d) {\n", i%2, i)
 			case kExported:
 				fmt.Fprintf(&b, "func P%d() {\n", i)
 			}
@@ -145,7 +143,7 @@ func TestRowGraphDomain(t *testing.T) {
 					if forms.Intn(2) == 0 {
 						fmt.Fprintf(&b, "\tMkR%d().m%d()\n", e.to, e.to%2)
 					} else {
-						fmt.Fprintf(&b, "\tx%d := MkR%d()\n\tx%d.m%d()\n", k, e.to, k, e.to%2)
+						fmt.Fprintf(&b, "\tlet x%d = MkR%d()\n\tx%d.m%d()\n", k, e.to, k, e.to%2)
 					}
 				} else if e.call {
 					fmt.Fprintf(&b, "\t%s()\n", name(e.to))
@@ -166,7 +164,7 @@ func TestRowGraphDomain(t *testing.T) {
 				if r == 0 {
 					fmt.Fprintf(&b, "\tfunc(%s func()) { %s() }(func() {})\n", id, id)
 				} else {
-					fmt.Fprintf(&b, "\tfunc() { %s := func() {}; %s() }()\n", id, id)
+					fmt.Fprintf(&b, "\tfunc() { let %s = func() {}; %s() }()\n", id, id)
 				}
 				shadowed++
 			}
@@ -175,7 +173,7 @@ func TestRowGraphDomain(t *testing.T) {
 			}
 			b.WriteString("}\n")
 		}
-		src := check.FromOld(b.String())
+		src := check.Decided(b.String())
 
 		// The initialization graph's components (Tarjan over every edge).
 		comp := make([]int, n)
@@ -493,28 +491,21 @@ func cycleSwitch(n int, order []int) string {
 		col[v] = j
 	}
 	var b strings.Builder
-	b.WriteString("package main\ntype A struct{}\ntype B struct{}\ntype U interface{A | B}\nfunc F(")
+	b.WriteString("type A {}\ntype B {}\ntype U = A | B\nfunc F(")
 	for i := 0; i < n; i++ {
 		if i > 0 {
 			b.WriteString(",")
 		}
 		fmt.Fprintf(&b, "x%d U", i)
 	}
-	b.WriteString(") int {\nswitch ")
+	b.WriteString(") int {\nmatch (")
 	for i := 0; i < n; i++ {
 		if i > 0 {
 			b.WriteString(",")
 		}
-		b.WriteString("_")
+		fmt.Fprintf(&b, "x%d", i)
 	}
-	b.WriteString(" := ")
-	for i := 0; i < n; i++ {
-		if i > 0 {
-			b.WriteString(",")
-		}
-		fmt.Fprintf(&b, "x%d.(type)", i)
-	}
-	b.WriteString(" {\n")
+	b.WriteString(") {\n")
 	for v := 0; v < n; v++ {
 		for _, variant := range []string{"A", "B"} {
 			cells := make([]string, n)
@@ -527,7 +518,7 @@ func cycleSwitch(n int, order []int) string {
 		}
 	}
 	b.WriteString("}\n}\n")
-	return check.FromOld(b.String())
+	return check.Decided(b.String())
 }
 
 func columnOrders(n int, rng *rand.Rand) map[string][]int {
@@ -616,28 +607,21 @@ func TestTotalityPermutations(t *testing.T) {
 // It returns the source and the rows.
 func cnfSwitch(rng *rand.Rand, n, m int) (string, [][]int) {
 	var b strings.Builder
-	b.WriteString("package main\ntype A struct{}\ntype B struct{}\ntype U interface{A | B}\nfunc F(")
+	b.WriteString("type A {}\ntype B {}\ntype U = A | B\nfunc F(")
 	for i := 0; i < n; i++ {
 		if i > 0 {
 			b.WriteString(",")
 		}
 		fmt.Fprintf(&b, "x%d U", i)
 	}
-	b.WriteString(") int {\nswitch ")
+	b.WriteString(") int {\nmatch (")
 	for i := 0; i < n; i++ {
 		if i > 0 {
 			b.WriteString(",")
 		}
-		b.WriteString("_")
+		fmt.Fprintf(&b, "x%d", i)
 	}
-	b.WriteString(" := ")
-	for i := 0; i < n; i++ {
-		if i > 0 {
-			b.WriteString(",")
-		}
-		fmt.Fprintf(&b, "x%d.(type)", i)
-	}
-	b.WriteString(" {\n")
+	b.WriteString(") {\n")
 	var rows [][]int
 	seen := map[string]bool{}
 	for r := 0; r < m; r++ {
@@ -660,7 +644,7 @@ func cnfSwitch(rng *rand.Rand, n, m int) (string, [][]int) {
 		b.WriteString("case (" + text + "): return 1\n")
 	}
 	b.WriteString("}\nreturn 0\n}\n")
-	return check.FromOld(b.String()), rows
+	return check.Decided(b.String()), rows
 }
 
 // cnfTotal decides by enumeration whether the rows cover every assignment.
@@ -716,13 +700,13 @@ func totalityVerdict(diags []check.Diagnostic) string {
 // round-3 crasher, testdata/fuzz/FuzzCheck/9c69c36df14c1bf1).
 func TestTotalityEmptySubject(t *testing.T) {
 	for _, sw := range []string{
-		`switch c.(type){}`,
-		`switch c.(type){ case _: return A{} }`,
-		`switch _, _ := c.(type), d.(type) {}`,
-		`switch _, _ := d.(type), c.(type) { case (A, _): return A{} }`,
+		`match c {}`,
+		`match c { case _: return A{} }`,
+		`match (c, d) {}`,
+		`match (d, c) { case (A, _): return A{} }`,
 	} {
-		src := "package main\ntype A struct{}\ntype B struct{}\ntype Choice interface{A00}\ntype Full interface{A | B}\nfunc F(c Choice, d Full) A {" + sw + "}\n"
-		_, diags := checkWithin(t, check.FromOld(src), 2*time.Second)
+		src := "type A {}\ntype B {}\ntype Choice = A00\ntype Full = A | B\nfunc F(c Choice, d Full) A {" + sw + "}\n"
+		_, diags := checkWithin(t, check.Decided(src), 2*time.Second)
 		if len(diags) != 1 || diags[0].Code != "S104" {
 			t.Errorf("%s: want only the unknown-name S104, got %s", sw, describe(diags))
 		}

@@ -46,6 +46,34 @@ func Apply[T any](f func(T) T, x T) T { return f(x) }
 
 func Rev[T any](x T, f func(T) T) T { return f(x) }
 `
+	const ergoDecls = `type S {}
+
+func M(S, int8) {}
+
+type R {}
+
+func M(R, int) {}
+
+type I[T] { M(T) }
+
+type IM[T] { M(T) }
+
+func G[T comparable, P IM[T]](v T, p P) {}
+
+func GN[T comparable, P I[T]](v T, p P) {}
+
+type Q {}
+
+func Get(_ Q) int8 { return 0 }
+
+type IG[T] { Get() T }
+
+func GR[T comparable, P IG[T]](v T, p P) {}
+
+func Apply[T](f func(T) T, x T) T { return f(x) }
+
+func Rev[T](x T, f func(T) T) T { return f(x) }
+`
 	type verdict int
 	const (
 		valid verdict = iota
@@ -73,12 +101,12 @@ func Rev[T any](x T, f func(T) T) T { return f(x) }
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			src := "package p\n\n" + decls + "\n" + tc.body + "\n"
-			g := goErrors(src)
+			src := newTwin("package p\n\n"+decls+"\n"+tc.body+"\n", ergoDecls+"\n"+tc.body+"\n")
+			g := goErrors(src.goSrc)
 			if goValid := len(g) == 0; goValid != (tc.want != invalid) {
 				t.Fatalf("go/types disagrees with the case: %q", g)
 			}
-			_, diags := CheckSource(fromOld(src))
+			_, diags := CheckSource(src.ergoSrc)
 			var ds []string
 			for _, d := range diags {
 				ds = append(ds, d.String())

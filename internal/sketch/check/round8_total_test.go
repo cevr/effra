@@ -9,89 +9,81 @@ import (
 )
 
 // sharedTuple writes the reviewer's round-7 TestR7ReviewGenericTuple
-// shape: V[T, Q], n structs Ai, a union U[T] of V[T, A0] … V[T, A(n-1)],
+// shape: V[T, Q], n records Ai, a union U[T] of V[T, A0] … V[T, A(n-1)],
 // n subjects xi of type U[Ai], and one tuple case (V[A0, A(n-1)], …,
-// V[A(n-1), A(n-1)]) with default and underscore bindings. Every variant
+// V[A(n-1), A(n-1)]) with case _. Every variant
 // of every subject shares the origin V. With noSwitch, the function only
 // returns (the control).
 func sharedTuple(n int, noSwitch bool) string {
 	var b strings.Builder
-	b.WriteString("package main\ntype V[T, Q any] struct{}\n")
+	b.WriteString("type V[T, Q] {}\n")
 	for i := range n {
-		fmt.Fprintf(&b, "type A%d struct{}\n", i)
+		fmt.Fprintf(&b, "type A%d {}\n", i)
 	}
-	b.WriteString("type U[T any] interface{")
+	b.WriteString("type U[T] = ")
 	for i := range n {
 		if i > 0 {
 			b.WriteString(" | ")
 		}
 		fmt.Fprintf(&b, "V[T, A%d]", i)
 	}
-	b.WriteString("}\nfunc F(")
+	b.WriteString("\nfunc F(")
+	subjects := make([]string, n)
 	for i := range n {
 		if i > 0 {
 			b.WriteString(", ")
 		}
 		fmt.Fprintf(&b, "x%d U[A%d]", i, i)
+		subjects[i] = fmt.Sprintf("x%d", i)
 	}
 	b.WriteString(") int {\n")
 	if !noSwitch {
-		b.WriteString("\tswitch ")
-		for i := range n {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			b.WriteString("_")
+		b.WriteString("\t" + matchHead(subjects) + "\n\tcase ")
+		if n > 1 {
+			b.WriteString("(")
 		}
-		b.WriteString(" := ")
-		for i := range n {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			fmt.Fprintf(&b, "x%d.(type)", i)
-		}
-		b.WriteString(" {\n\tcase (")
 		for i := range n {
 			if i > 0 {
 				b.WriteString(", ")
 			}
 			fmt.Fprintf(&b, "V[A%d, A%d]", i, n-1)
 		}
-		b.WriteString("):\n\t\treturn 1\n\tdefault:\n\t\treturn 0\n\t}\n")
+		if n > 1 {
+			b.WriteString(")")
+		}
+		b.WriteString(":\n\t\treturn 1\n\tcase _:\n\t\treturn 0\n\t}\n")
 	}
 	b.WriteString("\treturn 0\n}\n")
-	return check.FromOld(b.String())
+	return check.Decided(b.String())
 }
 
 // sharedCases writes one subject whose n variants share one origin, and a
-// switch with a case for each variant and default. The variants are
+// match with a case for each variant and case _. The variants are
 // V[Ai] of a plain union (the reviewer's TestR7ReviewSharedOrigin), V[B,
 // Ai] of an instance U[B] of a generic union, or V[func() Ai], whose type
-// arguments are signatures. Both generators write the old syntax and return
-// its decided translation (fromOld).
+// arguments are signatures.
 func sharedCases(n int, shape string, noSwitch bool) string {
 	var b strings.Builder
-	b.WriteString("package main\n")
 	variant := func(i int) string { return fmt.Sprintf("V[A%d]", i) }
 	param := "U"
 	switch shape {
 	case "plain":
-		b.WriteString("type V[T any] struct{}\n")
+		b.WriteString("type V[T] {}\n")
 	case "generic":
-		b.WriteString("type V[T, Q any] struct{}\ntype B struct{}\n")
+		b.WriteString("type V[T, Q] {}\ntype B {}\n")
 		variant = func(i int) string { return fmt.Sprintf("V[T, A%d]", i) }
 		param = "U[B]"
 	case "signature":
-		b.WriteString("type V[T any] struct{}\n")
+		b.WriteString("type V[T] {}\n")
 		variant = func(i int) string { return fmt.Sprintf("V[func() A%d]", i) }
 	}
 	for i := range n {
-		fmt.Fprintf(&b, "type A%d struct{}\n", i)
+		fmt.Fprintf(&b, "type A%d {}\n", i)
 	}
 	if shape == "generic" {
-		b.WriteString("type U[T any] interface{")
+		b.WriteString("type U[T] = ")
 	} else {
-		b.WriteString("type U interface{")
+		b.WriteString("type U = ")
 	}
 	for i := range n {
 		if i > 0 {
@@ -99,9 +91,9 @@ func sharedCases(n int, shape string, noSwitch bool) string {
 		}
 		b.WriteString(variant(i))
 	}
-	fmt.Fprintf(&b, "}\nfunc F(x %s) int {\n", param)
+	fmt.Fprintf(&b, "\nfunc F(x %s) int {\n", param)
 	if !noSwitch {
-		b.WriteString("\tswitch x.(type) {\n")
+		b.WriteString("\tmatch x {\n")
 		for i := range n {
 			c := variant(i)
 			if shape == "generic" {
@@ -109,66 +101,64 @@ func sharedCases(n int, shape string, noSwitch bool) string {
 			}
 			fmt.Fprintf(&b, "\tcase %s:\n\t\treturn %d\n", c, i)
 		}
-		b.WriteString("\tdefault:\n\t\treturn -1\n\t}\n")
+		b.WriteString("\tcase _:\n\t\treturn -1\n\t}\n")
 	}
 	b.WriteString("\treturn 0\n}\n")
-	return check.FromOld(b.String())
+	return check.Decided(b.String())
 }
 
 // TestVariantIdentity: the variant index resolves a case to the variant
 // identical to it, through type arguments bound by an instance, nested
 // constructors and signatures, and names every other case "not a variant"
 // (rows.md, Totality 1 and 5). The declarations and each body are
-// one old program, checked as its decided translation (fromOld): translated
-// apart, a body would read the declared one-letter types as implicit type
-// parameters.
+// one program.
 func TestVariantIdentity(t *testing.T) {
-	const decls = `type A struct{}
-type B struct{}
-type C struct{}
-type V[T any] struct{}
-type W[T, Q any] struct{}
-type P interface{ V[A] | V[B] }
-type G[T any] interface{ W[T, A] | W[T, []T] | W[A, T] }
-type S interface{ V[func() A] | V[func(A) []B] | V[map[A][]B] }
+	const decls = `type A {}
+type B {}
+type C {}
+type V[T] {}
+type W[T, Q] {}
+type P = V[A] | V[B]
+type G[T] = W[T, A] | W[T, []T] | W[A, T]
+type S = V[func() A] | V[func(A) []B] | V[Map[A, []B]]
 `
 	cases := []struct {
 		name, body, want string
 	}{
-		{"plain-total", `func F(x P) int { switch x.(type) { case V[A]: return 1
+		{"plain-total", `func F(x P) int { match x { case V[A]: return 1
 	case V[B]: return 2 }
 	return 0 }`, ""},
-		{"plain-missing", `func F(x P) int { switch x.(type) { case V[A]: return 1 }
+		{"plain-missing", `func F(x P) int { match x { case V[A]: return 1 }
 	return 0 }`, "S103"},
-		{"plain-not-variant", `func F(x P) int { switch x.(type) { case V[C]: return 1
-	default: return 0 } }`, "is not a variant"},
-		{"generic-total", `func F(x G[B]) int { switch x.(type) { case W[B, A]: return 1
+		{"plain-not-variant", `func F(x P) int { match x { case V[C]: return 1
+	case _: return 0 } }`, "is not a variant"},
+		{"generic-total", `func F(x G[B]) int { match x { case W[B, A]: return 1
 	case W[B, []B]: return 2
 	case W[A, B]: return 3 }
 	return 0 }`, ""},
-		{"generic-bound-mismatch", `func F(x G[B]) int { switch x.(type) { case W[B, []A]: return 1
-	default: return 0 } }`, "is not a variant"},
+		{"generic-bound-mismatch", `func F(x G[B]) int { match x { case W[B, []A]: return 1
+	case _: return 0 } }`, "is not a variant"},
 		// G[A] lists W[A, A] twice (W[T, A] and W[A, T]): both index paths
 		// reach the case, which names the first, as before the index; the
 		// second stays unhandled.
-		{"generic-collapsed", `func F(x G[A]) int { switch x.(type) { case W[A, A]: return 1
+		{"generic-collapsed", `func F(x G[A]) int { match x { case W[A, A]: return 1
 	case W[A, []A]: return 2 }
 	return 0 }`, "S103"},
-		{"generic-collapsed-default", `func F(x G[A]) int { switch x.(type) { case W[A, A]: return 1
+		{"generic-collapsed-default", `func F(x G[A]) int { match x { case W[A, A]: return 1
 	case W[A, []A]: return 2
-	default: return 0 } }`, ""},
-		{"signature-total", `func F(x S) int { switch x.(type) { case V[func() A]: return 1
+	case _: return 0 } }`, ""},
+		{"signature-total", `func F(x S) int { match x { case V[func() A]: return 1
 	case V[func(A) []B]: return 2
-	case V[map[A][]B]: return 3 }
+	case V[Map[A, []B]]: return 3 }
 	return 0 }`, ""},
-		{"signature-not-variant", `func F(x S) int { switch x.(type) { case V[func() B]: return 1
-	default: return 0 } }`, "is not a variant"},
-		{"slice-not-variant", `func F(x S) int { switch x.(type) { case V[map[A]B]: return 1
-	default: return 0 } }`, "is not a variant"},
+		{"signature-not-variant", `func F(x S) int { match x { case V[func() B]: return 1
+	case _: return 0 } }`, "is not a variant"},
+		{"slice-not-variant", `func F(x S) int { match x { case V[Map[A, B]]: return 1
+	case _: return 0 } }`, "is not a variant"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, d := check.CheckSource(check.FromOld("package main\n" + decls + tc.body + "\n"))
+			_, d := check.CheckSource(check.Decided(decls + tc.body + "\n"))
 			got := describe(d)
 			switch {
 			case tc.want == "" && len(d) > 0:

@@ -426,7 +426,7 @@ func TestReviewCases(t *testing.T) {
 // body calls f0, gets the one S108.
 func largeSCC(n int, values bool) string {
 	var b strings.Builder
-	b.WriteString("package main\ntype C interface{ Use() }\nfunc f0() {\n")
+	b.WriteString("type C { Use() }\nfunc f0() {\n")
 	for i := 1; i <= n; i++ {
 		if values {
 			fmt.Fprintf(&b, "\t_ = f%d\n", i)
@@ -439,7 +439,7 @@ func largeSCC(n int, values bool) string {
 		fmt.Fprintf(&b, "func f%d() { f%d() }\n", i, i-1)
 	}
 	fmt.Fprintf(&b, "func F() { f%d() }\n", n)
-	return check.FromOld(b.String())
+	return check.Decided(b.String())
 }
 
 // TestInferenceConverges: every function of the cycle gets the full row,
@@ -466,28 +466,21 @@ func TestInferenceConverges(t *testing.T) {
 // is redundant.
 func oddCycleSwitch(n int) string {
 	var b strings.Builder
-	b.WriteString("package main\ntype A struct{}\ntype B struct{}\ntype U interface{A | B}\nfunc F(")
+	b.WriteString("type A {}\ntype B {}\ntype U = A | B\nfunc F(")
 	for i := 0; i < n; i++ {
 		if i > 0 {
 			b.WriteString(",")
 		}
 		fmt.Fprintf(&b, "x%d U", i)
 	}
-	b.WriteString(") int {\nswitch ")
+	b.WriteString(") int {\nmatch (")
 	for i := 0; i < n; i++ {
 		if i > 0 {
 			b.WriteString(",")
 		}
-		b.WriteString("_")
+		fmt.Fprintf(&b, "x%d", i)
 	}
-	b.WriteString(" := ")
-	for i := 0; i < n; i++ {
-		if i > 0 {
-			b.WriteString(",")
-		}
-		fmt.Fprintf(&b, "x%d.(type)", i)
-	}
-	b.WriteString(" {\n")
+	b.WriteString(") {\n")
 	for i := 0; i < n; i++ {
 		for _, variant := range []string{"A", "B"} {
 			b.WriteString("case (")
@@ -505,7 +498,7 @@ func oddCycleSwitch(n int) string {
 		}
 	}
 	b.WriteString("}\n}\n")
-	return check.FromOld(b.String())
+	return check.Decided(b.String())
 }
 
 // TestTotalityCost: the odd-cycle family stays clean and cheap (M8, D16).

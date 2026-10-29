@@ -326,33 +326,31 @@ func TestIdentityMatchesStructure(t *testing.T) {
 func genericInferred(seed uint64) string {
 	rng := rand.New(rand.NewPCG(seed, seed^0x9e37))
 	var b strings.Builder
-	b.WriteString("package main\ntype Bang struct{}\ntype Fault[T any] struct{ V T }\ntype Cap interface{ M() }\n")
-	// The bodiless functions are extern go in the decided syntax; fromOld
-	// binds each one to extern go fixture.<name>.
-	b.WriteString("func fail() error[Bang]\nfunc work() needs Cap\nfunc mark[T any]() error[Fault[T]]\n")
+	b.WriteString("type Bang {}\ntype Fault[T] { V T }\ntype Cap { M() }\n")
+	b.WriteString("extern go fixture.fail func fail() fails Bang\nextern go fixture.work func work() needs Cap\nextern go fixture.mark func mark[T]() fails Fault[T]\n")
 	types := []string{"int", "string", "Bang", "[]int"}
 	for i := range 6 {
 		ty := types[rng.IntN(len(types))]
 		switch rng.IntN(3) {
 		case 0:
-			fmt.Fprintf(&b, "func pass%d[E error](f func() error[E]) { return f() }\n", i)
-			fmt.Fprintf(&b, "func C%d() error[Bang] { return pass%d(fail) }\n", i, i)
-			fmt.Fprintf(&b, "func X%d() error[Bang] { return pass%d[Bang](fail) }\n", i, i)
-			fmt.Fprintf(&b, "var saved%d = pass%d[Bang]\nfunc S%d() error[Bang] { return saved%d(fail) }\n", i, i, i, i)
+			fmt.Fprintf(&b, "func pass%d[E error](f func() fails E) { return f() }\n", i)
+			fmt.Fprintf(&b, "func C%d() fails Bang { return pass%d(fail) }\n", i, i)
+			fmt.Fprintf(&b, "func X%d() fails Bang { return pass%d[Bang](fail) }\n", i, i)
+			fmt.Fprintf(&b, "let saved%d = pass%d[Bang]\nfunc S%d() fails Bang { return saved%d(fail) }\n", i, i, i, i)
 		case 1:
-			fmt.Fprintf(&b, "func raise%d[T any](x T) { return Fault{x} }\n", i)
-			fmt.Fprintf(&b, "func C%d(x %s) error[Fault[%s]] { return raise%d(x) }\n", i, ty, ty, i)
-			fmt.Fprintf(&b, "func X%d(x %s) error[Fault[%s]] { return raise%d[%s](x) }\n", i, ty, ty, i, ty)
-			fmt.Fprintf(&b, "var saved%d = raise%d[%s]\nfunc S%d(x %s) error[Fault[%s]] { return saved%d(x) }\n", i, i, ty, i, ty, ty, i)
+			fmt.Fprintf(&b, "func raise%d[T](x T) { return Fault{x} }\n", i)
+			fmt.Fprintf(&b, "func C%d(x %s) fails Fault[%s] { return raise%d(x) }\n", i, ty, ty, i)
+			fmt.Fprintf(&b, "func X%d(x %s) fails Fault[%s] { return raise%d[%s](x) }\n", i, ty, ty, i, ty)
+			fmt.Fprintf(&b, "let saved%d = raise%d[%s]\nfunc S%d(x %s) fails Fault[%s] { return saved%d(x) }\n", i, i, ty, i, ty, ty, i)
 		default:
-			fmt.Fprintf(&b, "func run%d(f func() needs R) { f() }\n", i)
+			fmt.Fprintf(&b, "func run%d[R](f func() needs R) { f() }\n", i)
 			fmt.Fprintf(&b, "func C%d() needs Cap { run%d(work) }\n", i, i)
 			// An implicit capability-row parameter takes no explicit argument:
 			// the saved form is a function value passed on.
-			fmt.Fprintf(&b, "func S%d() needs Cap { g := work; run%d(g) }\n", i, i)
+			fmt.Fprintf(&b, "func S%d() needs Cap { let g = work; run%d(g) }\n", i, i)
 		}
 	}
-	return fromOld(b.String())
+	return decided(b.String())
 }
 
 // TestIdentityGenericInferred: the generic-callee family is accepted, and

@@ -10,37 +10,20 @@ import (
 
 // deepBound writes the reviewer's round-9 M1 shape: U[T] listing V[T] and
 // V[int], a field F of type U[G[G[… int]]] with the G argument nested d
-// levels and written once, and a switch over n subjects x.F with
-// underscore bindings, one tuple case (V[int], …, V[int]) and default. The
+// levels and written once, and a match on n subjects x.F with one tuple
+// case (V[int], …, V[int]) and case _. The
 // source is O(n + d); every subject shares one instance whose bound type
 // argument is d levels deep.
 func deepBound(n, d int) string {
 	var b strings.Builder
-	b.WriteString("package main\ntype G[T any] struct{}\ntype V[T any] struct{}\ntype U[T any] interface{ V[T] | V[int] }\ntype B struct{ F U[")
+	b.WriteString("type G[T] {}\ntype V[T] {}\ntype U[T] = V[T] | V[int]\ntype B { F U[")
 	b.WriteString(strings.Repeat("G[", d) + "int" + strings.Repeat("]", d))
-	b.WriteString("] }\nfunc F(x B) int {\n\tswitch ")
+	subjects, cells := make([]string, n), make([]string, n)
 	for i := range n {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString("_")
+		subjects[i], cells[i] = "x.F", "V[int]"
 	}
-	b.WriteString(" := ")
-	for i := range n {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString("x.F.(type)")
-	}
-	b.WriteString(" {\n\tcase (")
-	for i := range n {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString("V[int]")
-	}
-	b.WriteString("):\n\t\treturn 1\n\tdefault:\n\t\treturn 0\n\t}\n}\n")
-	return check.FromOld(b.String())
+	b.WriteString("] }\nfunc F(x B) int {\n\t" + matchHead(subjects) + "\n\tcase " + caseRow(cells) + ":\n\t\treturn 1\n\tcase _:\n\t\treturn 0\n\t}\n}\n")
+	return check.Decided(b.String())
 }
 
 // TestDeepBoundLinear: a bound type argument's identity is interned once

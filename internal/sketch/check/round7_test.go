@@ -43,6 +43,30 @@ func Use[T comparable, P IM[T]](x P) {}
 
 func UseN[T comparable, P I[T]](x P) {}
 `
+	const ergoDecls = `func Two[T](a T, b T) T { return a }
+
+func Id[U](x U) U { return x }
+
+func Apply[T](f func(T) T, x T) T { return f(x) }
+
+func Fix(f func(int) int) int { return f(1) }
+
+func Pick[A, B](a A, b B) A { return a }
+
+func Each[A, B](f func(A, B) A, a A, b B) {}
+
+type S {}
+
+func M(S, int) {}
+
+type I[T] { M(T) }
+
+type IM[T] { M(T) }
+
+func Use[T comparable, P IM[T]](x P) {}
+
+func UseN[T comparable, P I[T]](x P) {}
+`
 	type verdict int
 	const (
 		valid verdict = iota
@@ -70,12 +94,12 @@ func UseN[T comparable, P I[T]](x P) {}
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			src := "package p\n\n" + decls + "\n" + tc.body + "\n"
-			g := goErrors(src)
+			src := newTwin("package p\n\n"+decls+"\n"+tc.body+"\n", ergoDecls+"\n"+tc.body+"\n")
+			g := goErrors(src.goSrc)
 			if goValid := len(g) == 0; goValid != (tc.want != invalid) {
 				t.Fatalf("go/types disagrees with the case: %q", g)
 			}
-			_, diags := CheckSource(fromOld(src))
+			_, diags := CheckSource(src.ergoSrc)
 			var ds []string
 			for _, d := range diags {
 				ds = append(ds, d.String())

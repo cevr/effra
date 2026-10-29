@@ -17,6 +17,10 @@ func TestNonConstantShift(t *testing.T) {
 
 func Two[T any](a T, b T) T { return a }
 `
+	const ergoDecls = `func Id[T](x T) T { return x }
+
+func Two[T](a T, b T) T { return a }
+`
 	const shiftFix = "S108 the left operand of a shift is an integer, and float64 is expected here; write int(1) << n"
 	cases := []struct {
 		name, body, want string
@@ -39,8 +43,8 @@ func Two[T any](a T, b T) T { return a }
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			src := "package p\n\n" + decls + "\n" + tc.body + "\n"
-			_, diags := CheckSource(fromOld(src))
+			src := newTwin("package p\n\n"+decls+"\n"+tc.body+"\n", ergoDecls+"\n"+tc.body+"\n")
+			_, diags := CheckSource(src.ergoSrc)
 			var ds []string
 			for _, d := range diags {
 				ds = append(ds, d.String())

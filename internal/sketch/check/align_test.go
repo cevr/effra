@@ -10,17 +10,17 @@ import (
 )
 
 // The go/types oracle reads a generated program as Go text; the checker
-// reads its translation into the decided syntax (fromOld). The two texts
-// no longer match byte for byte, so the differential tests match their
-// expressions by tokens: the translation keeps every function body and
+// reads the same program as decided Ergo text (a twin, differential_test.go).
+// The two texts do not match byte for byte, so the differential tests match
+// their expressions by tokens: the Ergo text keeps every function body and
 // every package variable, in order, token for token, apart from the
-// spelling it changes (var, let and mut; map and Map with the brackets and
+// spellings that differ (var, let and mut; map and Map with the brackets and
 // commas of a type-argument list; the any constraint; := and =; ;; range,
 // in and the blank of a for clause; switch written match). An
 // expression's key is its region (the n-th body or variable) and the
 // indices of its first and last kept token there. A region whose kept
-// tokens differ between the two texts is reported, so a translation that
-// changes a body fails the test rather than mismatching keys.
+// tokens differ between the two texts is reported, so a generator whose two
+// texts disagree on a body fails the test rather than mismatching keys.
 
 // alignKey identifies an expression in either text.
 type alignKey struct{ region, from, to int }
@@ -45,7 +45,7 @@ var alignDropped = map[string]bool{
 	"range": true, "in": true, "_": true,
 }
 
-// alignSame spells a translated keyword as the Go one it replaces.
+// alignSame spells an Ergo keyword as the Go one it replaces.
 var alignSame = map[string]string{"match": "switch"}
 
 var alignOps = []string{"==", "!=", "<=", ">=", "&&", "||", "<<", ">>", ":=", "..", "<-", "+=", "-=", "*=", "/="}
@@ -166,18 +166,18 @@ func ergoRegions(f *syntax.File, src string) []alignRegion {
 // alignCheck reports the first region whose name or kept tokens differ.
 func alignCheck(g, e []alignRegion) error {
 	if len(g) != len(e) {
-		return fmt.Errorf("the translation has %d bodies and variables, the Go text %d", len(e), len(g))
+		return fmt.Errorf("the Ergo text has %d bodies and variables, the Go text %d", len(e), len(g))
 	}
 	for i := range g {
 		if g[i].name != e[i].name {
-			return fmt.Errorf("region %d is %s in the Go text and %s in the translation", i, g[i].name, e[i].name)
+			return fmt.Errorf("region %d is %s in the Go text and %s in the Ergo text", i, g[i].name, e[i].name)
 		}
 		if len(g[i].toks) != len(e[i].toks) {
-			return fmt.Errorf("%s: %d kept tokens in the Go text, %d in the translation", g[i].name, len(g[i].toks), len(e[i].toks))
+			return fmt.Errorf("%s: %d kept tokens in the Go text, %d in the Ergo text", g[i].name, len(g[i].toks), len(e[i].toks))
 		}
 		for k := range g[i].toks {
 			if g[i].toks[k].text != e[i].toks[k].text {
-				return fmt.Errorf("%s: token %d is %q in the Go text and %q in the translation", g[i].name, k, g[i].toks[k].text, e[i].toks[k].text)
+				return fmt.Errorf("%s: token %d is %q in the Go text and %q in the Ergo text", g[i].name, k, g[i].toks[k].text, e[i].toks[k].text)
 			}
 		}
 	}

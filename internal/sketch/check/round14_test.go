@@ -56,29 +56,27 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 	n := 2 + rng.IntN(5)
 	var g admissionGroup
 	var b strings.Builder
-	b.WriteString("package main\n")
-	line := 1
+	line := 0
 	emit := func(format string, args ...any) {
 		fmt.Fprintf(&b, format+"\n", args...)
 		line++
 	}
 	if errors {
-		emit("type Bang struct{}")
-		// A bodiless function is extern go in the decided syntax; fromOld
-		// binds each one to extern go fixture.<name>.
-		emit("func mark() error[Bang]")
-		emit("type Box[T any] interface{ M(T) }")
-		emit("func BoxOf[T any](x T) Box[T]")
-		emit("func Choose[T any](x T, y T) error[Bang]")
+		emit("type Bang {}")
+		// A Go binding with no body is extern go.
+		emit("extern go fixture.mark func mark() fails Bang")
+		emit("type Box[T] { M(T) }")
+		emit("extern go fixture.BoxOf func BoxOf[T](x T) Box[T]")
+		emit("extern go fixture.Choose func Choose[T](x T, y T) fails Bang")
 		// E first: the decided list [T, E error] would make T an error row.
-		emit("func Run[E error, T any](x T, y T, callback func() error[E]) error[E]")
+		emit("extern go fixture.Run func Run[E error, T](x T, y T, callback func() fails E) fails E")
 	} else {
-		emit("type Cap interface{ M() }")
-		emit("type Box[T any] interface{ M(T) }")
-		emit("func BoxOf[T any](x T) Box[T]")
-		emit("func Choose[T any](x T, y T) needs Cap")
-		emit("func Same[T any](x T, y T) {}")
-		emit("func Run[T any](x T, y T, callback func() needs R) needs R")
+		emit("type Cap { M() }")
+		emit("type Box[T] { M(T) }")
+		emit("extern go fixture.BoxOf func BoxOf[T](x T) Box[T]")
+		emit("extern go fixture.Choose func Choose[T](x T, y T) needs Cap")
+		emit("func Same[T](x T, y T) {}")
+		emit("extern go fixture.Run func Run[T, R](x T, y T, callback func() needs R) needs R")
 	}
 	// Which members are used as values, and which of those write rows.
 	value := make([]bool, n)
@@ -179,7 +177,7 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 		row := ""
 		if written[i] {
 			if errors {
-				row = " error[Bang]"
+				row = " fails Bang"
 			} else {
 				row = " needs Cap"
 			}
@@ -246,14 +244,14 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 			if r == 0 {
 				emit("\tfunc(%s func()) { %s() }(func() {})", id, id)
 			} else {
-				emit("\tfunc() { %s := func() {}; %s() }()", id, id)
+				emit("\tfunc() { let %s = func() {}; %s() }()", id, id)
 			}
 		}
 		emit("}")
 	}
-	// The checker reads the translation, whose lines differ: each
+	// The checker reads the formatted text, whose lines may differ: each
 	// member's declaration line is read again there.
-	g.src = fromOld(b.String())
+	g.src = decided(b.String())
 	for i, l := range strings.Split(g.src, "\n") {
 		for k := range n {
 			if strings.HasPrefix(l, fmt.Sprintf("func f%d(", k)) {

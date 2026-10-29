@@ -9,49 +9,32 @@ import (
 )
 
 // rowPattern writes the reviewer's round-10 M1 shape: n distinct empty
-// structs A0 … A(n-1); U[T] listing, for each Ai, V[func(Ai) error[Fault[T]]]
-// and V[func(Ai) error[Fault[int]]]; a field F of type U[G[G[… int]]] with
-// the G argument nested d levels and written once; and a switch over n
-// subjects x.F with underscore bindings, one tuple of the fixed
-// V[func(Ai) error[Fault[int]]] variants, and default. Each signature path
-// substitutes its row pattern error[Fault[T]] with the deep argument.
+// structs A0 … A(n-1); U[T] listing, for each Ai, V[func(Ai) fails Fault[T]]
+// and V[func(Ai) fails Fault[int]]; a field F of type U[G[G[… int]]] with
+// the G argument nested d levels and written once; and a match on n
+// subjects x.F with one tuple of the fixed V[func(Ai) fails Fault[int]]
+// variants, and case _. Each signature path substitutes its row pattern
+// fails Fault[T] with the deep argument.
 func rowPattern(n, d int) string {
 	var b strings.Builder
-	b.WriteString("package main\ntype G[T any] struct{}\ntype V[T any] struct{}\ntype Fault[T any] struct{}\n")
+	b.WriteString("type G[T] {}\ntype V[T] {}\ntype Fault[T] {}\n")
 	for i := range n {
-		fmt.Fprintf(&b, "type A%d struct{}\n", i)
+		fmt.Fprintf(&b, "type A%d {}\n", i)
 	}
-	b.WriteString("type U[T any] interface {\n\t")
+	b.WriteString("type U[T] = ")
 	for i := range n {
 		if i > 0 {
 			b.WriteString(" | ")
 		}
-		fmt.Fprintf(&b, "V[func(A%d) error[Fault[T]]] | V[func(A%d) error[Fault[int]]]", i, i)
+		fmt.Fprintf(&b, "V[func(A%d) fails Fault[T]] | V[func(A%d) fails Fault[int]]", i, i)
 	}
-	b.WriteString("\n}\ntype B struct{ F U[" + strings.Repeat("G[", d) + "int" + strings.Repeat("]", d) + "] }\n")
-	b.WriteString("func F(x B) int {\n\tswitch ")
+	b.WriteString("\ntype B { F U[" + strings.Repeat("G[", d) + "int" + strings.Repeat("]", d) + "] }\n")
+	subjects, cells := make([]string, n), make([]string, n)
 	for i := range n {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString("_")
+		subjects[i], cells[i] = "x.F", fmt.Sprintf("V[func(A%d) fails Fault[int]]", i)
 	}
-	b.WriteString(" := ")
-	for i := range n {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString("x.F.(type)")
-	}
-	b.WriteString(" {\n\tcase (")
-	for i := range n {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		fmt.Fprintf(&b, "V[func(A%d) error[Fault[int]]]", i)
-	}
-	b.WriteString("):\n\t\treturn 1\n\tdefault:\n\t\treturn 0\n\t}\n}\n")
-	return check.FromOld(b.String())
+	b.WriteString("func F(x B) int {\n\t" + matchHead(subjects) + "\n\tcase " + caseRow(cells) + ":\n\t\treturn 1\n\tcase _:\n\t\treturn 0\n\t}\n}\n")
+	return check.Decided(b.String())
 }
 
 // TestRowPatternLinear: substituting a row pattern with a deep bound

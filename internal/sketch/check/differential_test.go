@@ -17,10 +17,10 @@ import (
 
 // Differential testing against go/types (round-4 request A, widened in
 // round 5). Where Go's semantics apply, Go's checker is the oracle: a
-// generator writes random Go programs whose translation into the decided
-// syntax (fromOld, #196) keeps their meaning, with no rows: go/types reads
-// the Go text, the checker its translation, and their expressions match by
-// tokens (align_test.go). The programs hold:
+// generator writes each random program twice (a twin), as Go text and as
+// decided Ergo text of the same meaning with no rows (spec D-A6): go/types
+// reads the Go text, the checker the Ergo text, and their expressions match
+// by tokens (align_test.go). The programs hold:
 //
 //   - generic struct and interface types, instantiated inside type
 //     declarations;
@@ -29,7 +29,7 @@ import (
 //   - methods whose receiver names the type's parameter or renames it,
 //     with parametric signatures, which instantiate the receiver's own and
 //     other receivers' types (signature growth and cross-receiver cycles,
-//     round-4 M1); the translation makes each a function whose first
+//     round-4 M1); the Ergo text writes each as a function whose first
 //     parameter is the receiver (196m);
 //   - instantiations as values, call targets, in parentheses, explicit
 //     with every argument, partial, and inferred.
@@ -51,18 +51,64 @@ import (
 // than Go's untyped constants. Prior art: Csmith-style differential
 // testing; Go cross-checks types2 against go/types the same way.
 
+// twin is one generated program written twice: Go text, which go/types
+// reads, and decided Ergo text of the same meaning, which the checker
+// reads. The two keep every function body and package variable token for
+// token, apart from the spellings align_test.go drops (spec D-A6: the
+// generators write both; no oracle depends on a translator).
+type twin struct{ goSrc, ergoSrc string }
+
+// newTwin pairs a program's two texts; the Ergo text is formatted.
+func newTwin(goSrc, ergoSrc string) twin {
+	return twin{goSrc: goSrc, ergoSrc: decided(ergoSrc)}
+}
+
+// twinBuilder writes a twin: text both syntaxes spell alike, or a pair.
+type twinBuilder struct{ g, e strings.Builder }
+
+func (w *twinBuilder) both(format string, args ...any) {
+	fmt.Fprintf(&w.g, format, args...)
+	fmt.Fprintf(&w.e, format, args...)
+}
+
+func (w *twinBuilder) each(goText, ergoText string) {
+	w.g.WriteString(goText)
+	w.e.WriteString(ergoText)
+}
+
+func (w *twinBuilder) reset() { w.g.Reset(); w.e.Reset() }
+
+func (w *twinBuilder) twin() twin { return newTwin(w.g.String(), w.e.String()) }
+
+// tt is a type written in both syntaxes: Go's map[K]V is Ergo's Map[K, V].
+type tt struct{ g, e string }
+
+func ttOf(s string) tt { return tt{s, s} }
+
+func (t tt) wrap(goPre, goPost, ergoPre, ergoPost string) tt {
+	return tt{goPre + t.g + goPost, ergoPre + t.e + ergoPost}
+}
+
+func joinTT(ts []tt, sep string) tt {
+	var g, e []string
+	for _, t := range ts {
+		g, e = append(g, t.g), append(e, t.e)
+	}
+	return tt{strings.Join(g, sep), strings.Join(e, sep)}
+}
+
 // diffFunc is a generated generic function: its parameter count and its
 // value parameter types, written over P and Q.
 type diffFunc struct {
 	ntp    int
-	params []string
+	params []tt
 	result bool
 }
 
 // diffGen writes one program from rng.
 type diffGen struct {
 	rng    *rand.Rand
-	b      strings.Builder
+	b      twinBuilder
 	types  int // generic struct types Gt0…
 	ifaces int // generic interface types Gi0…
 	funcs  []diffFunc
@@ -70,45 +116,48 @@ type diffGen struct {
 }
 
 // typeExpr writes a type of depth at most d over the type parameters ps.
-func (g *diffGen) typeExpr(ps []string, d int) string {
+func (g *diffGen) typeExpr(ps []string, d int) tt {
 	leaves := []string{"int", "string"}
 	leaves = append(leaves, ps...)
 	leaves = append(leaves, ps...)
 	if d == 0 || g.rng.Intn(3) == 0 {
-		return leaves[g.rng.Intn(len(leaves))]
+		return ttOf(leaves[g.rng.Intn(len(leaves))])
 	}
 	inner := g.typeExpr(ps, d-1)
 	switch g.rng.Intn(6) {
 	case 0:
-		return "[]" + inner
+		return inner.wrap("[]", "", "[]", "")
 	case 1:
-		return "map[string]" + inner
+		return inner.wrap("map[string]", "", "Map[string, ", "]")
 	case 2:
-		return "func(" + inner + ")"
+		return inner.wrap("func(", ")", "func(", ")")
 	case 3:
-		return fmt.Sprintf("Gi%d[%s]", g.rng.Intn(g.ifaces), inner)
+		n := fmt.Sprintf("Gi%d[", g.rng.Intn(g.ifaces))
+		return inner.wrap(n, "]", n, "]")
 	default:
-		return fmt.Sprintf("Gt%d[%s]", g.rng.Intn(g.types), inner)
+		n := fmt.Sprintf("Gt%d[", g.rng.Intn(g.types))
+		return inner.wrap(n, "]", n, "]")
 	}
 }
 
 // zeroType writes a type that has a zero value in Ergo (no function or
 // interface type, no bare type parameter in a non-generic context), over
 // the type parameters ps.
-func (g *diffGen) zeroType(ps []string, d int) string {
+func (g *diffGen) zeroType(ps []string, d int) tt {
 	leaves := []string{"int", "string"}
 	leaves = append(leaves, ps...)
 	if d == 0 || g.rng.Intn(3) == 0 {
-		return leaves[g.rng.Intn(len(leaves))]
+		return ttOf(leaves[g.rng.Intn(len(leaves))])
 	}
 	inner := g.zeroType(ps, d-1)
 	switch g.rng.Intn(4) {
 	case 0:
-		return "[]" + inner
+		return inner.wrap("[]", "", "[]", "")
 	case 1:
-		return "map[string]" + inner
+		return inner.wrap("map[string]", "", "Map[string, ", "]")
 	default:
-		return fmt.Sprintf("Gt%d[%s]", g.rng.Intn(g.types), inner)
+		n := fmt.Sprintf("Gt%d[", g.rng.Intn(g.types))
+		return inner.wrap(n, "]", n, "]")
 	}
 }
 
@@ -138,11 +187,20 @@ func substParams(t string, m map[string]string) string {
 	return out.String()
 }
 
+// substTT is substParams in both syntaxes.
+func substTT(t tt, m map[string]tt) tt {
+	gm, em := map[string]string{}, map[string]string{}
+	for k, v := range m {
+		gm[k], em[k] = v.g, v.e
+	}
+	return tt{substParams(t.g, gm), substParams(t.e, em)}
+}
+
 var tpNames = []string{"P", "Q"}
 
 // targs writes type arguments for k parameters in the context ps.
-func (g *diffGen) targs(ps []string, k int, zero bool) []string {
-	out := make([]string, k)
+func (g *diffGen) targs(ps []string, k int, zero bool) []tt {
+	out := make([]tt, k)
 	for i := range out {
 		if zero {
 			out[i] = g.zeroType(ps, 2)
@@ -164,15 +222,20 @@ func (g *diffGen) stmts(ps []string, k int) {
 		switch g.rng.Intn(choices) {
 		case 0:
 			i := g.rng.Intn(len(g.funcs))
-			fmt.Fprintf(&g.b, "\t_ = Fn%d[%s]\n", i, strings.Join(g.targs(ps, g.funcs[i].ntp, false), ", "))
+			a := joinTT(g.targs(ps, g.funcs[i].ntp, false), ", ")
+			g.b.each(fmt.Sprintf("\t_ = Fn%d[%s]\n", i, a.g), fmt.Sprintf("\t_ = Fn%d[%s]\n", i, a.e))
 		case 1:
 			i := g.rng.Intn(len(g.funcs))
-			fmt.Fprintf(&g.b, "\t_ = (Fn%d[%s])\n", i, strings.Join(g.targs(ps, g.funcs[i].ntp, false), ", "))
+			a := joinTT(g.targs(ps, g.funcs[i].ntp, false), ", ")
+			g.b.each(fmt.Sprintf("\t_ = (Fn%d[%s])\n", i, a.g), fmt.Sprintf("\t_ = (Fn%d[%s])\n", i, a.e))
 		case 2:
-			fmt.Fprintf(&g.b, "\t_ = Gt%d[%s]{}\n", g.rng.Intn(g.types), g.typeExpr(ps, 2))
+			j := g.rng.Intn(g.types)
+			a := g.typeExpr(ps, 2)
+			g.b.each(fmt.Sprintf("\t_ = Gt%d[%s]{}\n", j, a.g), fmt.Sprintf("\t_ = Gt%d[%s]{}\n", j, a.e))
 		case 3:
 			j := g.rng.Intn(g.types)
-			fmt.Fprintf(&g.b, "\tGt%d[%s]{}.Mt%d()\n", j, g.typeExpr(ps, 2), j)
+			a := g.typeExpr(ps, 2)
+			g.b.each(fmt.Sprintf("\tGt%d[%s]{}.Mt%d()\n", j, a.g, j), fmt.Sprintf("\tGt%d[%s]{}.Mt%d()\n", j, a.e, j))
 		default:
 			g.call()
 		}
@@ -186,7 +249,7 @@ func (g *diffGen) call() {
 	i := g.rng.Intn(len(g.funcs))
 	f := g.funcs[i]
 	ta := g.targs(nil, f.ntp, true)
-	m := map[string]string{}
+	m := map[string]tt{}
 	for k := range f.ntp {
 		m[tpNames[k]] = ta[k]
 	}
@@ -194,75 +257,78 @@ func (g *diffGen) call() {
 	for _, p := range f.params {
 		v := fmt.Sprintf("a%d", g.vars)
 		g.vars++
-		fmt.Fprintf(&g.b, "\tvar %s %s\n", v, substParams(p, m))
+		a := substTT(p, m)
+		g.b.each(fmt.Sprintf("\tvar %s %s\n", v, a.g), fmt.Sprintf("\tlet %s %s\n", v, a.e))
 		args = append(args, v)
 	}
 	// occurs reports whether parameter k can be inferred from the
 	// arguments.
 	occurs := func(k int) bool {
 		for _, p := range f.params {
-			if substParams(p, map[string]string{tpNames[k]: "\x00"}) != p {
+			if substParams(p.g, map[string]string{tpNames[k]: "\x00"}) != p.g {
 				return true
 			}
 		}
 		return false
 	}
-	callee := fmt.Sprintf("Fn%d[%s]", i, strings.Join(ta, ", "))
+	all := joinTT(ta, ", ")
+	callee := tt{fmt.Sprintf("Fn%d[%s]", i, all.g), fmt.Sprintf("Fn%d[%s]", i, all.e)}
 	switch g.rng.Intn(5) {
 	case 0:
-		callee = "(" + callee + ")"
+		callee = callee.wrap("(", ")", "(", ")")
 	case 1:
-		callee = "((" + callee + "))"
+		callee = callee.wrap("((", "))", "((", "))")
 	case 2:
 		if f.ntp == 2 && occurs(1) {
-			callee = fmt.Sprintf("Fn%d[%s]", i, ta[0])
+			callee = tt{fmt.Sprintf("Fn%d[%s]", i, ta[0].g), fmt.Sprintf("Fn%d[%s]", i, ta[0].e)}
 		}
 	case 3:
-		all := true
+		every := true
 		for k := range f.ntp {
-			all = all && occurs(k)
+			every = every && occurs(k)
 		}
-		if all {
-			callee = fmt.Sprintf("Fn%d", i)
+		if every {
+			callee = ttOf(fmt.Sprintf("Fn%d", i))
 		}
 	}
 	lhs := "\t"
 	if f.result {
 		lhs = "\t_ = "
 	}
-	fmt.Fprintf(&g.b, "%s%s(%s)\n", lhs, callee, strings.Join(args, ", "))
+	g.b.each(fmt.Sprintf("%s%s(%s)\n", lhs, callee.g, strings.Join(args, ", ")), fmt.Sprintf("%s%s(%s)\n", lhs, callee.e, strings.Join(args, ", ")))
 }
 
-func (g *diffGen) program() string {
-	g.b.Reset()
+func (g *diffGen) program() twin {
+	g.b.reset()
 	g.vars = 0
 	g.types = 1 + g.rng.Intn(3)
 	g.ifaces = 1 + g.rng.Intn(2)
 	g.funcs = make([]diffFunc, 1+g.rng.Intn(3))
-	g.b.WriteString("package p\n\n")
+	g.b.each("package p\n\n", "")
 	for i := range g.types {
-		field := "[]P"
+		field := ttOf("[]P")
 		if g.rng.Intn(4) == 0 {
 			// An instantiation inside a type declaration, behind a slice.
-			field = "[]" + g.typeExpr([]string{"P"}, 2)
+			field = g.typeExpr([]string{"P"}, 2).wrap("[]", "", "[]", "")
 		}
-		fmt.Fprintf(&g.b, "type Gt%d[P any] struct{ F %s }\n\n", i, field)
+		g.b.each(fmt.Sprintf("type Gt%d[P any] struct{ F %s }\n\n", i, field.g), fmt.Sprintf("type Gt%d[P] { F %s }\n\n", i, field.e))
 	}
 	for i := range g.ifaces {
-		fmt.Fprintf(&g.b, "type Gi%d[P any] interface{ M(%s) }\n\n", i, g.typeExpr([]string{"P"}, 1))
+		m := g.typeExpr([]string{"P"}, 1)
+		g.b.each(fmt.Sprintf("type Gi%d[P any] interface{ M(%s) }\n\n", i, m.g), fmt.Sprintf("type Gi%d[P] { M(%s) }\n\n", i, m.e))
 	}
 	for i := range g.funcs {
 		f := diffFunc{ntp: 1 + g.rng.Intn(2)}
 		ps := tpNames[:f.ntp]
 		for range g.rng.Intn(3) {
 			p := g.zeroType(ps, 2)
-			if len(f.params) == 0 && strings.HasPrefix(p, "Gt") {
+			if len(f.params) == 0 && strings.HasPrefix(p.g, "Gt") {
 				// A first parameter Gt0[P] makes a function a method of
 				// Gt0 in the decided language (196m), whose instantiation
 				// cycles are the receiver's; Go's function has none. The
 				// methods below cover that case, so a function's first
 				// parameter is never a generated type itself.
-				p = "[]" + p
+				p = p.wrap("[]", "", "[]", "")
 			}
 			f.params = append(f.params, p)
 		}
@@ -271,45 +337,50 @@ func (g *diffGen) program() string {
 	}
 	for i, f := range g.funcs {
 		ps := tpNames[:f.ntp]
-		var tps, params []string
+		var tps []string
+		var params []tt
 		for _, p := range ps {
 			tps = append(tps, p+" any")
 		}
 		for k, p := range f.params {
-			params = append(params, fmt.Sprintf("x%d %s", k, p))
+			params = append(params, p.wrap(fmt.Sprintf("x%d ", k), "", fmt.Sprintf("x%d ", k), ""))
 		}
-		res := ""
+		res := ttOf("")
 		if f.result {
-			res = " " + f.params[0]
+			res = f.params[0].wrap(" ", "", " ", "")
 		}
-		fmt.Fprintf(&g.b, "func Fn%d[%s](%s)%s {\n", i, strings.Join(tps, ", "), strings.Join(params, ", "), res)
+		pl := joinTT(params, ", ")
+		g.b.each(fmt.Sprintf("func Fn%d[%s](%s)%s {\n", i, strings.Join(tps, ", "), pl.g, res.g),
+			fmt.Sprintf("func Fn%d[%s](%s)%s {\n", i, strings.Join(ps, ", "), pl.e, res.e))
 		g.stmts(ps, g.rng.Intn(3))
 		if f.result {
-			g.b.WriteString("\treturn x0\n")
+			g.b.both("\treturn x0\n")
 		}
-		g.b.WriteString("}\n\n")
+		g.b.both("}\n\n")
 	}
 	for i := range g.types {
 		// The receiver names the type's parameter P, or renames it Q.
 		rp := tpNames[g.rng.Intn(2)]
 		ps := []string{rp}
-		fmt.Fprintf(&g.b, "func (r Gt%d[%s]) Mt%d() {\n", i, rp, i)
+		g.b.each(fmt.Sprintf("func (r Gt%d[%s]) Mt%d() {\n", i, rp, i), fmt.Sprintf("func Mt%d[%s](r Gt%d[%s]) {\n", i, rp, i, rp))
 		g.stmts(ps, g.rng.Intn(3))
-		g.b.WriteString("}\n\n")
+		g.b.both("}\n\n")
 		// A parametric signature: it may grow the receiver's own type or
 		// another receiver's, in a parameter, a result or an interface.
 		pt := g.typeExpr(ps, 2)
 		switch g.rng.Intn(2) {
 		case 0:
-			fmt.Fprintf(&g.b, "func (r Gt%d[%s]) Ms%d(x %s) %s {\n\treturn x\n}\n\n", i, rp, i, pt, pt)
+			g.b.each(fmt.Sprintf("func (r Gt%d[%s]) Ms%d(x %s) %s {\n\treturn x\n}\n\n", i, rp, i, pt.g, pt.g),
+				fmt.Sprintf("func Ms%d[%s](r Gt%d[%s], x %s) %s {\n\treturn x\n}\n\n", i, rp, i, rp, pt.e, pt.e))
 		default:
-			fmt.Fprintf(&g.b, "func (r Gt%d[%s]) Ms%d(x %s) {\n}\n\n", i, rp, i, pt)
+			g.b.each(fmt.Sprintf("func (r Gt%d[%s]) Ms%d(x %s) {\n}\n\n", i, rp, i, pt.g),
+				fmt.Sprintf("func Ms%d[%s](r Gt%d[%s], x %s) {\n}\n\n", i, rp, i, rp, pt.e))
 		}
 	}
-	g.b.WriteString("func Main() {\n")
+	g.b.both("func Main() {\n")
 	g.stmts(nil, 1+g.rng.Intn(4))
-	g.b.WriteString("}\n")
-	return g.b.String()
+	g.b.both("}\n")
+	return g.b.twin()
 }
 
 // goKey and ergoKey write a type in one normal form, so the two checkers'
@@ -487,16 +558,16 @@ func (k ergoKeys) key(t Type) string {
 // span is an expression's byte range, the key that matches the two ASTs.
 type span struct{ from, to int }
 
-// diffOne checks src with both checkers and returns the disagreements; a
-// rejection must be an instantiation cycle in both.
-func diffOne(src string) []string { return diffCheck(src, true) }
+// diffOne checks a twin with both checkers and returns the disagreements;
+// a rejection must be an instantiation cycle in both.
+func diffOne(p twin) []string { return diffCheck(p, true) }
 
-// diffCheck checks src with both checkers and returns the disagreements.
+// diffCheck checks a twin with both checkers and returns the disagreements.
 // With cycleOnly, a program both reject must fail by an instantiation
 // cycle in both; otherwise any rejection agrees (the inference programs
 // fail by unification).
-func diffCheck(src string, cycleOnly bool) []string {
-	d, _ := diffCount(src, cycleOnly)
+func diffCheck(p twin, cycleOnly bool) []string {
+	d, _ := diffCount(p, cycleOnly)
 	return d
 }
 
@@ -523,14 +594,14 @@ func goCheck(fset *token.FileSet, f *ast.File, info *types.Info) []string {
 // program invalid (its lowered text, each literal of one type, is invalid
 // Go too: `1 + 'a'`, `Two(1, 'a')`, `var f float64 = 1 << n`), or every
 // diagnostic is the inferred subset's refusal.
-func diffCount(src string, cycleOnly bool) ([]string, bool) {
+func diffCount(p twin, cycleOnly bool) ([]string, bool) {
+	src, ergoSrc := p.goSrc, p.ergoSrc
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "p.go", src, 0)
 	if err != nil {
 		return []string{"go cannot parse the generated program: " + err.Error()}, false
 	}
 	goErrs := goCheck(fset, file, nil)
-	ergoSrc := fromOld(src)
 	pkg, diags := CheckSource(ergoSrc)
 	var ds []string
 	for _, d := range diags {
@@ -539,7 +610,7 @@ func diffCount(src string, cycleOnly bool) ([]string, bool) {
 	// The two texts' expressions match by their kept tokens (align_test.go).
 	ergoFile, err := syntax.Parse(ergoSrc)
 	if err != nil {
-		return []string{"the translation does not parse: " + err.Error()}, false
+		return []string{"the Ergo text does not parse: " + err.Error()}, false
 	}
 	goRegs, ergoRegs := goRegions(fset, file, src), ergoRegions(ergoFile, ergoSrc)
 	if err := alignCheck(goRegs, ergoRegs); err != nil {
@@ -619,7 +690,7 @@ func diffCount(src string, cycleOnly bool) ([]string, bool) {
 		k, inRegion := alignKeyOf(goRegs, sp.from, sp.to)
 		if !inRegion {
 			// A signature's or declaration's type expression: its tokens
-			// are the ones the translation moves (a receiver becomes the
+			// are the ones the Ergo text moves (a receiver becomes the
 			// first parameter), so it is not matched.
 			if tv.IsValue() {
 				out = append(out, fmt.Sprintf("%s: a value outside every body and variable", text(sp)))
@@ -680,17 +751,17 @@ func TestDifferentialGoTypes(t *testing.T) {
 		g := &diffGen{rng: rand.New(rand.NewSource(seed))}
 		src := g.program()
 		if d := diffOne(src); len(d) > 0 {
-			t.Fatalf("seed %d:\n%s\n%s", seed, strings.Join(d, "\n"), src)
+			t.Fatalf("seed %d:\n%s\n%s", seed, strings.Join(d, "\n"), src.goSrc)
 		}
 		// Class H (round 16): declaration order changes no verdict, and the
 		// reference walk is complete and exact.
-		if p := OrderProblems(fromOld(src), 1); len(p) > 0 {
+		if p := OrderProblems(src.ergoSrc, 1); len(p) > 0 {
 			t.Fatalf("seed %d (declaration order): %s", seed, p[0])
 		}
-		if p := RefWalkProblems(fromOld(src)); len(p) > 0 {
+		if p := RefWalkProblems(src.ergoSrc); len(p) > 0 {
 			t.Fatalf("seed %d (reference walk): %s", seed, strings.Join(p, "; "))
 		}
-		if _, diags := CheckSource(fromOld(src)); len(diags) == 0 {
+		if _, diags := CheckSource(src.ergoSrc); len(diags) == 0 {
 			accepted++
 		} else {
 			rejected++
@@ -705,23 +776,23 @@ func TestDifferentialGoTypes(t *testing.T) {
 // call forms, checked by the same oracle, so the generic name inside an
 // explicit instantiation keeps its generic type (round-4 M3).
 func TestDifferentialInfoNames(t *testing.T) {
-	for _, body := range []string{
-		`func Fn[T any](x T) T { return x }
-func F() int { return Fn[int](1) }`,
-		`func Fn[T any](x T) T { return x }
-func F() int { return ((Fn[int]))(1) }`,
-		`func Fn[T any](x T) T { return x }
-func F() int { return Fn(1) }`,
-		`func Fn[A, B any](a A, b B) B { return b }
-func F() string { return Fn[int, string](1, "a") }`,
-		`func Fn[A, B any](a A, b B) B { return b }
-func F() string { return Fn[int](1, "a") }`,
-		`func Fn[T any](x T) T { return x }
-func F() func(int) int { return Fn[int] }`,
+	const (
+		goFn   = "func Fn[T any](x T) T { return x }\n"
+		ergoFn = "func Fn[T](x T) T { return x }\n"
+		goAB   = "func Fn[A, B any](a A, b B) B { return b }\n"
+		ergoAB = "func Fn[A, B](a A, b B) B { return b }\n"
+	)
+	for _, c := range []struct{ goDecl, ergoDecl, body string }{
+		{goFn, ergoFn, `func F() int { return Fn[int](1) }`},
+		{goFn, ergoFn, `func F() int { return ((Fn[int]))(1) }`},
+		{goFn, ergoFn, `func F() int { return Fn(1) }`},
+		{goAB, ergoAB, `func F() string { return Fn[int, string](1, "a") }`},
+		{goAB, ergoAB, `func F() string { return Fn[int](1, "a") }`},
+		{goFn, ergoFn, `func F() func(int) int { return Fn[int] }`},
 	} {
-		src := "package p\n\n" + body + "\n"
-		if d := diffOne(src); len(d) > 0 {
-			t.Errorf("%s:\n%s", body, strings.Join(d, "\n"))
+		p := newTwin("package p\n\n"+c.goDecl+c.body+"\n", c.ergoDecl+c.body+"\n")
+		if d := diffOne(p); len(d) > 0 {
+			t.Errorf("%s:\n%s", c.body, strings.Join(d, "\n"))
 		}
 	}
 	// Go reads the inside of parentheses as a value: a generic function
@@ -732,9 +803,10 @@ func F() func(int) int { return Fn[int] }`,
 		`func F() string { return (Fn2[int])(1, "a") }`,
 		`func F() { _ = (Fn) }`,
 	} {
-		src := "package p\n\nfunc Fn[T any](x T) T { return x }\n\nfunc Fn2[A, B any](a A, b B) B { return b }\n\n" + body + "\n"
-		_, ds := CheckSource(fromOld(src))
-		if g := goErrors(src); len(g) == 0 || len(ds) == 0 {
+		p := newTwin("package p\n\nfunc Fn[T any](x T) T { return x }\n\nfunc Fn2[A, B any](a A, b B) B { return b }\n\n"+body+"\n",
+			"func Fn[T](x T) T { return x }\n\nfunc Fn2[A, B](a A, b B) B { return b }\n\n"+body+"\n")
+		_, ds := CheckSource(p.ergoSrc)
+		if g := goErrors(p.goSrc); len(g) == 0 || len(ds) == 0 {
 			t.Errorf("%s: go %q, ergo %v; both must reject", body, g, ds)
 		}
 	}
@@ -750,28 +822,29 @@ func F() func(int) int { return Fn[int] }`,
 // parameter of Main, so no zero value is needed. The calls mix matching
 // and mismatching arguments, so both verdicts occur. The decided language
 // has no anonymous interfaces and no channels (#196), so none is written.
-func inferProgram(rng *rand.Rand, wrap int) string {
-	var b strings.Builder
-	b.WriteString("package p\n\n")
-	b.WriteString("type I0[T any] interface{ M(T) T }\n\n")
-	b.WriteString("type W0 interface {\n\tM(int) int\n\tN()\n}\n\n")
-	b.WriteString("type J0 interface{ M(int) int }\n\n")
-	b.WriteString("type K0 interface{ M(string) string }\n\n")
-	b.WriteString("type A0[T any] interface{ M(T) T }\n\n")
-	b.WriteString("type V0[T any] interface {\n\tM(T) T\n\tN()\n}\n\n")
+// The two texts differ only in their declarations.
+func inferProgram(rng *rand.Rand, wrap int) twin {
+	var b twinBuilder
+	b.each("package p\n\n", "")
+	b.each("type I0[T any] interface{ M(T) T }\n\n", "type I0[T] { M(T) T }\n\n")
+	b.each("type W0 interface {\n\tM(int) int\n\tN()\n}\n\n", "type W0 {\n\tM(int) int,\n\tN(),\n}\n\n")
+	b.each("type J0 interface{ M(int) int }\n\n", "type J0 { M(int) int }\n\n")
+	b.each("type K0 interface{ M(string) string }\n\n", "type K0 { M(string) string }\n\n")
+	b.each("type A0[T any] interface{ M(T) T }\n\n", "type A0[T] { M(T) T }\n\n")
+	b.each("type V0[T any] interface {\n\tM(T) T\n\tN()\n}\n\n", "type V0[T] {\n\tM(T) T,\n\tN(),\n}\n\n")
 	results := []string{"int", "string"}
 	nS := 1 + rng.Intn(3)
 	var values, types []string
 	for k := range nS {
 		r := results[rng.Intn(2)]
-		fmt.Fprintf(&b, "type S%d struct{}\n\n", k)
+		b.each(fmt.Sprintf("type S%d struct{}\n\n", k), fmt.Sprintf("type S%d {}\n\n", k))
 		recv := fmt.Sprintf("S%d", k)
 		if rng.Intn(3) == 0 {
 			recv = "*" + recv
 		}
-		fmt.Fprintf(&b, "func (%s) M(v %s) %s { return v }\n\n", recv, r, r)
+		b.each(fmt.Sprintf("func (%s) M(v %s) %s { return v }\n\n", recv, r, r), fmt.Sprintf("func M(_ %s, v %s) %s { return v }\n\n", recv, r, r))
 		if rng.Intn(2) == 0 {
-			fmt.Fprintf(&b, "func (%s) N() {}\n\n", recv)
+			b.each(fmt.Sprintf("func (%s) N() {}\n\n", recv), fmt.Sprintf("func N(_ %s) {}\n\n", recv))
 		}
 		values = append(values, fmt.Sprintf("s%d S%d", k, k), fmt.Sprintf("p%d *S%d", k, k))
 		// A borrow *T is only a parameter or receiver type in Ergo
@@ -782,19 +855,19 @@ func inferProgram(rng *rand.Rand, wrap int) string {
 	types = append(types, "W0", "J0", "I0[int]", "K0", "int", "int32")
 	// Every function returns a value, so a call can be nested in another
 	// (round 9 class D).
-	b.WriteString("func FnA[T any](x A0[T]) A0[T] { return x }\n\n")
-	b.WriteString("func FnN[T any](x I0[T]) I0[T] { return x }\n\n")
-	b.WriteString("func FnW[T any](x V0[T]) V0[T] { return x }\n\n")
-	b.WriteString("func Two[T any](a T, b T) T { return a }\n\n")
-	b.WriteString("func Id[U any](x U) U { return x }\n\n")
-	b.WriteString("func Pair[A, B any](a A, b B) A { return a }\n\n")
-	b.WriteString("func Apply[T any](f func(T) T, x T) T { return x }\n\n")
-	b.WriteString("func Fix(f func(int) int) int { return f(1) }\n\n")
-	b.WriteString("func Rev[T any](x T, f func(T) T) T { return x }\n\n")
+	b.each("func FnA[T any](x A0[T]) A0[T] { return x }\n\n", "func FnA[T](x A0[T]) A0[T] { return x }\n\n")
+	b.each("func FnN[T any](x I0[T]) I0[T] { return x }\n\n", "func FnN[T](x I0[T]) I0[T] { return x }\n\n")
+	b.each("func FnW[T any](x V0[T]) V0[T] { return x }\n\n", "func FnW[T](x V0[T]) V0[T] { return x }\n\n")
+	b.each("func Two[T any](a T, b T) T { return a }\n\n", "func Two[T](a T, b T) T { return a }\n\n")
+	b.each("func Id[U any](x U) U { return x }\n\n", "func Id[U](x U) U { return x }\n\n")
+	b.each("func Pair[A, B any](a A, b B) A { return a }\n\n", "func Pair[A, B](a A, b B) A { return a }\n\n")
+	b.each("func Apply[T any](f func(T) T, x T) T { return x }\n\n", "func Apply[T](f func(T) T, x T) T { return x }\n\n")
+	b.both("func Fix(f func(int) int) int { return f(1) }\n\n")
+	b.each("func Rev[T any](x T, f func(T) T) T { return x }\n\n", "func Rev[T](x T, f func(T) T) T { return x }\n\n")
 	// P comes first: the decided list [T, P I0[T]] would give T the
 	// constraint too (one group), and the decided language has no any.
-	b.WriteString("func Dep[P I0[T], T any](v T, p P) T { return v }\n\n")
-	fmt.Fprintf(&b, "func Main(%s) {\n", strings.Join(values, ", "))
+	b.each("func Dep[P I0[T], T any](v T, p P) T { return v }\n\n", "func Dep[P I0[T], T](v T, p P) T { return v }\n\n")
+	b.both("func Main(%s) {\n", strings.Join(values, ", "))
 	name := func(v string) string { return v[:strings.Index(v, " ")] }
 	for range 1 + rng.Intn(2) {
 		// An argument is a value, or a literal expression (a parameter
@@ -854,10 +927,10 @@ func inferProgram(rng *rand.Rand, wrap int) string {
 		case wrapPair:
 			call = "Pair(" + call + ", n)"
 		}
-		fmt.Fprintf(&b, "\t_ = %s\n", call)
+		b.both("\t_ = %s\n", call)
 	}
-	b.WriteString("}\n")
-	return b.String()
+	b.both("}\n")
+	return b.twin()
 }
 
 // The nestings of a generated call: flat, as the argument of Id, or as the
@@ -870,8 +943,8 @@ const (
 
 // diagCauses is a program's diagnostics without positions, which a nesting
 // shifts: the code and message of each, sorted.
-func diagCauses(src string) []string {
-	_, diags := CheckSource(fromOld(src))
+func diagCauses(p twin) []string {
+	_, diags := CheckSource(p.ergoSrc)
 	out := make([]string, len(diags))
 	for i, d := range diags {
 		out[i] = d.Code + " " + d.Message
@@ -893,7 +966,7 @@ func nestedCheck(seed int64) []string {
 			out = append(out, d...)
 		}
 		if got := diagCauses(src); strings.Join(got, "\n") != strings.Join(flat, "\n") {
-			out = append(out, fmt.Sprintf("nesting %d changes the diagnostics:\nflat   %q\nnested %q\n%s", wrap, flat, got, src))
+			out = append(out, fmt.Sprintf("nesting %d changes the diagnostics:\nflat   %q\nnested %q\n%s", wrap, flat, got, src.ergoSrc))
 		}
 	}
 	return out
@@ -923,12 +996,12 @@ func TestDifferentialInference(t *testing.T) {
 		src := inferProgram(rand.New(rand.NewSource(seed)), wrapNone)
 		d, refusal := diffCount(src, false)
 		if len(d) > 0 {
-			t.Fatalf("seed %d:\n%s\n%s", seed, strings.Join(d, "\n"), src)
+			t.Fatalf("seed %d:\n%s\n%s", seed, strings.Join(d, "\n"), src.goSrc)
 		}
 		if refusal {
 			refused++
 		}
-		if _, diags := CheckSource(fromOld(src)); len(diags) == 0 {
+		if _, diags := CheckSource(src.ergoSrc); len(diags) == 0 {
 			accepted++
 		} else {
 			rejected++
@@ -952,17 +1025,17 @@ func FuzzDifferential(f *testing.F) {
 		g := &diffGen{rng: rand.New(rand.NewSource(seed))}
 		src := g.program()
 		if d := diffOne(src); len(d) > 0 {
-			t.Fatalf("seed %d:\n%s\n%s", seed, strings.Join(d, "\n"), src)
+			t.Fatalf("seed %d:\n%s\n%s", seed, strings.Join(d, "\n"), src.goSrc)
 		}
-		if p := OrderProblems(fromOld(src), 1); len(p) > 0 {
+		if p := OrderProblems(src.ergoSrc, 1); len(p) > 0 {
 			t.Fatalf("seed %d (declaration order): %s", seed, p[0])
 		}
-		if p := RefWalkProblems(fromOld(src)); len(p) > 0 {
+		if p := RefWalkProblems(src.ergoSrc); len(p) > 0 {
 			t.Fatalf("seed %d (reference walk): %s", seed, strings.Join(p, "; "))
 		}
 		src = inferProgram(rand.New(rand.NewSource(seed)), wrapNone)
 		if d := diffCheck(src, false); len(d) > 0 {
-			t.Fatalf("seed %d (inference):\n%s\n%s", seed, strings.Join(d, "\n"), src)
+			t.Fatalf("seed %d (inference):\n%s\n%s", seed, strings.Join(d, "\n"), src.goSrc)
 		}
 		if d := nestedCheck(seed); len(d) > 0 {
 			t.Fatalf("seed %d (nested):\n%s", seed, strings.Join(d, "\n"))

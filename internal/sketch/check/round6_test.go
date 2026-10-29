@@ -53,7 +53,7 @@ type Some2 {}`, false},
 // interface, a concrete type or a pointer with the method. A typed argument
 // that conflicts with what an earlier argument inferred is S108 in either
 // order, unless every type argument is written. go/types is the oracle for
-// each verdict, on the Go text; the checker reads its translation. The
+// each verdict, on the Go text; the checker reads the Ergo text. The
 // decided language has no anonymous interfaces (#196), so the cases that
 // tested one are gone and the others name their interfaces.
 func TestInferenceInterfaces(t *testing.T) {
@@ -99,6 +99,50 @@ func Two[T any](a T, b T) T { return a }
 
 func FnS[T any](a []T, b T) {}
 `
+	// ergoDecls are decls in the decided syntax (a method is a function
+	// whose first parameter is the receiver, 196m).
+	const ergoDecls = `type S {}
+
+func M(_ S) int { return 1 }
+
+type P {}
+
+func M(_ *P) int { return 1 }
+
+type I[T] { M() T }
+
+type J { M() int }
+
+type K { M() int }
+
+type W {
+	M() int,
+	N(),
+}
+
+type E { M() }
+
+type F { M() }
+
+type EN {
+	M(),
+	N(),
+}
+
+type A[T] { M() T }
+
+type R {}
+
+func M(_ R) {}
+
+func FnI[T](x A[T]) T { return x.M() }
+
+func FnN[T](x I[T]) T { return x.M() }
+
+func Two[T](a T, b T) T { return a }
+
+func FnS[T](a []T, b T) {}
+`
 	cases := []struct {
 		name, body string
 		accept     bool
@@ -123,12 +167,12 @@ func FnS[T any](a []T, b T) {}
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			src := "package p\n\n" + decls + "\n" + tc.body + "\n"
-			g := goErrors(src)
+			src := newTwin("package p\n\n"+decls+"\n"+tc.body+"\n", ergoDecls+"\n"+tc.body+"\n")
+			g := goErrors(src.goSrc)
 			if (len(g) == 0) != tc.accept {
 				t.Fatalf("go/types disagrees with the case (accept = %v): %q", tc.accept, g)
 			}
-			_, diags := CheckSource(fromOld(src))
+			_, diags := CheckSource(src.ergoSrc)
 			var ds []string
 			for _, d := range diags {
 				ds = append(ds, d.String())

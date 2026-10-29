@@ -49,12 +49,12 @@ func TestWireChainLinear(t *testing.T) {
 	counts := map[int]int{}
 	for _, n := range []int{1000, 4000, 8000} {
 		var b strings.Builder
-		b.WriteString("package p\nwire W0 {}\n")
+		b.WriteString("let W0 = wire {}\n")
 		for i := 1; i < n; i++ {
-			fmt.Fprintf(&b, "wire W%d { W%d }\n", i, i-1)
+			fmt.Fprintf(&b, "let W%d = wire { W%d }\n", i, i-1)
 		}
-		fmt.Fprintf(&b, "func F() { with(W%d) {} }\n", n-1)
-		diags, _, wire := opsOf(t, fromOld(b.String()))
+		fmt.Fprintf(&b, "func F() { with W%d {} }\n", n-1)
+		diags, _, wire := opsOf(t, decided(b.String()))
 		if len(diags) > 0 {
 			t.Fatalf("n=%d: want acceptance, got %v", n, diags[0])
 		}
@@ -178,9 +178,9 @@ func TestRecordLiteralLinear(t *testing.T) {
 		counts := map[int]int{}
 		for _, n := range []int{1000, 4000, 8000} {
 			var b strings.Builder
-			b.WriteString("package p\ntype S struct{ a int }\ntype Big struct{\n")
+			b.WriteString("type S { a int }\ntype Big {\n")
 			for i := range n {
-				fmt.Fprintf(&b, " f%d []S\n", i)
+				fmt.Fprintf(&b, " f%d []S,\n", i)
 			}
 			b.WriteString("}\nfunc F() { _ = Big{")
 			for i := range n {
@@ -190,7 +190,7 @@ func TestRecordLiteralLinear(t *testing.T) {
 				b.WriteString("[]S{{a: 1}, {a: 2}}, ")
 			}
 			b.WriteString("} }\n")
-			diags, walk, _ := opsOf(t, fromOld(b.String()))
+			diags, walk, _ := opsOf(t, decided(b.String()))
 			if len(diags) > 0 {
 				t.Fatalf("keyed=%v n=%d: want acceptance, got %v", keyed, n, diags[0])
 			}
@@ -205,8 +205,8 @@ func TestRecordLiteralLinear(t *testing.T) {
 // map literal may elide it (round 17 C1; the decided language has no fixed
 // arrays, #196).
 func TestMissingLiteralType(t *testing.T) {
-	const decls = "package p\ntype S struct{ a int }\ntype Wrap[T any] struct{ value T }\n" +
-		"type Long struct{ alpha int; beta int; gamma int; delta int }\n"
+	const decls = "type S { a int }\ntype Wrap[T] { value T }\n" +
+		"type Long { alpha int, beta int, gamma int, delta int }\n"
 	for _, tc := range []struct{ body, want string }{
 		{"_ = Wrap[S]{value: {a: 1}}", "missing type in composite literal; write S{a: 1}"},
 		{"_ = Wrap[S]{{a: 1}}", "missing type in composite literal; write S{a: 1}"},
@@ -215,16 +215,16 @@ func TestMissingLiteralType(t *testing.T) {
 		{"_ = Wrap[S]{value: {\na: 1}}", "missing type in composite literal; write S{…}"},
 	} {
 		src := decls + "func F() {\n" + tc.body + "\n}\n"
-		_, diags := CheckSource(fromOld(src))
+		_, diags := CheckSource(decided(src))
 		if len(diags) != 1 || diags[0].Code != CodeType || diags[0].Message != tc.want {
 			t.Errorf("%s: want one S108 %q, got %v", tc.body, tc.want, diags)
 		}
 	}
 	for _, ok := range []string{
-		"_ = []S{{a: 1}}", "_ = map[S]S{{a: 1}: {a: 2}}",
+		"_ = []S{{a: 1}}", "_ = Map[S, S]{{a: 1}: {a: 2}}",
 		"_ = Wrap[S]{value: S{a: 1}}", "_ = Wrap[[]S]{value: []S{{a: 1}}}",
 	} {
-		if _, diags := CheckSource(fromOld(decls + "func F() {\n" + ok + "\n}\n")); len(diags) > 0 {
+		if _, diags := CheckSource(decided(decls + "func F() {\n" + ok + "\n}\n")); len(diags) > 0 {
 			t.Errorf("%s: want acceptance, got %v", ok, diags)
 		}
 	}
