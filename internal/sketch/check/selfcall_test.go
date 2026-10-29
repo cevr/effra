@@ -1,6 +1,7 @@
 package check
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -454,4 +455,77 @@ func TestSelfCallOrderFree(t *testing.T) {
 		order = append(order[1:], order[0])
 		order[0], order[len(order)-1] = order[len(order)-1], order[0]
 	}
+}
+
+// TestSelfCallBindsOwnerKinds: a 196m method's first parameter binds its
+// owner's bracket parameters by position, as a receiver did, so its
+// signature gives them their kinds (D6 "body and methods"; round-3 M3); a
+// conflict is reported once, at the declaration. A function with its own
+// parameter, or one on an operation type, binds nothing.
+func TestSelfCallBindsOwnerKinds(t *testing.T) {
+	checkSelfCases(t, []selfCase{
+		{"error row", `type Job[E] {}
+func Run[E](j Job[E]) fails E {}
+`, nil},
+		{"service row", `type Job[R] {}
+func Run[R](j Job[R]) needs R {}
+`, nil},
+		{"pointer first parameter", `type Job[E] {}
+func Run[E](j *Job[E]) fails E {}
+`, nil},
+		{"conflict reported once", `type Job[E] { v E }
+func Run[E](j Job[E]) fails E {}
+`, []selfWant{{"S108", "used both as a type and as a row", 1}}},
+		{"not the first parameter", `type Job[E] {}
+func Run[E](n int, j Job[E]) fails E {}
+`, []selfWant{{"S108", "E is used as a type and as an error row", 2}}},
+	})
+}
+
+// TestSelfCallEdgesByStaticType: x.f(…) on a receiver whose type is fixed
+// before bodies (a composite literal, a typed local) reaches only the
+// function on that type, so n same-named methods give n body-graph edges,
+// not n², and n separate initialization cycles, not one.
+func TestSelfCallEdgesByStaticType(t *testing.T) {
+	var b strings.Builder
+	n := 50
+	for i := range n {
+		fmt.Fprintf(&b, "type R%d {}\nlet v%d = func() { R%d{}.M() }\nfunc M(_ R%d) { _ = v%d }\n", i, i, i, i, i)
+	}
+	c, diags := selfChecker(t, b.String())
+	cycles := 0
+	for _, d := range diags {
+		if d.Code == "S108" && strings.Contains(d.Message, "initialization cycle") {
+			cycles++
+		} else {
+			t.Fatalf("unexpected %v", d)
+		}
+	}
+	if cycles != n || c.bodyEdges > 2*n {
+		t.Fatalf("%d cycles and %d body edges, want %d and at most %d", cycles, c.bodyEdges, n, 2*n)
+	}
+}
+
+// TestSelfCallInstantiationCycle: a 196m method's parameters are its
+// owner's for the instantiation-cycle check, as a receiver's are in Go
+// (go/types mono.go), so a signature that grows the owner is S108. A
+// function with a type parameter of its own lowers to a Go function, which
+// Go does not canonicalize, so it is not.
+func TestSelfCallInstantiationCycle(t *testing.T) {
+	checkSelfCases(t, []selfCase{
+		{"method grows its owner", `type R[P] {}
+func M[P](r R[P], x R[[]P]) {}
+`, []selfWant{{"S108", "instantiation cycle", 2}}},
+		{"across two owners", `type R[P] {}
+type S[Q] {}
+func M[P](r R[P], x S[[]P]) {}
+func N[Q](s S[Q], x R[Q]) {}
+`, []selfWant{{"S108", "instantiation cycle", 3}}},
+		{"own parameter", `type R[P] {}
+func F[P, Q](r R[P], x R[[]P], q Q) {}
+`, nil},
+		{"no growth", `type R[P] {}
+func M[P](r R[P], x R[P]) {}
+`, nil},
+	})
 }

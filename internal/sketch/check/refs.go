@@ -446,6 +446,22 @@ func (w *refWalker) selfCallee(fun syntax.Expr) {
 			w.valueUse(f, true, sel.Sel.Pos())
 		}
 	}
+	// A receiver whose type is fixed before bodies (a typed local, a
+	// composite literal) reaches only the function on that type, so k
+	// same-named functions add one edge per call, not k; any other
+	// receiver reaches every one of them.
+	if t := w.staticType(sel.X); t != nil {
+		if p, ok := t.(*Pointer); ok {
+			t = p.Elem
+		}
+		n, _ := t.(*Named)
+		for _, f := range append([]*Func{first}, first.same...) {
+			if n != nil && f.owner != nil && f.owner.Obj == n.Obj {
+				edge(f)
+			}
+		}
+		return
+	}
 	edge(first)
 	for _, f := range first.same {
 		edge(f)

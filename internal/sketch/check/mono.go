@@ -79,6 +79,44 @@ func (c *checker) recordInstantiation(name string, tparams []*TypeParam, targs [
 	}
 }
 
+// monoLinkSelf joins a 196m method's type parameters to its owner's: in
+// `func Grow[P](b Box[P], x Box[[]P])` the P that the first parameter binds
+// is Box's P, as a receiver's parameter was, so an instantiation in the
+// signature or the body grows Box's parameter. Go canonicalizes a
+// receiver's type parameters to the type's the same way (go/types mono.go,
+// recordCanon); here each pair gets weight-0 edges both ways, which puts
+// them in one strongly connected component. Only a function whose type
+// parameters are all its first parameter's is joined: it is the one that
+// lowers to a Go method; one with a parameter of its own lowers to a Go
+// function (Go methods take no type parameters), whose parameters Go does
+// not canonicalize either.
+func (c *checker) monoLinkSelf(f *Func, ctx *typeCtx) {
+	if f.owner == nil || len(f.selfArgs) == 0 || len(f.selfArgs) != len(ctx.params) {
+		return
+	}
+	for i, a := range f.selfArgs {
+		id, ok := unparen(a).(*syntax.Ident)
+		if !ok || i >= len(f.owner.TParams) {
+			continue
+		}
+		p, q := ctx.params[id.Name], f.owner.TParams[i]
+		if p == nil || p == q || p.Kind != KindType || q.Kind != KindType {
+			continue
+		}
+		for _, pair := range [][2]*TypeParam{{p, q}, {q, p}} {
+			key := [2]*TypeParam{pair[0], pair[1]}
+			if c.mono.seen == nil {
+				c.mono.seen = map[[2]*TypeParam]int{}
+			}
+			if _, ok := c.mono.seen[key]; ok {
+				continue
+			}
+			c.mono.seen[key] = len(c.mono.edges)
+			c.mono.edges = append(c.mono.edges, monoEdge{pair[0], pair[1], 0, a, c.cur, pair[0], f.owner.Obj.Name})
+		}
+	}
+}
+
 // occurs reports whether the type parameter q occurs in t.
 func occurs(q *TypeParam, t Type) bool {
 	seen := map[*Named]bool{}

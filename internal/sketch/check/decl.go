@@ -1203,6 +1203,7 @@ func (c *checker) funcSig(f *Func) *Signature {
 		p.tp.Constraint = c.constraint(p.x, ctx)
 	}
 	c.kindBracketParams(d.Type, ctx, unconstrained)
+	c.monoLinkSelf(f, ctx)
 	nbracket := len(tparams)
 	var implicit []string
 	if d.Recv == nil {
@@ -1251,7 +1252,30 @@ func (c *checker) kindBracketParams(ft *syntax.FuncType, ctx *typeCtx, unconstra
 		return
 	}
 	seen := map[*TypeParam]Kind{}
-	typeWalker{slots: c.slotKinds, f: func(id *syntax.Ident, k Kind) {
+	// A parameter passed to a declaration's parameter whose kinds conflict
+	// takes no kind from it: that conflict is reported at the declaration,
+	// once (a 196m method's first parameter, `func Run[E](j Job[E])`).
+	conflicted := func(ix *syntax.IndexExpr) bool {
+		tn, _ := c.namedHead(ix.X)
+		if tn == nil || len(c.kinds.conflicts[tn]) == 0 || tn.Decl == nil || tn.Decl.TypeParams == nil {
+			return false
+		}
+		i := 0
+		for _, fld := range tn.Decl.TypeParams.List {
+			for _, n := range fld.Names {
+				if i < len(ix.Indices) && c.kinds.conflicts[tn][n.Name] {
+					if id, ok := unparen(ix.Indices[i]).(*syntax.Ident); ok {
+						if tp := ctx.params[id.Name]; tp != nil && free[tp] {
+							tp.conflict = true
+						}
+					}
+				}
+				i++
+			}
+		}
+		return false
+	}
+	typeWalker{slots: c.slotKinds, index: conflicted, f: func(id *syntax.Ident, k Kind) {
 		tp := ctx.params[id.Name]
 		if tp == nil || !free[tp] || tp.conflict {
 			return
