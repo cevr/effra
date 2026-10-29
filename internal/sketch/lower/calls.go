@@ -1,0 +1,692 @@
+package lower
+
+import (
+	"fmt"
+	"strings"
+
+	"ergo.local/prototype/internal/sketch/check"
+	"ergo.local/prototype/internal/sketch/syntax"
+)
+
+// Calls (Info.Calls). A declared function is called by its Go name, or as a
+// Go method on its first argument, with the environment first when its
+// capability row is not empty and its error last when its error row is not
+// (spec D3); generic type arguments are written out from the call's
+// TypeArgs, never left to Go's inference. A capability's operation is called
+// on the provider the environment holds; an operation type's operation on
+// the value. A function value has the uniform shape (typeCtx.funcType).
+
+// call lowers a call in a value position: a result is bound to a
+// temporary, so it is evaluated exactly here, in order.
+func (fc *funcCtx) call(x *syntax.CallExpr) operand {
+	c := fc.l.info.Calls[x]
+	if c == nil {
+		ice(x, "a call with no Calls entry")
+	}
+	switch c.Kind {
+	case check.CallWith:
+		return fc.with(x)
+	case check.CallConversion:
+		if len(x.Args) != 1 {
+			ice(x, "a conversion with %d arguments", len(x.Args))
+		}
+		arg := fc.value(x.Args[0])
+		target := fc.goType(c.Type)
+		if isString(c.Type) && isInteger(fc.typeOf(x.Args[0])) {
+			arg = "rune(" + arg + ")" // Go's string(int) is a rune conversion; vet asks for it spelled out
+		}
+		return operand{val: target + "(" + arg + ")"}
+	case check.CallLen:
+		if len(x.Args) != 1 {
+			ice(x, "len with %d arguments", len(x.Args))
+		}
+		return operand{val: "len(" + fc.value(x.Args[0]) + ")"}
+	case check.CallPrelude:
+		refuse(x, "the prelude dot call %s is lowered after check-v1 stage D (D-D6) and lower-v1 stage 3", c.Name)
+	}
+	text, result, fallible := fc.callText(x, c)
+	switch {
+	case result && fallible:
+		v, e := fc.temp("v"), fc.temp("err")
+		fc.line(v + ", " + e + " := " + text)
+		if len(rowElems(c.Fails)) == 0 {
+			fc.line("_ = " + e)
+			return operand{val: v}
+		}
+		return operand{val: v, err: e}
+	case fallible:
+		e := fc.temp("err")
+		fc.line(e + " := " + text)
+		if len(rowElems(c.Fails)) == 0 {
+			fc.line("_ = " + e)
+			return operand{}
+		}
+		return operand{err: e}
+	case result:
+		v := fc.temp("v")
+		fc.line(v + " := " + text)
+		return operand{val: v}
+	}
+	fc.line(text)
+	return operand{}
+}
+
+// callStmt is a call whose results are discarded, as one Go statement. A
+// call that cannot fail at this site drops its error, which is nil.
+func (fc *funcCtx) callStmt(x *syntax.CallExpr) string {
+	c := fc.l.info.Calls[x]
+	if c.Kind == check.CallPrelude {
+		refuse(x, "the prelude dot call %s is lowered after check-v1 stage D (D-D6) and lower-v1 stage 3", c.Name)
+	}
+	text, _, fallible := fc.callText(x, c)
+	if fallible && len(rowElems(c.Fails)) > 0 {
+		ice(x, "an untried fallible call in a statement")
+	}
+	return text
+}
+
+// callText is a call's Go text, whether it returns a value, and whether its
+// Go form returns an error.
+func (fc *funcCtx) callText(x *syntax.CallExpr, c *check.Call) (string, bool, bool) {
+	args := x.Args
+	if x.Trailing != nil {
+		args = append(append([]syntax.Expr{}, args...), nil) // the trailing block, lowered below
+	}
+	switch c.Kind {
+	case check.CallFunc:
+		fd := fc.l.useFunc(c.Func, x)
+		list := args
+		if c.Recv != nil {
+			list = append([]syntax.Expr{c.Recv}, args...)
+		}
+		// A *T function called on an addressable T takes the receiver's
+		// address where the receiver is evaluated, so a later argument's
+		// spill keeps the place, never a copy (types.md, Methods 1 and 5).
+		addr := false
+		if c.Recv != nil && c.Func.Ptr {
+			_, isPtr := fc.typeOf(c.Recv).(*check.Pointer)
+			addr = !isPtr
+		}
+		vals := fc.callArgsAddr(list, x, addr)
+		var head string
+		var rest []string
+		if fd.method != nil {
+			if len(vals) == 0 {
+				ice(x, "a method call with no receiver")
+			}
+			head, rest = "("+vals[0]+")."+fd.name, vals[1:]
+		} else {
+			head, rest = fd.name+fc.typeArgs(c.Func.Sig, c.TypeArgs, x), vals
+		}
+		if fd.env {
+			rest = append([]string{fc.envArg(x, c.Needs)}, rest...)
+		}
+		return head + "(" + strings.Join(rest, ", ") + ")", len(c.Func.Sig.Results) > 0, fd.fallible
+	case check.CallOp:
+		if c.Recv == nil || c.Op == nil {
+			ice(x, "an operation call with no receiver or operation")
+		}
+		vals := fc.callArgs(append([]syntax.Expr{c.Recv}, args...), x)
+		return "(" + vals[0] + ")." + memberName(c.Op.Name) + "(" + strings.Join(vals[1:], ", ") + ")", len(c.Op.Sig.Results) > 0, len(rowElems(c.Op.Sig.Errors)) > 0
+	case check.CallProviderOp:
+		sel, ok := unparen(x.Fun).(*syntax.SelectorExpr)
+		if !ok || c.Op == nil {
+			ice(x, "a capability call that is not Cap.op(…)")
+		}
+		cap, ok := fc.typeOf(sel.X).(*check.Named)
+		if !ok {
+			ice(sel.X, "a capability with no named type")
+		}
+		vals := fc.callArgs(args, x)
+		provider := fc.envExpr(x) + "." + fc.l.envField(cap.Obj)
+		return provider + "." + memberName(c.Op.Name) + "(" + strings.Join(vals, ", ") + ")", len(c.Op.Sig.Results) > 0, len(rowElems(c.Op.Sig.Errors)) > 0
+	case check.CallFuncValue:
+		sig, ok := fc.typeOf(x.Fun).(*check.Signature)
+		if !ok {
+			ice(x.Fun, "a called value that is not a function")
+		}
+		vals := fc.callArgs(append([]syntax.Expr{x.Fun}, args...), x)
+		env := fc.env
+		if env == "" {
+			env = fc.l.noEnv()
+		}
+		return vals[0] + "(" + strings.Join(append([]string{env}, vals[1:]...), ", ") + ")", len(sig.Results) > 0, true
+	}
+	ice(x, "an unknown call kind %d", c.Kind)
+	return "", false, false
+}
+
+// callArgs lowers a call's operands left to right, with each argument's
+// implicit conversion. A nil operand is the call's trailing block.
+func (fc *funcCtx) callArgs(list []syntax.Expr, call *syntax.CallExpr) []string {
+	return fc.callArgsAddr(list, call, false)
+}
+
+// callArgsAddr is callArgs; with addr, the first operand is a receiver
+// place whose address is the operand.
+func (fc *funcCtx) callArgsAddr(list []syntax.Expr, call *syntax.CallExpr, addr bool) []string {
+	later := make([]bool, len(list)+1)
+	for i := len(list) - 1; i >= 0; i-- {
+		later[i] = later[i+1] || (list[i] != nil && fc.emits(list[i]))
+	}
+	out := make([]string, len(list))
+	for i, x := range list {
+		if x == nil {
+			out[i] = fc.funcLit(nil, call.Trailing.List, call.Trailing)
+			continue
+		}
+		switch {
+		case i == 0 && addr:
+			out[i] = fc.place(x, later[1])
+		case i == 0 && x == call.Fun:
+			out[i] = fc.value(x)
+		default:
+			out[i] = fc.assigned(x)
+		}
+		if later[i+1] && !fc.isConst(x) {
+			out[i] = fc.spill(out[i])
+		}
+	}
+	return out
+}
+
+// typeArgs writes a generic call's type-kinded arguments, from the call's
+// Info: the row arguments are erased.
+func (fc *funcCtx) typeArgs(sig *check.Signature, args []check.Type, site syntax.Node) string {
+	var out []string
+	for i, tp := range sig.TParams {
+		if tp.Kind != check.KindType {
+			continue
+		}
+		if i >= len(args) {
+			ice(site, "a generic call with %d type arguments for %d parameters", len(args), len(sig.TParams))
+		}
+		out = append(out, fc.goType(args[i]))
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(out, ", ") + "]"
+}
+
+// envExpr is the current environment, which a call that needs capabilities
+// receives.
+func (fc *funcCtx) envExpr(site syntax.Node) string {
+	if fc.env == "" {
+		ice(site, "a call that needs capabilities where none is bound")
+	}
+	return fc.env
+}
+
+// envArg is the environment a call of a function that takes one receives:
+// the current one, or the shared empty one where none is bound and the call needs nothing at
+// this site (a row parameter instantiated with the empty row).
+func (fc *funcCtx) envArg(site syntax.Node, needs *check.Row) string {
+	if fc.env == "" && len(rowElems(needs)) == 0 {
+		return fc.l.noEnv()
+	}
+	return fc.envExpr(site)
+}
+
+// funcValue lowers a declared function used as a value: a closure of the
+// uniform shape that calls it. A generic function's type arguments come
+// from Go's inference on the closure's typed parameters, so every
+// type-kinded parameter must appear in a parameter type.
+func (fc *funcCtx) funcValue(f *check.Func, t check.Type, site syntax.Node) string {
+	fd := fc.l.useFunc(f, site)
+	sig, ok := t.(*check.Signature)
+	if !ok {
+		ice(site, "the function %s used as a value has no function type", f.Name)
+	}
+	for _, tp := range f.Sig.TParams {
+		if tp.Kind == check.KindType && !paramsMention(f.Sig, tp) {
+			refuse(site, "the generic function %s used as a value has a type parameter %s that no parameter names; its instantiation needs a check-v1 Info fact (lower-v1 request)", f.Name, tp.Name)
+		}
+	}
+	env := fc.scope.alloc("env")
+	params := []string{env + " *" + fc.l.env()}
+	var args []string
+	for _, p := range sig.Params {
+		name := fc.scope.alloc("p")
+		params = append(params, name+" "+fc.goType(p.Type))
+		args = append(args, name)
+	}
+	var head string
+	if fd.method != nil {
+		head, args = args[0]+"."+fd.name, args[1:]
+	} else {
+		head = fd.name
+	}
+	if fd.env {
+		args = append([]string{env}, args...)
+	}
+	call := head + "(" + strings.Join(args, ", ") + ")"
+	var result check.Type
+	if len(sig.Results) == 1 {
+		result = sig.Results[0]
+	}
+	ind := strings.Repeat("\t", fc.depth+1)
+	var body string
+	switch {
+	case fd.fallible:
+		body = ind + "return " + call + "\n"
+	case result != nil:
+		body = ind + "return " + call + ", nil\n"
+	default:
+		body = ind + call + "\n" + ind + "return nil\n"
+	}
+	return "func(" + strings.Join(params, ", ") + ")" + fc.resultList(result, true) + " {\n" + body + strings.Repeat("\t", fc.depth) + "}"
+}
+
+// paramsMention reports whether a parameter type of sig names tp.
+func paramsMention(sig *check.Signature, tp *check.TypeParam) bool {
+	var mentions func(t check.Type) bool
+	mentions = func(t check.Type) bool {
+		switch t := t.(type) {
+		case *check.TypeParam:
+			return t == tp
+		case *check.Named:
+			for _, a := range t.TArgs {
+				if mentions(a) {
+					return true
+				}
+			}
+		case *check.Slice:
+			return mentions(t.Elem)
+		case *check.Map:
+			return mentions(t.Key) || mentions(t.Elem)
+		case *check.Pointer:
+			return mentions(t.Elem)
+		case *check.Signature:
+			for _, p := range t.Params {
+				if mentions(p.Type) {
+					return true
+				}
+			}
+			for _, r := range t.Results {
+				if mentions(r) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	for _, p := range sig.Params {
+		if mentions(p.Type) {
+			return true
+		}
+	}
+	return false
+}
+
+// with lowers with W { block } (rows.md, With): a Go block that copies the
+// environment, builds the wire's providers into the copy and runs the block
+// against it, with no closure (With 8). The block's tail is the with's
+// value, and its untried failure the with's.
+func (fc *funcCtx) with(x *syntax.CallExpr) operand {
+	w := fc.l.info.Withs[x]
+	if w == nil {
+		ice(x, "a with with no Withs entry")
+	}
+	if len(x.Args) != 1 || x.Trailing == nil {
+		ice(x, "a with without one wire and a block")
+	}
+	if len(w.Wires) == 0 {
+		if _, inline := unparen(x.Args[0]).(*syntax.WireLit); inline {
+			refuse(x.Args[0], "an inline wire value is lowered after check-v1 stage E (196x)")
+		}
+		refuse(x.Args[0], "a with of an imported wire is lowered after check-v1 stage B supplies its wire (check-v1 r5b m2)")
+	}
+	list := x.Trailing.List
+	var tail *syntax.ExprStmt
+	if len(list) > 0 {
+		if last, ok := list[len(list)-1].(*syntax.ExprStmt); ok {
+			if _, isTail := fc.l.info.Tails[last]; isTail {
+				tail = last
+			}
+		}
+	}
+	var res operand
+	valued := !fc.noValue(x) && tail != nil
+	if valued {
+		res.val = fc.temp("v")
+		fc.line("var " + res.val + " " + fc.goType(fc.typeOf(x)))
+	}
+	fallible := tail != nil && fc.fallibleExpr(tail.X)
+	if fallible {
+		res.err = fc.temp("err")
+		fc.line("var " + res.err + " error")
+	}
+	build := fc.l.wireBuilder(w.Wires[0], x)
+	env := fc.temp("env")
+	fc.line("{")
+	fc.depth++
+	if fc.env != "" {
+		fc.line(env + " := *" + fc.env)
+	} else {
+		fc.line(env + " := " + fc.l.env() + "{}")
+	}
+	fc.line(build + "(&" + env + ")")
+	saved := fc.env
+	fc.env = "(&" + env + ")"
+	if tail == nil {
+		fc.stmts(list)
+	} else {
+		fc.stmts(list[:len(list)-1])
+		fc.at(tail)
+		switch {
+		case fallible:
+			o := fc.expr(tail.X)
+			if res.val != "" {
+				fc.line(res.val + ", " + res.err + " = " + fc.convertAt(tail.X, o.val) + ", " + o.err)
+			} else {
+				fc.line(res.err + " = " + o.err)
+			}
+		case valued:
+			fc.line(res.val + " = " + fc.assigned(tail.X))
+		default:
+			fc.discard(tail.X)
+		}
+	}
+	fc.env = saved
+	fc.depth--
+	fc.line("}")
+	return res
+}
+
+// wireBuilder is the Go function that builds a named wire's providers into
+// an environment (rows.md, Wire 4: its own function, so its providers do not
+// see the caller's locals). It builds each provider entry that still binds a
+// capability once replace and embedding are resolved (Wire.Provider), once
+// per build, so a shared entry is one value under each of its keys and an
+// overridden provider never runs (Wire 7). An entry whose provider uses a
+// capability of this wire is built after that capability's entry.
+func (l *lowerer) wireBuilder(w *check.Wire, site syntax.Node) string {
+	if name, ok := l.wires[w]; ok {
+		return name
+	}
+	name := l.pkgName(pkgKey{"wire", w}, "build"+w.Name)
+	l.wires[w] = name
+	l.pending = append(l.pending, func() { l.emitWire(w, name, site) })
+	return name
+}
+
+// wire lowers a named wire declaration: its builder.
+func (l *lowerer) wire(w *check.Wire, site syntax.Node) {
+	l.wireBuilder(w, site)
+}
+
+func (l *lowerer) emitWire(w *check.Wire, name string, site syntax.Node) {
+	if w.Decl == nil || l.isImported(w) {
+		refuse(site, "a with of an imported wire is lowered after check-v1 stage B supplies its wire (check-v1 r5b m2)")
+	}
+	if w.Decl.Provides != nil || w.Decl.Needs != nil {
+		refuse(w.Decl, "a wire header is checked by #196 stage b")
+	}
+	// The entries, in source order through embeddings, each once.
+	var entries []*check.WireEntry
+	seen := map[*check.WireEntry]bool{}
+	visited := map[*check.Wire]bool{}
+	var walk func(w *check.Wire)
+	walk = func(v *check.Wire) {
+		if visited[v] {
+			return
+		}
+		visited[v] = true
+		if v.Decl == nil || l.isImported(v) {
+			refuse(site, "an embedded imported wire is lowered after check-v1 stage B")
+		}
+		for _, e := range v.Entries {
+			if e.Embedded != nil {
+				walk(e.Embedded)
+				continue
+			}
+			if !seen[e] {
+				seen[e] = true
+				entries = append(entries, e)
+			}
+		}
+	}
+	walk(w)
+	type build struct {
+		entry *check.WireEntry
+		caps  []int // indexes into entry.Caps it still binds
+		needs map[*check.TypeName]bool
+	}
+	bound := map[*check.TypeName]bool{}
+	var builds []*build
+	for _, e := range entries {
+		b := &build{entry: e}
+		for i, cap := range e.Caps {
+			if w.Provider(cap) == e {
+				b.caps = append(b.caps, i)
+				if n, ok := cap.(*check.Named); ok {
+					bound[n.Obj] = true
+				}
+			}
+		}
+		if len(b.caps) > 0 {
+			builds = append(builds, b)
+		}
+	}
+	for _, b := range builds {
+		b.needs = l.providerNeeds(b.entry.Provider)
+	}
+	fc := newFuncCtx(l, newNamer(l.names), true)
+	fc.frame = &frame{}
+	fc.depth = 1
+	fc.env = fc.scope.alloc("env")
+	built := map[*check.TypeName]bool{}
+	done := make([]bool, len(builds))
+	for range builds {
+		next := -1
+		for i, b := range builds {
+			if done[i] {
+				continue
+			}
+			ready := true
+			for cap := range b.needs {
+				if bound[cap] && !built[cap] {
+					ready = false
+					break
+				}
+			}
+			if ready {
+				next = i
+				break
+			}
+		}
+		if next < 0 {
+			ice(w.Decl, "the wire %s has a provider cycle the checker did not report", w.Name)
+		}
+		done[next] = true
+		b := builds[next]
+		fc.at(b.entry.Provider)
+		val := fc.value(b.entry.Provider)
+		if len(b.caps) > 1 {
+			val = fc.spill(val)
+		}
+		for _, i := range b.caps {
+			cap, ok := b.entry.Caps[i].(*check.Named)
+			if !ok {
+				ice(b.entry.Provider, "a wire key that is not a named capability")
+			}
+			conv := check.Conversion{}
+			if i < len(b.entry.Conversions) {
+				conv = b.entry.Conversions[i]
+			}
+			fc.line(fc.env + "." + l.envField(cap.Obj) + " = " + fc.convert(conv, val, b.entry.Provider))
+			built[cap.Obj] = true
+		}
+	}
+	l.user.WriteString(l.directive(w.Decl.Pos()))
+	l.user.WriteString("func " + name + "(" + fc.env + " *" + l.env() + ") {\n" + fc.out.String() + "}\n\n")
+}
+
+// isImported reports a wire declared outside the user package.
+func (l *lowerer) isImported(w *check.Wire) bool {
+	for _, d := range l.file.Decls {
+		if d == syntax.Decl(w.Decl) {
+			return false
+		}
+	}
+	return true
+}
+
+// providerNeeds are the capabilities a provider expression charges where it
+// is evaluated: the needs of its calls and its capability operations, not
+// those inside a function literal, which charge their caller.
+func (l *lowerer) providerNeeds(x syntax.Expr) map[*check.TypeName]bool {
+	needs := map[*check.TypeName]bool{}
+	syntax.Inspect(x, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncLit:
+			return false
+		case *syntax.CallExpr:
+			c := l.info.Calls[n]
+			if c == nil {
+				return true
+			}
+			for _, t := range rowElems(c.Needs) {
+				if named, ok := t.(*check.Named); ok {
+					needs[named.Obj] = true
+				}
+			}
+			if c.Kind == check.CallProviderOp {
+				if sel, ok := unparen(n.Fun).(*syntax.SelectorExpr); ok {
+					if named, ok := l.info.Types[sel.X].(*check.Named); ok {
+						needs[named.Obj] = true
+					}
+				}
+			}
+		}
+		return true
+	})
+	return needs
+}
+
+// operations converts val to the operation type of an operations
+// conversion (Info.Implicit, Wire entries). When the source is a
+// non-generic record whose table functions are all its Go methods, with the
+// operation's exact Go signatures, the value is already the interface's;
+// otherwise an adapter struct calls the table's functions.
+func (l *lowerer) operations(conv check.Conversion, val string, site syntax.Node) string {
+	from, ok := conv.From.(*check.Named)
+	to, ok2 := conv.To.(*check.Named)
+	if !ok || !ok2 {
+		refuse(site, "an operations conversion from %s to %s is not lowered yet", conv.From, conv.To)
+	}
+	toDecl := l.typeDecl(to.Obj, site)
+	if toDecl.kind != kindOps {
+		ice(site, "an operations conversion to %s, which is not an operation type", conv.To)
+	}
+	tc := &typeCtx{l: l, params: map[*check.TypeParam]string{}, site: site}
+	if mentionsTypeParam(conv.From) || mentionsTypeParam(conv.To) {
+		refuse(site, "an operations conversion inside a generic function is not lowered yet")
+	}
+	fromGo := tc.goType(conv.From)
+	tc.goType(conv.To) // the adapter implements it: the type is emitted
+	direct := from.Orig == nil
+	for _, op := range toDecl.ops {
+		f := conv.Table[op.Name]
+		if f == nil {
+			ice(site, "the operations conversion to %s has no function for %s", conv.To, op.Name)
+		}
+		fd := l.useFunc(f, site)
+		if fd.env {
+			ice(site, "the provider function %s needs capabilities", f.Name)
+		}
+		if fd.method == nil || fd.method.tn != from.Obj || fd.ptr || fd.name != memberName(op.Name) || tc.funcMethodSig(f) != tc.methodSig(op.Sig) {
+			direct = false
+		}
+	}
+	if direct {
+		return val
+	}
+	key := adapterKey(conv)
+	name, ok := l.adapters[key]
+	if !ok {
+		name = l.pkgName(pkgKey{"adapter", key}, "ops"+from.Obj.Name+"As"+to.Obj.Name)
+		l.adapters[key] = name
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("// %s provides %s through the functions of %s (an operations conversion).\n", name, conv.To, conv.From))
+		b.WriteString("type " + name + " struct{ v " + fromGo + " }\n\n")
+		for _, op := range toDecl.ops {
+			f := conv.Table[op.Name]
+			fd := l.funcDecl(f)
+			locals := newNamer(l.names) // so no local hides the function it calls
+			self := locals.alloc("a")
+			var params, args []string
+			for _, p := range op.Sig.Params {
+				n := locals.alloc("p")
+				params = append(params, n+" "+tc.goType(p.Type))
+				args = append(args, n)
+			}
+			recv := self + ".v"
+			if fd.ptr {
+				recv = "&" + recv
+			}
+			var call string
+			if fd.method != nil {
+				call = "(" + recv + ")." + fd.name + "(" + strings.Join(args, ", ") + ")"
+			} else {
+				call = fd.name + "(" + strings.Join(append([]string{recv}, args...), ", ") + ")"
+			}
+			var result check.Type
+			if len(op.Sig.Results) == 1 {
+				result = op.Sig.Results[0]
+			}
+			opFallible := len(rowElems(op.Sig.Errors)) > 0
+			b.WriteString("func (" + self + " *" + name + ") " + memberName(op.Name) + "(" + strings.Join(params, ", ") + ")" + tc.resultList(result, opFallible) + " {\n")
+			switch {
+			case fd.fallible == opFallible && (result != nil || opFallible):
+				b.WriteString("\treturn " + call + "\n")
+			case result != nil && opFallible:
+				b.WriteString("\treturn " + call + ", nil\n")
+			case opFallible:
+				b.WriteString("\t" + call + "\n\treturn nil\n")
+			case fd.fallible:
+				ice(site, "the provider function %s fails and the operation %s cannot", f.Name, op.Name)
+			default:
+				b.WriteString("\t" + call + "\n")
+			}
+			b.WriteString("}\n\n")
+		}
+		l.gen.WriteString(b.String())
+	}
+	return "&" + name + "{v: " + val + "}"
+}
+
+// funcMethodSig is the Go method signature f has as a method: its
+// parameters after the first.
+func (tc *typeCtx) funcMethodSig(f *check.Func) string {
+	s := *f.Sig
+	s.Params = s.Params[1:]
+	return tc.methodSig(&s)
+}
+
+// mentionsTypeParam reports a type that names a type parameter.
+func mentionsTypeParam(t check.Type) bool {
+	switch t := t.(type) {
+	case *check.TypeParam:
+		return true
+	case *check.Named:
+		for _, a := range t.TArgs {
+			if mentionsTypeParam(a) {
+				return true
+			}
+		}
+	case *check.Slice:
+		return mentionsTypeParam(t.Elem)
+	case *check.Map:
+		return mentionsTypeParam(t.Key) || mentionsTypeParam(t.Elem)
+	case *check.Pointer:
+		return mentionsTypeParam(t.Elem)
+	}
+	return false
+}
+
+func isString(t check.Type) bool {
+	b, ok := t.(*check.Basic)
+	return ok && b.Kind == check.String
+}

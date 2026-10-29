@@ -1,0 +1,205 @@
+package lower
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+
+	"ergo.local/prototype/internal/sketch/check"
+	"ergo.local/prototype/internal/sketch/syntax"
+)
+
+// The test harness: check a source with the real checker, lower it, and
+// build many lowered programs as packages of one Go module, so one go
+// command compiles, vets and links them all.
+
+// testSourcePath is the admitted path the tests' //line directives name.
+const testSourcePath = "/ergo-test/main.ergo"
+
+// lowered is one source's outcome.
+type lowered struct {
+	name     string
+	src      string
+	file     *syntax.File
+	pkg      *check.Package
+	diags    []check.Diagnostic
+	files    []File
+	refused  []Refusal
+	err      error // a lowering error other than a refusal
+	panicked any
+}
+
+// lowerSource parses, checks and lowers src. Without entry, a program with
+// no runnable main still lowers, with an empty Go main, so every
+// declaration of a library-shaped fixture is lowered and compiled.
+func lowerSource(name, src string, entry bool) *lowered {
+	out := &lowered{name: name, src: src}
+	file, err := syntax.Parse(src)
+	if err != nil {
+		out.err = err
+		return out
+	}
+	out.file = file
+	out.pkg, out.diags = check.Check("main", []*syntax.File{file}, nil)
+	if len(out.diags) > 0 {
+		return out
+	}
+	func() {
+		defer func() { out.panicked = recover() }()
+		u := Unit{Package: out.pkg, Files: []*syntax.File{file}, Sources: []Source{{Path: testSourcePath, Text: src}}}
+		code, err := lowerPackage(u, !entry)
+		var refused *Refused
+		switch {
+		case errors.As(err, &refused):
+			out.refused = refused.Refusals
+		case err != nil:
+			out.err = err
+		default:
+			out.files = []File{{Path: "go.mod", Data: []byte(goMod)}, {Path: "main.go", Data: code}}
+		}
+	}()
+	return out
+}
+
+// mainGo is the lowered main.go.
+func (o *lowered) mainGo() string {
+	for _, f := range o.files {
+		if f.Path == "main.go" {
+			return string(f.Data)
+		}
+	}
+	return ""
+}
+
+// buildAll writes each program as package p/NAME of one module and runs go
+// vet and go build on them all. It returns each program's executable when
+// link is set. A program that does not compile or vet fails the test with
+// its Go diagnostics and its source.
+func buildAll(t *testing.T, programs []*lowered, link bool) map[string]string {
+	t.Helper()
+	if len(programs) == 0 {
+		return nil
+	}
+	root := t.TempDir()
+	write := func(rel string, data []byte) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", []byte(goMod))
+	for _, f := range Runtime() {
+		write(f.Path, f.Data)
+	}
+	byPkg := map[string]*lowered{}
+	for _, p := range programs {
+		write("p/"+p.name+"/main.go", []byte(p.mainGo()))
+		byPkg[p.name] = p
+	}
+	run := func(args ...string) (string, bool) {
+		cmd := exec.Command("go", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GOWORK=off", "GOPROXY=off")
+		var out bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &out
+		err := cmd.Run()
+		return out.String(), err == nil
+	}
+	report := func(what, output string) {
+		pkgs := map[string]bool{}
+		for _, m := range regexp.MustCompile(`(?m)^# ergo\.local/program/p/(\S+)`).FindAllStringSubmatch(output, -1) {
+			pkgs[m[1]] = true
+		}
+		for _, m := range regexp.MustCompile(`(?m)p/([^/\s]+)/main\.go`).FindAllStringSubmatch(output, -1) {
+			pkgs[m[1]] = true
+		}
+		var names []string
+		for n := range pkgs {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		t.Errorf("go %s failed for %v:\n%s", what, names, firstLines(output, 60))
+		for i, n := range names {
+			if p := byPkg[n]; p != nil && i < 3 {
+				t.Logf("source of %s:\n%s\nGo:\n%s", n, p.src, p.mainGo())
+			}
+		}
+	}
+	if out, ok := run("vet", "./p/..."); !ok {
+		report("vet", out)
+		return nil
+	}
+	if !link {
+		if out, ok := run("build", "./p/..."); !ok {
+			report("build", out)
+		}
+		return nil
+	}
+	bin := filepath.Join(root, "bin")
+	if out, ok := run("build", "-o", bin+string(filepath.Separator), "./p/..."); !ok {
+		report("build", out)
+		return nil
+	}
+	exes := map[string]string{}
+	for _, p := range programs {
+		exe := filepath.Join(bin, p.name)
+		if _, err := os.Stat(exe + ".exe"); err == nil {
+			exe += ".exe"
+		}
+		exes[p.name] = exe
+	}
+	return exes
+}
+
+// runExe runs a built program and returns its stdout, stderr and exit
+// code.
+func runExe(t *testing.T, exe string) (string, string, int) {
+	t.Helper()
+	cmd := exec.Command(exe)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	code := 0
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		code = exit.ExitCode()
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	return stdout.String(), stderr.String(), code
+}
+
+func firstLines(s string, n int) string {
+	lines := strings.SplitN(s, "\n", n+1)
+	if len(lines) > n {
+		lines = append(lines[:n], fmt.Sprintf("… (%d more bytes)", len(s)-len(strings.Join(lines[:n], "\n"))))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// mustLower lowers a source that must lower, with its entry.
+func mustLower(t *testing.T, name, src string) *lowered {
+	t.Helper()
+	o := lowerSource(name, src, true)
+	switch {
+	case o.err != nil:
+		t.Fatalf("%s: %v\n%s", name, o.err, src)
+	case len(o.diags) > 0:
+		t.Fatalf("%s: checker diagnostics %v\n%s", name, o.diags, src)
+	case o.panicked != nil:
+		t.Fatalf("%s: lowering panicked: %v\n%s", name, o.panicked, src)
+	case len(o.refused) > 0:
+		t.Fatalf("%s: refused %+v\n%s", name, o.refused, src)
+	}
+	return o
+}
