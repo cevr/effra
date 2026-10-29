@@ -72,7 +72,9 @@ func (c *checker) callOf(x *syntax.CallExpr, hint Type) operand {
 		return c.callSig(x, fun.typ.(*Signature), fun)
 	case modeGeneric:
 		return c.callGeneric(x, fun.typ.(*Signature), nil, fun)
-	case modeValue:
+	case modeValue, modeConst:
+		// A constant is a value too: `1()` and `K()` are S108, never an
+		// unchecked call (FuzzCheck, round 1b).
 		c.handled(&fun)
 		sig, ok := under(fun.typ).(*Signature)
 		if !ok {

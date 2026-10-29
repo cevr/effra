@@ -235,6 +235,18 @@ func f() {
 	let v float64 = 1 << n
 	return v
 }`, 2, "write int(1) << n"},
+	// A constant is not a function: calling one is S108, never an
+	// unchecked call (FuzzCheck found `""()` accepted at the base).
+	{"a literal is not called", `func f() string {
+	return ""()
+}`, 2, "cannot call this expression, a value of type string"},
+	{"a parenthesized literal is not called", `func f() int {
+	return (1)()
+}`, 2, "cannot call this expression, a value of type int"},
+	{"a named constant is not called", `let K = 1
+func f() int {
+	return K()
+}`, 3, "cannot call K, a value of type int"},
 }
 
 // TestLiteralRules (196u rules 1, 3, 4 and 6; spec D-A3): each refusal is
