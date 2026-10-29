@@ -131,7 +131,7 @@ let local = with wire { Orders: MemoryOrders{} } { report(id) }
    ```go
    with wire { Store: Holder{Value: "outer"} } {
    	with wire { Store: Holder{Value: "inner"}, Box: Holder{Value: read()} } {
-   		Console.Println(Box.Get(), Store.Get()) // read() saw the outer Store
+   		Console.Println("\(Box.Get()) \(Store.Get())") // read() saw the outer Store
    	}
    }
    ```
