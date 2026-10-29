@@ -1,7 +1,7 @@
 package build
 
 import (
-	"slices"
+	"strings"
 	"testing"
 )
 
@@ -9,8 +9,11 @@ import (
 // HOME, XDG_CONFIG_HOME, GOENV, AppData and GOTOOLCHAIN through unchanged,
 // so the go command reads the user's own go env file and keeps its
 // telemetry and other state where the user's go command does (the
-// telemetry directory follows os.UserConfigDir and cannot be set). Only
-// GOWORK, GOOS, GOARCH and GOFLAGS are the action's own.
+// telemetry directory follows os.UserConfigDir; GOTELEMETRYDIR cannot be
+// set, and TEST_TELEMETRY_DIR is an undocumented test hook). Only GOWORK,
+// GOOS, GOARCH and GOFLAGS are the action's own. Each variable has exactly
+// one entry, so the value the go command reads (os/exec keeps the last of
+// duplicates) is the user's or the action's, never a second one.
 func TestCommandKeepsTheUsersGoConfig(t *testing.T) {
 	user := map[string]string{
 		"HOME": "/users/me", "XDG_CONFIG_HOME": "/users/me/config", "GOENV": "/users/me/config/go/env",
@@ -19,14 +22,24 @@ func TestCommandKeepsTheUsersGoConfig(t *testing.T) {
 	for name, value := range user {
 		t.Setenv(name, value)
 	}
+	// The action's own variables replace the user's, once each (o1).
 	t.Setenv("GOWORK", "/somewhere/go.work")
-	command := Toolchain{Go: "go", GOOS: "linux"}.Command(Module{Dir: "/cache/modules/key"}, "/out/app")
-	for name, value := range user {
-		if !slices.Contains(command.Env, name+"="+value) {
-			t.Errorf("the action dropped or changed %s=%s", name, value)
-		}
+	t.Setenv("GOOS", "plan9")
+	t.Setenv("GOARCH", "mips")
+	t.Setenv("GOFLAGS", "-race")
+	command := Toolchain{Go: "go", GOOS: "linux", GOARCH: "arm64", GOFLAGS: "-trimpath"}.Command(Module{Dir: "/cache/modules/key"}, "/out/app")
+	entries := map[string][]string{}
+	for _, kv := range command.Env {
+		name, value, _ := strings.Cut(kv, "=")
+		entries[name] = append(entries[name], value)
 	}
-	if !slices.Contains(command.Env, "GOWORK=off") || slices.Contains(command.Env, "GOWORK=/somewhere/go.work") || !slices.Contains(command.Env, "GOOS=linux") {
-		t.Errorf("the action's own variables are wrong: %v", command.Env)
+	want := map[string]string{"GOWORK": "off", "GOOS": "linux", "GOARCH": "arm64", "GOFLAGS": "-trimpath"}
+	for name, value := range user {
+		want[name] = value
+	}
+	for name, value := range want {
+		if got := entries[name]; len(got) != 1 || got[0] != value {
+			t.Errorf("the action's environment has %s = %q; want exactly one entry, %q", name, got, value)
+		}
 	}
 }
