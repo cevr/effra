@@ -97,11 +97,12 @@ func (s *capSet) height() int {
 	return int(height(s.root))
 }
 
-// A wireMeter counts the wire summaries' work against the package's
-// budget. step reports whether n more units fit and counts them; once a
-// step does not fit, out is set and every later step fails, so no work is
-// done past the budget. An allowance (finishBody) is a meter whose whole
-// limit its parent was charged in advance.
+// A wireMeter counts the wire pass's repeatable work against the
+// package's budget (D16 as amended in round 20: wiresum.go). step reports
+// whether n more units fit and counts them; once a step does not fit, out
+// is set and every later step fails, so no repeatable work is done past
+// the budget. An allowance (finishBody) is a meter whose whole limit its
+// parent was charged in advance.
 type wireMeter struct {
 	used, limit int
 	out         bool
@@ -117,14 +118,27 @@ func (m *wireMeter) step(n int) bool {
 	return true
 }
 
-// wireWork, set only by tests, is called at each unit of wire-summary work
-// as it is done, apart from the meter's charges, so a test can count the
-// work independently and check that every unit was charged first.
-var wireWork func(m *wireMeter)
+// The two classes of the wire pass's work (round 20). Repeatable work can
+// run more often than a fixed multiple of the wire source it reads (set
+// nodes, union elements, probes against a summary, a sort): the meter
+// charges it before it runs. Single-pass work reads each wire node a
+// fixed number of times (an entry, a key, an embedding, a graph step, a
+// component member, a root): wireSinglePerUnit bounds it, uncharged.
+const (
+	repeatable = true
+	singlePass = false
+)
 
-func work(m *wireMeter) {
-	if wireWork != nil {
-		wireWork(m)
+// wireOp, set only by tests, is called at each data operation of the wire
+// pass as it is done: a set node read, made or copied, a sort comparison
+// or move, an entry, key or embedding read, a graph step, a probe. kind
+// names it and repeat gives its class. The calls sit at the data, not at
+// the meter's charges, so a test counts each class apart from the meter.
+var wireOp func(m *wireMeter, kind string, repeat bool, n int)
+
+func op(m *wireMeter, kind string, repeat bool, n int) {
+	if wireOp != nil {
+		wireOp(m, kind, repeat, n)
 	}
 }
 
@@ -165,7 +179,7 @@ func (s *capSet) lookup(m *wireMeter, k capKey) (found, ok bool) {
 		if !m.step(1) {
 			return false, false
 		}
-		work(m)
+		op(m, "lookup node", repeatable, 1)
 		switch c := k.compare(n.key); {
 		case c < 0:
 			n = n.left
@@ -207,13 +221,13 @@ func capInsert(m *wireMeter, n *capNode, k capKey, t Type, pri uint32) (out *cap
 		if !m.step(1) {
 			return nil, false, false
 		}
-		work(m)
+		op(m, "node made", repeatable, 1)
 		return &capNode{key: k, t: t, pri: pri, h: 1}, true, true
 	}
 	if !m.step(1) {
 		return n, false, false
 	}
-	work(m)
+	op(m, "insert node", repeatable, 1)
 	cmp := k.compare(n.key)
 	if cmp == 0 {
 		return n, false, true
@@ -230,7 +244,7 @@ func capInsert(m *wireMeter, n *capNode, k capKey, t Type, pri uint32) (out *cap
 	if !m.step(1) {
 		return n, false, false
 	}
-	work(m)
+	op(m, "node copied", repeatable, 1)
 	c := *n
 	if cmp < 0 {
 		c.left = child
@@ -266,7 +280,7 @@ func (s *capSet) each(m *wireMeter, f func(k capKey, t Type) bool) bool {
 			if !m.step(1) {
 				return false
 			}
-			work(m)
+			op(m, "each node", repeatable, 1)
 			if !walk(n.left) {
 				return false
 			}
@@ -282,6 +296,8 @@ func (s *capSet) each(m *wireMeter, f func(k capKey, t Type) bool) bool {
 
 // capUnion returns the union of sets, adding the elements of all but the
 // largest to the largest: each union costs its smaller sides, counted.
+// Reading the sets is single-pass work: a component's sets are its
+// members and its successors, each read once.
 // The plan depends on the sizes and the order of sets alone, the first of
 // two equal sizes being kept, and every caller passes sets in an order
 // fixed by the wires' names and entries (wiresum.go), so the charged work
@@ -290,10 +306,7 @@ func (s *capSet) each(m *wireMeter, f func(k capKey, t Type) bool) bool {
 func capUnion(m *wireMeter, sets []*capSet) (out *capSet, ok bool) {
 	largest := -1
 	for i, s := range sets {
-		if !m.step(1) {
-			return nil, false
-		}
-		work(m)
+		op(m, "union set read", singlePass, 1)
 		if s != nil && s.size > 0 && (largest < 0 || s.size > sets[largest].size) {
 			largest = i
 		}
@@ -343,12 +356,12 @@ func mergeSort[T any](m *wireMeter, xs, buf []T, less func(a, b T) bool) {
 	mergeSort(m, xs[:mid], buf[:mid], less)
 	mergeSort(m, xs[mid:], buf[mid:], less)
 	for i := range xs {
-		work(m)
+		op(m, "sort move", repeatable, 1)
 		buf[i] = xs[i]
 	}
 	i, j := 0, mid
 	for k := range xs {
-		work(m) // the move
+		op(m, "sort move", repeatable, 1)
 		switch {
 		case i == mid:
 			xs[k] = buf[j]
@@ -357,7 +370,7 @@ func mergeSort[T any](m *wireMeter, xs, buf []T, less func(a, b T) bool) {
 			xs[k] = buf[i]
 			i++
 		default:
-			work(m) // the comparison
+			op(m, "sort comparison", repeatable, 1)
 			if less(buf[j], buf[i]) {
 				xs[k] = buf[j]
 				j++

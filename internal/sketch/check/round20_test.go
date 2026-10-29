@@ -3,37 +3,102 @@ package check
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
 	"ergo.local/prototype/internal/sketch/syntax"
 )
 
-// A workCount counts the wire summaries' work through the wireWork hook,
-// apart from the production meter: each unit as it is done, per meter and
-// per root meter (an allowance's work counts toward its parent too). A unit
-// done before the meter charged it is recorded in early (round 19 M1).
-type workCount struct {
-	mu    sync.Mutex
-	done  map[*wireMeter]int
-	early []string
+// An opCount counts the wire pass's data operations through wireOp, apart
+// from the meter: each operation where it touches the data, by class
+// (repeatable or single-pass) and by kind, per meter and per root meter
+// (an allowance's operations count toward its parent too). A repeatable
+// operation done while its meter had charged less is recorded in early
+// (round 20: the two-part bound).
+type opCount struct {
+	mu             sync.Mutex
+	repeat, single map[*wireMeter]int
+	kinds          map[string]int
+	early          []string
 }
 
-func countWork(t *testing.T) *workCount {
+func countOps(t *testing.T) *opCount {
 	t.Helper()
-	wc := &workCount{done: map[*wireMeter]int{}}
-	wireWork = func(m *wireMeter) {
-		wc.mu.Lock()
-		defer wc.mu.Unlock()
+	oc := &opCount{repeat: map[*wireMeter]int{}, single: map[*wireMeter]int{}, kinds: map[string]int{}}
+	wireOp = func(m *wireMeter, kind string, repeat bool, n int) {
+		oc.mu.Lock()
+		defer oc.mu.Unlock()
+		oc.kinds[kind] += n
 		for r := m; r != nil; r = r.parent {
-			wc.done[r]++
-			if wc.done[r] > r.used && len(wc.early) < 5 {
-				wc.early = append(wc.early, fmt.Sprintf("unit %d done with %d of %d charged", wc.done[r], r.used, r.limit))
+			if !repeat {
+				oc.single[r] += n
+				continue
+			}
+			oc.repeat[r] += n
+			if oc.repeat[r] > r.used && len(oc.early) < 5 {
+				oc.early = append(oc.early, fmt.Sprintf("%s: %d repeatable operations with %d of %d charged", kind, oc.repeat[r], r.used, r.limit))
 			}
 		}
 	}
-	t.Cleanup(func() { wireWork = nil })
-	return wc
+	t.Cleanup(func() { wireOp = nil })
+	return oc
+}
+
+// wireNodes counts the wire source of src, independently of wireSource:
+// every wire declaration and literal, every entry, for an entry that is
+// not an embedding one more and one per key, every name of a needs row,
+// and one.
+func wireNodes(t *testing.T, src string) int {
+	t.Helper()
+	file, err := syntax.Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 1
+	syntax.Inspect(file, func(x syntax.Node) bool {
+		switch x := x.(type) {
+		case *syntax.WireDecl, *syntax.WireLit:
+			n++
+		case *syntax.WireEntry:
+			n++
+			if x.Kind != syntax.WireEmbed {
+				n += 1 + len(x.Keys)
+			}
+		case *syntax.NeedsClause:
+			n += len(x.Names)
+		}
+		return true
+	})
+	return n
+}
+
+// bounded checks the two-part bound of one check of src: its repeatable
+// operations at most what the meter charged, each before it ran; its
+// single-pass operations at most wireSinglePerUnit per wire node; so all
+// its operations at most the charge plus that; and every body finished
+// at most once.
+func (oc *opCount) bounded(t *testing.T, what, src string, c *checker) {
+	t.Helper()
+	m := c.wires
+	nodes := wireNodes(t, src)
+	if c.wireLimit == nil && m.limit != wireBudgetPerUnit*nodes {
+		t.Errorf("%s: budget %d, want %d × %d wire nodes", what, m.limit, wireBudgetPerUnit, nodes)
+	}
+	if oc.repeat[m] > m.used || len(oc.early) > 0 {
+		t.Errorf("%s: %d repeatable operations, %d charged (%v)", what, oc.repeat[m], m.used, oc.early)
+	}
+	if oc.single[m] > wireSinglePerUnit*nodes {
+		t.Errorf("%s: %d single-pass operations for %d wire nodes, more than %d each", what, oc.single[m], nodes, wireSinglePerUnit)
+	}
+	if oc.repeat[m]+oc.single[m] > m.used+wireSinglePerUnit*nodes {
+		t.Errorf("%s: %d operations, more than %d charged and %d × %d nodes", what, oc.repeat[m]+oc.single[m], m.used, wireSinglePerUnit, nodes)
+	}
+	for _, s := range c.wireBodies {
+		if s.finishes > 1 {
+			t.Errorf("%s: a body finished %d times", what, s.finishes)
+		}
+	}
 }
 
 // checkLimited checks src as one package, with its wire budget replaced by
@@ -59,29 +124,26 @@ func allBudget(diags []Diagnostic) bool {
 	return len(diags) > 0
 }
 
-var budgetShapes = []string{"entry chain", "wide fan-in", "large-base chain", "replace diamond", "disjoint", "empty independent", "inline fan-in"}
+var budgetShapes = []string{"entry chain", "wide fan-in", "large-base chain", "replace diamond", "disjoint", "empty independent", "inline fan-in", "multi-key", "inline embeddings"}
 
 // TestWireBudgetPrefixes: for every shape, at every budget from zero to
-// the work the full check charges, no unit of work is done before it is
-// charged, the meter stays within its budget, and the verdict is the full
-// check's at its exact cost and only budget refusals below it: every
-// prefix of the work that ends at a refusal, a zero and a small budget
-// among them.
+// the work the full check charges, the two-part bound holds (bounded),
+// the meter stays within its budget, and the verdict is the full check's
+// at its exact cost and only budget refusals below it: every prefix of the
+// work that ends at a refusal, a zero and a small budget among them.
 func TestWireBudgetPrefixes(t *testing.T) {
-	wc := countWork(t)
+	oc := countOps(t)
 	for _, shape := range budgetShapes {
 		src := wireFamily(shape, 4)
 		full, c := checkLimited(t, src, nil)
 		cost := c.wires.used
-		if wc.done[c.wires] > cost {
-			t.Fatalf("%s: %d units done, %d charged", shape, wc.done[c.wires], cost)
-		}
+		oc.bounded(t, shape, src, c)
 		for limit := 0; limit <= cost; limit++ {
 			diags, c := checkLimited(t, src, func(int) int { return limit })
-			m := c.wires
-			if m.used > limit || wc.done[m] > m.used {
-				t.Fatalf("%s at %d: %d charged, %d done", shape, limit, m.used, wc.done[m])
+			if c.wires.used > limit {
+				t.Fatalf("%s at %d: %d charged", shape, limit, c.wires.used)
 			}
+			oc.bounded(t, fmt.Sprintf("%s at %d", shape, limit), src, c)
 			switch {
 			case limit == cost:
 				if fmt.Sprint(diags) != fmt.Sprint(full) {
@@ -93,8 +155,77 @@ func TestWireBudgetPrefixes(t *testing.T) {
 		}
 		t.Logf("%s n=4: %d steps, %d budgets checked", shape, cost, cost+1)
 	}
-	if len(wc.early) > 0 {
-		t.Errorf("work done before it was charged: %v", wc.early)
+}
+
+// TestWireSinglePass: single-pass work stays within wireSinglePerUnit per
+// wire node on every shape at sizes 1 to 8000, at the real budget, and the
+// repeatable work within the charge.
+func TestWireSinglePass(t *testing.T) {
+	oc := countOps(t)
+	worst, worstWhat := 0.0, ""
+	for _, shape := range budgetShapes {
+		for _, n := range []int{1, 2, 7, 64, 1000} {
+			src := wireFamily(shape, n)
+			_, c := checkLimited(t, src, nil)
+			what := fmt.Sprintf("%s n=%d", shape, n)
+			oc.bounded(t, what, src, c)
+			if r := float64(oc.single[c.wires]) / float64(wireNodes(t, src)); r > worst {
+				worst, worstWhat = r, what
+			}
+		}
+	}
+	t.Logf("the most single-pass operations per wire node: %.2f (%s), bound %d", worst, worstWhat, wireSinglePerUnit)
+}
+
+// TestWireContractMultiKey (the round-20 reviewer's contract, under the
+// two-part bound): one entry of 1000 and of 8000 keys, at a budget of 3
+// and at the real one, reads its keys once each, uncopied, and charges
+// every set node before it reads it.
+func TestWireContractMultiKey(t *testing.T) {
+	oc := countOps(t)
+	for _, n := range []int{1000, 8000} {
+		src := wireFamily("multi-key", n)
+		for _, limit := range []func(int) int{func(int) int { return 3 }, nil} {
+			diags, c := checkLimited(t, src, limit)
+			oc.bounded(t, fmt.Sprintf("multi-key n=%d", n), src, c)
+			if limit != nil && !allBudget(diags) {
+				t.Errorf("multi-key n=%d at 3: %v", n, diags)
+			}
+			if limit == nil && len(diags) > 0 {
+				t.Errorf("multi-key n=%d: %v", n, diags[0])
+			}
+		}
+	}
+}
+
+// TestWireContractInline (the round-20 reviewer's contract, under the
+// two-part bound): an inline wire of 1 to 8000 empty embeddings and no
+// entry reads each embedding a fixed number of times, finishes once, and
+// its finish does no repeatable work past its allowance.
+func TestWireContractInline(t *testing.T) {
+	oc := countOps(t)
+	for _, n := range []int{1, 4, 1000, 8000} {
+		src := wireFamily("inline embeddings", n)
+		diags, c := checkLimited(t, src, nil)
+		if len(diags) > 0 {
+			t.Fatalf("n=%d: %v", n, diags)
+		}
+		oc.bounded(t, fmt.Sprintf("inline embeddings n=%d", n), src, c)
+		finished := 0
+		for _, s := range c.wireBodies {
+			finished += s.finishes
+		}
+		if finished != 2 { // the named Empty and the inline wire
+			t.Errorf("n=%d: %d bodies finished, want 2", n, finished)
+		}
+		for m, r := range oc.repeat {
+			if m.parent == c.wires && r > m.used {
+				t.Errorf("n=%d: an allowance of %d did %d repeatable operations", n, m.limit, r)
+			}
+		}
+	}
+	if strings.Count(wireFamily("inline embeddings", 3), "\t\tEmpty\n") != 3 {
+		t.Fatal("the family does not write one embedding per line")
 	}
 }
 

@@ -32,7 +32,7 @@ func wireFamily(shape string, n int) string {
 	if shape == "disjoint" || shape == "large-base chain" {
 		caps = 2 * n
 	}
-	if shape == "empty independent" {
+	if shape == "empty independent" || shape == "inline embeddings" {
 		caps = 1
 	}
 	for i := range caps {
@@ -94,6 +94,23 @@ func wireFamily(shape string, n int) string {
 		}
 		b.WriteString("\t\treplace C0 = P{}\n\t}) { C0.M() }\n}\n")
 		return b.String()
+	case "multi-key": // one entry binds n capabilities to one provider (round 20)
+		b.WriteString("wire W {\n\t")
+		for i := range n {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "C%d", i)
+		}
+		b.WriteString(" = P{}\n}\n")
+		last = "W"
+	case "inline embeddings": // an inline wire of n empty embeddings and no entry (round 20)
+		b.WriteString("wire Empty {}\nfunc F() {\n\twith(wire{\n")
+		for range n {
+			b.WriteString("\t\tEmpty\n")
+		}
+		b.WriteString("\t}) {}\n}\n")
+		return b.String()
 	default:
 		panic(shape)
 	}
@@ -101,15 +118,15 @@ func wireFamily(shape string, n int) string {
 	return b.String()
 }
 
-// TestWireBudget: on every embedding shape, the wire summaries' counted
-// work stays within the package's budget, every unit of work counted
-// apart from the meter (countWork) was charged before it was done, and
-// the verdict is the exact one (acceptance) or the
-// one budget S111 (D16 as amended in round 18). The disjoint ladder's
-// answer is quadratic, so it is refused at every size here; the chains and
-// the fan-in are accepted.
+// TestWireBudget: on every embedding shape, the wire pass's repeatable
+// work stays within the package's budget and was charged before it ran,
+// its single-pass work within wireSinglePerUnit per wire node (bounded),
+// and the verdict is the exact one (acceptance) or the one budget S111
+// (D16 as amended in rounds 18 and 20). The disjoint ladder's answer is
+// quadratic, so it is refused at every size here; the other shapes are
+// accepted.
 func TestWireBudget(t *testing.T) {
-	wc := countWork(t)
+	oc := countOps(t)
 	for _, family := range []struct {
 		shape   string
 		sizes   []int
@@ -121,23 +138,25 @@ func TestWireBudget(t *testing.T) {
 		{"replace diamond", []int{1000, 4000, 8000}, false},
 		{"empty independent", []int{1000, 4000, 8000}, false},
 		{"inline fan-in", []int{1000, 4000, 8000}, false},
+		{"multi-key", []int{1000, 8000}, false},
+		{"inline embeddings", []int{1, 1000, 8000}, false},
 		{"disjoint", []int{128, 256, 512, 2048}, true},
 	} {
 		for _, n := range family.sizes {
-			diags, m := meterOf(t, wireFamily(family.shape, n))
+			src := wireFamily(family.shape, n)
+			diags, c := checkLimited(t, src, nil)
+			m := c.wires
 			if m == nil {
 				t.Fatalf("%s n=%d: no wire meter", family.shape, n)
 			}
-			if m.used > m.limit || wc.done[m] > m.used || len(wc.early) > 0 {
-				t.Errorf("%s n=%d: %d steps of %d charged, %d units done (%v)", family.shape, n, m.used, m.limit, wc.done[m], wc.early)
-			}
+			oc.bounded(t, fmt.Sprintf("%s n=%d", family.shape, n), src, c)
 			switch {
 			case len(diags) == 0 && !family.refused:
 			case len(diags) == 1 && diags[0].Code == CodeDuplicateCap && diags[0].Message == wireBudgetMessage && family.refused:
 			default:
 				t.Errorf("%s n=%d: want %s, got %v", family.shape, n, map[bool]string{false: "acceptance", true: "the budget S111"}[family.refused], diags)
 			}
-			t.Logf("%s n=%d: %d of %d steps (%.0f%%), %d units done, %d diagnostics", family.shape, n, m.used, m.limit, 100*float64(m.used)/float64(m.limit), wc.done[m], len(diags))
+			t.Logf("%s n=%d: %d of %d steps charged (%.1f%%), %d repeatable and %d single-pass operations, %d diagnostics", family.shape, n, m.used, m.limit, 100*float64(m.used)/float64(m.limit), oc.repeat[m], oc.single[m], len(diags))
 		}
 	}
 }
@@ -189,22 +208,24 @@ func TestWireBudgetHeadroom(t *testing.T) {
 	if len(files) < 300 {
 		t.Fatalf("found %d sources", len(files))
 	}
+	oc := countOps(t)
 	worst, worstFile, metered := 0.0, "", 0
+	worstOps, worstOpsFile := 0.0, ""
 	for _, f := range files {
 		data, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
 		}
-		file, err := syntax.Parse(usesKeyword.ReplaceAllString(string(data), "needs"))
-		if err != nil {
+		src := usesKeyword.ReplaceAllString(string(data), "needs")
+		if _, err := syntax.Parse(src); err != nil {
 			continue
 		}
-		c := newChecker("main", Std, prelude().scope)
-		c.run([]*syntax.File{file})
+		_, c := checkLimited(t, src, nil)
 		if c.wires == nil {
 			continue
 		}
 		metered++
+		oc.bounded(t, f, src, c)
 		share := float64(c.wires.used) / float64(c.wires.limit)
 		if share >= 0.10 {
 			t.Errorf("%s: %d of %d wire steps (%.1f%%), want under 10%%", f, c.wires.used, c.wires.limit, 100*share)
@@ -212,6 +233,9 @@ func TestWireBudgetHeadroom(t *testing.T) {
 		if share > worst {
 			worst, worstFile = share, f
 		}
+		if ops := float64(oc.repeat[c.wires]+oc.single[c.wires]) / float64(c.wires.limit); ops > worstOps {
+			worstOps, worstOpsFile = ops, f
+		}
 	}
-	t.Logf("%d sources, %d with wires; the largest share is %.2f%% (%s)", len(files), metered, 100*worst, worstFile)
+	t.Logf("%d sources, %d with wires; the largest charged share is %.2f%% (%s); the most operations of both classes, against the budget, %.2f%% (%s)", len(files), metered, 100*worst, worstFile, 100*worstOps, worstOpsFile)
 }
