@@ -319,6 +319,21 @@ func (c *checker) selfSig(t *Named, f *Func) *Signature {
 	return s
 }
 
+// ownTypeParam returns the first type parameter of the 196m function f
+// that its first parameter does not bind from t's type arguments, or nil.
+func ownTypeParam(t *Named, f *Func) *TypeParam {
+	if f.Sig == nil {
+		return nil
+	}
+	bound := selfBinding(t, f)
+	for _, tp := range f.Sig.TParams {
+		if _, ok := bound[tp]; !ok {
+			return tp
+		}
+	}
+	return nil
+}
+
 // selfBinding maps the type parameters of f that its first parameter's
 // type arguments name to t's type arguments, by position.
 func selfBinding(t *Named, f *Func) map[*TypeParam]Type {
@@ -363,6 +378,14 @@ func (c *checker) implements(v Type, it *Interface) string {
 		}
 		if fn != nil && fn.Ptr && !ptr {
 			return fmt.Sprintf("%s.%s has a *T receiver", v, m.Name)
+		}
+		// An operation takes no type parameters, so a 196m function with
+		// type parameters beyond those its first parameter binds from v's
+		// type cannot satisfy one (round 6b1 ruling; round 6 review m1).
+		if n, ok := v.(*Named); ok && fn != nil && fn.owner != nil {
+			if extra := ownTypeParam(n, fn); extra != nil {
+				return fmt.Sprintf("%s.%s has a type parameter of its own, %s; an operation takes none", v, m.Name, extra.Name)
+			}
 		}
 		if !c.sameShape(got, m.Sig) {
 			return fmt.Sprintf("%s.%s has signature %s, want %s", v, m.Name, got, m.Sig)

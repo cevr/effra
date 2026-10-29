@@ -1522,6 +1522,18 @@ func (c *checker) selfOwner(f *Func) (*Named, []syntax.Expr, bool) {
 	if !ok {
 		return nil, nil, false
 	}
+	// A name the function's own bracket list declares is its type
+	// parameter, which shadows a package type of that name (round 6
+	// review m1): the function is an ordinary generic function.
+	if d.TypeParams != nil {
+		for _, field := range d.TypeParams.List {
+			for _, name := range field.Names {
+				if name.Name == id.Name {
+					return nil, nil, false
+				}
+			}
+		}
+	}
 	tn, ok := c.pkg.Scope.names[id.Name].(*TypeName)
 	if !ok {
 		return nil, nil, false
