@@ -1,18 +1,16 @@
 // Command ergo checks, formats, builds and runs Ergo source on its one front
 // end (internal/sketchfront). The command table (commands.go) classifies
-// every command word; this file holds the commands that read one source.
+// every command word; this file holds the options and loading of the
+// commands that read one source, and check and diagnostics; build.go holds
+// build and run.
 package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"ergo.local/prototype/internal/producer"
 	"ergo.local/prototype/internal/receipt"
@@ -91,14 +89,14 @@ const diagnosticsHelp = "usage: ergo diagnostics FILE [--strict] [--json] [--tar
 
 // fileOptions are the options of a command that reads one source.
 type fileOptions struct {
-	target, output string
-	strict, json   bool
-	file           string
+	target, output     string
+	strict, json, work bool
+	file               string
 }
 
 // parseFileOptions reads the options of command. --strict and --json belong
-// to diagnostics and -o to build; any other option is unknown. A target
-// other than Go is the EF110 refusal.
+// to diagnostics and -o and -work to build; any other option is unknown. A
+// target other than Go is the EF110 refusal.
 func parseFileOptions(command string, args []string) (fileOptions, error) {
 	opts := fileOptions{target: report.Target}
 	var positional []string
@@ -118,6 +116,8 @@ func parseFileOptions(command string, args []string) (fileOptions, error) {
 			opts.strict = true
 		case "--json":
 			opts.json = true
+		case "-work":
+			opts.work = true
 		default:
 			if strings.HasPrefix(args[i], "-") {
 				return opts, fmt.Errorf("unknown option %s", args[i])
@@ -137,6 +137,8 @@ func parseFileOptions(command string, args []string) (fileOptions, error) {
 		return opts, fmt.Errorf("--json is only supported by diagnostics")
 	case opts.output != "" && command != "build":
 		return opts, fmt.Errorf("-o is only supported by build")
+	case opts.work && command != "build":
+		return opts, fmt.Errorf("-work is only supported by build")
 	case len(positional) != 1:
 		return opts, fmt.Errorf("incorrect arguments for %s", command)
 	}
@@ -237,131 +239,4 @@ func diagnosticsCommand(args []string) error {
 		return fmt.Errorf("diagnostics failed policy")
 	}
 	return nil
-}
-
-// buildCommand builds a native executable and prints its path.
-func buildCommand(args []string) error {
-	output, err := buildSource("build", args)
-	if err != nil {
-		return err
-	}
-	fmt.Println(output)
-	return nil
-}
-
-// runCommand builds a native executable and runs it as a child.
-func runCommand(args []string) error {
-	output, err := buildSource("run", args)
-	if err != nil {
-		return err
-	}
-	child := exec.Command(output.Path())
-	child.Stdout = os.Stdout
-	child.Stderr = os.Stderr
-	child.Stdin = os.Stdin
-	return runEntryProcess(child)
-}
-
-// buildSource checks the source and builds it to its output: -o, or
-// dist/NAME for a source NAME.ergo. A source that does not check prints its
-// check envelope and builds nothing. Building acquires no producer
-// identity; only the refusal, which prints facts, does.
-func buildSource(command string, args []string) (receipt.Location, error) {
-	opts, err := parseFileOptions(command, args)
-	if err != nil {
-		return receipt.Location{}, err
-	}
-	l, err := load(opts.file, opts.target)
-	if err != nil {
-		return receipt.Location{}, err
-	}
-	if !l.result.Checked {
-		if err := l.result.Qualify(producer.Current()); err != nil {
-			return receipt.Location{}, err
-		}
-		_ = printJSON(l.result.CheckEnvelope())
-		return receipt.Location{}, fmt.Errorf("check failed")
-	}
-	output, err := locateArtifact(outputPath(l.source.String(), opts.output))
-	if err != nil {
-		return receipt.Location{}, err
-	}
-	if err := sketchfront.Build(l.analysis, l.source.Admitted(), output.Path(), os.Stderr); err != nil {
-		return receipt.Location{}, err
-	}
-	return output, nil
-}
-
-// outputPath is the executable a build writes.
-func outputPath(source, output string) string {
-	if output != "" {
-		return output
-	}
-	return filepath.Join("dist", strings.TrimSuffix(filepath.Base(source), filepath.Ext(source)))
-}
-
-// locateArtifact locates a file the build writes. A directory is refused
-// before anything is built: the go command would write a child executable
-// named after the package into it, a file no other step addresses, so the
-// spelling must name the file itself.
-func locateArtifact(path string) (receipt.Location, error) {
-	if strings.HasSuffix(path, string(filepath.Separator)) {
-		return receipt.Location{}, fmt.Errorf("output %s names a directory; name the file to write", path)
-	}
-	location, err := receipt.Locate(path)
-	if err != nil {
-		return receipt.Location{}, err
-	}
-	if info, err := os.Stat(location.Path()); err == nil && info.IsDir() {
-		return receipt.Location{}, fmt.Errorf("output %s is a directory; name the file to write", path)
-	}
-	return location, nil
-}
-
-// runEntryProcess runs a built program as `ergo run`'s child. SIGINT and
-// SIGTERM are forwarded to the program, and the program's exit status
-// passes through without an extra message: the program reports its own
-// failure. A program that a forwarded signal ended exits 128 plus the
-// signal number, as a shell reports it (130 for SIGINT, 143 for SIGTERM),
-// which is also the interruption status of docs/spec/runtime.md rule 6.
-func runEntryProcess(child *exec.Cmd) error {
-	signals := make(chan os.Signal, 2)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(signals)
-	if err := child.Start(); err != nil {
-		return err
-	}
-	done := make(chan error, 1)
-	go func() { done <- child.Wait() }()
-	forwarded := map[syscall.Signal]bool{}
-	for {
-		select {
-		case received := <-signals:
-			if number, ok := received.(syscall.Signal); ok {
-				forwarded[number] = true
-			}
-			_ = child.Process.Signal(received)
-		case err := <-done:
-			var exited *exec.ExitError
-			if !errors.As(err, &exited) {
-				return err
-			}
-			if exited.ExitCode() > 0 {
-				return exitStatusError{code: exited.ExitCode(), handled: true}
-			}
-			if number, ok := signalOf(exited); ok && forwarded[number] {
-				return exitStatusError{code: 128 + int(number), handled: true}
-			}
-			return err
-		}
-	}
-}
-
-// signalOf is the signal that ended a program, when one did.
-func signalOf(exited *exec.ExitError) (syscall.Signal, bool) {
-	status, ok := exited.Sys().(syscall.WaitStatus)
-	if !ok || !status.Signaled() {
-		return 0, false
-	}
-	return status.Signal(), true
 }

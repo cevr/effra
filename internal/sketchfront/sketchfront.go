@@ -5,38 +5,50 @@
 // with the shared report code. The CLI checks and formats sources only
 // through Check and Format, so it reports one identity.
 //
-// Build lowers a checked program through the prototype's bridge, checker and
-// direct-Go emitter (internal/sketch/proto) until #50 lowers from the
-// checker's output: a program the checker accepts and the prototype cannot
-// lower is refused with S109 naming #50, and nothing is written (spec D12).
+// Build emits a checked program into the content-addressed emission cache
+// (internal/sketch/build, #224) and links it with the go command. Until
+// checked-tree lowering (internal/sketch/lower) replaces it, emission goes
+// through the prototype's bridge, checker and direct-Go emitter
+// (internal/sketch/proto): a program the checker accepts and the prototype
+// cannot lower is refused with S109 naming #50, and nothing is published
+// (spec D12).
 //
 // No runtime or generated-code package may import it.
 package sketchfront
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"unicode"
 	"unicode/utf8"
 
-	"ergo.local/prototype/internal/receipt"
+	"ergo.local/prototype/internal/producer"
 	"ergo.local/prototype/internal/report"
+	"ergo.local/prototype/internal/sketch/build"
 	"ergo.local/prototype/internal/sketch/check"
 	"ergo.local/prototype/internal/sketch/format"
+	"ergo.local/prototype/internal/sketch/lower"
 	"ergo.local/prototype/internal/sketch/proto"
+	"ergo.local/prototype/internal/sketch/std"
 	"ergo.local/prototype/internal/sketch/syntax"
 )
 
-// Analysis is the 2026 front-end's outcome for one source text.
+// Analysis is the 2026 front-end's outcome for one source text. It keeps
+// the parsed file and the checker's package, so building reads the same
+// checked program and never parses or checks again.
 type Analysis struct {
 	// Diagnostics are the checker's diagnostics in source order, with UTF-8
 	// byte spans into the analysed text.
 	Diagnostics []report.Diagnostic
 	source      string
 	file        *syntax.File
+	pkg         *check.Package
 }
 
 // Check parses source and checks it as one package with the 2026 checker.
@@ -47,7 +59,8 @@ func Check(source string) Analysis {
 		return Analysis{Diagnostics: []report.Diagnostic{syntaxDiagnostic(err)}, source: source}
 	}
 	analysis := Analysis{source: source, file: file}
-	_, diagnostics := check.Check("main", []*syntax.File{file}, nil)
+	pkg, diagnostics := check.Check("main", []*syntax.File{file}, nil)
+	analysis.pkg = pkg
 	for _, d := range diagnostics {
 		analysis.Diagnostics = append(analysis.Diagnostics, report.Diagnostic{
 			Code:    d.Code,
@@ -205,51 +218,110 @@ func span(source string, lines []int, line, col int) report.Span {
 	return report.Span{Offset: offset, Length: length, Line: line, Column: col}
 }
 
-// Build lowers the checked analysis through the prototype emitter as a Go
-// module in a fresh temporary directory, builds it to output with the go
-// command and removes the module. lineName is the source path //line
-// directives name. The go command's output goes to stderr. An analysis
-// with diagnostics, or one the prototype cannot lower, is refused with a
-// *BuildError before anything is written.
-func Build(a Analysis, lineName, output string, stderr io.Writer) error {
-	if len(a.Diagnostics) > 0 || a.file == nil {
-		return &BuildError{Diagnostics: a.Diagnostics}
+// LanguageRevision is the fixed language revision every emission names: the
+// #196 v1 contract of 2026-10-28. There is no user edition selector.
+const LanguageRevision = "ergo-v1-2026-10-28"
+
+// emitterRevision names the emitter that builds use. Stage 2 of lower-v1
+// replaces the prototype emitter with internal/sketch/lower.
+const emitterRevision = "proto-emit/1"
+
+// BuildRequest is one build of a checked analysis.
+type BuildRequest struct {
+	// Source is the admitted absolute path of the analysed source. //line
+	// directives and the emission key name it.
+	Source string
+	// Output is the executable to write.
+	Output string
+	// Cache holds the generated modules; Toolchain links them.
+	Cache     build.Cache
+	Toolchain build.Toolchain
+	// Stderr receives the go command's output.
+	Stderr io.Writer
+}
+
+// Build emits the checked analysis into the emission cache, or reuses its
+// published module, and links the module to the request's output with the
+// go command. It returns the module whenever one is published, also when
+// the link fails, so the caller can name it. An analysis with diagnostics,
+// one whose source path cannot be anchored, or one the prototype cannot
+// lower is refused before anything is published; a refusal by the
+// prototype is a *BuildError.
+func Build(a Analysis, req BuildRequest) (build.Module, error) {
+	if len(a.Diagnostics) > 0 || a.file == nil || a.pkg == nil {
+		return build.Module{}, &BuildError{Diagnostics: a.Diagnostics}
 	}
-	checked, refusals := a.lower()
-	if len(refusals) > 0 {
-		return &BuildError{Diagnostics: refusals}
+	unit := lower.Unit{Package: a.pkg, Files: []*syntax.File{a.file}, Sources: []lower.Source{{Path: req.Source, Text: a.source}}}
+	if err := unit.Validate(); err != nil {
+		return build.Module{}, err
 	}
-	checked.File.Name = lineName
-	code, err := proto.Emit(checked)
-	if err != nil {
-		return fmt.Errorf("2026 emission failed: %w", err)
+	input := build.Input{
+		Dependencies: stdDependencies(),
+		Compiler:     producer.Current().Qualifier,
+		Emitter:      emitterRevision,
+		Runtime:      []build.File{{Path: "rt/rt.go", Data: []byte(proto.RuntimeSource())}},
+		Language:     LanguageRevision,
+		Mode:         build.ModeBuild,
 	}
-	module, err := os.MkdirTemp("", "ergo-2026-")
-	if err != nil {
-		return err
+	for _, s := range unit.Sources {
+		input.Sources = append(input.Sources, build.Source{Path: s.Path, Text: []byte(s.Text)})
 	}
-	defer os.RemoveAll(module)
-	files := map[string]string{"go.mod": proto.GoMod, "main.go": code, filepath.Join("rt", "rt.go"): proto.RuntimeSource()}
-	for name, body := range files {
-		path := filepath.Join(module, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return err
+	module, err := req.Cache.Module(input, func() ([]build.File, error) {
+		checked, refusals := a.lower()
+		if len(refusals) > 0 {
+			return nil, &BuildError{Diagnostics: refusals}
 		}
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			return err
+		checked.File.Name = unit.Sources[0].Path
+		code, err := proto.Emit(checked)
+		if err != nil {
+			return nil, fmt.Errorf("2026 emission failed: %w", err)
 		}
-	}
-	absolute, err := filepath.Abs(output)
+		return []build.File{{Path: "go.mod", Data: []byte(proto.GoMod)}, {Path: "main.go", Data: []byte(code)}}, nil
+	})
 	if err != nil {
-		return err
+		return build.Module{}, err
+	}
+	absolute, err := filepath.Abs(req.Output)
+	if err != nil {
+		return module, err
 	}
 	if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {
-		return err
+		return module, err
 	}
-	child := receipt.GoBuildCommand(module, absolute, ".")
-	child.Stdout, child.Stderr = stderr, stderr
+	child := req.Toolchain.Command(module, absolute)
+	child.Stdout, child.Stderr = req.Stderr, req.Stderr
 	if err := child.Run(); err != nil {
-		return fmt.Errorf("Go build failed: %w", err)
+		return module, fmt.Errorf("Go build failed: %w", err)
 	}
-	return nil
+	return module, nil
+}
+
+// stdDependencies summarises the bundled standard library: the prelude and
+// every importable package. Until package summaries exist (196b, #7), each
+// summary is the conservative digest of the package's whole source, for
+// its interface and its implementation alike.
+func stdDependencies() []build.Dependency {
+	deps := []build.Dependency{sourceDependency(std.PreludePath, std.Prelude())}
+	for _, path := range std.Packages() {
+		files, _ := std.Package(path)
+		deps = append(deps, sourceDependency(path, files))
+	}
+	return deps
+}
+
+// sourceDependency summarises a source package by the digest of its file
+// names and bytes, each length-prefixed so no two packages encode alike.
+func sourceDependency(name string, files map[string]string) build.Dependency {
+	names := make([]string, 0, len(files))
+	for file := range files {
+		names = append(names, file)
+	}
+	slices.Sort(names)
+	hash := sha256.New()
+	for _, file := range names {
+		fmt.Fprintf(hash, "%d:%s%d:", len(file), file, len(files[file]))
+		hash.Write([]byte(files[file]))
+	}
+	digest := hex.EncodeToString(hash.Sum(nil))
+	return build.Dependency{Name: name, Interface: digest, Implementation: digest}
 }
