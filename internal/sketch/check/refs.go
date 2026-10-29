@@ -274,6 +274,19 @@ func (w *refWalker) bindAs(name string, b *localBinding) {
 	w.scopes[len(w.scopes)-1][name] = b
 }
 
+// bindPatterns binds the names that the `as` patterns of a case or catch
+// arm bind (196p): reads of them in the arm are locals.
+func (w *refWalker) bindPatterns(list []syntax.Expr) {
+	for _, p := range list {
+		syntax.Inspect(p, func(n syntax.Node) bool {
+			if a, ok := n.(*syntax.AsPattern); ok && a.Name.Name != "_" {
+				w.bind(a.Name.Name)
+			}
+			return true
+		})
+	}
+}
+
 func (w *refWalker) visit(n syntax.Node) {
 	if w.visited != nil && n != nil {
 		w.visited[n] = true
@@ -732,6 +745,7 @@ func (w *refWalker) expr(x syntax.Expr) {
 			for _, t := range arm.Types {
 				w.typ(t)
 			}
+			w.bindPatterns(arm.Types)
 			w.list(arm.Body)
 			w.pop()
 		}
@@ -763,6 +777,11 @@ func (w *refWalker) expr(x syntax.Expr) {
 	case *syntax.KeyValueExpr:
 		w.expr(x.Key)
 		w.expr(x.Value)
+	case *syntax.InterpolatedString:
+		for _, t := range x.Texts {
+			w.visit(t)
+		}
+		w.exprs(x.Exprs)
 	case *syntax.BasicLit:
 	default:
 		// A type in a value position (a conversion's type, an array or
@@ -956,6 +975,7 @@ func (w *refWalker) stmt(s syntax.Stmt) {
 					w.bind(b.Name)
 				}
 			}
+			w.bindPatterns(cl.List)
 			w.list(cl.Body)
 			w.pop()
 		}

@@ -1,0 +1,54 @@
+// The prelude of the language (docs/spec/stdlib.md, Prelude). It is
+// ordinary Ergo source, checked by internal/sketch/check like any other
+// package; its exported names are in scope in every package without an
+// import. The operation sets of the four capabilities are provisional: they
+// hold only what the fixtures and the v0 corpus call (#209).
+
+// Console writes lines to the host's standard output. Println writes one
+// line; several values are one interpolated string, "\(a) \(b)".
+type Console {
+	Println(line string),
+}
+
+// Scheduler suspends the calling task.
+type Scheduler {
+	Sleep(d duration),
+}
+
+// LiveScheduler is the host's Scheduler provider: Sleep below is its
+// operation, because its first parameter is a LiveScheduler (196m).
+type LiveScheduler {}
+
+// Sleep suspends the calling task for d on the host's clock.
+extern go ergo.local/prototype/runtime/rt.Sleep func Sleep(s LiveScheduler, d duration)
+
+// Clock reads the current time.
+type Clock {
+	Now() int64,
+}
+
+// Random draws random numbers.
+type Random {
+	Int63() int64,
+}
+
+// Option is a value that may be absent (#99).
+type Some[T] { Value T }
+type None {}
+type Option[T] = Some[T] | None
+
+// Decision is the result of a machine's step (docs/spec/runtime.md,
+// Machines and actors).
+type Enter[S] { Next S }
+type Stay[S] { Next S }
+type Ignore {}
+type Reject {}
+type Done[O] { Output O }
+type Decision[S, O] = Enter[S] | Stay[S] | Ignore | Reject | Done[O]
+
+// Task is a started task: task.Go() { … } yields one
+// (docs/spec/runtime.md, Tasks). E is an error row.
+type Task[T, E] {
+	Wait() T fails E,
+	Stop(),
+}

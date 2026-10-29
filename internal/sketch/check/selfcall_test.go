@@ -44,11 +44,6 @@ func selfChecker(t *testing.T, src string) (*checker, []Diagnostic) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if f.Name == nil {
-		// A decided source has no package clause: the directory names the
-		// package.
-		f.Name = &syntax.Ident{Name: "main"}
-	}
 	c := newChecker("main", Std, universe())
 	c.run([]*syntax.File{f})
 	return c, c.sorted()

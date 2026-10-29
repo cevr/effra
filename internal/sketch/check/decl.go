@@ -1,6 +1,7 @@
 package check
 
 import (
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,9 +19,10 @@ func (c *checker) run(files []*syntax.File) *Package {
 		c.files = append(c.files, &fileInfo{syntax: f, index: i, scope: newScope(nil)})
 	}
 	c.pkg.files = c.files
-	if len(files) > 0 {
-		c.pkg.Name = files[0].Name.Name
-	}
+	// A decided source has no package clause: the directory names the
+	// package (grammar.md, Old spellings), so the name is the last element
+	// of the import path.
+	c.pkg.Name = path.Base(c.pkg.Path)
 	c.pkg.qualify = true
 	c.collect()
 	c.solveDeclKinds()
@@ -136,9 +138,6 @@ func (c *checker) collect() {
 	for _, fi := range c.files {
 		c.cur = fi
 		f := fi.syntax
-		if c.pkg.Name != "" && f.Name.Name != c.pkg.Name {
-			c.errorf(f.Name, CodeType, "package %s; expected package %s", f.Name.Name, c.pkg.Name)
-		}
 		for _, d := range f.Decls {
 			switch d := d.(type) {
 			case *syntax.ImportDecl:
@@ -175,6 +174,8 @@ func (c *checker) collect() {
 						c.vars = append(c.vars, &pkgVar{obj: v, spec: spec, idx: i, file: fi})
 					}
 				}
+			case *syntax.TestDecl:
+				c.notYet(d)
 			case *syntax.WireDecl:
 				w := &Wire{Name: d.Name.Name, Pos: d.Name.Pos(), Decl: d, file: fi, pkg: c.pkg}
 				if _, dup := c.pkg.Wires[w.Name]; dup {
@@ -388,6 +389,9 @@ func (c *checker) structType(spec *syntax.StructType, ctx *typeCtx) *Struct {
 func (c *checker) interfaceType(spec *syntax.InterfaceType, ctx *typeCtx) *Interface {
 	it := &Interface{}
 	seen := map[string]bool{}
+	for _, l := range spec.Laws {
+		c.notYet(l)
+	}
 	for _, m := range spec.Methods {
 		ft, ok := m.Type.(*syntax.FuncType)
 		if !ok || len(m.Names) == 0 {
@@ -602,6 +606,9 @@ func (c *checker) typExpr0(x syntax.Expr, ctx *typeCtx) Type {
 		return invalid
 	case *syntax.ErrorRow:
 		c.errorf(x, CodeType, "an error row appears only in a result list")
+		return invalid
+	case *syntax.VariantSpec, *syntax.AsPattern:
+		c.notYet(x)
 		return invalid
 	}
 	c.errorf(x, CodeType, "expected a type")
@@ -1153,6 +1160,7 @@ func (c *checker) funcSig(f *Func) *Signature {
 		x  syntax.Expr
 	}
 	var constraints []pending
+	var unconstrained []*TypeParam
 	if d.TypeParams != nil {
 		for _, field := range d.TypeParams.List {
 			for _, name := range field.Names {
@@ -1162,6 +1170,8 @@ func (c *checker) funcSig(f *Func) *Signature {
 					tp.Kind = KindErrors
 				case field.Type != nil:
 					constraints = append(constraints, pending{tp, field.Type})
+				default:
+					unconstrained = append(unconstrained, tp)
 				}
 				if _, dup := ctx.params[name.Name]; dup {
 					c.errorf(name, CodeType, "type parameter %s is declared twice", name.Name)
@@ -1185,6 +1195,7 @@ func (c *checker) funcSig(f *Func) *Signature {
 	for _, p := range constraints {
 		p.tp.Constraint = c.constraint(p.x, ctx)
 	}
+	c.kindBracketParams(d.Type, ctx, unconstrained)
 	nbracket := len(tparams)
 	var implicit []string
 	if d.Recv == nil {
@@ -1216,6 +1227,38 @@ func (c *checker) funcSig(f *Func) *Signature {
 		sig.Uses = c.types.row(f.useVar)
 	}
 	return sig
+}
+
+// kindBracketParams gives each unconstrained bracket parameter of a
+// function the kind of its positions in the signature: after fails an
+// error row, after needs a capability row, elsewhere a type (grammar.md,
+// Declarations 3; 196g as amended). It is the rule solveDeclKinds applies
+// to type declarations and prescanImplicit to implicit parameters; a
+// parameter used in two kinds is S108, as there.
+func (c *checker) kindBracketParams(ft *syntax.FuncType, ctx *typeCtx, unconstrained []*TypeParam) {
+	free := map[*TypeParam]bool{}
+	for _, tp := range unconstrained {
+		free[tp] = true
+	}
+	if len(free) == 0 || ft == nil {
+		return
+	}
+	seen := map[*TypeParam]Kind{}
+	typeWalker{slots: c.slotKinds, f: func(id *syntax.Ident, k Kind) {
+		tp := ctx.params[id.Name]
+		if tp == nil || !free[tp] || tp.conflict {
+			return
+		}
+		if prev, ok := seen[tp]; ok {
+			if prev != k {
+				tp.conflict = true
+				c.errorf(id, CodeType, "%s is used as %s and as %s; a parameter has one kind (types.md, Generics 1)", id.Name, prev, k)
+			}
+			return
+		}
+		seen[tp] = k
+		tp.Kind = k
+	}}.walk(ft, KindType)
 }
 
 // implicitOrder lists the implicit parameters in order of first occurrence.

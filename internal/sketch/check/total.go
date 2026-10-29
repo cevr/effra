@@ -91,7 +91,15 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 					ok = false
 					break
 				}
-				idx := c.caseVariant(e, unions[j], subj[j], resolve)
+				core, name := asParts(e)
+				if name != nil && len(cl.List) > 1 {
+					// A binding in a case with several patterns must
+					// bind in each of them; check-v1 decides it (196p).
+					c.notYet(e)
+					ok, patternsOK = false, false
+					continue
+				}
+				idx := c.caseVariant(core, unions[j], subj[j], resolve)
 				if idx == variantOver {
 					resolve.over = true
 					ok = false
@@ -155,7 +163,9 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 			v := &Var{Name: b.Name, Type: bt, Pos: b.Pos(), group: groups[j], used: true}
 			c.fn.scope.insert(b.Name, v)
 		}
+		asGroups := c.bindAsPatterns(cl.List, n, rowOf[ci], unions, subj)
 		c.stmtList(cl.Body, false)
+		c.unusedAs(asGroups)
 		inner()
 	}
 	for j, g := range groups {

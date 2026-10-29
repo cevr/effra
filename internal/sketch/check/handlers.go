@@ -86,7 +86,23 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 	}
 	for _, arm := range x.Arms {
 		var types []Type
+		var asName *syntax.Ident
 		for _, te := range arm.Types {
+			core, name := asParts(te)
+			if name != nil {
+				if len(arm.Types) > 1 {
+					// A binding in an arm with several types is
+					// check-v1's (196p).
+					c.notYet(te)
+					continue
+				}
+				asName = name
+			}
+			if _, ok := core.(*syntax.CompositeLit); ok {
+				c.notYet(core) // a record pattern, 196p
+				continue
+			}
+			te = core
 			t := c.catchType(te, row)
 			if t == nil {
 				continue
@@ -119,7 +135,18 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 			v := &Var{Name: x.Bind.Name, Type: bt, Pos: x.Bind.Pos(), group: group, used: true}
 			c.fn.scope.insert(v.Name, v)
 		}
+		var asBinds []asBinding
+		if asName != nil {
+			bt := Type(invalid)
+			if len(types) == 1 {
+				bt = types[0]
+			}
+			if b, ok := c.declareAs(asName, bt); ok {
+				asBinds = append(asBinds, b)
+			}
+		}
 		c.catchArm(arm, valueType, hasValue, wantValue && hasValue, valid)
+		c.unusedAs(asBinds)
 		c.fn.scope = saved
 	}
 	if group != nil && !group.used {

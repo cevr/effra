@@ -150,6 +150,10 @@ func (c *checker) caseVariant(e syntax.Expr, u *switchUnion, subj Type, b *looku
 	if id, ok := e.(*syntax.Ident); ok && id.Name == "_" {
 		return -1
 	}
+	if _, ok := e.(*syntax.CompositeLit); ok {
+		c.notYet(e) // a record pattern, 196p
+		return -2
+	}
 	t := c.typExpr0(e, c.localTypeCtx())
 	if isInvalid(t) {
 		return -2

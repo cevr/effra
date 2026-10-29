@@ -321,9 +321,63 @@ func (c *checker) expr0(x syntax.Expr, hint Type) operand {
 	case *syntax.Ellipsis, *syntax.ErrorRow, *syntax.MachineType:
 		c.errorf(x, CodeType, "unexpected type form in an expression")
 		return bad(x)
+	case *syntax.InterpolatedString:
+		return c.interpolated(x)
 	}
-	c.errorf(x, CodeType, "unexpected expression")
-	return bad(x)
+	return c.notYet(x)
+}
+
+// interpolated checks `"a \(x) b"`: each interpolated expression is a
+// value of any type, printed as Go's %v prints it, and the whole is a
+// string (grammar.md, Lexical; the Console.Println rule of #196). An
+// untyped constant takes its default type, as an argument of Go's
+// fmt.Sprint does.
+func (c *checker) interpolated(x *syntax.InterpolatedString) operand {
+	ok := true
+	for _, e := range x.Exprs {
+		op := c.valueExpr(e, nil)
+		if op.invalid() || isInvalid(c.defaultOf(&op)) {
+			ok = false
+		}
+	}
+	if !ok {
+		return bad(x)
+	}
+	return operand{mode: modeValue, typ: Typ[String]}
+}
+
+// notYet reports a decided syntax node that this checker does not check
+// yet (S109; check-v1 owns it). It never panics: the parser may build a
+// node before its consumer checks it (grammar.md, Parser 2).
+func (c *checker) notYet(n syntax.Node) operand {
+	c.errorf(n, CodeOutside, "%s is not checked yet (check-v1)", decidedNoun(n))
+	if x, ok := n.(syntax.Expr); ok {
+		return bad(x)
+	}
+	return operand{mode: modeInvalid, typ: invalid}
+}
+
+// decidedNoun names a node for notYet, with the stage that decided it.
+func decidedNoun(n syntax.Node) string {
+	switch n := n.(type) {
+	case *syntax.AsPattern:
+		return "an as pattern here (196p, patterns)"
+	case *syntax.CompositeLit:
+		return "a record pattern (196p, patterns)"
+	case *syntax.VariantSpec:
+		return "a variant declared in place (196 fifth round, unions)"
+	case *syntax.AssertStmt:
+		return "assert (196l, laws and tests)"
+	case *syntax.TestDecl:
+		return "a test declaration (196l, laws and tests)"
+	case *syntax.LawDecl:
+		return "a law (196l, laws and tests)"
+	case *syntax.BinaryExpr:
+		if n.Op == syntax.DOTDOT {
+			return "a range outside a for header (196 one for)"
+		}
+	}
+	return "this form"
 }
 
 func under0(t Type) Type {

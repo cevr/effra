@@ -224,6 +224,9 @@ func (c *checker) binary(x *syntax.BinaryExpr, hint Type) operand {
 	if x.Op == syntax.SHL || x.Op == syntax.SHR {
 		return c.shift(x, hint)
 	}
+	if x.Op == syntax.DOTDOT {
+		return c.notYet(x)
+	}
 	lhint, rhint := hint, hint
 	if isComparison(x.Op) || x.Op == syntax.LAND || x.Op == syntax.LOR {
 		lhint, rhint = nil, nil

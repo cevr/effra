@@ -18,7 +18,7 @@ import (
 	"strings"
 )
 
-//go:embed prelude.ef timeout/*.ef
+//go:embed prelude.ergo timeout/*.ergo
 var sources embed.FS
 
 // PreludePath is the package path of the prelude. No import names it: its
@@ -27,11 +27,11 @@ const PreludePath = "prelude"
 
 // Prelude returns the prelude's source files, by file name.
 func Prelude() map[string]string {
-	data, err := sources.ReadFile("prelude.ef")
+	data, err := sources.ReadFile("prelude.ergo")
 	if err != nil {
 		panic("std: the prelude is not embedded: " + err.Error())
 	}
-	return map[string]string{"prelude.ef": string(data)}
+	return map[string]string{"prelude.ergo": string(data)}
 }
 
 // Package returns the source files of the standard-library package at the
@@ -47,7 +47,7 @@ func Package(importPath string) (map[string]string, bool) {
 	}
 	files := map[string]string{}
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".ef") {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".ergo") {
 			continue
 		}
 		data, err := sources.ReadFile(path.Join(importPath, entry.Name()))

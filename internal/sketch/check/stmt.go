@@ -116,7 +116,7 @@ func (c *checker) stmt(s syntax.Stmt) {
 	case *syntax.RangeStmt:
 		c.rangeStmt(s, "")
 	default:
-		c.errorf(s, CodeType, "unexpected statement")
+		c.notYet(s)
 	}
 }
 
@@ -767,9 +767,41 @@ func (c *checker) forStmt(s *syntax.ForStmt, label string) {
 	pop()
 }
 
+// countRange checks `for i in lo..hi { }` (grammar.md, One for): the
+// bounds are integers of one type, an untyped pair takes int, and the one
+// binding counts from lo up to hi, excluding hi, as Go's `for i := lo; i <
+// hi; i++` does.
+func (c *checker) countRange(s *syntax.RangeStmt, r *syntax.BinaryExpr, label string) {
+	lo := c.valueExpr(r.X, nil)
+	hi := c.valueExpr(r.Y, nil)
+	t := Type(invalid)
+	if !lo.invalid() && !hi.invalid() && c.matchTypes(r, &lo, &hi) {
+		t = c.defaultOf(&lo)
+		c.defaultOf(&hi)
+		if !isInvalid(t) && !isInteger(under(t)) {
+			c.errorf(r, CodeType, "a range's bounds are integers, not %s", t)
+			t = invalid
+		}
+	}
+	c.record(r, operand{mode: modeValue, typ: t})
+	if s.Key != nil {
+		c.errorf(s.Key, CodeType, "for over a range binds one name")
+	}
+	if id, ok := s.Value.(*syntax.Ident); ok {
+		c.declareLocal(id, t)
+	}
+	pop := c.push(brLoop, label)
+	c.block(s.Body)
+	pop()
+}
+
 func (c *checker) rangeStmt(s *syntax.RangeStmt, label string) {
 	done := c.openScope()
 	defer done()
+	if r, ok := s.X.(*syntax.BinaryExpr); ok && r.Op == syntax.DOTDOT {
+		c.countRange(s, r, label)
+		return
+	}
 	x := c.valueExpr(s.X, nil)
 	var kt, vt Type = invalid, invalid
 	if !x.invalid() {
