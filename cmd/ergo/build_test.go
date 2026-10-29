@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -36,9 +37,10 @@ const innerRunVariable = "ERGO_CMD_TEST_INNER_RUN"
 // TestPackageNeverWritesUnderHome runs this package's tests again with
 // HOME set to an empty directory and XDG_CACHE_HOME unset, and requires the
 // directory to stay empty: building and running programs, in every test,
-// writes only into the tests' own temporary space. Go's own caches and
-// configuration keep the locations this process resolved, so the run
-// measures Ergo's writes, not Go's. The inner run's temporary directory is
+// writes only into the tests' own temporary space. Go's caches and go env
+// file keep the locations this process resolved, and the go command runs
+// with a HOME and config directory of its own (goOwnHome), so the run
+// measures Ergo's writes, not the go command's telemetry. The inner run's temporary directory is
 // reached through a symbolic link, with GOTMPDIR unset, so its tests see
 // a logical path that differs from the physical one, as on darwin.
 //
@@ -55,7 +57,7 @@ func TestPackageNeverWritesUnderHome(t *testing.T) {
 	if err := os.Symlink(temp, linkedTemp); err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command("go", "env", "-json", "GOCACHE", "GOMODCACHE", "GOPATH").Output()
+	out, err := exec.Command("go", "env", "-json", "GOCACHE", "GOMODCACHE", "GOPATH", "GOENV").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,16 +65,14 @@ func TestPackageNeverWritesUnderHome(t *testing.T) {
 	if err := json.Unmarshal(out, &goEnv); err != nil {
 		t.Fatal(err)
 	}
-	config, err := os.UserConfigDir()
-	if err != nil {
-		t.Fatal(err)
-	}
+	wrapperDir := goOwnHome(t)
 	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		name, _, _ := strings.Cut(kv, "=")
-		return slices.Contains([]string{"HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "GOCACHE", "GOMODCACHE", "GOPATH", "TMPDIR", "GOTMPDIR"}, name)
+		return slices.Contains([]string{"HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "GOCACHE", "GOMODCACHE", "GOPATH", "GOENV", "TMPDIR", "GOTMPDIR", "PATH"}, name)
 	})
-	env = append(env, "HOME="+home, "XDG_CONFIG_HOME="+config, innerRunVariable+"=1", "TMPDIR="+linkedTemp,
-		"GOCACHE="+goEnv["GOCACHE"], "GOMODCACHE="+goEnv["GOMODCACHE"], "GOPATH="+goEnv["GOPATH"])
+	env = append(env, "HOME="+home, innerRunVariable+"=1", "TMPDIR="+linkedTemp,
+		"PATH="+wrapperDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"GOCACHE="+goEnv["GOCACHE"], "GOMODCACHE="+goEnv["GOMODCACHE"], "GOPATH="+goEnv["GOPATH"], "GOENV="+goEnv["GOENV"])
 	child := exec.Command(os.Args[0], "-test.count=1", "-test.v", "-test.skip=^TestPackageNeverWritesUnderHome$")
 	child.Env = env
 	stdout, stderr, code := runSmokeCommand(t, 10*processDeadline, child)
@@ -94,6 +94,42 @@ func TestPackageNeverWritesUnderHome(t *testing.T) {
 	if len(written) != 0 {
 		t.Fatalf("the package's tests wrote under HOME: %v", written[:min(len(written), 20)])
 	}
+}
+
+// goOwnHome returns a directory holding a `go` that runs the real go
+// command with its own HOME and XDG_CONFIG_HOME, both temporary
+// directories outside the HOME the witness checks. The go command keeps
+// state under os.UserConfigDir()/go/telemetry
+// (cmd/vendor/golang.org/x/telemetry/internal/telemetry/dir.go, init), and
+// GOTELEMETRYDIR is a non-settable go env value
+// (cmd/go/internal/telemetrycmd/telemetry.go). os.UserConfigDir is
+// $XDG_CONFIG_HOME or $HOME/.config on Linux, but $HOME/Library/Application
+// Support on darwin, which ignores XDG_CONFIG_HOME (os/file.go). So only a
+// HOME of its own keeps the go command's writes out of the witnessed HOME
+// on every platform. Ergo's processes keep the witnessed HOME, so Ergo's
+// own writes are still caught; GOCACHE, GOMODCACHE, GOPATH and GOENV are
+// pinned by the caller to the values this process resolved.
+func goOwnHome(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the go wrapper is a shell script")
+	}
+	realGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if realGo, err = filepath.Abs(realGo); err != nil {
+		t.Fatal(err)
+	}
+	goHome := t.TempDir()
+	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+	script := "#!/bin/sh\nHOME=" + quote(goHome) + " XDG_CONFIG_HOME=" + quote(filepath.Join(goHome, "config")) +
+		" exec " + quote(realGo) + " \"$@\"\n"
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 // TestBuildReusesTheModuleWithoutAProducerImage: a compiler whose producer
