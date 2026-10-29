@@ -4,10 +4,10 @@ type B {}
 func fail() string fails A | B { return A{} }
 
 func Run() string fails B {
-	let v = try fail() catch {
+	let v = try fail() catch { // want S101
 	case B:
 		"b"
-	} // want S101
+	}
 	return v
 }
 

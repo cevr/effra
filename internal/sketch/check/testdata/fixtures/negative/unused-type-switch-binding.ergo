@@ -3,8 +3,8 @@ type B {}
 type Choice = A | B
 
 func name(c Choice) string {
-	match c { // want S110
-	case A:
+	match c {
+	case A as v: // want S110
 		return "a"
 	case B:
 		return "b"

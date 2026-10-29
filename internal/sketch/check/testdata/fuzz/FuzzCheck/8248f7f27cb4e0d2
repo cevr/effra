@@ -1,2 +1,2 @@
 go test fuzz v1
-string("package A\nfunc(A)A()\ntype A struct{}\nfunc(A)A()\nfunc A()\nfunc A(A)")
+string("extern go fixture.A func A(_ A)\ntype A {}\nextern go fixture.A func A(_ A)\nextern go fixture.A func A()\nextern go fixture.A func A(A)")

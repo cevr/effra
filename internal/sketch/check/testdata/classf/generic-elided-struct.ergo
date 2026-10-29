@@ -2,7 +2,7 @@ type Cap { M() }
 type Wrap[T] { value T }
 type S { a int }
 func f() {
-	_ = Wrap[S]{value: {a: 1}}
+	_ = Wrap[S]{value: {a: 1}} // want S108
 	Cap.M()
-}        // want S108
+}
 func a() { _ = f }

@@ -1,7 +1,7 @@
 type Cap { M() }
 type Box[T] { M(T) }
 extern go fixture.BoxOf func BoxOf[T](x T) Box[T]
-func Run[T](x T, y T, callback func() needs R) needs R { callback() }
+func Run[T, R](x T, y T, callback func() needs R) needs R { callback() }
 func c() { d(); Cap.M() }
 func d() { d(); Cap.M() }
 func a() { Run(BoxOf(c), BoxOf(d)) { b() } }

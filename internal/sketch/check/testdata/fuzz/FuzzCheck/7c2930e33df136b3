@@ -1,2 +1,2 @@
 go test fuzz v1
-string("package A\nfunc A(A00 A00[A],A A)A0000[A]needs A00{{A{}}}\nfunc A(A0000 A00[A],A A)error[A00]{}\nfunc A(A A00[A],A A){}\nfunc(A)A(s[]A){s}\nfunc s()")
+string("func A[A](A00 A00[A],A A)A0000[A]needs A00{ A{} }\nfunc A[A](A0000 A00[A],A A)fails A00{}\nfunc A[A](A A00[A],A A){}\nfunc A[A](_ A, s[]A){s}\nfunc s() {}")

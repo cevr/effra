@@ -58,26 +58,24 @@ var negativeSpans = map[string][2]string{
 	"main-called":                        {"S113", "main()"},
 	"main-parameter":                     {"S113", "(arg string)"},
 	"main-value-result":                  {"S113", "string"},
-	"method-type-parameter":              {"S108", "A"},
 	"missing-capability":                 {"S102", "Store.Get()"},
 	"missing-return":                     {"S107", "}"},
 	"parameter-kind-conflict":            {"S108", "E"},
-	"partial-catch-rest":                 {"S101", "try fail() catch { case B: \"b\" }"},
+	"partial-catch-rest":                 {"S101", "try fail() catch {"},
 	"plus-on-bool":                       {"S108", "true + false"},
 	"positional-literal-short":           {"S108", "P{1}"},
-	"product-not-total":                  {"S103", "switch"},
+	"product-not-total":                  {"S103", "match"},
 	"provider-method-needs":              {"S106", "Mem{}"},
 	"provider-missing-method":            {"S106", "Mem{}"},
 	"provider-wider-row":                 {"S106", "Mem{}"},
-	"receiver-not-local":                 {"S108", "int64"},
 	"recursive-struct":                   {"S108", "Node"},
 	"return-in-with-block":               {"S108", "return \"x\""},
 	"return-mismatch":                    {"S108", "true"},
 	"timeout-is-a-library-function":      {"S101", "timeout.After(1s) { \"ok\" }"},
 	"try-infallible":                     {"S108", "try word()"},
 	"type-argument-not-inferred":         {"S108", "zero()"},
-	"type-switch-non-union":              {"S108", "o.(type)"},
-	"type-switch-not-total":              {"S103", "switch"},
+	"type-switch-non-union":              {"S108", "o"},
+	"type-switch-not-total":              {"S103", "match"},
 	"undeclared-error":                   {"S101", "try fail()"},
 	"unhandled-argument":                 {"S105", "fail()"},
 	"unhandled-condition":                {"S105", "check()"},
@@ -100,7 +98,7 @@ var negativeSpans = map[string][2]string{
 	"wire-cycle":                         {"S108", "W"},
 	"wire-entry-non-capability":          {"S104", "Order"},
 	"wire-exposure-hides-entry":          {"S109", "provides Account"},
-	"wire-literal-outside-with":          {"S108", "wire{ Store = Mem{} }"},
+	"wire-literal-outside-with":          {"S108", "wire { Store: Mem{} }"},
 }
 
 // TestNegativeSpans: each negative fixture's one diagnostic has the pinned
@@ -174,16 +172,17 @@ func TestRegistry(t *testing.T) {
 }
 
 // corpus returns every source the checker's tests and the fuzz seeds use:
-// the fixture mirror, the prototype's fixtures and the parser's corpus.
+// the fixture mirror, the prototype's fixtures and the parser's corpus,
+// as translated into the decided syntax (#196; the frozen old .sketch
+// copies no longer parse).
 func corpus(t testing.TB) map[string]string {
 	out := map[string]string{}
 	for _, pattern := range []string{
 		"testdata/fixtures/*/*.ergo",
-		"../../../prototypes/sketch9/testdata/*.sketch",
-		"../../../prototypes/sketch9/testdata/*/*.sketch",
-		"../syntax/testdata/corpus/*/*.sketch",
-		"../syntax/testdata/corpus/*/*/*.sketch",
-		"../syntax/testdata/corpus/*/*/*/*.sketch",
+		"../proto/testdata/*.ergo",
+		"../proto/testdata/*/*.ergo",
+		"../syntax/testdata/corpus/*/*.ergo",
+		"../syntax/testdata/corpus/*/*/*.ergo",
 	} {
 		files, _ := filepath.Glob(pattern)
 		for _, f := range files {

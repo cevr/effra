@@ -1,2 +1,2 @@
 go test fuzz v1
-string("package A\nimport\"0000000\"\ntype OrderNotFound struct{A g}\ntype g interface{A(A)(error[OrderNotFound])}")
+string("import a0000000\ntype OrderNotFound { A g }\ntype g[A] { A(A) fails OrderNotFound }\n")

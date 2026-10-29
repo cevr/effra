@@ -1,2 +1,2 @@
 go test fuzz v1
-string("package A\nfunc A(){go{A{}}}")
+string("import task\nfunc A() { task.Go() { A{} } }\n")

@@ -5,3 +5,6 @@
 # its stage, so the line goes when the stage lands. Removed forms are never
 # quarantined: their fixtures are rewritten or deleted.
 fixtures/spec/types-laws.ergo 196l
+fixtures/positive/go-task-wait.ergo lower-v1
+classf/go-statement.ergo lower-v1
+classf/go-value.ergo lower-v1

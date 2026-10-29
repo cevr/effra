@@ -16,9 +16,6 @@ import (
 // one line.
 var wantMarker = regexp.MustCompile(`// want (S\d{3}(?: S\d{3})*)\s*$`)
 
-// usesWord finds the keyword the frozen prototype fixtures spell before #217.
-var usesWord = regexp.MustCompile(`\buses\b`)
-
 // expected lists the `// want CODE` markers of a source as CODE@LINE, one per
 // code.
 func expected(src string) []string {
@@ -88,9 +85,11 @@ func TestFixtures(t *testing.T) {
 
 // TestParity checks the prototype's fixtures: each keeps its `// want` code
 // (or stays clean), except the overrides the designed rules change (spec
-// D11, mirrored in testdata/parity.overrides).
+// D11, mirrored in testdata/parity.overrides). It reads their decided
+// translations in the proto package's testdata (#196; the frozen
+// prototypes/sketch9 copies no longer parse).
 func TestParity(t *testing.T) {
-	base := filepath.Join("..", "..", "..", "prototypes", "sketch9", "testdata")
+	base := filepath.Join("..", "proto", "testdata")
 	overrides := map[string]string{}
 	data, err := os.ReadFile(filepath.Join("testdata", "parity.overrides"))
 	if err != nil {
@@ -101,7 +100,7 @@ func TestParity(t *testing.T) {
 		overrides[rel] = code
 	}
 	var files []string
-	for _, pattern := range []string{"*.sketch", "probes/*.sketch", "reject/*.sketch"} {
+	for _, pattern := range []string{"*.ergo", "probes/*.ergo", "reject/*.ergo"} {
 		m, _ := filepath.Glob(filepath.Join(base, pattern))
 		files = append(files, m...)
 	}
@@ -127,10 +126,7 @@ func TestParity(t *testing.T) {
 			if expect == "skip" {
 				t.Skip("restated as a fixture")
 			}
-			// The frozen prototype fixtures spell needs as uses (before #217);
-			// the test translates them, as the acceptance driver does: the
-			// language keeps no compatibility path.
-			_, diags := check.CheckSource(usesWord.ReplaceAllString(string(data), "needs"))
+			_, diags := check.CheckSource(string(data))
 			if expect == "clean" {
 				if len(diags) > 0 {
 					t.Errorf("want no diagnostics, got\n\t%s", describe(diags))
