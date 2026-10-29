@@ -32,11 +32,9 @@ func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
 		binds, known = c.withArg(x.Args[0])
 	}
 	t := c.fn.t
-	if known {
-		t.withs = append(t.withs, binds)
-	} else {
-		t.withs = append(t.withs, nil) // unknown: discharge everything, so no cascade
-	}
+	// unknown: discharge everything, so no cascade
+	frame := &withFrame{binds: binds, unknown: !known}
+	t.withs = append(t.withs, frame)
 	done := c.openScope()
 	c.fn.branches = append(c.fn.branches, branch{kind: brBarrier})
 	var errs *Row
@@ -51,7 +49,7 @@ func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
 	c.fn.branches = c.fn.branches[:len(c.fn.branches)-1]
 	done()
 	t.withs = t.withs[:len(t.withs)-1]
-	c.recordWith(x, binds)
+	c.recordWith(x, frame)
 	if res == nil {
 		return bad(x)
 	}
@@ -60,6 +58,42 @@ func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
 	}
 	op := operand{mode: modeValue, typ: res, errs: errs}
 	return op
+}
+
+// A withFrame is one with scope of a target while its block is checked:
+// what the wire binds (unknown: a wire that is not known, reported, which
+// discharges everything so nothing cascades; D3), and the capabilities the
+// block's row needs that this with discharges, each once with the entry
+// that provides it (charge). With.Discharged is that list, so a with's
+// Info is bounded by its body, not by its wire (round-4 review M1).
+type withFrame struct {
+	binds   *capSet
+	unknown bool
+	at      map[capKey]int // index in caps
+	caps    []Type
+	entries []*WireEntry // nil for an inline wire's own entry
+}
+
+// discharge records that the frame discharges cap, provided by n's entry
+// (n is nil for an inline wire's own entry).
+func (f *withFrame) discharge(cap Type, n *capNode) {
+	k, ok := keyOf(cap)
+	if !ok {
+		return
+	}
+	if _, seen := f.at[k]; seen {
+		return
+	}
+	if f.at == nil {
+		f.at = map[capKey]int{}
+	}
+	f.at[k] = len(f.caps)
+	f.caps = append(f.caps, cap)
+	var e *WireEntry
+	if n != nil {
+		e = n.entry
+	}
+	f.entries = append(f.entries, e)
 }
 
 // withArg resolves with's argument to the capabilities it binds.
@@ -163,7 +197,11 @@ func (c *checker) wireBody(body *syntax.WireBody, named *Wire) (*capSet, bool) {
 		if build != nil {
 			build.charged = newRow()
 		}
-		caps, entry := c.wireEntry(e)
+		var made *WireEntry
+		if named != nil && c.silent == 0 {
+			made = c.wireEntries[e] // the record the wire summary's nodes carry
+		}
+		caps, entry := c.wireEntry(e, made)
 		if named != nil && c.silent == 0 {
 			named.Entries = append(named.Entries, entry)
 		}
@@ -271,15 +309,20 @@ func (c *checker) checkEntryCycles(name string, d *wireDeps) {
 // compatibility (S106); one value may serve several capabilities (README
 // Gap 28 and 34). A constructor entry is #37's (S109). The second-entry
 // and replace rules are the body summary's (wiresum.go). It returns the
-// capabilities the entry names.
-func (c *checker) wireEntry(e *syntax.WireEntry) ([]Type, *WireEntry) {
+// capabilities the entry names and its Info record: made, the one the wire
+// pass made for a named wire's entry, filled in here, or a new one.
+func (c *checker) wireEntry(e *syntax.WireEntry, made *WireEntry) ([]Type, *WireEntry) {
 	var caps []Type
 	for _, k := range append([]syntax.Expr{e.Key}, e.Keys...) {
 		if t := c.wireKey(k); t != nil {
 			caps = append(caps, t)
 		}
 	}
-	entry := &WireEntry{Caps: caps, Provider: e.Value, Replace: e.Replace.IsValid()}
+	entry := made
+	if entry == nil {
+		entry = &WireEntry{Provider: e.Value, Replace: e.Replace.IsValid()}
+	}
+	entry.Caps, entry.Conversions = caps, nil
 	if c.isConstructor(e.Value) {
 		c.errorf(e.Value, CodeOutside, "a constructor entry is #37's (wire constructors); write a provider value, not a function")
 		return caps, entry
@@ -381,7 +424,7 @@ func (c *checker) checkWires() {
 		if t.internal == nil {
 			// Its summary was refused (wiresum.go): nothing it charges is
 			// reported (D3).
-			t.withs = []*capSet{nil}
+			t.withs = []*withFrame{{unknown: true}}
 		}
 		c.fn = &funcCtx{t: t, scope: newScope(c.pkg.Scope), reach: c.reachOf(w)}
 		c.wireBody(d.Body, w)

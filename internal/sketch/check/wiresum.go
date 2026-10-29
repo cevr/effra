@@ -51,9 +51,9 @@ import (
 
 // wireBudgetPerUnit is K, the repeatable work allowed per unit of wire
 // source: 128. One step is a set node read, copied or created, an element
-// enumerated, a probe against a summary, or a sort's comparison or move. A
-// wire costs 3⌈log₂ n⌉ for the name sort, and a capability added along a
-// chain about 2·log₂ n + 2 for its path, a few times over (its wire's own
+// enumerated, a probe against a summary, an override recorded, or a sort's
+// comparison or move. A wire costs 3⌈log₂ n⌉ for the name sort, and a
+// capability added along a chain about 2·log₂ n + 2 for its path, a few times over (its wire's own
 // set, its component's union, a body), so a chain, a fan-in or a large
 // base with a chain of 8000 wires uses under a third of the budget
 // (TestWireBudget, measured). A small program pays a constant per wire,
@@ -188,6 +188,9 @@ type bodySum struct {
 	known    bool
 	findings []wireFinding
 
+	// overrides are a named wire's own replace overrides (Wire.Overrides).
+	overrides []Override
+
 	pending         bool
 	embedded, cycle *capSet
 	collisions      []collision
@@ -200,10 +203,13 @@ type wireFinding struct {
 	code, msg string
 }
 
+// A collision is a capability two embeddings of one body bind (Wire 7):
+// entry is the provider the embeddings' union did not keep.
 type collision struct {
-	cap Type
-	key capKey
-	at  syntax.Expr
+	cap   Type
+	key   capKey
+	at    syntax.Expr
+	entry *WireEntry
 }
 
 // wireSummaries runs the wire pass once, before any body (decl.go run):
@@ -213,9 +219,11 @@ type collision struct {
 //  3. the strongly connected components of the embedding graph (Tarjan,
 //     roots in name order, embeddings in entry order) get their summaries
 //     in reverse topological order: the union of the members' own entries
-//     and the successors' summaries, shared by every member and every
-//     embedding (round 17 M1, round 18);
-//  4. each named wire's body is summarised, in name order;
+//     and the successors' summaries, an own entry over a successor's (a
+//     replace), shared by every member, every embedding and every with
+//     of them (round 17 M1, round 18, round-4 review M1);
+//  4. each named wire's body is summarised, in name order, with what
+//     its replaces override (Wire.Overrides);
 //  5. each inline wire is prepared, group by group, and the repeatable
 //     work of finishing it is charged as its allowance.
 //
@@ -230,6 +238,7 @@ func (c *checker) wireSummaries() {
 	c.wiresDone = true
 	c.wireComp = map[*Wire]*wireComp{}
 	c.wireBodies = map[*syntax.WireBody]*bodySum{}
+	c.wireEntries = map[*syntax.WireEntry]*WireEntry{}
 	size, groups, wired := c.wireSource()
 	if !wired {
 		return
@@ -387,6 +396,10 @@ func (p *wirePass) own(wires []*Wire) {
 				n.embeds = append(n.embeds, inner)
 				continue
 			}
+			// The entry's Info record, made here once, so the summary's
+			// nodes carry it (checkWires fills it in).
+			entry := &WireEntry{Provider: e.Value, Replace: e.Replace.IsValid(), seq: len(c.wireEntries)}
+			c.wireEntries[e] = entry
 			if !eachKey(e, func(k syntax.Expr) bool {
 				op(m, "key read", singlePass, 1)
 				t := c.rowElem(k, KindUses, nil)
@@ -394,7 +407,7 @@ func (p *wirePass) own(wires []*Wire) {
 					return true
 				}
 				var ok bool
-				set, ok = set.with(m, t)
+				set, ok = set.with(m, t, entry)
 				return ok
 			}) {
 				p.refuse(w)
@@ -452,24 +465,28 @@ func (p *wirePass) components(wires []*Wire) {
 			}
 		}
 		// The summary joins the members' entries and each successor
-		// component's summary once, into the largest of them (capUnion), in
-		// the order the walk met them.
-		var sets []*capSet
+		// component's summary once, into the largest of them (capUnion):
+		// the members' own sets first, then the successors in the order the
+		// walk met them. An own entry provides its capability over a
+		// successor's (a replace), so the summary is the resolved bindings
+		// a with reads (Wire.Provider).
+		sets := make([]*capSet, len(members))
+		var succs []*capSet
 		succ := map[*wireComp]bool{}
-		for _, v := range members {
+		for i, v := range members {
 			op(m, "member read", singlePass, 1)
-			sets = append(sets, v.own)
+			sets[i] = v.own
 			comp.unknown = comp.unknown || v.unknown
 			for _, e := range p.nodes[v].embeds {
 				op(m, "member edge", singlePass, 1)
 				if d := c.wireComp[e]; d != comp && !succ[d] {
 					succ[d] = true
-					sets = append(sets, d.binds)
+					succs = append(succs, d.binds)
 					comp.unknown = comp.unknown || d.unknown
 				}
 			}
 		}
-		binds, ok := capUnion(m, sets)
+		binds, ok := capUnion(m, append(sets, succs...), len(members))
 		if !ok {
 			p.refuse(w)
 			return
@@ -504,6 +521,7 @@ func (p *wirePass) namedBody(w *Wire) {
 		s = &bodySum{}
 	}
 	c.wireBodies[w.Decl.Body] = s
+	w.Overrides = s.overrides
 }
 
 // inline prepares a group's inline wires and charges their allowances.
@@ -625,13 +643,14 @@ func (c *checker) prepareBody(s *bodySum, body *syntax.WireBody, self *Wire, m *
 				if !ok {
 					return false
 				}
-				if found {
-					s.collisions = append(s.collisions, collision{e.cap, e.key, keys[j]})
+				if found != nil {
+					s.collisions = append(s.collisions, collision{e.cap, e.key, keys[j], e.entry})
 				}
 			}
 			continue
 		}
-		if !r.each(m, func(k capKey, t Type) bool {
+		if !r.each(m, func(n *capNode) bool {
+			k, t := n.key, n.t
 			if !m.step(1) {
 				return false
 			}
@@ -642,19 +661,19 @@ func (c *checker) prepareBody(s *bodySum, body *syntax.WireBody, self *Wire, m *
 				if !ok {
 					return false
 				}
-				collide = found
+				collide = found != nil
 			}
 			if collide {
-				s.collisions = append(s.collisions, collision{t, k, keys[j]})
+				s.collisions = append(s.collisions, collision{t, k, keys[j], n.entry})
 			}
 			if !seen[k] {
 				seen[k] = true
 				if j < largest {
-					early = append(early, collision{t, k, nil})
+					early = append(early, collision{t, k, nil, n.entry})
 				}
 			}
 			var ok bool
-			embedded, ok = embedded.with(m, t)
+			embedded, ok = embedded.with(m, t, n.entry)
 			return ok
 		}) {
 			return false
@@ -673,12 +692,28 @@ func (c *checker) prepareBody(s *bodySum, body *syntax.WireBody, self *Wire, m *
 // and keys and the body's own key map are single-pass; the lookups in the
 // summaries and the collisions are repeatable and charged, within the
 // allowance prepareBody set.
+//
+// A named wire's replace also records what it overrides (s.overrides,
+// Wire.Overrides), from the same lookups: the entry the embeddings' union
+// binds for its capability and each colliding embedded entry, ordered by
+// the wire pass's entry order (WireEntry.seq) and each once (a diamond
+// brings one entry twice). Sorting them is repeatable and charged; an
+// inline wire records none (its entries are stage E's, 196x), so its
+// allowance is unchanged.
 func (c *checker) finishBody(s *bodySum, body *syntax.WireBody, m *wireMeter) bool {
 	s.finishes++
 	op(m, "body setup", singlePass, 1)
 	own := map[capKey]bool{}
-	ownAt := map[capKey]int{} // the entry (1-based) that first binds each capability
+	type place struct{ entry, key int } // 1-based
+	ownAt := map[capKey]place{}         // where each capability is first bound
 	replaced := map[capKey]bool{}
+	type override struct {
+		cap   Type
+		by    *WireEntry
+		cands []*WireEntry
+	}
+	var overrides []*override
+	overrideOf := map[capKey]*override{}
 	c.silent++
 	defer func() { c.silent-- }()
 	for i, e := range body.Entries {
@@ -687,8 +722,11 @@ func (c *checker) finishBody(s *bodySum, body *syntax.WireBody, m *wireMeter) bo
 			continue
 		}
 		constructor := c.isConstructor(e.Value)
+		by := c.wireEntries[e] // a named wire's entry; nil for an inline wire's
+		at := 0
 		if !eachKey(e, func(k syntax.Expr) bool {
 			op(m, "key read", singlePass, 1)
+			at++
 			t := c.wireKey(k)
 			if t == nil {
 				return true
@@ -702,10 +740,11 @@ func (c *checker) finishBody(s *bodySum, body *syntax.WireBody, m *wireMeter) bo
 			// holds one binding per capability (D-A4).
 			op(m, "own probe", singlePass, 1)
 			if first, dup := ownAt[key]; dup {
-				s.findings = append(s.findings, wireFinding{k, CodeDuplicateCap, fmt.Sprintf("%s has a second entry in this wire, entry %d; the first is entry %d, and a wire binds a capability once (rows.md, Wire 1)", t, i+1, first)})
+				msg := fmt.Sprintf("%s has a second entry in this wire, entry %d; the first is entry %d, and a wire binds a capability once (rows.md, Wire 1)", t, i+1, first.entry)
+				s.findings = append(s.findings, wireFinding{k, CodeDuplicateCap, msg})
 				return true
 			}
-			ownAt[key] = i + 1
+			ownAt[key] = place{i + 1, at}
 			switch {
 			case e.Kind == syntax.WireReplace:
 				replaced[key] = true
@@ -722,15 +761,20 @@ func (c *checker) finishBody(s *bodySum, body *syntax.WireBody, m *wireMeter) bo
 				if !ok {
 					return false
 				}
-				if !inEmbedded && !inCycle {
+				if inEmbedded == nil && inCycle == nil {
 					s.findings = append(s.findings, wireFinding{k, CodeType, fmt.Sprintf("replace %s names no entry of an embedded wire (rows.md, Wire 7)", t)})
+				}
+				if by != nil && inEmbedded != nil && inEmbedded.entry != nil {
+					o := &override{cap: t, by: by, cands: []*WireEntry{inEmbedded.entry}}
+					overrides = append(overrides, o)
+					overrideOf[key] = o
 				}
 			case !constructor:
 				found, ok := s.embedded.lookup(m, key)
 				if !ok {
 					return false
 				}
-				if found {
+				if found != nil {
 					s.findings = append(s.findings, wireFinding{k, CodeDuplicateCap, fmt.Sprintf("%s has a second entry in this wire; only replace overrides an embedded entry (rows.md, Wire 1; README Gap 28)", t)})
 				}
 			}
@@ -748,6 +792,23 @@ func (c *checker) finishBody(s *bodySum, body *syntax.WireBody, m *wireMeter) bo
 		op(m, "collision", repeatable, 1)
 		if !replaced[k.key] {
 			s.findings = append(s.findings, wireFinding{k.at, CodeDuplicateCap, fmt.Sprintf("%s is bound by two embedded wires; replace one entry (rows.md, Wire 7)", k.cap)})
+		} else if o := overrideOf[k.key]; o != nil && k.entry != nil {
+			o.cands = append(o.cands, k.entry)
+		}
+	}
+	for _, o := range overrides {
+		if !sortWires(m, o.cands, func(a, b *WireEntry) bool { return a.seq < b.seq }) {
+			return false
+		}
+		for i, e := range o.cands {
+			if !m.step(1) {
+				return false
+			}
+			op(m, "override", repeatable, 1)
+			if i > 0 && o.cands[i-1] == e {
+				continue // one entry two embeddings bring (a diamond)
+			}
+			s.overrides = append(s.overrides, Override{Cap: o.cap, Entry: e, By: o.by})
 		}
 	}
 	s.binds = &capSet{root: s.embedded.root, size: s.embedded.size, extra: own}

@@ -113,6 +113,10 @@ type checker struct {
 	// wireBodies holds each wire body's summary, decided once (wireSummaries,
 	// finished by bodySummary).
 	wireBodies map[*syntax.WireBody]*bodySum
+	// wireEntries holds the Info record of each named wire's provider
+	// entry, made once by the wire pass (wirePass.own) and filled in when
+	// the wire's body is checked (wireBody).
+	wireEntries map[*syntax.WireEntry]*WireEntry
 	// nodeCheck replaces checkNode in converge for the synthetic oscillation
 	// test (nil otherwise); convergeChecks counts converge's checks.
 	nodeCheck      func(*bodyNode) bool

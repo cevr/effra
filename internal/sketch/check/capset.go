@@ -14,12 +14,20 @@ import (
 // (round 18). Each node keeps its height, so the cost of a lookup is known
 // before it runs (finishBody's allowance).
 //
+// Each node also carries the entry that provides its capability, so a
+// named wire's summary is its resolved bindings too (rows.md, Wire 5 and
+// 7): the union of a component puts its members' own entries over what
+// its embeddings bring (a replace), and a with points to that shared
+// summary instead of copying it (Wire.Provider; round-4 review M1).
+//
 // Every operation of the wire summaries runs on a wireMeter: each node is
 // charged before it is read, each node copied or created before it is
 // made, each element enumerated before it is passed on, and the operation
 // stops when the package's budget would be passed (D16 as amended in
 // round 18; wiresum.go). Only the membership test of a with scope while a
-// body is checked (has) is not wire-summary work and is not metered.
+// body is checked (has, find), which charges the body's own budget like
+// Row.has, and the lowering's lookups (Wire.Provider) are not wire-summary
+// work and are not metered.
 // Prior art: OCaml's Set and Erlang maps share structure between
 // versions; TypeScript (TS2589) and rustc (recursion_limit) refuse past a
 // deterministic, source-only budget instead of accepting unproven.
@@ -32,8 +40,11 @@ type capSet struct {
 }
 
 type capNode struct {
-	key         capKey
-	t           Type
+	key capKey
+	t   Type
+	// entry is the provider entry that binds the capability: a named
+	// wire's own entry (wirePass.own), nil for an inline wire's.
+	entry       *WireEntry
 	pri         uint32
 	h           int32 // nodes on the longest path down from here
 	left, right *capNode
@@ -145,16 +156,38 @@ func op(m *wireMeter, kind string, repeat bool, n int) {
 // has reports whether t is an element: a with scope's membership test
 // while a body is checked. Like Row.has, it charges one lookup step.
 func (s *capSet) has(tab *typeTable, t Type) bool {
+	found, _ := s.find(tab, t)
+	return found
+}
+
+// find is has, and also returns the node that holds t: nil when t is an
+// inline wire's own entry (extra). A with's discharge test reads the
+// providing entry from it, so a with's Info costs no lookup of its own
+// (recordWith).
+func (s *capSet) find(tab *typeTable, t Type) (found bool, n *capNode) {
 	if s == nil || s.size == 0 && len(s.extra) == 0 {
-		return false
+		return false, nil
 	}
 	tab.charge(1)
 	k, ok := keyOf(t)
 	if !ok {
-		return false
+		return false, nil
 	}
 	if s.extra[k] {
-		return true
+		return true, nil
+	}
+	if n := s.node(k); n != nil {
+		return true, n
+	}
+	return false, nil
+}
+
+// node is the node of k, or nil, read without a meter: the with test
+// (find) and the lowering's lookups (Wire.Provider), which are not
+// wire-summary work.
+func (s *capSet) node(k capKey) *capNode {
+	if s == nil {
+		return nil
 	}
 	for n := s.root; n != nil; {
 		switch c := k.compare(n.key); {
@@ -163,21 +196,22 @@ func (s *capSet) has(tab *typeTable, t Type) bool {
 		case c > 0:
 			n = n.right
 		default:
-			return true
+			return n
 		}
 	}
-	return false
+	return nil
 }
 
 // lookup is has for the wire summaries: one step per node, charged before
-// the node is read. ok is false when the budget ran out.
-func (s *capSet) lookup(m *wireMeter, k capKey) (found, ok bool) {
+// the node is read. It returns the node of k, or nil; ok is false when the
+// budget ran out.
+func (s *capSet) lookup(m *wireMeter, k capKey) (found *capNode, ok bool) {
 	if s == nil {
-		return false, true
+		return nil, true
 	}
 	for n := s.root; n != nil; {
 		if !m.step(1) {
-			return false, false
+			return nil, false
 		}
 		op(m, "lookup node", repeatable, 1)
 		switch c := k.compare(n.key); {
@@ -186,15 +220,27 @@ func (s *capSet) lookup(m *wireMeter, k capKey) (found, ok bool) {
 		case c > 0:
 			n = n.right
 		default:
-			return true, true
+			return n, true
 		}
 	}
-	return false, true
+	return nil, true
 }
 
-// with returns s with t added; s is unchanged. ok is false when the
-// budget ran out; s is then returned.
-func (s *capSet) with(m *wireMeter, t Type) (out *capSet, ok bool) {
+// with returns s with t added, provided by e; s is unchanged. An element
+// already there keeps its entry. ok is false when the budget ran out; s is
+// then returned.
+func (s *capSet) with(m *wireMeter, t Type, e *WireEntry) (out *capSet, ok bool) {
+	return s.insert(m, t, e, false)
+}
+
+// put is with, except that an element already there is now provided by e:
+// a wire's own entry over what its embeddings bring (a replace; rows.md,
+// Wire 7). The path to it is copied, as an insertion's is.
+func (s *capSet) put(m *wireMeter, t Type, e *WireEntry) (out *capSet, ok bool) {
+	return s.insert(m, t, e, true)
+}
+
+func (s *capSet) insert(m *wireMeter, t Type, e *WireEntry, over bool) (out *capSet, ok bool) {
 	if s == nil {
 		s = &capSet{}
 	}
@@ -202,47 +248,60 @@ func (s *capSet) with(m *wireMeter, t Type) (out *capSet, ok bool) {
 	if !isKey {
 		return s, true
 	}
-	root, added, ok := capInsert(m, s.root, k, t, k.priority())
+	root, added, changed, ok := capInsert(m, s.root, k, t, e, k.priority(), over)
 	if !ok {
 		return s, false
 	}
-	if !added {
-		return s, true
+	switch {
+	case added:
+		return &capSet{root: root, size: s.size + 1}, true
+	case changed:
+		return &capSet{root: root, size: s.size}, true
 	}
-	return &capSet{root: root, size: s.size + 1}, true
+	return s, true
 }
 
-// capInsert returns n with (k, t) added and whether it was added. The nodes
-// on the path are copies, so a returned node is never shared and a
-// rotation may change it. A visit and a copy are each one step, charged
-// before the node is read or made.
-func capInsert(m *wireMeter, n *capNode, k capKey, t Type, pri uint32) (out *capNode, added, ok bool) {
+// capInsert returns n with (k, t) added, provided by e, and whether it was
+// added; when over is set, an element already there whose entry is not e
+// is copied with e (changed). The nodes on the path are copies, so a
+// returned node is never shared and a rotation may change it. A visit and
+// a copy are each one step, charged before the node is read or made.
+func capInsert(m *wireMeter, n *capNode, k capKey, t Type, e *WireEntry, pri uint32, over bool) (out *capNode, added, changed, ok bool) {
 	if n == nil {
 		if !m.step(1) {
-			return nil, false, false
+			return nil, false, false, false
 		}
 		op(m, "node made", repeatable, 1)
-		return &capNode{key: k, t: t, pri: pri, h: 1}, true, true
+		return &capNode{key: k, t: t, entry: e, pri: pri, h: 1}, true, false, true
 	}
 	if !m.step(1) {
-		return n, false, false
+		return n, false, false, false
 	}
 	op(m, "insert node", repeatable, 1)
 	cmp := k.compare(n.key)
 	if cmp == 0 {
-		return n, false, true
+		if !over || n.entry == e {
+			return n, false, false, true
+		}
+		if !m.step(1) {
+			return n, false, false, false
+		}
+		op(m, "node copied", repeatable, 1)
+		c := *n
+		c.entry = e
+		return &c, false, true, true
 	}
 	var child *capNode
 	if cmp < 0 {
-		child, added, ok = capInsert(m, n.left, k, t, pri)
+		child, added, changed, ok = capInsert(m, n.left, k, t, e, pri, over)
 	} else {
-		child, added, ok = capInsert(m, n.right, k, t, pri)
+		child, added, changed, ok = capInsert(m, n.right, k, t, e, pri, over)
 	}
-	if !ok || !added {
-		return n, false, ok
+	if !ok || !added && !changed {
+		return n, false, false, ok
 	}
 	if !m.step(1) {
-		return n, false, false
+		return n, false, false, false
 	}
 	op(m, "node copied", repeatable, 1)
 	c := *n
@@ -252,7 +311,7 @@ func capInsert(m *wireMeter, n *capNode, k capKey, t Type, pri uint32) (out *cap
 			c.left, child.right = child.right, &c
 			c.h = 1 + max(height(c.left), height(c.right))
 			child.h = 1 + max(height(child.left), height(child.right))
-			return child, true, true
+			return child, added, changed, true
 		}
 	} else {
 		c.right = child
@@ -260,17 +319,17 @@ func capInsert(m *wireMeter, n *capNode, k capKey, t Type, pri uint32) (out *cap
 			c.right, child.left = child.left, &c
 			c.h = 1 + max(height(c.left), height(c.right))
 			child.h = 1 + max(height(child.left), height(child.right))
-			return child, true, true
+			return child, added, changed, true
 		}
 	}
 	c.h = 1 + max(height(c.left), height(c.right))
-	return &c, true, true
+	return &c, added, changed, true
 }
 
 // each calls f on the elements in key order, one step per node, charged
 // before the node or its children are read, until f returns false. It
 // returns false when the budget ran out or f stopped.
-func (s *capSet) each(m *wireMeter, f func(k capKey, t Type) bool) bool {
+func (s *capSet) each(m *wireMeter, f func(n *capNode) bool) bool {
 	if s == nil {
 		return true
 	}
@@ -284,7 +343,7 @@ func (s *capSet) each(m *wireMeter, f func(k capKey, t Type) bool) bool {
 			if !walk(n.left) {
 				return false
 			}
-			if !f(n.key, n.t) {
+			if !f(n) {
 				return false
 			}
 			n = n.right
@@ -303,7 +362,12 @@ func (s *capSet) each(m *wireMeter, f func(k capKey, t Type) bool) bool {
 // fixed by the wires' names and entries (wiresum.go), so the charged work
 // does not depend on the declarations' order. ok is false when the budget
 // ran out.
-func capUnion(m *wireMeter, sets []*capSet) (out *capSet, ok bool) {
+//
+// The first owns sets are a component's own entries: their elements are
+// put, so an own entry provides its capability over what an embedding
+// brings (a replace; rows.md, Wire 7), whichever side is the largest. The
+// others are added, so an element already there keeps its entry.
+func capUnion(m *wireMeter, sets []*capSet, owns int) (out *capSet, ok bool) {
 	largest := -1
 	for i, s := range sets {
 		op(m, "union set read", singlePass, 1)
@@ -319,7 +383,11 @@ func capUnion(m *wireMeter, sets []*capSet) (out *capSet, ok bool) {
 		if i == largest {
 			continue
 		}
-		if !s.each(m, func(_ capKey, t Type) bool { out, ok = out.with(m, t); return ok }) {
+		add := (*capSet).with
+		if i < owns {
+			add = (*capSet).put
+		}
+		if !s.each(m, func(n *capNode) bool { out, ok = add(out, m, n.t, n.entry); return ok }) {
 			return nil, false
 		}
 	}

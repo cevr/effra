@@ -129,8 +129,18 @@ type Wire struct {
 	budget bool
 	pkg    *Package
 	// Entries are the wire's own entries as written, in source order, made
-	// when its body is checked; With.Entries holds the resolved bindings.
+	// when its body is checked: its provider entries, and an entry per
+	// embedding that points to the embedded wire. Provider reads the
+	// resolved bindings, shared with the wires that embed it.
 	Entries []*WireEntry
+	// Overrides are this wire's own replace overrides, so a replaced
+	// provider stays traceable: in its replace entries' source order, and
+	// for one capability each overridden entry once, in the order the wire
+	// pass meets them (wires by name, then entries in source order). An
+	// embedded wire's own overrides are on it (Entries[i].Embedded): a
+	// replace of a replace is one override on each wire (wiresum.go,
+	// finishBody).
+	Overrides []Override
 }
 
 func (o *TypeName) name() string { return o.Name }

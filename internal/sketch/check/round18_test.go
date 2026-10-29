@@ -84,7 +84,7 @@ func TestCapSetPersistent(t *testing.T) {
 	for i := range 2000 {
 		k := key((i * 7919) % 2003)
 		var added bool
-		root, added, _ = capInsert(m, root, k, nil, k.priority())
+		root, added, _, _ = capInsert(m, root, k, nil, nil, k.priority(), false)
 		if added {
 			size++
 		}
@@ -125,22 +125,23 @@ func TestCapSetPersistent(t *testing.T) {
 	}
 	s := &capSet{root: root, size: size}
 	prev := lo
-	s.each(m, func(k capKey, _ Type) bool {
+	s.each(m, func(n *capNode) bool {
+		k := n.key
 		if k.compare(prev) <= 0 {
 			t.Fatalf("each: %v after %v", k, prev)
 		}
 		prev = k
-		if found, _ := s.lookup(m, k); !found {
+		if found, _ := s.lookup(m, k); found == nil {
 			t.Fatalf("lookup(%v) false", k)
 		}
 		return true
 	})
-	if found, _ := s.lookup(m, key(2003)); found {
+	if found, _ := s.lookup(m, key(2003)); found != nil {
 		t.Error("lookup(C02003) true")
 	}
 	// A meter that runs out stops an insert and leaves the set unchanged.
 	small := &wireMeter{limit: 3}
-	out, _, ok := capInsert(small, root, key(99999), nil, key(99999).priority())
+	out, _, _, ok := capInsert(small, root, key(99999), nil, nil, key(99999).priority(), false)
 	if ok || out != root || !small.out || small.used > small.limit {
 		t.Errorf("an insert past the budget: ok=%v, out=%v, used %d of %d", ok, small.out, small.used, small.limit)
 	}
@@ -152,8 +153,8 @@ func TestCapSetPersistent(t *testing.T) {
 	var other *capNode
 	for i := 2002; i >= 0; i-- {
 		k := key(i)
-		if found, _ := s.lookup(m, k); found {
-			other, _, _ = capInsert(m, other, k, nil, k.priority())
+		if found, _ := s.lookup(m, k); found != nil {
+			other, _, _, _ = capInsert(m, other, k, nil, nil, k.priority(), false)
 		}
 	}
 	var same func(a, b *capNode) bool
@@ -165,6 +166,57 @@ func TestCapSetPersistent(t *testing.T) {
 	}
 	if !same(root, other) {
 		t.Error("two insertion orders of one key set give two shapes")
+	}
+}
+
+// TestCapSetPut (round-4 review M1): put provides an element already there
+// by a new entry and copies only its path, so the earlier version keeps
+// its entry and every node off the path is shared; with keeps the entry
+// already there; and the shape does not change.
+func TestCapSetPut(t *testing.T) {
+	m := &wireMeter{limit: 1 << 30}
+	var s *capSet
+	old, other := &WireEntry{}, &WireEntry{}
+	types := make([]Type, 500)
+	for i := range types {
+		types[i] = &Named{Obj: &TypeName{Name: fmt.Sprintf("C%03d", i)}}
+		s, _ = s.with(m, types[i], old)
+	}
+	k, _ := keyOf(types[250])
+	kept, _ := s.with(m, types[250], other)
+	if kept != s || kept.node(k).entry != old {
+		t.Fatal("with replaced an element's entry")
+	}
+	before := m.used
+	put, ok := s.put(m, types[250], other)
+	if !ok || put.size != s.size || put.node(k).entry != other || s.node(k).entry != old {
+		t.Fatalf("put: size %d of %d, new entry %v, old version's entry kept %v", put.size, s.size, put.node(k).entry == other, s.node(k).entry == old)
+	}
+	if cost := m.used - before; cost > 2*s.height()+1 {
+		t.Errorf("put charged %d steps; its path is at most %d nodes", cost, s.height())
+	}
+	shared := 0
+	var walk func(a, b *capNode)
+	walk = func(a, b *capNode) {
+		if a == nil || b == nil {
+			if a != b {
+				t.Fatal("put changed the shape")
+			}
+			return
+		}
+		if a == b {
+			shared++
+			return
+		}
+		if a.key != b.key || a.h != b.h {
+			t.Fatal("put changed the shape")
+		}
+		walk(a.left, b.left)
+		walk(a.right, b.right)
+	}
+	walk(s.root, put.root)
+	if shared == 0 {
+		t.Error("put copied the whole set")
 	}
 }
 

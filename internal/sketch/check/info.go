@@ -2,6 +2,7 @@ package check
 
 import (
 	"go/constant"
+	"sort"
 
 	"ergo.local/prototype/internal/sketch/syntax"
 )
@@ -15,8 +16,9 @@ import (
 //     entry, every identifier a Defs or Uses entry, every call a Calls
 //     entry, every pattern a Patterns entry, every match and catch a
 //     Matches entry, every for-in a Loops entry and every with a Withs
-//     entry, whose Entries hold its named wires' providers with their
-//     conversions (TestInfoComplete). A package name before a dot and a
+//     entry, whose Entries hold its named wire's providers of what its
+//     block needs, with their conversions; the wire itself holds the rest
+//     (Wire.Provider, Wire.Overrides; TestInfoComplete). A package name before a dot and a
 //     built-in callee are no values and have no Types entry. An inline
 //     wire value's entries are stage E's (196x).
 //  2. Final: no type in Info is invalid or holds a row variable; a type
@@ -61,10 +63,7 @@ type Package struct {
 	ErrorTypes map[*Named]bool
 
 	qualify bool // print its types with the package name
-	// bindWork counts the steps that resolved the named wires' bindings
-	// (finishInfo): wires, entries and the nodes and entries read.
-	bindWork int
-	files    []*fileInfo
+	files   []*fileInfo
 }
 
 // Info records the checker's results for the lowering (#197, #50).
@@ -254,32 +253,34 @@ type Loop struct {
 	Bindings []*Var
 }
 
-// With is one with site.
+// With is one with site. Its size is bounded by its body, never by its
+// wire (round-4 review M1): the wire's resolved bindings are shared, and a
+// with points to them through Wires.
 type With struct {
 	// Wires are the named wires bound, in nesting order; an inline wire
-	// value's entries are stage E's (196x).
+	// value's entries are stage E's (196x). Wires[0] is the shared,
+	// resolved wire: Wire.Provider and Wire.EachProvider read every
+	// capability it binds, Wire.Overrides what its replaces overrode.
 	Wires []*Wire
-	// Discharged are the capability types the site binds, by name.
+	// Discharged are the capabilities the block's row needs that this with
+	// discharges, by name: each charge of the block that no inner with
+	// discharged (rows.md, With 2 and 3). A capability the wire binds and
+	// the block never needs is not listed.
 	Discharged []Type
-	// Entries holds, for a with of a named wire, exactly one entry per
+	// Entries holds, for a with of a named wire, one entry per discharged
 	// capability: Entries[i] is the provider entry that binds
 	// Discharged[i] once replace and embedding are resolved (rows.md,
-	// Wire 7). An entry of several capabilities appears at each of its
-	// capabilities; its conversion for Discharged[i] is the one at that
-	// capability's index in its Caps. Empty for an inline wire value
-	// (stage E, 196x).
+	// Wire 7), Wires[0].Provider(Discharged[i]). An entry of several
+	// capabilities appears at each of its capabilities; its conversion for
+	// Discharged[i] is the one at that capability's index in its Caps.
+	// Empty for an inline wire value (stage E, 196x).
 	Entries []*WireEntry
-	// Overridden are the bindings a replace overrode, outermost replace
-	// first, so a replaced provider stays traceable: each names the
-	// capability, the overridden entry and the entry that replaced it for
-	// that capability. The overridden entry is not built for that
-	// capability; an entry of several capabilities that still binds another
-	// one is in Entries for it and is built for it.
-	Overridden []Override
 }
 
-// Override is a binding a replace overrode (With.Overridden): Entry no
-// longer binds Cap, By does.
+// Override is a binding a replace overrode (Wire.Overrides): Entry no
+// longer binds Cap, By does. The overridden entry is not built for that
+// capability; an entry of several capabilities that still binds another
+// one is built for it.
 type Override struct {
 	Cap       Type
 	Entry, By *WireEntry
@@ -302,6 +303,10 @@ type WireEntry struct {
 	Conversions []Conversion
 	// Embedded is the embedded wire; nil for a provider entry.
 	Embedded *Wire
+
+	// seq orders a package's named wire entries: the wire pass meets the
+	// wires by name, then their entries in source order (wirePass.own).
+	seq int
 }
 
 // Test is a test block (stage E, 196l).
@@ -373,8 +378,11 @@ func (c *checker) recordCall(x *syntax.CallExpr, fun operand) {
 	}
 }
 
-// recordWith records a with site: the named wire and what it binds.
-func (c *checker) recordWith(x *syntax.CallExpr, binds *capSet) {
+// recordWith records a with site: the named wire, and the capabilities its
+// block needed from it with their entries, which the block's charges found
+// (withFrame), sorted by name. It reads nothing of the wire's summary, so
+// its work and its size are the block's.
+func (c *checker) recordWith(x *syntax.CallExpr, f *withFrame) {
 	if c.silent > 0 {
 		return
 	}
@@ -384,19 +392,59 @@ func (c *checker) recordWith(x *syntax.CallExpr, binds *capSet) {
 			w.Wires = []*Wire{c.pkg.Wires[id.Name]}
 		}
 	}
-	if binds != nil {
-		var walk func(n *capNode)
-		walk = func(n *capNode) {
-			for n != nil {
-				walk(n.left)
-				w.Discharged = append(w.Discharged, n.t)
-				n = n.right
+	if !f.unknown && len(f.caps) > 0 {
+		order := make([]int, len(f.caps))
+		keys := make([]capKey, len(f.caps))
+		for i, cap := range f.caps {
+			order[i] = i
+			keys[i], _ = keyOf(cap)
+		}
+		sort.Slice(order, func(a, b int) bool { return keys[order[a]].compare(keys[order[b]]) < 0 })
+		for _, i := range order {
+			w.Discharged = append(w.Discharged, f.caps[i])
+			if w.Wires != nil {
+				w.Entries = append(w.Entries, f.entries[i])
 			}
 		}
-		walk(binds.root)
 	}
 	c.pkg.Info.Withs[x] = w
 	c.callInfo(x).Kind = CallWith
+}
+
+// Provider returns the entry that binds cap in a with of w, once replace
+// and embedding are resolved (rows.md, Wire 7), or nil when w binds no
+// cap. It reads the wire's summary, shared with every wire that embeds w
+// and every with of it (wiresum.go): a lookup reads at most the summary's
+// height, O(log n) of the capabilities w reaches. Its conversion for cap is
+// the one at cap's index in the entry's Caps.
+func (w *Wire) Provider(cap Type) *WireEntry {
+	k, ok := keyOf(cap)
+	if !ok {
+		return nil
+	}
+	if n := w.binds.node(k); n != nil {
+		return n.entry
+	}
+	return nil
+}
+
+// EachProvider calls f on each capability w binds, by name, with the entry
+// that binds it (Provider), until f returns false.
+func (w *Wire) EachProvider(f func(cap Type, e *WireEntry) bool) {
+	if w.binds == nil {
+		return
+	}
+	var walk func(n *capNode) bool
+	walk = func(n *capNode) bool {
+		for n != nil {
+			if !walk(n.left) || !f(n.t, n.entry) {
+				return false
+			}
+			n = n.right
+		}
+		return true
+	}
+	walk(w.binds.root)
 }
 
 // finishInfo resolves the rows Info holds once every body is final, so no
@@ -421,141 +469,6 @@ func (c *checker) finishInfo() {
 			c.pkg.Info.Types[x] = r
 		}
 	}
-	// A with's bindings, final once every wire body is checked: the entry
-	// that binds each discharged capability, and what a replace overrode.
-	b := &binder{c: c, nodes: map[*Wire]*bindNode{}, results: map[*bindNode]*bindResult{}}
-	for _, w := range c.pkg.Info.Withs {
-		w.Entries, w.Overridden = nil, nil
-		if len(w.Wires) != 1 {
-			continue
-		}
-		r := b.result(b.node(w.Wires[0], map[*Wire]bool{}))
-		for _, d := range w.Discharged {
-			w.Entries = append(w.Entries, r.bound[c.types.id(d)])
-		}
-		w.Overridden = r.overridden
-	}
-	c.pkg.bindWork = b.work
-}
-
-// The bindings of named wires (rows.md, Wire 7), resolved once per
-// package (round-3 review M1). Each wire gets one bindNode, made once:
-// its own entries and the nodes of its embedded wires. A wire with no own
-// entry and one embedding shares its embedding's node, and an empty node
-// is dropped, so a chain of wires that only embed shares one node. A with
-// reads the result of its wire's node, made once per node: the entry that
-// binds each capability and the overrides. work counts the wires and the
-// entries each step reads; the result of a node is made by one walk of the
-// nodes it reaches, each node once, so work is at most twice the wires
-// and entries plus the nodes and entries the results read. In a clean
-// package every own entry a walk reads is in its result (it binds, or a
-// replace overrode it) and a node of several embeddings joins disjoint
-// capabilities (a capability two embeddings bind is S111 unless replaced),
-// so the results' reading is bounded by their size (TestWireInfoLinear).
-type binder struct {
-	c       *checker
-	nodes   map[*Wire]*bindNode
-	results map[*bindNode]*bindResult
-	work    int
-}
-
-// bindNode is a wire's own entries, by capability, in source order, and
-// the distinct non-empty nodes of its embedded wires, in source order.
-type bindNode struct {
-	own   []ownBinding
-	bases []*bindNode
-}
-
-type ownBinding struct {
-	id    int32
-	cap   Type
-	entry *WireEntry
-}
-
-// bindResult is a node's resolved bindings: the provider entry for each
-// capability, keyed by its interned id, and the overrides.
-type bindResult struct {
-	bound      map[int32]*WireEntry
-	overridden []Override
-}
-
-var emptyBind = &bindNode{}
-
-// node makes w's node once. Embedding cycles are S108 (rows.md, Wire 5),
-// so a wire already on the walk adds nothing.
-func (b *binder) node(w *Wire, walk map[*Wire]bool) *bindNode {
-	if n, ok := b.nodes[w]; ok {
-		return n
-	}
-	if walk[w] {
-		return emptyBind
-	}
-	walk[w] = true
-	b.work++ // the wire
-	n := &bindNode{}
-	seen := map[*bindNode]bool{}
-	for _, e := range w.Entries {
-		b.work++ // the entry
-		if e.Embedded != nil {
-			if base := b.node(e.Embedded, walk); base != emptyBind && !seen[base] {
-				seen[base] = true
-				n.bases = append(n.bases, base)
-			}
-			continue
-		}
-		for _, cap := range e.Caps {
-			n.own = append(n.own, ownBinding{id: b.c.types.id(cap), cap: cap, entry: e})
-		}
-	}
-	delete(walk, w)
-	switch {
-	case len(n.own) == 0 && len(n.bases) == 0:
-		n = emptyBind
-	case len(n.own) == 0 && len(n.bases) == 1:
-		n = n.bases[0] // shared: the wire binds what its embedding binds
-	}
-	b.nodes[w] = n
-	return n
-}
-
-// result resolves a node once, in one depth-first walk of the nodes it
-// reaches, each once, a node's own entries before its bases'. The first
-// entry the walk meets for a capability is the outermost on its path, so
-// it binds; a later entry for it is overridden, for that capability, by
-// the nearest entry for it on the path above.
-func (b *binder) result(root *bindNode) *bindResult {
-	if r, ok := b.results[root]; ok {
-		return r
-	}
-	r := &bindResult{bound: map[int32]*WireEntry{}}
-	visited := map[*bindNode]bool{}
-	above := map[int32][]*WireEntry{} // the entries for each capability on the path
-	var walk func(n *bindNode)
-	walk = func(n *bindNode) {
-		if visited[n] {
-			return
-		}
-		visited[n] = true
-		b.work++ // the node
-		for _, o := range n.own {
-			b.work++ // the entry
-			if stack := above[o.id]; len(stack) > 0 {
-				r.overridden = append(r.overridden, Override{Cap: o.cap, Entry: o.entry, By: stack[len(stack)-1]})
-			} else if r.bound[o.id] == nil {
-				r.bound[o.id] = o.entry
-			}
-			above[o.id] = append(above[o.id], o.entry)
-		}
-		for _, base := range n.bases {
-			walk(base)
-		}
-		for _, o := range n.own {
-			above[o.id] = above[o.id][:len(above[o.id])-1]
-		}
-	}
-	walk(root)
-	b.results[root] = r
-	return r
 }
 
 // finalType is t with every row variable in a function type's rows

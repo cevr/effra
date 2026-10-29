@@ -341,11 +341,24 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 			if embeds != wantEmbeds {
 				at(d, fmt.Sprintf("a named wire with %d embeddings and %d embedded Entries", wantEmbeds, embeds))
 			}
+			// Each capability the wire binds has a provider entry that
+			// lists it (Wire.Provider), and each override names two
+			// provider entries of one capability, the later its own.
+			wire.EachProvider(func(cap Type, e *WireEntry) bool {
+				if e == nil || e.Provider == nil || !listsCap(e, cap) {
+					at(d, "a named wire whose entry for "+typeString(cap)+" does not provide it")
+				}
+				return true
+			})
+			for _, o := range wire.Overrides {
+				if o.Entry == nil || o.By == nil || o.Entry.Provider == nil || o.By.Provider == nil || !listsCap(o.Entry, o.Cap) || !listsCap(o.By, o.Cap) || entries[o.By.Provider] != o.By {
+					at(d, "a named wire with an override whose entries do not both list its capability")
+				}
+			}
 		}
 	}
 	// Each with of a named wire holds one provider entry per discharged
-	// capability, an entry that lists that capability; each override names
-	// two provider entries of one capability.
+	// capability: the entry its wire's Provider returns, which lists it.
 	for x, w := range info.Withs {
 		if len(w.Wires) == 0 {
 			continue // an inline wire value: stage E (196x)
@@ -356,32 +369,27 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 		}
 		for i, d := range w.Discharged {
 			e := w.Entries[i]
-			lists := false
-			if e != nil {
-				for _, cap := range e.Caps {
-					lists = lists || typeString(cap) == typeString(d)
-				}
-			}
-			if !lists || e.Provider == nil {
+			if e == nil || e.Provider == nil || !listsCap(e, d) || w.Wires[0].Provider(d) != e {
 				at(x, "a with whose entry for "+typeString(d)+" does not provide it")
-			}
-		}
-		for _, o := range w.Overridden {
-			lists := func(e *WireEntry) bool {
-				for _, cap := range e.Caps {
-					if o.Cap != nil && typeString(cap) == typeString(o.Cap) {
-						return true
-					}
-				}
-				return false
-			}
-			if o.Entry == nil || o.By == nil || o.Entry.Provider == nil || o.By.Provider == nil || !lists(o.Entry) || !lists(o.By) {
-				at(x, "a with with an override whose entries do not both list its capability")
 			}
 		}
 	}
 	sort.Strings(gaps)
 	return gaps
+}
+
+// listsCap reports whether a provider entry lists cap among its keys.
+func listsCap(e *WireEntry, cap Type) bool {
+	k, ok := keyOf(cap)
+	if !ok {
+		return false
+	}
+	for _, c := range e.Caps {
+		if ck, ok := keyOf(c); ok && ck == k {
+			return true
+		}
+	}
+	return false
 }
 
 // cleanInfoGaps checks src as one package and returns infoGaps when the

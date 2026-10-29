@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
 
 	"ergo.local/prototype/internal/sketch/syntax"
 )
@@ -52,10 +51,26 @@ func withSummary(t *testing.T, src string) []string {
 			parts = append(parts, fmt.Sprintf("%s=%s", strings.TrimPrefix(typeString(d), "main."), text(w.Entries[i].Provider)))
 		}
 		line := w.Wires[0].Name + ": " + strings.Join(parts, " ")
+		// The overrides live on each wire (Wire.Overrides): the with's
+		// wire first, then the wires it embeds, each once.
 		var over []string
-		for _, o := range w.Overridden {
-			over = append(over, strings.TrimPrefix(typeString(o.Cap), "main.")+": "+text(o.Entry.Provider)+" by "+text(o.By.Provider))
+		seen := map[*Wire]bool{}
+		var walk func(wire *Wire)
+		walk = func(wire *Wire) {
+			if seen[wire] {
+				return
+			}
+			seen[wire] = true
+			for _, o := range wire.Overrides {
+				over = append(over, strings.TrimPrefix(typeString(o.Cap), "main.")+": "+text(o.Entry.Provider)+" by "+text(o.By.Provider))
+			}
+			for _, e := range wire.Entries {
+				if e.Embedded != nil {
+					walk(e.Embedded)
+				}
+			}
 		}
+		walk(w.Wires[0])
 		if len(over) > 0 {
 			line += "; " + strings.Join(over, ", ")
 		}
@@ -101,12 +116,42 @@ let Outer = wire { replace Store: Mem{V: "outer"}, Fixture }
 		{"a replace of one capability of a shared entry", `let Both = wire { Store, Log: Mem{V: "both"} }
 let W = wire { replace Store: Mem{V: "one"}, Both }
 `, []string{`W: Log=Mem{V: "both"} Store=Mem{V: "one"}; Store: Mem{V: "both"} by Mem{V: "one"}`}},
+		// Round-4 review M1: a with lists only what its block's row needs;
+		// the wire's other bindings stay on the shared wire.
+		{"a with lists only what its block needs", `let Live = wire { Store: Mem{V: "pkg"}, Log: Mem{V: "log"} }
+func b() string {
+	return with Live { Store.Get() }
+}
+`, []string{`Live: Store=Mem{V: "pkg"}`, `Live: Log=Mem{V: "log"} Store=Mem{V: "pkg"}`}},
+		// An inner with discharges what it binds; the outer one only the
+		// rest (rows.md, With 3).
+		{"nested withs split the block's needs", `let Inner = wire { Store: Mem{V: "inner"} }
+let Outer = wire { Store: Mem{V: "outer"}, Log: Mem{V: "log"} }
+func b() string {
+	return with Outer { with Inner { Run() } }
+}
+`, []string{`Outer: Log=Mem{V: "log"}`, `Inner: Store=Mem{V: "inner"}`, `Outer: Log=Mem{V: "log"} Store=Mem{V: "outer"}`}},
+		// Two embeddings that bring one entry and a replace of it: one
+		// override per overridden entry.
+		{"a replaced diamond overrides its entry once", `let Base = wire { Store: Mem{V: "base"} }
+let L = wire { Base }
+let R = wire { Base }
+let W = wire { replace Store: Mem{V: "w"}, Log: Mem{V: "log"}, L, R }
+`, []string{`W: Log=Mem{V: "log"} Store=Mem{V: "w"}; Store: Mem{V: "base"} by Mem{V: "w"}`}},
+		{"a replace of two embedded entries", `let A = wire { Store: Mem{V: "a"} }
+let B = wire { Store: Mem{V: "b"}, Log: Mem{V: "log"} }
+let W = wire { replace Store: Mem{V: "w"}, B, A }
+`, []string{`W: Log=Mem{V: "log"} Store=Mem{V: "w"}; Store: Mem{V: "a"} by Mem{V: "w"}, Store: Mem{V: "b"} by Mem{V: "w"}`}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// The with uses the last wire declared.
-			lines := strings.Split(strings.TrimSpace(tc.wires), "\n")
-			name := strings.Fields(lines[len(lines)-1])[1]
+			var name string
+			for _, line := range strings.Split(tc.wires, "\n") {
+				if strings.HasPrefix(line, "let ") {
+					name = strings.Fields(line)[1]
+				}
+			}
 			src := wireInfoPrelude + tc.wires + "func a() string {\n\treturn with " + name + " { Run() }\n}\n"
 			got := withSummary(t, src)
 			if strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
@@ -116,74 +161,106 @@ let W = wire { replace Store: Mem{V: "one"}, Both }
 	}
 }
 
-// TestWireInfoLinear (round 3, "Runaway allocation"): the bindings of a
-// with are linear in the wires it reaches. A first resolution merged each
-// embedded wire's override list into its embedder's, so a replaced diamond
-// (each layer joins two branches over the layer below) doubled the list
-// per layer: 2^n entries, which grew to 44 GB at n = 8000 in
-// TestWireBudget. Each shape here checks in bounded memory, with one entry
-// per discharged capability and one override per replace.
+// TestWireInfoLinear: the work that resolves the withs' bindings and the
+// Info that holds them are linear in the source (round 3, "Runaway
+// allocation"; round-3 and round-4 review M1).
 //
-// Round-3 review M1: each wire is resolved once per package and every with
-// reuses the result, so the reviewer's chain (n wires, each embedding the
-// one before, one with per wire) is linear too. The counted work
-// (Package.bindWork: wires, entries, and the nodes and entries a result
-// reads) stays within bindWorkPerUnit × (wires + entries + the size of
-// the bindings the withs hold).
+// A with's bindings are the wire pass's per-component summaries, whose
+// nodes carry their providing entries (wiresum.go): no second structure
+// is built after the pass, and a with records only the capabilities its
+// block's charges found (With.Discharged), with the entries the discharge
+// test read. So two counters bound everything:
+//   - the counted work: every operation of the wire pass, repeatable or
+//     single-pass (wireOp), at most wireInfoWorkPerUnit × (wire nodes +
+//     withs), on top of the pass's own two-part bound (bounded);
+//   - the Info size: Discharged and Entries summed over every with, and
+//     each wire's Overrides, at most wireInfoSizePerUnit × the source's
+//     syntax nodes.
+//
+// The shapes are the round-4 reviewer's owned chain (W0 binds C0, Wi binds
+// Ci and embeds W(i-1), one with per wire: at 3f5d6ac1 each with held i
+// bindings, n²/2 in all), the round-3 with chain, and the budget's entry
+// chain, large-base chain, wide fan-in and replaced diamond. Each also
+// pins its with and override counts. Timing is accept's scale leg's, not
+// go test's (round-4 ruling 4).
 func TestWireInfoLinear(t *testing.T) {
 	const n = 4000
 	for _, tc := range []struct {
 		shape     string
+		src       func() string
 		withs     int
-		overrides int
+		overrides int // summed over the wires
 	}{
-		{"replace diamond", 1, n - 1},
-		{"entry chain", 1, 0},
-		{"large-base chain", 1, 0},
-		{"wide fan-in", 1, 0},
-		{"with chain", n, 0},
+		{"owned chain", func() string { return ownedChain(n) }, n, 0},
+		{"with chain", func() string { return withChain(n) }, n, 0},
+		{"entry chain", func() string { return wireFamily("entry chain", n) }, 1, 0},
+		{"large-base chain", func() string { return wireFamily("large-base chain", n) }, 1, 0},
+		{"wide fan-in", func() string { return wireFamily("wide fan-in", n) }, 1, 0},
+		{"replace diamond", func() string { return wireFamily("replace diamond", n) }, 1, n - 1},
 	} {
 		t.Run(tc.shape, func(t *testing.T) {
-			src := ""
-			if tc.shape == "with chain" {
-				src = withChain(n)
-			} else {
-				src = wireFamily(tc.shape, n)
-			}
-			pkg, diags := CheckSource(src)
+			src := tc.src()
+			oc := countOps(t)
+			diags, c := checkLimited(t, src, nil)
 			if len(diags) > 0 {
 				t.Fatalf("want a clean check, got %s", describeDiags(diags[:1]))
 			}
+			oc.bounded(t, tc.shape, src, c)
+			pkg := c.pkg
 			if len(pkg.Info.Withs) != tc.withs {
 				t.Fatalf("want %d withs, got %d", tc.withs, len(pkg.Info.Withs))
 			}
-			units := len(pkg.Wires)
+			m := c.wires
+			work, units := oc.repeat[m]+oc.single[m], wireNodes(t, src)+len(pkg.Info.Withs)
+			if work > wireInfoWorkPerUnit*units {
+				t.Errorf("the wire pass did %d operations for %d units, over %d per unit", work, units, wireInfoWorkPerUnit)
+			}
+			size, overrides := 0, 0
+			for _, w := range pkg.Info.Withs {
+				size += len(w.Discharged) + len(w.Entries)
+				if len(w.Entries) != len(w.Discharged) || len(w.Discharged) != 1 {
+					t.Fatalf("a with of %d capabilities and %d entries; its block needs one", len(w.Discharged), len(w.Entries))
+				}
+				if e := w.Entries[0]; e == nil || !listsCap(e, w.Discharged[0]) || w.Wires[0].Provider(w.Discharged[0]) != e {
+					t.Fatalf("the entry for %s does not provide it", typeString(w.Discharged[0]))
+				}
+			}
 			for _, w := range pkg.Wires {
-				units += len(w.Entries)
+				size += len(w.Overrides)
+				overrides += len(w.Overrides)
 			}
-			for _, w := range pkg.Info.Withs {
-				units += len(w.Entries) + len(w.Overridden)
+			if overrides != tc.overrides {
+				t.Errorf("%d overrides, want %d", overrides, tc.overrides)
 			}
-			if pkg.bindWork > bindWorkPerUnit*units {
-				t.Fatalf("the bindings cost %d steps for %d units, over %d per unit", pkg.bindWork, units, bindWorkPerUnit)
+			if nodes := syntaxNodes(t, src); size > wireInfoSizePerUnit*nodes {
+				t.Errorf("Info holds %d with bindings and overrides for %d syntax nodes, over %d per node", size, nodes, wireInfoSizePerUnit)
 			}
-			for _, w := range pkg.Info.Withs {
-				if len(w.Entries) != len(w.Discharged) || len(w.Overridden) != tc.overrides {
-					t.Fatalf("%d capabilities: %d entries, %d overrides (want %d)", len(w.Discharged), len(w.Entries), len(w.Overridden), tc.overrides)
-				}
-				for i, e := range w.Entries {
-					if e == nil || typeString(e.Caps[0]) != typeString(w.Discharged[i]) {
-						t.Fatalf("the entry for %s does not provide it", typeString(w.Discharged[i]))
-					}
-				}
-			}
+			t.Logf("%d operations for %d units (%.1f each); Info size %d", work, units, float64(work)/float64(units), size)
 		})
 	}
 }
 
-// bindWorkPerUnit bounds the counted binding work per wire, entry and
-// binding held (TestWireInfoLinear).
-const bindWorkPerUnit = 4
+// wireInfoWorkPerUnit bounds the wire pass's operations per wire node and
+// with (TestWireInfoLinear): the pass's summaries cost O(log n) per
+// capability added along a chain (wireBudgetPerUnit's comment), so the
+// constant leaves room for log₂ 4000 = 12 a few times over.
+const wireInfoWorkPerUnit = 48
+
+// wireInfoSizePerUnit bounds the with bindings and overrides Info holds per
+// syntax node (TestWireInfoLinear).
+const wireInfoSizePerUnit = 1
+
+// syntaxNodes counts src's syntax nodes.
+func syntaxNodes(t *testing.T, src string) int {
+	t.Helper()
+	file, err := syntax.Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	syntax.Inspect(file, func(syntax.Node) bool { n++; return true })
+	return n
+}
 
 // withChain is the reviewer's chain (round-3 review M1): W0 binds Store,
 // each Wi embeds W(i-1), and one function per wire runs with Wi.
@@ -199,30 +276,23 @@ func withChain(n int) string {
 	return b.String()
 }
 
-// TestWireInfoChainScale (round-3 review M1): checking the with chain at
-// 4n takes under 8 times as long as at n (the acceptance rule's ratio),
-// the best of three runs each, taken in turn so a load change on the
-// machine (the gate runs packages in parallel) reaches both sizes.
-func TestWireInfoChainScale(t *testing.T) {
-	srcs := map[int]string{4000: withChain(4000), 16000: withChain(16000)}
-	best := map[int]time.Duration{}
-	for range 3 {
-		for _, n := range []int{4000, 16000} {
-			start := time.Now()
-			if _, diags := CheckSource(srcs[n]); len(diags) > 0 {
-				t.Fatalf("n = %d: want a clean check, got %s", n, describeDiags(diags[:1]))
-			}
-			if d := time.Since(start); best[n] == 0 || d < best[n] {
-				best[n] = d
-			}
-		}
+// ownedChain is the round-4 reviewer's shape (gen-wires.ts owned): W0
+// binds Store and C0, each Wi binds Ci and embeds W(i-1), and one function
+// per wire runs with Wi a body that needs Store.
+func ownedChain(n int) string {
+	var b strings.Builder
+	b.WriteString("type Store { Get() string }\ntype Mem { V string }\nfunc Get(m Mem) string { return m.V }\nfunc Run() string needs Store {\n\treturn Store.Get()\n}\n")
+	for i := range n {
+		fmt.Fprintf(&b, "type C%d { Get() string }\n", i)
 	}
-	small, large := best[4000], best[16000]
-	if ratio := float64(large) / float64(small); ratio >= 8 {
-		t.Fatalf("t(16000) = %v is %.1f × t(4000) = %v; want under 8", large, ratio, small)
-	} else {
-		t.Logf("t(4000) = %v, t(16000) = %v, ratio %.1f", small, large, ratio)
+	b.WriteString("let W0 = wire { Store: Mem{V: \"w0\"}, C0: Mem{V: \"c0\"} }\n")
+	for i := 1; i < n; i++ {
+		fmt.Fprintf(&b, "let W%d = wire { C%d: Mem{V: \"c\"}, W%d }\n", i, i, i-1)
 	}
+	for i := range n {
+		fmt.Fprintf(&b, "func f%d() string {\n\treturn with W%d { Run() }\n}\n", i, i)
+	}
+	return b.String()
 }
 
 // TestWireInfoConversions: each provider entry has a conversion per

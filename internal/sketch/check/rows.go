@@ -17,7 +17,7 @@ type target struct {
 	// (rows-and-constraints §7 amendment 1).
 	declErrors, declUses *Row
 	errors, uses         *Row // what escapes or is charged (inferred rows)
-	withs                []*capSet
+	withs                []*withFrame
 	// results are the value results a return gives; resultKnown is false
 	// for a block whose result is its last expression's type.
 	results     []Type
@@ -41,16 +41,23 @@ func (t *target) row(declared, inferred *Row) *Row {
 
 // charge records that the body charges capability cap at n: a with of this
 // target discharges it; otherwise it must be in the declared row (S102), or
-// it joins the inferred row (rows.md, Capability rows 2 and 3).
+// it joins the inferred row (rows.md, Capability rows 2 and 3). The with
+// that discharges it records it with its providing entry, which the
+// membership test found (withFrame.discharge, With.Discharged).
 func (c *checker) charge(n syntax.Node, cap Type) {
 	if c.fn == nil || c.fn.t == nil {
 		return
 	}
 	t := c.fn.t
 	for i := len(t.withs) - 1; i >= 0; i-- {
-		// A nil scope is a with whose wire is unknown (reported): it
+		// An unknown scope is a with whose wire is unknown (reported): it
 		// discharges everything, so no charge cascades from it (D3; M18).
-		if t.withs[i] == nil || t.withs[i].has(c.types, cap) {
+		f := t.withs[i]
+		if f.unknown {
+			return
+		}
+		if found, node := f.binds.find(c.types, cap); found {
+			f.discharge(cap, node)
 			return
 		}
 	}
