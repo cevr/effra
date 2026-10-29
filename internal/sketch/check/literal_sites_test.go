@@ -3,8 +3,6 @@ package check
 import (
 	"strings"
 	"testing"
-
-	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // literalSites has one row per expected-type site of spec D-A2 (literals.go
@@ -115,10 +113,10 @@ func f() P {
 }`, "77", "int64"},
 	{"signed literal", `func f() int8 {
 	return -77
-}`, "77", "int8"},
+}`, "-77", "int8"},
 	{"signed literal in parentheses", `func f() int8 {
 	return -(77)
-}`, "77", "int8"},
+}`, "-(77)", "int8"},
 	// No expected type: the default.
 	{"let without a type", `func f() int {
 	let v = 77
@@ -163,14 +161,59 @@ func TestLiteralSites(t *testing.T) {
 			if len(diags) > 0 {
 				t.Fatalf("want a clean check, got %s", describeDiags(diags))
 			}
+			// The literal is the expression spelled row.lit: a basic
+			// literal, or a signed literal, which is one literal.
+			src := row.src + "\n"
 			var got []string
 			for x, typ := range pkg.Info.Types {
-				if lit, ok := x.(*syntax.BasicLit); ok && lit.Value == row.lit {
+				if src[x.Pos():x.End()] == row.lit {
 					got = append(got, typ.String())
 				}
 			}
 			if len(got) != 1 || got[0] != row.want {
 				t.Fatalf("the literal %s: want %s, got %q", row.lit, row.want, got)
+			}
+		})
+	}
+}
+
+// TestSignedLiteralUnit (round-2 review m2): a signed literal is one
+// literal. `-128` and `-(128)` where int8 is expected have Types int8 and
+// Values -128 on the signed expression; the unsigned 128 and its
+// parentheses have no entry, since 128 is no int8 and the lowering emits
+// int8(-128).
+func TestSignedLiteralUnit(t *testing.T) {
+	for _, tc := range []struct{ signed, value string }{
+		{"-128", "-128"}, {"-(128)", "-128"}, {"-((128))", "-128"}, {"+127", "127"},
+	} {
+		signed := tc.signed
+		t.Run(signed, func(t *testing.T) {
+			src := "func f() int8 {\n\treturn " + signed + "\n}\n"
+			pkg, diags := CheckSource(src)
+			if len(diags) > 0 {
+				t.Fatalf("want a clean check, got %s", describeDiags(diags))
+			}
+			found := false
+			for x, typ := range pkg.Info.Types {
+				text := src[x.Pos():x.End()]
+				switch {
+				case text == signed:
+					found = true
+					v := pkg.Info.Values[x]
+					if typ.String() != "int8" || v == nil || v.ExactString() != tc.value {
+						t.Fatalf("%s: want int8 = %s, got %s = %v", signed, tc.value, typ, v)
+					}
+				case strings.Contains(signed, text) && text != "f":
+					t.Fatalf("the unsigned part %q of %s has the Types entry %s", text, signed, typ)
+				}
+			}
+			for x := range pkg.Info.Values {
+				if text := src[x.Pos():x.End()]; text != signed {
+					t.Fatalf("the unsigned part %q of %s has a Values entry", text, signed)
+				}
+			}
+			if !found {
+				t.Fatalf("%s has no Types entry", signed)
 			}
 		})
 	}

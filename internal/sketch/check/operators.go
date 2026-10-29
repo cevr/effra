@@ -132,18 +132,12 @@ func (c *checker) unary(x *syntax.UnaryExpr, hint Type) operand {
 	}
 	var op operand
 	if lit, ok := unparen(x.X).(*syntax.BasicLit); ok && (x.Op == syntax.SUB || x.Op == syntax.ADD) {
-		// A signed literal fits its type after the sign: -128 and -(128)
-		// are int8 (literal checks the unsigned value everywhere else).
+		// A signed literal is one literal: -128 and -(128) are an int8
+		// (literal checks the unsigned value everywhere else). Info records
+		// the signed expression only; its unsigned part has no entry, since
+		// 128 is no int8 (info.go, Types).
 		op = c.basicLit(lit, hint)
 		op.expr = lit
-		for y := x.X; ; {
-			c.record(y, op)
-			p, ok := y.(*syntax.ParenExpr)
-			if !ok {
-				break
-			}
-			y = p.X
-		}
 	} else {
 		op = c.valueExpr(x.X, hint)
 	}

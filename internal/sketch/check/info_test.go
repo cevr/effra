@@ -93,6 +93,27 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 			}
 		case *syntax.TypeGuard:
 			notValue[n] = true
+		case *syntax.UnaryExpr:
+			// A signed literal is one literal: its unsigned part, with its
+			// parentheses, has no Types or Values entry (info.go, Types).
+			if n.Op == syntax.SUB || n.Op == syntax.ADD {
+				if _, ok := unparen(n.X).(*syntax.BasicLit); ok {
+					for y := n.X; ; {
+						notValue[y] = true
+						if _, typed := info.Types[y]; typed {
+							at(y, "the unsigned part of a signed literal with a Types entry")
+						}
+						if _, valued := info.Values[y]; valued {
+							at(y, "the unsigned part of a signed literal with a Values entry")
+						}
+						p, ok := y.(*syntax.ParenExpr)
+						if !ok {
+							break
+						}
+						y = p.X
+					}
+				}
+			}
 		case *syntax.SelectorExpr:
 			notValue[n.Sel] = true
 			notObject[n.Sel] = true

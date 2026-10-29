@@ -67,7 +67,11 @@ type Package struct {
 // Info records the checker's results for the lowering (#197, #50).
 type Info struct {
 	// Types is every expression's final type; a literal carries its one
-	// type (196u).
+	// type (196u). A signed literal is one literal: `-128` where int8 is
+	// expected has Types and Values entries (int8, -128) on the signed
+	// expression, and the literal 128 under the sign, with any parentheses
+	// around it, has none, so the lowering emits int8(-128) and never
+	// int8(128).
 	Types map[syntax.Expr]Type
 	// Values is every constant expression's exact value, already checked
 	// against its type.
@@ -172,7 +176,7 @@ const (
 	// ConvOperations puts a value into an operation type; Table maps each
 	// operation name to the function that implements it.
 	ConvOperations
-	// ConvRow puts a error row's value into a union.
+	// ConvRow puts an error row's value into a union.
 	ConvRow
 )
 
