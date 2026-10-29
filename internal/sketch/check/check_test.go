@@ -98,7 +98,7 @@ var negativeSpans = map[string][2]string{
 	"wire-cycle":                         {"S108", "W"},
 	"wire-entry-non-capability":          {"S104", "Order"},
 	"wire-exposure-hides-entry":          {"S109", "provides Account"},
-	"wire-literal-outside-with":          {"S108", "wire { Store: Mem{} }"},
+	"wire-literal-outside-with":          {"S109", "wire { Store: Mem{} }"},
 }
 
 // TestNegativeSpans: each negative fixture's one diagnostic has the pinned

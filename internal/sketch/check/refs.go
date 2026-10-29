@@ -423,6 +423,36 @@ type pendingSelf struct {
 	site [2]useSite
 }
 
+// pattern walks a let or for pattern (196p, 196t; the checker reports it
+// S109): the names it binds (patternNames) become locals after it, and
+// every other node is a name, not a value reference (a type that tests
+// the variant, a field key, a literal).
+func (w *refWalker) pattern(p syntax.Expr) {
+	isType := func(name string) bool {
+		if w.local(name) {
+			return false
+		}
+		_, ok := w.c.typeObject(name, w.c.cur).(*TypeName)
+		return ok
+	}
+	names := patternNames(p, isType)
+	binds := make(map[*syntax.Ident]bool, len(names))
+	for _, id := range names {
+		binds[id] = true
+	}
+	syntax.Inspect(p, func(n syntax.Node) bool {
+		if id, ok := n.(*syntax.Ident); ok && !binds[id] {
+			w.name(id)
+			return true
+		}
+		w.visit(n)
+		return true
+	})
+	for _, id := range names {
+		w.bind(id.Name)
+	}
+}
+
 // frame walks walk inside a value frame.
 func (w *refWalker) frame(f valueFrame, walk func()) {
 	w.frames = append(w.frames, f)
@@ -798,6 +828,13 @@ func (w *refWalker) expr(x syntax.Expr) {
 			w.pop()
 		}
 	case *syntax.WireLit:
+		// A header names capabilities: no value reference.
+		if x.Provides != nil {
+			w.typ(x.Provides)
+		}
+		if x.Needs != nil {
+			w.typ(x.Needs)
+		}
 		w.wireBody(x.Body)
 	case *syntax.ParenExpr:
 		w.expr(x.X)
@@ -905,6 +942,9 @@ func (w *refWalker) stmt(s syntax.Stmt) {
 			w.visit(spec)
 			w.typ(spec.Type)
 			w.exprs(spec.Values)
+			if spec.Pattern != nil {
+				w.pattern(spec.Pattern)
+			}
 			for i, n := range spec.Names {
 				w.visit(n)
 				b := &localBinding{rt: w.writtenType(spec.Type)}
@@ -914,6 +954,8 @@ func (w *refWalker) stmt(s syntax.Stmt) {
 				w.bindAs(n.Name, b)
 			}
 		}
+	case *syntax.AssertStmt:
+		w.expr(s.X)
 	case *syntax.LabeledStmt:
 		w.visit(s.Label)
 		w.stmt(s.Stmt)
@@ -985,6 +1027,10 @@ func (w *refWalker) stmt(s syntax.Stmt) {
 			if id, ok := l.(*syntax.Ident); ok && s.Tok == syntax.DEFINE {
 				w.visit(id)
 				w.bind(id.Name)
+				continue
+			}
+			if s.Tok == syntax.DEFINE {
+				w.pattern(l)
 				continue
 			}
 			w.expr(l)

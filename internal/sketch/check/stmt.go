@@ -203,6 +203,10 @@ func (c *checker) exprStmt(s *syntax.ExprStmt) {
 // value needs a value (types.md, Zero values 3).
 func (c *checker) varDecl(d *syntax.VarDecl) {
 	for _, spec := range d.Specs {
+		if spec.Pattern != nil {
+			c.patternLet(spec)
+			continue
+		}
 		var declared Type
 		if spec.Type != nil {
 			declared = c.typExpr(spec.Type, c.localTypeCtx())
@@ -795,6 +799,7 @@ func (c *checker) countRange(s *syntax.RangeStmt, r *syntax.BinaryExpr, label st
 	if id, ok := s.Value.(*syntax.Ident); ok {
 		c.declareLocal(id, t)
 	}
+	c.rangePatterns(s)
 	pop := c.push(brLoop, label)
 	c.block(s.Body)
 	pop()
@@ -844,6 +849,7 @@ func (c *checker) rangeStmt(s *syntax.RangeStmt, label string) {
 	}
 	switch s.Tok {
 	case syntax.DEFINE:
+		c.rangePatterns(s)
 		if id, ok := s.Key.(*syntax.Ident); ok {
 			c.declareLocal(id, kt)
 		}

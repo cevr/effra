@@ -135,6 +135,13 @@ func (c *checker) namedHead(x syntax.Expr) (*TypeName, *Named) {
 // ---------------------------------------------------------------- collection
 
 func (c *checker) collect() {
+	// A package-level let with a pattern (196p, 196t) declares its names
+	// once every type is declared, so a type name in it tests the variant.
+	type patternSpec struct {
+		spec *syntax.VarSpec
+		file *fileInfo
+	}
+	var patterns []patternSpec
 	for _, fi := range c.files {
 		c.cur = fi
 		f := fi.syntax
@@ -147,6 +154,9 @@ func (c *checker) collect() {
 			case *syntax.TypeDecl:
 				tn := &TypeName{Name: d.Name.Name, Pkg: c.pkg, Pos: d.Name.Pos(), Decl: d, file: fi, id: newID()}
 				tn.Type = &Named{Obj: tn}
+				if isDefinedSpec(d.Spec) {
+					c.outside(d.Spec, definedNoun)
+				}
 				if c.declare(d.Name, tn) {
 					c.pkg.Types = append(c.pkg.Types, tn)
 				}
@@ -168,6 +178,10 @@ func (c *checker) collect() {
 				}
 			case *syntax.VarDecl:
 				for _, spec := range d.Specs {
+					if spec.Pattern != nil {
+						patterns = append(patterns, patternSpec{spec, fi})
+						continue
+					}
 					for i, name := range spec.Names {
 						v := &Var{Name: name.Name, Pos: name.Pos(), pkg: true, used: true}
 						c.declare(name, v)
@@ -184,6 +198,16 @@ func (c *checker) collect() {
 				}
 				c.pkg.Wires[w.Name] = w
 			}
+		}
+	}
+	// The pattern is S109 until check-v1, and its names are invalid package
+	// vars: never accepted unchecked, and no use of them cascades (D3;
+	// round 6 review B1).
+	for _, p := range patterns {
+		c.cur = p.file
+		c.outside(p.spec.Pattern, patternNoun("let", p.spec.Pattern))
+		for _, id := range patternNames(p.spec.Pattern, c.isTypeName) {
+			c.declare(id, &Var{Name: id.Name, Pos: id.Pos(), Type: invalid, pkg: true, used: true})
 		}
 	}
 	// The export guard: the step of an exported machine type spells its
@@ -322,6 +346,8 @@ func (c *checker) resolveNamed(n *Named) {
 				switch {
 				case field.Type != nil && isErrorName(field.Type):
 					tp.Kind = KindErrors
+				case field.Type != nil && c.uncheckedConstraint(field.Type, ctx):
+					tp.unchecked = true
 				case field.Type != nil:
 					tp.Constraint = c.constraint(field.Type, ctx)
 				case conflicts[name.Name]:
@@ -598,6 +624,10 @@ func (c *checker) typExpr0(x syntax.Expr, ctx *typeCtx) Type {
 		inner.param = false
 		return &Pointer{Elem: c.typExpr(x.X, &inner)}
 	case *syntax.FuncType:
+		if x.Escaping.IsValid() {
+			c.outside(x, "an escaping function type (196e, escaping)")
+			return invalid
+		}
 		inner := typeCtx{}
 		if ctx != nil {
 			inner = *ctx
@@ -624,6 +654,9 @@ func (c *checker) typExpr0(x syntax.Expr, ctx *typeCtx) Type {
 		return invalid
 	case *syntax.ErrorRow:
 		c.errorf(x, CodeType, "an error row appears only in a result list")
+		return invalid
+	case *syntax.TupleExpr:
+		c.outside(x, "a tuple type (196t, tuples)")
 		return invalid
 	case *syntax.VariantSpec, *syntax.AsPattern:
 		c.notYet(x)
@@ -653,6 +686,9 @@ func (c *checker) typeName(x *syntax.Ident, ctx *typeCtx) Type {
 	case *TypeName:
 		if o == universeOnce.errorName {
 			c.errorf(x, CodeType, "error is only the head of an error row or a constraint")
+			return invalid
+		}
+		if refusedType(o.Type) {
 			return invalid
 		}
 		if n, ok := o.Type.(*Named); ok {
@@ -1216,6 +1252,10 @@ func (c *checker) funcSig(f *Func) *Signature {
 	owner = append(owner, tparams...)
 	restore := c.monoOwner(owner)
 	for _, p := range constraints {
+		if c.uncheckedConstraint(p.x, ctx) {
+			p.tp.unchecked = true
+			continue
+		}
 		p.tp.Constraint = c.constraint(p.x, ctx)
 	}
 	c.kindBracketParams(d.Type, ctx, unconstrained)

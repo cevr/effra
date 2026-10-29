@@ -182,7 +182,11 @@ type TypeParam struct {
 	Pos        syntax.Pos
 	Implicit   bool
 	conflict   bool // a kind conflict, already reported: resolves to nothing
-	id         int
+	// unchecked: its constraint is a decided one this checker does not
+	// check yet (S109 at the constraint): a body that declares it is not
+	// checked, so nothing cascades from the missing operations (D3).
+	unchecked bool
+	id        int
 }
 
 // RowVar is the inferred row of a function that writes no row (class F):

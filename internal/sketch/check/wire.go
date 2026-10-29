@@ -26,7 +26,7 @@ func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
 		c.errorf(x, CodeType, "with takes one wire (rows.md, With 1)")
 		known = false
 	case len(x.Args) > 1:
-		c.errorf(x.Args[1], CodeOutside, "with takes one wire; context values in with are G1's (runtime.md, G1) and are not checked yet")
+		c.outside(x.Args[1], "a with over several wires (196x, extern and wire values)")
 		known = false
 	default:
 		binds, known = c.withArg(x.Args[0])
@@ -69,8 +69,13 @@ func (c *checker) withArg(arg syntax.Expr) (*capSet, bool) {
 		w := c.pkg.Wires[a.Name]
 		if w == nil {
 			if o := c.lookup(a.Name); o != nil {
-				if _, isVar := o.(*Var); isVar {
-					c.errorf(a, CodeOutside, "with takes a wire; a value in with is a context value, G1's (runtime.md, G1), not checked yet")
+				if v, isVar := o.(*Var); isVar {
+					// A local holding a wire value (196x): its value is S109
+					// already when it is invalid, and nothing cascades (D3).
+					v.used = true
+					if !isInvalid(v.Type) {
+						c.outside(a, "with over a value (196x, extern and wire values)")
+					}
 					return nil, false
 				}
 			}
@@ -110,6 +115,14 @@ func (c *checker) withArg(arg syntax.Expr) (*capSet, bool) {
 // is false when it embeds an unknown wire (reported) or its summary was
 // refused (wiresum.go).
 func (c *checker) wireLit(w *syntax.WireLit) (binds *capSet, known bool) {
+	// The header of an inline wire is refused as a named wire's is
+	// (checkWires): never read partly (rows.md, Wire 8).
+	if w.Provides != nil {
+		c.errorf(w.Provides, CodeOutside, "a wire's provides clause is #196 stage b's (the wire header, rows.md Wire 8); it is not checked yet")
+	}
+	if w.Needs != nil {
+		c.errorf(w.Needs, CodeOutside, "a wire's needs clause is #196 stage b's (the wire header, rows.md Wire 8); it is not checked yet")
+	}
 	return c.wireBody(w.Body)
 }
 

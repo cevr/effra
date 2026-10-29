@@ -302,16 +302,15 @@ func (c *checker) expr0(x syntax.Expr, hint Type) operand {
 	case *syntax.CatchExpr:
 		return c.catch(x, hint, true, false)
 	case *syntax.WireLit:
-		c.errorf(x, CodeType, "a wire literal appears only as the argument of with (grammar.md, Expressions 4)")
-		return bad(x)
+		// A wire value outside with (grammar.md, Expressions 8).
+		return c.outside(x, "a wire value (196x, extern and wire values)")
 	case *syntax.GoExpr:
 		return c.goExpr(x)
 	case *syntax.KeyValueExpr:
 		c.errorf(x, CodeType, "a key: value pair belongs in a composite literal")
 		return bad(x)
 	case *syntax.TupleExpr:
-		c.errorf(x, CodeType, "a tuple is a case of a multi-subject type switch only")
-		return bad(x)
+		return c.outside(x, "a tuple (196t, tuples)")
 	case *syntax.TypeGuard:
 		c.errorf(x, CodeType, "x.(type) is the subject of a type switch only")
 		return bad(x)
@@ -354,11 +353,7 @@ func (c *checker) interpolated(x *syntax.InterpolatedString) operand {
 // yet (S109; check-v1 owns it). It never panics: the parser may build a
 // node before its consumer checks it (grammar.md, Parser 2).
 func (c *checker) notYet(n syntax.Node) operand {
-	c.errorf(n, CodeOutside, "%s is not checked yet (check-v1)", decidedNoun(n))
-	if x, ok := n.(syntax.Expr); ok {
-		return bad(x)
-	}
-	return operand{mode: modeInvalid, typ: invalid}
+	return c.outside(n, decidedNoun(n))
 }
 
 // decidedNoun names a node for notYet, with the stage that decided it.
@@ -382,6 +377,8 @@ func decidedNoun(n syntax.Node) string {
 		if n.Op == syntax.DOTDOT {
 			return "a range outside a for header (196 one for)"
 		}
+	case *syntax.IfStmt, *syntax.SwitchStmt, *syntax.TypeSwitchStmt:
+		return "an if or match in value position (196r, tail results)"
 	}
 	return "this form"
 }
@@ -494,6 +491,9 @@ func (c *checker) ident(x *syntax.Ident) operand {
 		if n, ok := o.Type.(*Named); ok {
 			c.resolveNamed(n)
 		}
+		if refusedType(o.Type) {
+			return bad(x)
+		}
 		if o == universeOnce.errorName {
 			return operand{mode: modeType, typ: invalid, obj: o}
 		}
@@ -577,6 +577,16 @@ func (c *checker) basicLit(x *syntax.BasicLit) operand {
 			return bad(x)
 		}
 		return operand{mode: modeConst, typ: Typ[UntypedRune], val: constant.MakeInt64(int64(r[0]))}
+	case syntax.FLOAT:
+		// Go's float literal forms (grammar.md, Lexical): an untyped float
+		// constant, as Go's 1.5 is, checked by the same constant rules as
+		// a float constant made by arithmetic.
+		v := constant.MakeFromLiteral(x.Value, token.FLOAT, 0)
+		if v.Kind() == constant.Unknown {
+			c.errorf(x, CodeType, "malformed float literal %s", x.Value)
+			return bad(x)
+		}
+		return operand{mode: modeConst, typ: Typ[UntypedFloat], val: v}
 	}
 	c.errorf(x, CodeType, "unexpected literal")
 	return bad(x)

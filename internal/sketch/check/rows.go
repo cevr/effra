@@ -790,6 +790,11 @@ type branch struct {
 }
 
 func (c *checker) checkFuncBody(f *Func) bool {
+	if uncheckedParams(f.Sig.TParams) {
+		// A constraint this checker does not check yet (S109 at it): the
+		// body's operations on that parameter have no meaning here.
+		return false
+	}
 	defer c.beginDeps(f)()
 	// A method's receiver binds its type's parameters, which its body
 	// instantiates like its own: they own its instantiations too, as
