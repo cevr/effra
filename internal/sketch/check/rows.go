@@ -182,6 +182,7 @@ func (c *checker) checkBodies() {
 	// any body is typed (refs.go).
 	c.refs = make(map[any]map[any]bool, len(nodes))
 	c.valueRefs = make(map[any]map[*Func][2]useSite, len(nodes))
+	c.guardedRefs = map[any][]guardedUse{}
 	pending := map[any][]pendingSelf{}
 	for _, n := range nodes {
 		var w *refWalker
@@ -192,6 +193,9 @@ func (c *checker) checkBodies() {
 		}
 		owner := n.owner()
 		c.refs[owner], c.valueRefs[owner] = w.refs, w.values
+		if len(w.guarded) > 0 {
+			c.guardedRefs[owner] = w.guarded
+		}
 		if len(w.pending) > 0 {
 			pending[owner] = w.pending
 		}
@@ -205,7 +209,7 @@ func (c *checker) checkBodies() {
 	for _, scc := range tarjan(nodes) {
 		c.checkComponent(scc)
 	}
-	c.valueRefs = nil
+	c.valueRefs, c.guardedRefs = nil, nil
 	// Instantiation cycles through methods alone close outside any cyclic
 	// component (methods add no edge); the reporting pass recorded them.
 	c.checkInstantiationCycles()
@@ -300,9 +304,19 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 	if cyclic {
 		// One silent pass records the component's instantiations, so an
 		// expanding cycle is rejected before the rows iterate (round-2 M1).
+		// It is also typing's verdict on the callback frames class G reads
+		// (pinGroup, liveUses; round 8 review M2): each member is typed from
+		// empty rows, its own rows reset after its check as in the typing of
+		// waiting calls (resolveSelfCalls), so which literals and blocks
+		// typing checks depends neither on the members' order nor on a row
+		// still being inferred. A group member used as a value is pinned
+		// empty afterwards, so the frames keep that verdict.
 		c.silent++
 		for _, n := range scc {
 			c.checkNode(n)
+			if n.fn != nil && n.fn.Sig != nil {
+				n.fn.resetRows()
+			}
 		}
 		c.silent--
 		c.checkInstantiationCycles()
@@ -402,7 +416,7 @@ func (c *checker) pinGroup(scc []*bodyNode) {
 		} else {
 			site.key, site.anchor = "func "+funcKey(n.fn), n.fn.Decl.Pos()
 		}
-		for f, kinds := range c.valueRefs[owner] {
+		for f, kinds := range c.liveUses(owner) {
 			if !c.group[f] {
 				continue
 			}
@@ -835,6 +849,7 @@ func (pv *pkgVar) bodySize() int {
 
 func (c *checker) checkFuncBody(f *Func) bool {
 	c.workNodes += f.bodySize()
+	defer c.beginBodyCheck(f)()
 	if uncheckedParams(f.Sig.TParams) {
 		// A constraint this checker does not check yet (S109 at it): the
 		// body's operations on that parameter have no meaning here.
@@ -1049,6 +1064,7 @@ func (c *checker) checkPkgVar(pv *pkgVar) {
 	}
 	c.workNodes += pv.bodySize()
 	pv.checking = true
+	defer c.beginBodyCheck(pv)()
 	defer func() { pv.checking = false }()
 	defer c.beginDeps(pv)()
 	// A silent check (a fixpoint round) does not count: the reporting

@@ -68,8 +68,11 @@ func TestClassGMessage(t *testing.T) {
 			at:   "walk; _",
 			want: "walk is used as a value at 3:%d inside its own recursive group; write its error row: func walk() error[…]",
 		},
+		// run checks its block (its row R is open): a block typing never
+		// checks, as one an arity error refuses, carries no class G use
+		// (round 8 review M2).
 		{
-			src: "type Cap { M() }\nfunc run(n int) { Cap.M() }\n" +
+			src: "type Cap { M() }\nfunc run[R](n int, body func() needs R) needs R { body() }\n" +
 				"func walk(n int) { Cap.M(); run(n) { walk(n) } }\n",
 			at:   "{ walk(n) }",
 			want: "walk is used as a value through the trailing block at 3:%d inside its own recursive group; write its capability row: func walk(…) needs …",

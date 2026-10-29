@@ -119,6 +119,12 @@ func (c *checker) applySelfCalls(owner any, pending map[any][]pendingSelf) []*Fu
 		if !f.inferErrors && !f.inferUses {
 			continue
 		}
+		if p.guard != nil {
+			// Inside callback frames: a use only if typing checks them
+			// (liveUses).
+			c.guardedRefs[owner] = append(c.guardedRefs[owner], guardedUse{f: f, site: p.site, guard: p.guard})
+			continue
+		}
 		uses := c.valueRefs[owner][f]
 		for k := range uses {
 			if p.site[k].ok && (!uses[k].ok || p.site[k].at < uses[k].at) {

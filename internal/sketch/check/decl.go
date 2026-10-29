@@ -739,6 +739,9 @@ func (c *checker) qualifiedType(x *syntax.SelectorExpr) Type {
 }
 
 func (c *checker) recordUse(id *syntax.Ident, o Object) {
+	if c.useGens != nil && c.curGen != 0 {
+		c.useGens[id] = append(c.useGens[id], c.curGen)
+	}
 	if c.silent == 0 {
 		c.pkg.Info.Uses[id] = o
 	}

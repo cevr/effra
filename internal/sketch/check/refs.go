@@ -1,6 +1,10 @@
 package check
 
-import "ergo.local/prototype/internal/sketch/syntax"
+import (
+	"maps"
+
+	"ergo.local/prototype/internal/sketch/syntax"
+)
 
 // Class H (round 16): the body graph does not depend on typing. Its edges
 // are the plain identifiers of each body that resolve, through the body's
@@ -53,6 +57,19 @@ import "ergo.local/prototype/internal/sketch/syntax"
 // that row from the parameter (call.go funcLit, blockLit), so the walk
 // stops there for that row (round 17 m1): the callee's signature was
 // resolved before any body (decl.go run), so this is order-invariant.
+//
+// Which callbacks carry a row at all is typing's verdict, not the walk's: a
+// call whose callee is invalid checks none of the literals and blocks
+// passed to it (call.go silentArgs), and typing records each function
+// literal, trailing block and with block it checks (typedFrame). The walk
+// keeps the uses it finds inside such a frame apart (guardedUse), and
+// class G counts them only when typing checked every enclosing frame in
+// the component's silent pass, which types each member from empty rows
+// (liveUses; round 8 review M2). So no callee is judged invalid by its
+// spelling, wherever the invalid value flows. Prior art: go/types records
+// each expression's type and mode once (Info.Types) and every later pass
+// reads that record; for a call whose callee is invalid it only uses the
+// arguments (call.go, check.use).
 type refWalker struct {
 	c      *checker
 	scopes []map[string]*localBinding
@@ -90,9 +107,16 @@ type refWalker struct {
 	nameIdents map[*syntax.Ident]bool
 	undecided  map[*syntax.Ident]bool
 	visited    map[syntax.Node]bool
-	// invalidCalls holds the calls whose callee the walk found invalid
-	// (invalidValue); recorded only in test builds.
-	invalidCalls []*syntax.CallExpr
+	// guard is the innermost callback frame the walk is in (nil outside
+	// every one), and guarded holds the class G value uses found inside
+	// callback frames: they count only for frames typing checked
+	// (checker.liveUses; round 8 review M2). cbFrames lists every callback
+	// frame walked, in test builds only.
+	guard    *guardNode
+	guarded  []guardedUse
+	cbFrames []syntax.Node
+	// owner is the body walked: its *Func or its *pkgVar.
+	owner any
 }
 
 // A useSite is where a body first uses a row of a function as a value: a
@@ -129,6 +153,7 @@ var refTrace func(root syntax.Node, w *refWalker)
 // its class G value uses.
 func (c *checker) bodyRefs(f *Func) *refWalker {
 	w := c.newRefWalker()
+	w.owner = f
 	saved := c.cur
 	c.cur = f.file
 	defer func() { c.cur = saved }()
@@ -171,6 +196,7 @@ func (c *checker) bodyRefs(f *Func) *refWalker {
 // varRefs walks a var initializer, as bodyRefs.
 func (c *checker) varRefs(pv *pkgVar) *refWalker {
 	w := c.newRefWalker()
+	w.owner = pv
 	saved := c.cur
 	c.cur = pv.file
 	defer func() { c.cur = saved }()
@@ -214,10 +240,6 @@ func (c *checker) newRefWalker() *refWalker {
 type localBinding struct {
 	rt  Type
 	sig *Signature
-	// invalid marks a local whose initializer typing finds invalid
-	// whatever the rows (invalidValue): a call of it checks none of its
-	// literals.
-	invalid bool
 }
 
 // receiverType is the type of f's receiver, as its declaration resolved
@@ -395,18 +417,137 @@ func (w *refWalker) ident(x *syntax.Ident) {
 // valueUse records the class G value uses of a reference to f at at:
 // called or not (see refWalker). The first site of each row is kept.
 func (w *refWalker) valueUse(f *Func, called bool, at syntax.Pos) {
+	site := [2]useSite{{ok: true, at: at}, {ok: true, at: at}}
+	if called {
+		site = w.callSite()
+	}
+	if w.guard != nil {
+		if site[0].ok || site[1].ok {
+			w.guarded = append(w.guarded, guardedUse{f: f, site: site, guard: w.guard})
+		}
+		return
+	}
 	uses := w.values[f]
 	for k := range uses {
-		if uses[k].ok {
-			continue
+		if !uses[k].ok {
+			uses[k] = site[k]
 		}
-		if !called {
-			uses[k] = useSite{ok: true, at: at}
-			continue
-		}
-		uses[k] = w.callSite()[k]
 	}
 	w.values[f] = uses
+}
+
+// A guardNode is a callback frame the walk is in: a function literal, a
+// trailing block or a with block, with the frame around it (up). Typing
+// does not check every such frame: a call whose callee is invalid (a
+// refused import, an unknown name, a value of invalid type wherever it
+// came from) or is no function checks none of the literals and blocks
+// passed to it (call.go silentArgs). Whether typing checked a frame is
+// typing's verdict, recorded per frame (checker.frameGen), never decided
+// by the walk from the callee's spelling (round 8 review M2).
+type guardNode struct {
+	frame syntax.Node
+	up    *guardNode
+}
+
+// A guardedUse is a class G value use inside callback frames: it counts
+// only when typing checked each frame of guard in the latest check of the
+// body (checker.liveUses).
+type guardedUse struct {
+	f     *Func
+	site  [2]useSite
+	guard *guardNode
+}
+
+// inFrame walks walk inside the callback frame n.
+func (w *refWalker) inFrame(n syntax.Node, walk func()) {
+	if w.visited != nil {
+		w.cbFrames = append(w.cbFrames, n)
+	}
+	saved := w.guard
+	w.guard = &guardNode{frame: n, up: saved}
+	walk()
+	w.guard = saved
+}
+
+// beginBodyCheck starts a check of owner's body: the callback frames typed
+// until the returned function runs belong to this check (typedFrame).
+func (c *checker) beginBodyCheck(owner any) func() {
+	if c.bodyGen == nil {
+		c.bodyGen, c.frameGen = map[any]int{}, map[syntax.Node]int{}
+	}
+	c.genSeq++
+	saved := c.curGen
+	c.curGen = c.genSeq
+	c.bodyGen[owner] = c.genSeq
+	return func() { c.curGen = saved }
+}
+
+// typedFrame records that typing checks the callback frame n (a function
+// literal, a trailing block or a with block) in the current body check.
+func (c *checker) typedFrame(n syntax.Node) {
+	if c.curGen != 0 {
+		c.frameGen[n] = c.curGen
+	}
+}
+
+// A frameVerdict is the verdict liveUses read for a callback frame (kept:
+// typing checked it) and the body check it read it from (test builds).
+type frameVerdict struct {
+	kept bool
+	gen  int
+}
+
+// liveUses is owner's class G value uses: the walk's uses outside every
+// callback frame, and each use inside frames that typing checked, every
+// one of them, in owner's latest check (the earliest site of each row is
+// kept). A frame typing did not check (silentArgs) carries no row, so
+// nothing inside it is a use (D3; round 8 review M2).
+func (c *checker) liveUses(owner any) map[*Func][2]useSite {
+	gs := c.guardedRefs[owner]
+	if len(gs) == 0 {
+		return c.valueRefs[owner]
+	}
+	out := maps.Clone(c.valueRefs[owner])
+	if out == nil {
+		out = map[*Func][2]useSite{}
+	}
+	gen := c.bodyGen[owner]
+	live := map[*guardNode]bool{}
+	var chain []*guardNode
+	for _, g := range gs {
+		// The frames of g that are not decided yet, innermost first.
+		chain = chain[:0]
+		n := g.guard
+		for ; n != nil; n = n.up {
+			if _, ok := live[n]; ok {
+				break
+			}
+			chain = append(chain, n)
+		}
+		ok := n == nil || live[n]
+		for i := len(chain) - 1; i >= 0; i-- {
+			f := chain[i]
+			typed := gen != 0 && c.frameGen[f.frame] == gen
+			if c.guardTrace != nil {
+				if _, seen := c.guardTrace[f.frame]; !seen {
+					c.guardTrace[f.frame] = frameVerdict{kept: typed, gen: gen}
+				}
+			}
+			ok = ok && typed
+			live[f] = ok
+		}
+		if !ok {
+			continue
+		}
+		uses := out[g.f]
+		for k := range uses {
+			if g.site[k].ok && (!uses[k].ok || g.site[k].at < uses[k].at) {
+				uses[k] = g.site[k]
+			}
+		}
+		out[g.f] = uses
+	}
+	return out
 }
 
 // callSite is where a call at the current point of the walk uses each row
@@ -431,8 +572,9 @@ func (w *refWalker) callSite() [2]useSite {
 // A pendingSelf is a call x.f(…) whose callee typing resolves, with the
 // value-use sites of its frames (callSite).
 type pendingSelf struct {
-	sel  *syntax.SelectorExpr
-	site [2]useSite
+	sel   *syntax.SelectorExpr
+	site  [2]useSite
+	guard *guardNode
 }
 
 // pattern walks a let or for pattern (196p, 196t; the checker reports it
@@ -522,7 +664,7 @@ func (w *refWalker) selfCallee(fun syntax.Expr) {
 	}
 	t := w.staticType(sel.X)
 	if t == nil {
-		w.pending = append(w.pending, pendingSelf{sel: sel, site: w.callSite()})
+		w.pending = append(w.pending, pendingSelf{sel: sel, site: w.callSite(), guard: w.guard})
 		return
 	}
 	if p, ok := t.(*Pointer); ok {
@@ -579,70 +721,6 @@ func (w *refWalker) calleeSig(fun syntax.Expr) *Signature {
 	return nil
 }
 
-// invalidValue reports whether typing gives e an invalid type whatever the
-// rows, as the declarations decide it before any body is typed: a name
-// that resolves to nothing, pkg.F of a package refused at its import
-// (PkgName.broken) or a name the package does not export, a local whose
-// initializer is such a value (localBinding.invalid), a parameter, field,
-// package var or call result whose declared type is invalid, or a
-// selection or call on such a value. A call whose callee is invalid is
-// checked by silentArgs, which checks none of its function literals and
-// not its block, so they carry no row (round 7 review M2: the provenance
-// follows the value through its bindings, not the callee's spelling).
-// RefWalkProblems checks that typing finds every such callee invalid.
-func (w *refWalker) invalidValue(e syntax.Expr) bool {
-	switch e := unparen(e).(type) {
-	case *syntax.Ident:
-		if b := w.lookupLocal(e.Name); b != nil {
-			return b.invalid || invalidType(b.rt)
-		}
-		if w.tparams[e.Name] {
-			return false
-		}
-		switch o := w.c.typeObject(e.Name, w.c.cur).(type) {
-		case nil:
-			return e.Name != "_"
-		case *Var:
-			return invalidType(o.Type)
-		}
-	case *syntax.SelectorExpr:
-		if id, ok := e.X.(*syntax.Ident); ok && !w.local(id.Name) {
-			if pn, ok := w.c.typeObject(id.Name, w.c.cur).(*PkgName); ok {
-				if pn.broken || !isExported(e.Sel.Name) {
-					return true
-				}
-				_, declared := pn.Pkg.Scope.names[e.Sel.Name]
-				return !declared
-			}
-		}
-		if w.invalidValue(e.X) {
-			return true
-		}
-		t := w.staticType(e.X)
-		if p, ok := t.(*Pointer); ok {
-			t = p.Elem
-		}
-		if n, ok := t.(*Named); ok {
-			if s := asStruct(n); s != nil {
-				if fld, _ := s.field(e.Sel.Name); fld != nil {
-					return invalidType(fld.Type)
-				}
-			}
-		}
-	case *syntax.CallExpr:
-		if w.invalidValue(e.Fun) {
-			return true
-		}
-		if sig := w.calleeSig(e.Fun); sig != nil && len(sig.TParams) == 0 && len(sig.Results) == 1 {
-			return invalidType(sig.Results[0])
-		}
-	}
-	return false
-}
-
-// invalidType reports whether t is known and invalid (nil is unknown).
-func invalidType(t Type) bool { return t != nil && isInvalid(t) }
-
 // declaredSig is the signature of a declared function that is not generic
 // in a way the call must infer: a function, not a method.
 func declaredSig(o Object) *Signature {
@@ -656,9 +734,6 @@ func declaredSig(o Object) *Signature {
 // signature of the declared function it aliases, or a composite literal's
 // written type.
 func (w *refWalker) initBinding(e syntax.Expr) *localBinding {
-	if w.invalidValue(e) {
-		return &localBinding{invalid: true}
-	}
 	switch e := unparen(e).(type) {
 	case *syntax.Ident:
 		if b := w.lookupLocal(e.Name); b != nil {
@@ -836,12 +911,14 @@ func (w *refWalker) expr(x syntax.Expr) {
 		if x.Type.Needs != nil || closed[1] {
 			f.mode[1] = frameStop
 		}
-		w.frame(f, func() {
-			w.push()
-			w.params(x.Type, nil)
-			w.visit(x.Body)
-			w.list(x.Body.List)
-			w.pop()
+		w.inFrame(x, func() {
+			w.frame(f, func() {
+				w.push()
+				w.params(x.Type, nil)
+				w.visit(x.Body)
+				w.list(x.Body.List)
+				w.pop()
+			})
 		})
 	case *syntax.CallExpr:
 		if id, ok := x.Fun.(*syntax.Ident); ok && id.Name == "with" {
@@ -868,36 +945,28 @@ func (w *refWalker) expr(x syntax.Expr) {
 				}
 				w.expr(a)
 			}
-			w.block(x.Trailing)
+			if x.Trailing != nil {
+				w.inFrame(x.Trailing, func() { w.block(x.Trailing) })
+			}
 		} else {
 			w.callee(x.Fun)
 			w.expr(x.Fun)
 			w.selfCallee(x.Fun)
 			sig := w.calleeSig(x.Fun)
 			spread := x.Ellipsis.IsValid()
-			// A callee typing finds invalid (a std module lower-v1 brings,
-			// refused at its import with S109; an unknown name; either
-			// through a binding) is not checked, nor are the literals and
-			// block passed to it (silentArgs): they carry no row, so no
-			// class G use follows from them (D3; round 6 review m3, round
-			// 7 review M2).
-			broken := w.invalidValue(x.Fun)
-			if broken && w.visited != nil {
-				w.invalidCalls = append(w.invalidCalls, x)
-			}
+			// Whether typing checks the literals and the block passed here
+			// (it does not when the callee is invalid, call.go silentArgs)
+			// is typing's verdict: each is a callback frame (inFrame), and
+			// a class G use inside it counts only when typing checked it
+			// (checker.liveUses; round 8 review M2).
 			for i, a := range x.Args {
-				if lit, ok := unparen(a).(*syntax.FuncLit); ok && broken {
-					w.argRows[lit] = [2]bool{true, true}
-				} else if ok && sig != nil {
+				if lit, ok := unparen(a).(*syntax.FuncLit); ok && sig != nil {
 					w.argRows[lit] = closedRows(paramType(sig, i, spread))
 				}
 				w.expr(a)
 			}
 			if x.Trailing != nil {
 				f := valueFrame{mode: [2]frameMode{frameValue, frameValue}, at: x.Trailing.Pos(), via: "the trailing block"}
-				if broken {
-					f.mode = [2]frameMode{frameStop, frameStop}
-				}
 				if sig != nil {
 					closed := closedRows(paramType(sig, len(x.Args), spread))
 					for k := range closed {
@@ -906,7 +975,9 @@ func (w *refWalker) expr(x syntax.Expr) {
 						}
 					}
 				}
-				w.frame(f, func() { w.block(x.Trailing) })
+				w.inFrame(x.Trailing, func() {
+					w.frame(f, func() { w.block(x.Trailing) })
+				})
 			}
 		}
 	case *syntax.GoExpr:

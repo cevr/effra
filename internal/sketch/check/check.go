@@ -152,9 +152,25 @@ type checker struct {
 	workNodes int
 	// settleOnly, set only by a test, is selfSettleOnly for one check.
 	settleOnly bool
-	// calleeValid, set only by a test, receives each call whose callee
-	// typing found valid (RefWalkProblems: the walk's invalid callees).
-	calleeValid map[*syntax.CallExpr]bool
+	// Typing's record of the callback frames it checks (round 8 review M2):
+	// frameGen holds, for each function literal, trailing block and with
+	// block, the body check that last typed it, and bodyGen each body's
+	// latest check (beginBodyCheck). A class G use the walk finds inside a
+	// frame counts only when typing checked the frame in the body's latest
+	// check (liveUses), so the walk never decides by itself which callee is
+	// invalid. guardTrace, set only by a test, receives the verdict liveUses
+	// first read for each frame and the check it read (RefWalkProblems).
+	frameGen       map[syntax.Node]int
+	bodyGen        map[any]int
+	curGen, genSeq int
+	guardTrace     map[syntax.Node]frameVerdict
+	// useGens, set only by a test, receives the body checks in which typing
+	// resolved each identifier (RefWalkProblems: an independent witness
+	// of which frames a check typed).
+	useGens map[*syntax.Ident][]int
+	// guardedRefs holds each body's class G uses inside callback frames
+	// (refWalker.guarded), beside valueRefs.
+	guardedRefs map[any][]guardedUse
 	// variantOps counts the variant-index work that resolves type-switch
 	// cases: a constructor inserted, a node visited, a type argument
 	// compared, a wildcard candidate checked. Linear in the source

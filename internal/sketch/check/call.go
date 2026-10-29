@@ -35,9 +35,6 @@ func (c *checker) call(x *syntax.CallExpr, hint Type) operand {
 		// (D3): the call is checked as one of an invalid callee.
 		fun = bad(x.Fun)
 	}
-	if c.calleeValid != nil && fun.mode != modeInvalid {
-		c.calleeValid[x] = true
-	}
 	switch fun.mode {
 	case modeInvalid:
 		c.silentArgs(x)
@@ -789,6 +786,7 @@ func (c *checker) paramsIn(t Type, set map[*TypeParam]bool) {
 // are known, else inferred from its body (rows-and-constraints §2, "Literals
 // land").
 func (c *checker) funcLit(x *syntax.FuncLit, expected *Signature, in *inferer) operand {
+	c.typedFrame(x)
 	sig := c.signature(x.Type, c.localTypeCtx())
 	writtenErr := false
 	if x.Type.Results != nil {
@@ -870,6 +868,7 @@ func (c *checker) body(t *target, ft *syntax.FuncType, params []*Var, check func
 // f(a, func() T { return body }). The block's last expression is its result;
 // return, break and continue may not leave it (grammar.md, Statements 5).
 func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer, value bool) (sig *Signature, refused bool) {
+	c.typedFrame(b)
 	sig = &Signature{Errors: newRow(), Uses: newRow()}
 	t := &target{name: "this block"}
 	resultFree := expected == nil || (in != nil && func() bool {

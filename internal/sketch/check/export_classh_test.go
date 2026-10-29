@@ -47,7 +47,8 @@ func RefWalkProblems(src string) []string {
 	var waited []*syntax.SelectorExpr
 	var pre map[*syntax.SelectorExpr]*Func
 	c.selfFinal = map[*syntax.SelectorExpr]*Func{}
-	c.calleeValid = map[*syntax.CallExpr]bool{}
+	c.guardTrace = map[syntax.Node]frameVerdict{}
+	c.useGens = map[*syntax.Ident][]int{}
 	selfTrace = func(cc *checker, pending []*syntax.SelectorExpr, resolved map[*syntax.SelectorExpr]*Func) {
 		if cc == c {
 			waited, pre = pending, resolved
@@ -87,11 +88,7 @@ func RefWalkProblems(src string) []string {
 		return nil
 	}
 	for _, wk := range walks {
-		for _, x := range wk.w.invalidCalls {
-			if c.calleeValid[x] {
-				out = append(out, fmt.Sprintf("%s at %d: the walk took the callee as invalid, typing checked it as valid", exprText(x.Fun), x.Pos()))
-			}
-		}
+		out = append(out, frameProblems(c, wk.w)...)
 		for _, x := range wk.w.retired {
 			if fn, ok := c.selfFinal[x]; ok {
 				out = append(out, fmt.Sprintf("%s at %d: the walk retired the call (its receiver names nothing), typing resolves %s", exprText(x), x.Pos(), depName(fn)))
@@ -132,6 +129,57 @@ func RefWalkProblems(src string) []string {
 		}
 	}
 	sort.Strings(out)
+	return out
+}
+
+// frameProblems checks the walk's callback frames against typing in both
+// directions (round 8 review M2). The walk's verdict on a frame is the one
+// class G read when it pinned the group, with the body check it read
+// (c.guardTrace), or, for a frame no pin read, typing's record of the
+// body's latest check. The witness is independent of that record: typing
+// checked the frame in that body check when an identifier directly in the
+// frame (not in a nested frame) that the walk resolves to a package object
+// was resolved by typing in that check (c.useGens), and left it unchecked
+// when none was. A frame the walk drops that typing checked, and a frame
+// the walk keeps that typing left unchecked, are both reported. A frame
+// with no such identifier is undecided and skipped. (The reporting pass may
+// skip a frame the pin kept: a call refused by class G checks nothing of
+// its own, by design, and the S108 is at the refused member.)
+func frameProblems(c *checker, w *refWalker) []string {
+	var out []string
+	nested := make(map[syntax.Node]bool, len(w.cbFrames))
+	for _, f := range w.cbFrames {
+		nested[f] = true
+	}
+	for _, f := range w.cbFrames {
+		v, pinned := c.guardTrace[f]
+		if !pinned {
+			v.gen = c.bodyGen[w.owner]
+			v.kept = v.gen != 0 && c.frameGen[f] == v.gen
+		}
+		known, typed := false, false
+		syntax.Inspect(f, func(n syntax.Node) bool {
+			if n != f && nested[n] {
+				return false
+			}
+			id, ok := n.(*syntax.Ident)
+			if !ok || w.idents[id] == nil {
+				return true
+			}
+			known = true
+			if slices.Contains(c.useGens[id], v.gen) {
+				typed = true
+			}
+			return true
+		})
+		switch {
+		case !known:
+		case !v.kept && typed:
+			out = append(out, fmt.Sprintf("%T at %d: the walk drops the callback frame, and typing checked it", f, f.Pos()))
+		case v.kept && !typed:
+			out = append(out, fmt.Sprintf("%T at %d: typing left the callback frame unchecked, and the walk kept its uses", f, f.Pos()))
+		}
+	}
 	return out
 }
 

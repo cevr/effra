@@ -46,6 +46,7 @@ func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
 	if hint != nil {
 		expect = []Type{hint}
 	}
+	c.typedFrame(x.Trailing)
 	res := c.yieldingBlock(x.Trailing, x.Trailing.List, expect, false, func(op *operand) { errs = op.errs })
 	c.fn.branches = c.fn.branches[:len(c.fn.branches)-1]
 	done()
