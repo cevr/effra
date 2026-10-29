@@ -293,14 +293,62 @@ func dropBlankLines(src string) string {
 }
 
 // printlnOnly reports whether two texts of the same lines differ only on
-// lines that call Console.Println.
-func printlnOnly(a, b string) bool {
+// lines that call Console.Println, and which of a's Println lines differ,
+// by their order among a's Println lines (0 for the first).
+func printlnOnly(a, b string) (ordinals []int, ok bool) {
 	la, lb := strings.Split(a, "\n"), strings.Split(b, "\n")
 	if len(la) != len(lb) {
-		return false
+		return nil, false
 	}
+	k := -1
 	for i := range la {
-		if la[i] != lb[i] && !(strings.Contains(la[i], "Console.Println(") && strings.Contains(lb[i], "Console.Println(")) {
+		println := strings.Contains(la[i], "Console.Println(")
+		if println {
+			k++
+		}
+		if la[i] == lb[i] {
+			continue
+		}
+		if !println || !strings.Contains(lb[i], "Console.Println(") {
+			return nil, false
+		}
+		ordinals = append(ordinals, k)
+	}
+	return ordinals, true
+}
+
+// printlnLines returns the line of each Console.Println call of src, in
+// source order.
+func printlnLines(t *testing.T, src string) []int {
+	t.Helper()
+	f, err := syntax.Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []int
+	syntax.Inspect(f, func(n syntax.Node) bool {
+		if sel, ok := n.(*syntax.SelectorExpr); ok && sel.Sel.Name == "Println" {
+			if id, ok := sel.X.(*syntax.Ident); ok && id.Name == "Console" {
+				lines = append(lines, 1+strings.Count(src[:sel.Pos()], "\n"))
+			}
+		}
+		return true
+	})
+	return lines
+}
+
+// diagnosedLines reports whether the checker reports a diagnostic on each
+// of the given lines of src.
+func diagnosedLines(src string, lines []int) bool {
+	_, diags := check.CheckSource(src)
+	for _, line := range lines {
+		found := false
+		for _, d := range diags {
+			if d.Line == line {
+				found = true
+			}
+		}
+		if !found {
 			return false
 		}
 	}
@@ -319,8 +367,8 @@ var packageClause = regexp.MustCompile(`(?m)^package [A-Za-z_][A-Za-z_0-9]*[ \t]
 // its spellings decide. One difference is admitted: the decided prelude's
 // Console.Println takes one line string (round 6, A3), so the translator
 // rewrites an old call with any other operands; the old call still parses,
-// and the checker refuses it (a located diagnostic), so it never runs with
-// another meaning.
+// and the checker refuses it with a diagnostic on that call's line, so it
+// never runs with another meaning.
 func TestOldCorpusRefusedOrSame(t *testing.T) {
 	refused, same, checked := 0, 0, 0
 	for _, in := range oldInputs(t) {
@@ -345,8 +393,16 @@ func TestOldCorpusRefusedOrSame(t *testing.T) {
 				continue
 			}
 			if dropBlankLines(got) != dropBlankLines(want) {
-				if printlnOnly(dropBlankLines(got), dropBlankLines(want)) {
-					if _, diags := check.CheckSource(src); len(diags) > 0 {
+				if ordinals, ok := printlnOnly(dropBlankLines(got), dropBlankLines(want)); ok {
+					// Each differing call is refused on its own line.
+					calls := printlnLines(t, src)
+					var lines []int
+					for _, k := range ordinals {
+						if k >= 0 && k < len(calls) {
+							lines = append(lines, calls[k])
+						}
+					}
+					if len(lines) == len(ordinals) && diagnosedLines(src, lines) {
 						checked++
 						continue
 					}
