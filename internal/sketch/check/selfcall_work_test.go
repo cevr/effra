@@ -66,8 +66,10 @@ func kchain(b *strings.Builder, n int) {
 type workCase struct {
 	name string
 	src  func(n int) string
-	// diags is the verdict at every n: the codes, in order.
+	// diags is the verdict at every n: the codes, in order; codes, when
+	// set, gives it for each n instead.
 	diags string
+	codes func(n int) string
 }
 
 var workCases = []workCase{
@@ -76,13 +78,13 @@ var workCases = []workCase{
 		chainSource(&b, n)
 		b.WriteString("type R {}\nfunc m(_ R) {}\nfunc bad() { nope.m() }\n")
 		return b.String()
-	}, "S104"},
+	}, "S104", nil},
 	{"star: a local bound to an unknown name in a caller of the star", func(n int) string {
 		var b strings.Builder
 		chainSource(&b, n)
 		b.WriteString("type R {}\nfunc m(_ R) {}\nfunc bad() { f0(); let x = nope; x.m() }\n")
 		return b.String()
-	}, "S104"},
+	}, "S104", nil},
 	{"star: a receiver that waits for a row in a caller of the star", func(n int) string {
 		var b strings.Builder
 		chainSource(&b, n)
@@ -96,7 +98,7 @@ var workCases = []workCase{
 }
 `)
 		return b.String()
-	}, ""},
+	}, "", nil},
 	{"star: declared from the middle", func(n int) string {
 		var b strings.Builder
 		b.WriteString("type C { Use() }\nfunc main() {}\n")
@@ -109,7 +111,7 @@ var workCases = []workCase{
 		}
 		chainBodies(&b, n, order)
 		return b.String()
-	}, ""},
+	}, "", nil},
 	{"star: a heavier body declared first reaches the middle", func(n int) string {
 		var b strings.Builder
 		b.WriteString("type C { Use() }\nfunc main() {}\n")
@@ -121,7 +123,7 @@ var workCases = []workCase{
 		chainBodies(&b, n, nil)
 		fmt.Fprintf(&b, "func g() { h() }\n")
 		return b.String()
-	}, ""},
+	}, "", nil},
 	{"r7 generator: receivers through locals bound to calls", func(n int) string {
 		var b strings.Builder
 		for i := range n {
@@ -129,7 +131,7 @@ var workCases = []workCase{
 		}
 		b.WriteString("func main() {}\n")
 		return b.String()
-	}, ""},
+	}, "", nil},
 	{"wideWaiting: one wide body over receivers that wait in waves", func(n int) string {
 		var b strings.Builder
 		kchain(&b, n)
@@ -139,7 +141,7 @@ var workCases = []workCase{
 		}
 		b.WriteString("}\n")
 		return b.String()
-	}, ""},
+	}, "", nil},
 	{"one body whose receivers each wait for the previous call's row", func(n int) string {
 		var b strings.Builder
 		b.WriteString("type E {}\ntype B {}\nfunc load() B fails E { return B{} }\nfunc main() {}\n")
@@ -152,7 +154,35 @@ var workCases = []workCase{
 		}
 		fmt.Fprintf(&b, "\t_ = c%d\n}\n", n-1)
 		return b.String()
-	}, ""},
+	}, "", nil},
+	// The round 13 review's M2 witness (gen-taint2.ts): the b4 component
+	// with its one arm error, n readers of walk, and one literal that
+	// calls every reader and is called n times. Each `try` there reads
+	// walk's pinned row, which is empty: 3n follow-ons that base17 gives
+	// too (round 13 ruling), with linear work.
+	{"M2 witness: one arm error read by n readers through one literal", func(n int) string {
+		var b strings.Builder
+		b.WriteString("type E {}\ntype G[T] {}\ntype H[T] {}\n")
+		b.WriteString("func load() fails G[int] { return G[int]{} }\nfunc boom() fails E { return E{} }\n")
+		b.WriteString("func keep[T, F](g H[T], f F) {}\n")
+		b.WriteString("func walk() {\n\ttry boom()\n\ttry w() catch {\n\tcase G[int]:\n\tcase H as h:\n\t\th.keep(func() { walk() })\n\t}\n}\n")
+		b.WriteString("func w() {\n\ttry load()\n\ttry walk()\n}\n")
+		for i := range n {
+			fmt.Fprintf(&b, "func f%d() { try walk() }\n", i)
+		}
+		b.WriteString("func outer() {\n\tlet lit = func() {\n")
+		for i := range n {
+			fmt.Fprintf(&b, "\t\ttry f%d()\n", i)
+		}
+		b.WriteString("\t}\n")
+		for range n {
+			b.WriteString("\ttry lit()\n")
+		}
+		b.WriteString("}\nfunc main() {}\n")
+		return b.String()
+	}, "", func(n int) string {
+		return strings.TrimSpace(strings.Repeat("S108 ", 3*n+1))
+	}},
 }
 
 // checkSettling is checkFor with the typing from empty rows skipped when
@@ -198,8 +228,12 @@ func TestSelfCallWorkLinear(t *testing.T) {
 					for _, d := range diags {
 						codes = append(codes, d.Code)
 					}
-					if got := strings.Join(codes, " "); got != wc.diags {
-						t.Fatalf("n = %d: want %q; got %v", n, wc.diags, diags)
+					want := wc.diags
+					if wc.codes != nil {
+						want = wc.codes(n)
+					}
+					if got := strings.Join(codes, " "); got != want {
+						t.Fatalf("n = %d: want %q; got %v", n, want, diags)
 					}
 					graph := c.bodyNodes + c.bodyEdges
 					t.Logf("n = %d: %d source nodes, %d bodies, %d edges; work %d nodes (%.2f per source node); %d settling checks, %d worklist steps, %d fixpoint checks; %s",
