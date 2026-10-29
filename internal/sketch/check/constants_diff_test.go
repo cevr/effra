@@ -1,0 +1,180 @@
+package check
+
+import (
+	"fmt"
+	"go/constant"
+	"math/rand"
+	"strings"
+	"testing"
+
+	"ergo.local/prototype/internal/sketch/syntax"
+)
+
+// Constant arithmetic against go/types (spec D-A6, round-1 review M3). The
+// lowering emits one conversion per literal (difflower_test.go), so
+// float64(1) / float64(2) is 0.5, and the differential compares each
+// constant's Info.Values entry with the value go/types computes for the
+// lowered text. constGen writes programs whose functions return a random
+// constant expression of one basic type: integer and float literals, the
+// operators + - * / %, unary - and ^, shifts with a literal count,
+// parentheses, float32 rounding, and divisors that fold to zero.
+
+// constTypes are the result types constGen draws from.
+var constTypes = []string{"int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "float32", "float64"}
+
+type constGen struct{ rng *rand.Rand }
+
+func (g *constGen) isFloat(t string) bool { return strings.HasPrefix(t, "float") }
+
+func (g *constGen) leaf(t string) string {
+	r := g.rng.Intn(10)
+	switch {
+	case r < 5:
+		return fmt.Sprint([]int{0, 1, 2, 3, 7, 10, 100, 127, 128, 255, 256, 1000}[g.rng.Intn(12)])
+	case r < 7 || g.isFloat(t) && r < 9:
+		// A float literal: exact or not in binary, large or small, and
+		// one that float32 rounds (16777217).
+		return []string{"0.5", "2.5", "0.1", "0.2", "1.0", "3.0", "1e3", "1e-3", "16777217.0", "1e40"}[g.rng.Intn(10)]
+	case r < 9:
+		return fmt.Sprint([]int{65535, 2147483647, 2147483648, 4294967295, 16777217}[g.rng.Intn(5)])
+	}
+	return "9223372036854775807"
+}
+
+func (g *constGen) expr(t string, depth int) string {
+	if depth == 0 || g.rng.Intn(4) == 0 {
+		return g.leaf(t)
+	}
+	unaryOperand := func() string {
+		x := g.expr(t, depth-1)
+		if strings.HasPrefix(x, "-") || strings.HasPrefix(x, "^") || strings.ContainsAny(x, " ") {
+			return "(" + x + ")" // never --x; a sign applies to the whole operand
+		}
+		return x
+	}
+	switch g.rng.Intn(9) {
+	case 0:
+		return "-" + unaryOperand()
+	case 1:
+		return "^" + unaryOperand()
+	case 2:
+		return "(" + g.expr(t, depth-1) + ")"
+	case 3:
+		return g.expr(t, depth-1) + []string{" << ", " >> "}[g.rng.Intn(2)] + fmt.Sprint(g.rng.Intn(10))
+	}
+	op := []string{" + ", " - ", " * ", " / ", " % "}[g.rng.Intn(5)]
+	return g.expr(t, depth-1) + op + g.expr(t, depth-1)
+}
+
+// zero is a constant expression that folds to zero.
+func (g *constGen) zero() string {
+	return []string{"(3 - 3)", "(2 * 0)", "(1 - 1)", "(0 / 5)"}[g.rng.Intn(4)]
+}
+
+func (g *constGen) program() twin {
+	var w twinBuilder
+	w.each("package p\n\nfunc Id[T any](x T) T { return x }\n\n", "func Id[T](x T) T { return x }\n\n")
+	for i := range 6 {
+		t := constTypes[g.rng.Intn(len(constTypes))]
+		switch g.rng.Intn(4) {
+		case 0:
+			w.both("func F%d() %s { return Id[%s](%s) }\n\n", i, t, t, g.expr(t, 3))
+		case 1:
+			// A divisor that folds to zero beside a variable.
+			w.both("func F%d(x %s) %s { return x %s %s }\n\n", i, t, t, []string{"/", "%"}[g.rng.Intn(2)], g.zero())
+		default:
+			w.both("func F%d() %s { return %s }\n\n", i, t, g.expr(t, 3))
+		}
+	}
+	return w.twin()
+}
+
+// TestDifferentialConstants runs constGen over a fixed seed set. Both
+// verdicts must occur, and accepted programs must hold constants.
+func TestDifferentialConstants(t *testing.T) {
+	accepted, rejected, values := 0, 0, 0
+	for seed := int64(0); seed < diffSeeds; seed++ {
+		src := (&constGen{rng: rand.New(rand.NewSource(seed))}).program()
+		if d := diffCheck(src, false); len(d) > 0 {
+			t.Fatalf("seed %d:\n%s\n%s", seed, strings.Join(d, "\n"), src.ergoSrc)
+		}
+		if gaps := cleanInfoGaps(src.ergoSrc); len(gaps) > 0 {
+			t.Fatalf("seed %d (Info):\n\t%s\n%s", seed, strings.Join(gaps, "\n\t"), src.ergoSrc)
+		}
+		// Each function alone, so one refusal does not hide the others.
+		for _, fn := range strings.Split(src.goSrc, "\n\n")[2:] {
+			if strings.TrimSpace(fn) == "" {
+				continue
+			}
+			one := newTwin("package p\n\nfunc Id[T any](x T) T { return x }\n\n"+fn+"\n", "func Id[T](x T) T { return x }\n\n"+fn+"\n")
+			if d := diffCheck(one, false); len(d) > 0 {
+				t.Fatalf("seed %d:\n%s\n%s", seed, strings.Join(d, "\n"), one.ergoSrc)
+			}
+			pkg, diags := CheckSource(one.ergoSrc)
+			if len(diags) == 0 {
+				accepted++
+				values += len(pkg.Info.Values)
+			} else {
+				rejected++
+			}
+		}
+	}
+	if accepted < diffSeeds/2 || rejected < diffSeeds/2 || values < accepted {
+		t.Errorf("the seeds cover %d accepted functions (%d constants) and %d rejected; the generator misses a verdict", accepted, values, rejected)
+	}
+}
+
+// TestConstantValues pins the values the review found the old lowering
+// model got wrong (round-1 review M3): Info.Values holds the value Ergo
+// computes, and the differential agrees with go/types on its lowering.
+func TestConstantValues(t *testing.T) {
+	for _, tc := range []struct {
+		body, expr, want string
+	}{
+		{"func F() float64 { return 1 / 2 }", "1 / 2", "0.5"},
+		{"func F() uint8 { return ^0 }", "^0", "255"},
+		{"func F() int8 { return -128 }", "-128", "-128"},
+		{"func F() int8 { return -(128) }", "-(128)", "-128"},
+		{"func F() float32 { return 0.1 + 0.2 }", "0.1 + 0.2", fmt.Sprint(float64(float32(0.1) + float32(0.2)))},
+		{"func F() int { return 7 / 2 }", "7 / 2", "3"},
+		{"func F() int { return -7 % 3 }", "-7 % 3", "-1"},
+		{"func F() float32 { return 16777217.0 }", "16777217.0", "16777216"},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			src := newTwin("package p\n\n"+tc.body+"\n", tc.body+"\n")
+			pkg, diags := CheckSource(src.ergoSrc)
+			if len(diags) > 0 {
+				t.Fatalf("want a clean check, got %s", describeDiags(diags))
+			}
+			var got []string
+			for x, v := range pkg.Info.Values {
+				if exprSource(src.ergoSrc, x) == tc.expr {
+					got = append(got, constantText(v))
+				}
+			}
+			if len(got) != 1 || got[0] != tc.want {
+				t.Fatalf("Info.Values of %s: want %s, got %q", tc.expr, tc.want, got)
+			}
+			if d := diffOne(src); len(d) > 0 {
+				t.Fatalf("Info differs from go/types on the lowering:\n%s", strings.Join(d, "\n"))
+			}
+		})
+	}
+}
+
+func exprSource(src string, x syntax.Expr) string {
+	from, to := int(x.Pos()), int(x.End())
+	if from < 0 || to > len(src) || from > to {
+		return ""
+	}
+	return src[from:to]
+}
+
+// constantText prints a constant as a float64 when it is not an integer.
+func constantText(v constant.Value) string {
+	if iv := constant.ToInt(v); iv.Kind() == constant.Int {
+		return iv.ExactString()
+	}
+	f, _ := constant.Float64Val(v)
+	return fmt.Sprint(f)
+}

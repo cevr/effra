@@ -3,6 +3,7 @@ package check
 import (
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -578,6 +579,52 @@ func isRefusal(d string) bool {
 	return strings.Contains(d, "S108") && strings.Contains(d, "cannot infer") && strings.Contains(d, "write the type arguments")
 }
 
+// is196uRefusal reports whether d is one of 196u's S108 refusals of a
+// literal or a constant (literals.go, operators.go): a literal of the wrong
+// kind, a mismatch two defaults make, a name that does not convert, an
+// overflow, a shift in a non-integer context, mixed literal defaults.
+func is196uRefusal(d string) bool {
+	if !strings.Contains(d, "S108") {
+		return false
+	}
+	for _, s := range []string{
+		"literal takes only",
+		"an integer literal is not a duration",
+		"mismatched types",
+		"overflows",
+		"is not representable as",
+		"is not an integer, so it is not representable",
+		"truncates to an integer",
+		"the left operand of a shift is an integer",
+		"cannot infer",
+		"; write ", // a name that does not convert: "Limit is int; write int8(Limit) …"
+		// Rule 6: a literal binds its parameter to its default before the
+		// constraint is checked (G(1, s)), so the constraint failure is the
+		// refusal; Go infers the parameter from the constraint instead.
+		"does not satisfy the constraint",
+		// Rule 1: a literal takes its context's type, so ^7 and 7 % 2 in a
+		// float64 context apply an integer operator to a float (Go folds
+		// them as untyped integers first).
+		"is not defined on",
+	} {
+		if strings.Contains(d, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// sameConstant reports whether two constants are the same value; values
+// of kinds that do not compare (a bool and a number) differ.
+func sameConstant(a, b constant.Value) (same bool) {
+	defer func() {
+		if recover() != nil {
+			same = false
+		}
+	}()
+	return constant.Compare(a, token.EQL, b)
+}
+
 // goCheck runs go/types over f, recording into info when it is not nil.
 func goCheck(fset *token.FileSet, f *ast.File, info *types.Info) []string {
 	var errs []string
@@ -623,6 +670,12 @@ func diffCount(p twin, cycleOnly bool) ([]string, bool) {
 			ergoTypes[k] = append(ergoTypes[k], keys.key(t))
 		}
 	}
+	ergoValues := map[alignKey][]constant.Value{}
+	for x, v := range pkg.Info.Values {
+		if k, ok := alignKeyOf(ergoRegs, int(x.Pos()), int(x.End())); ok {
+			ergoValues[k] = append(ergoValues[k], v)
+		}
+	}
 	// The lowered text: the same file, each literal converted in place.
 	lfset := token.NewFileSet()
 	lowered, _ := parser.ParseFile(lfset, "p.go", src, 0)
@@ -643,13 +696,15 @@ func diffCount(p twin, cycleOnly bool) ([]string, bool) {
 	info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}}
 	lowErrs := goCheck(lfset, lowered, info)
 	if len(goErrs) == 0 && len(ds) > 0 {
-		if len(lowErrs) > 0 {
-			return nil, true // 196u types it invalid
-		}
+		// 196u types it invalid: its lowered text is invalid Go too, and
+		// each diagnostic is one of 196u's refusals, so a checker bug that
+		// types a literal wrong and then refuses is not excused.
+		refused := true
 		for _, d := range ds {
-			if !isRefusal(d) {
-				return []string{fmt.Sprintf("ergo rejects a program go accepts, not with the refusal: %q", ds)}, false
-			}
+			refused = refused && (isRefusal(d) || len(lowErrs) > 0 && is196uRefusal(d))
+		}
+		if !refused {
+			return []string{fmt.Sprintf("ergo rejects a program go accepts, not with a 196u refusal: %q (lowered go: %q)", ds, lowErrs)}, false
 		}
 		return nil, true
 	}
@@ -679,14 +734,19 @@ func diffCount(p twin, cycleOnly bool) ([]string, bool) {
 	}
 	var out []string
 	text := func(sp span) string { return src[sp.from:sp.to] }
-	var compare func(x ast.Expr)
-	compare = func(x ast.Expr) {
+	var compare func(x ast.Expr, withValue bool)
+	compare = func(x ast.Expr, withValue bool) {
 		tv, ok := info.Types[x]
 		if !ok {
 			return
 		}
 		sp := offsets(x)
 		gt := goKey(tv.Type)
+		if gt == "untyped bool" {
+			// Go types a comparison untyped bool until its context fixes
+			// it; Ergo types it bool, and the lowered Go is the same.
+			gt = "bool"
+		}
 		k, inRegion := alignKeyOf(goRegs, sp.from, sp.to)
 		if !inRegion {
 			// A signature's or declaration's type expression: its tokens
@@ -714,6 +774,26 @@ func diffCount(p twin, cycleOnly bool) ([]string, bool) {
 		case !same:
 			out = append(out, fmt.Sprintf("%s: ergo %s, go %s", text(sp), strings.Join(ets, " or "), gt))
 		}
+		// A constant: the lowering emits Info.Values, so it must be the
+		// value go/types computes for the lowered text (spec D-A4).
+		if withValue && tv.IsValue() && tv.Value != nil {
+			evs := ergoValues[k]
+			if len(evs) == 0 {
+				out = append(out, fmt.Sprintf("%s: ergo records no value; go %s", text(sp), tv.Value.ExactString()))
+				return
+			}
+			equal := false
+			for _, ev := range evs {
+				equal = equal || sameConstant(ev, tv.Value)
+			}
+			if !equal {
+				var es []string
+				for _, ev := range evs {
+					es = append(es, ev.ExactString())
+				}
+				out = append(out, fmt.Sprintf("%s: ergo value %s, go %s", text(sp), strings.Join(es, " or "), tv.Value.ExactString()))
+			}
+		}
 	}
 	ast.Inspect(lowered, func(n ast.Node) bool {
 		x, ok := n.(ast.Expr)
@@ -722,17 +802,19 @@ func diffCount(p twin, cycleOnly bool) ([]string, bool) {
 		}
 		if call, ok := x.(*ast.CallExpr); ok && made[call] {
 			// A converted literal: the conversion and the literal carry its
-			// one type. Inside it Go keeps a constant operation's operands
-			// untyped, which the lowering never needs, so they are not
-			// compared.
-			compare(call)
-			compare(call.Args[0])
+			// one type. The conversion carries its value, rounded to the
+			// type; go/types keeps the literal's own source value (1/10 in
+			// float32(0.1)), so only the conversion's value is compared.
+			// Inside a signed literal Go keeps the operand untyped, which
+			// the lowering never needs, so it is not compared.
+			compare(call, true)
+			compare(call.Args[0], false)
 			return false
 		}
 		// Every expression node go/types records: identifiers, index and
 		// selector expressions, parentheses, calls, composite and basic
 		// literals, unary and binary operations, function literals.
-		compare(x)
+		compare(x, true)
 		return true
 	})
 	sort.Strings(out)
@@ -1052,6 +1134,13 @@ func FuzzDifferential(f *testing.F) {
 		}
 		if d := nestedCheck(seed); len(d) > 0 {
 			t.Fatalf("seed %d (nested):\n%s", seed, strings.Join(d, "\n"))
+		}
+		src = (&constGen{rng: rand.New(rand.NewSource(seed))}).program()
+		if d := diffCheck(src, false); len(d) > 0 {
+			t.Fatalf("seed %d (constants):\n%s\n%s", seed, strings.Join(d, "\n"), src.ergoSrc)
+		}
+		if gaps := cleanInfoGaps(src.ergoSrc); len(gaps) > 0 {
+			t.Fatalf("seed %d (constants Info):\n\t%s", seed, strings.Join(gaps, "\n\t"))
 		}
 	})
 }

@@ -9,39 +9,50 @@ import (
 )
 
 // The differential reads the Go text as the lowering would emit it (196u
-// rule 8): every literal expression is converted to the one type Ergo gave
-// it, int8(1) for a 1 that took int8, so go/types sees the types the
-// checker chose instead of Go's untyped constants. lowerLiterals rewrites
-// the Go syntax tree in place, keeping every position, so the converted
+// rule 8): every basic literal is converted to the one type Ergo gave it,
+// int8(1) for a 1 that took int8, so go/types sees the types the checker
+// chose instead of Go's untyped constants. The conversion is per literal,
+// never around a constant expression: float64(1) / float64(2) is 0.5, the
+// value Ergo computes, where float64(1 / 2) would be 0. A signed literal is
+// one literal (operators.go folds the sign, so -128 is an int8): it lowers
+// to int8(-128), since -int8(128) overflows. lowerLiterals rewrites the Go
+// syntax tree in place, keeping every position, so the converted
 // expressions still align with the Ergo text (align_test.go).
 
-// goIsLiteral is isLiteral over Go syntax: a basic literal, true or false,
-// a unary or arithmetic operation on literals, and a shift of a literal, in
-// parentheses or not. A comparison of two literals is one here too: Ergo
-// types it bool, while Go keeps it an untyped bool constant, so the
-// lowering converts it as well.
-func goIsLiteral(x ast.Expr) bool {
+// goLiteralUnit reports whether x is one literal of the lowering: a basic
+// literal, true or false, or a sign on a basic literal in parentheses or
+// not (the form unary in operators.go folds).
+func goLiteralUnit(x ast.Expr) bool {
 	switch x := x.(type) {
 	case *ast.BasicLit:
 		return true
 	case *ast.Ident:
 		return x.Name == "true" || x.Name == "false"
-	case *ast.ParenExpr:
-		return goIsLiteral(x.X)
 	case *ast.UnaryExpr:
-		return x.Op != token.AND && goIsLiteral(x.X)
-	case *ast.BinaryExpr:
-		if x.Op == token.SHL || x.Op == token.SHR {
-			return goIsLiteral(x.X)
+		if x.Op != token.SUB && x.Op != token.ADD {
+			return false
 		}
-		return goIsLiteral(x.X) && goIsLiteral(x.Y)
+		inner := x.X
+		for {
+			p, ok := inner.(*ast.ParenExpr)
+			if !ok {
+				break
+			}
+			inner = p.X
+		}
+		_, ok := inner.(*ast.BasicLit)
+		return ok
 	}
 	return false
 }
 
-// goLiteralDefault is a Go basic literal's type under 196u rule 2.
+// goLiteralDefault is a Go literal's type under 196u rule 2.
 func goLiteralDefault(x ast.Expr) string {
 	switch x := x.(type) {
+	case *ast.UnaryExpr:
+		return goLiteralDefault(x.X)
+	case *ast.ParenExpr:
+		return goLiteralDefault(x.X)
 	case *ast.BasicLit:
 		switch x.Kind {
 		case token.INT:
@@ -61,12 +72,10 @@ func goLiteralDefault(x ast.Expr) string {
 
 var goTypeName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// lowerLiterals converts each maximal literal expression of f to typeOf's
-// answer for it, Ergo's type. An expression Ergo did not type (it is in a
-// program Ergo rejects) is converted part by part: each basic literal in
-// it to its default, a shift's left operand only. It returns the
-// conversions it made, keyed by the call, or an error for a type that is
-// not a Go identifier.
+// lowerLiterals converts each literal of f (goLiteralUnit) to typeOf's
+// answer for it, Ergo's type, or to its default when Ergo did not type it
+// (it is in a program Ergo rejects). It returns the conversions it made,
+// keyed by the call, or an error for a type that is not a Go identifier.
 func lowerLiterals(f *ast.File, typeOf func(ast.Expr) (string, bool)) (map[*ast.CallExpr]bool, error) {
 	made := map[*ast.CallExpr]bool{}
 	var failure error
@@ -79,31 +88,14 @@ func lowerLiterals(f *ast.File, typeOf func(ast.Expr) (string, bool)) (map[*ast.
 		made[call] = true
 		return call
 	}
-	var lower func(x ast.Expr) ast.Expr
-	lower = func(x ast.Expr) ast.Expr {
-		if t, ok := typeOf(x); ok {
-			return convert(x, t)
-		}
-		switch y := x.(type) {
-		case *ast.BasicLit, *ast.Ident:
-			return convert(x, goLiteralDefault(x))
-		case *ast.ParenExpr:
-			y.X = lower(y.X)
-		case *ast.UnaryExpr:
-			y.X = lower(y.X)
-		case *ast.BinaryExpr:
-			y.X = lower(y.X)
-			if y.Op != token.SHL && y.Op != token.SHR {
-				y.Y = lower(y.Y)
-			}
-		}
-		return x
-	}
 	rewriteExprs(f, func(x ast.Expr) (ast.Expr, bool) {
-		if !goIsLiteral(x) {
+		if !goLiteralUnit(x) {
 			return x, true
 		}
-		return lower(x), false
+		if t, ok := typeOf(x); ok {
+			return convert(x, t), false
+		}
+		return convert(x, goLiteralDefault(x)), false
 	})
 	return made, failure
 }
