@@ -86,7 +86,7 @@ func (c *checker) rowWaits(open bool) bool {
 
 // readRow counts the reads of a callee's error row r at a call (result,
 // goExpr): an open read when r holds an unsolved variable of a member of
-// the component being checked. (The row's poison is its taint, poison.go.)
+// the component being checked (rowWaits; round 11 review M1).
 func (c *checker) readRow(r *Row) {
 	if r == nil || !r.vars {
 		return

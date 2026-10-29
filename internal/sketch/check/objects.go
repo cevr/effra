@@ -45,14 +45,7 @@ type Func struct {
 	// (rows.md, Capability rows 6; rows-and-constraints §7 amendment 1).
 	inferErrors, inferUses bool
 	errVar, useVar         *RowVar // the inferred rows' variables (class F)
-	// poisoned: the inferred error row is a lower bound that no diagnostic
-	// explains: the function's class G S108 for it was dropped, or a
-	// poisoned row reaches it (flow: the functions whose rows escape into
-	// it), so an absence check that reads it is silent (poison.go; rows.md,
-	// Capability rows 6).
-	poisoned bool
-	flow     rowTaint
-	called   bool
+	called                 bool
 
 	// owner is set for a function x.f(…) reaches (196m): its first
 	// parameter's type is owner, or *owner, a type declared in this

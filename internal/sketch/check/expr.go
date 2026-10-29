@@ -33,12 +33,9 @@ type operand struct {
 	typ  Type
 	val  constant.Value
 	errs *Row
-	// taint: the functions whose error rows errs was built from, where
-	// they can hold poison (poison.go); it follows errs.
-	taint rowTaint
-	obj   Object
-	cap   Type // modeCap/modeCapFn: the capability
-	expr  syntax.Expr
+	obj  Object
+	cap  Type // modeCap/modeCapFn: the capability
+	expr syntax.Expr
 	// addressable marks a variable, field or element: &x and assignment.
 	addressable bool
 	// mapElem marks a map index: assignable, as in Go, but not

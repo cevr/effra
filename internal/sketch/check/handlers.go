@@ -23,8 +23,8 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 		if op.invalid() {
 			return op
 		}
-		c.escape(x, op.errs, op.taint)
-		op.errs, op.taint = nil, nil
+		c.escape(x, op.errs)
+		op.errs = nil
 		return op
 	}
 	op := c.expr(x.X, hint)
@@ -39,17 +39,13 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 			return bad(x)
 		}
 	}
-	// The row escapes with its taint even when it is empty: a poisoned row
-	// may be empty (poison.go).
-	c.escape(x, op.errs, op.taint)
-	// An absence check: a poisoned row is no evidence that the expression
-	// cannot fail.
 	if !op.fallible() {
-		c.absence(op.taint, func() {
-			c.errorf(x, CodeType, "try on an expression that cannot fail (rows.md, Error rows 6)")
-		})
+		c.errorf(x, CodeType, "try on an expression that cannot fail (rows.md, Error rows 6)")
+		op.addressable = false
+		return op
 	}
-	op.errs, op.taint = nil, nil
+	c.escape(x, op.errs)
+	op.errs = nil
 	op.addressable = false
 	return op
 }
@@ -65,9 +61,7 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 	valid := !op.invalid()
 	// open: the row may still grow in this component (rowWaits). operandOK:
 	// the caught expression is valid, so an arm its row lacks is not a
-	// cascade of its diagnostic. The row's taint decides the absence checks
-	// below (Catch 1 and 2): a poisoned row is no evidence of an absence
-	// (poison.go). Catch 4 reports presence and always runs.
+	// cascade of its diagnostic.
 	open, operandOK := c.openRowSeq != openMark, valid
 	if valid {
 		switch op.mode {
@@ -85,9 +79,8 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 	// on the value resolves before the rows settle (selfcalls.go; round 8
 	// review M1).
 	hasValue := valid && op.mode != modeNoValue
-	if valid && row.Empty() && c.absence(op.taint, func() {
+	if valid && row.Empty() {
 		c.errorf(x.X, CodeType, "catch on an expression that cannot fail (rows.md, Catch 1)")
-	}) {
 		valid = false
 	}
 	var valueType Type
@@ -136,9 +129,8 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 			if !valid {
 				continue
 			}
-			if !row.has(c.types, t) && c.absence(op.taint, func() {
+			if !row.has(c.types, t) {
 				c.errorf(te, CodeType, "%s is not in the caught row %s (rows.md, Catch 2)", t, rowText(row))
-			}) {
 				continue
 			}
 			if covered.has(c.types, t) {
@@ -193,9 +185,7 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 		res = operand{mode: modeNoValue, typ: NoValue}
 	}
 	if partial {
-		// The rest passes on with the row's taint; a total catch
-		// discharges the row and stops the poison (poison.go).
-		res.errs, res.taint = rest, op.taint
+		res.errs = rest
 	}
 	return res
 }
@@ -206,9 +196,9 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 // component (open: the type is provisional, rowWaits) or is no evidence
 // (evidence false: the caught expression is invalid, so its own
 // diagnostic explains the empty row); otherwise the arm needs its type
-// arguments (round 11 review M1 and O1). A poisoned row does not silence
-// this error: it makes the binding invalid, so it is the diagnostic an
-// invalid-diagnosed frame, and a dropped S108, rest on.
+// arguments (round 11 review M1 and O1). This error makes the binding
+// invalid, so it is the diagnostic an invalid-diagnosed frame, and a
+// dropped S108, rest on.
 func (c *checker) catchType(te syntax.Expr, row *Row, open, evidence bool) Type {
 	t := c.typExpr0(te, c.localTypeCtx())
 	if isInvalid(t) {

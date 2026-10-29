@@ -152,11 +152,12 @@ func main() {}
 		want: []string{"11:7 S108 generic type main.H needs type arguments"},
 	},
 	// The arm catches a member's row (b4): the pin keeps the use and the
-	// S108 is dropped. walk's row is poisoned, and so is w's, which it
-	// flows into, so outer's catch reports nothing from walk's pinned row
-	// (round 11 review m1; round 12 review: the poison follows row flow).
+	// S108 is dropped. walk's row stays pinned, so outer's Catch 2 on E
+	// is a follow-on of the arm's error: it disappears when the arm is
+	// fixed (b4-fixed is clean), and base17 gives it too (round 13 ruling;
+	// rows.md, Capability rows 6).
 	{
-		name: "b4: a dropped S108 poisons the rows it flows into",
+		name: "b4: a dropped S108 leaves a follow-on Catch 2",
 		src: `type E {}
 type G[T] {}
 type H[T] {}
@@ -183,7 +184,10 @@ func outer() {
 }
 func main() {}
 `,
-		want: []string{"11:7 S108 generic type main.H needs type arguments"},
+		want: []string{
+			"11:7 S108 generic type main.H needs type arguments",
+			"22:7 S108 main.E is not in the caught row {main.G[int]} (rows.md, Catch 2)",
+		},
 	},
 	// A local bound to a refused member is a callee whose frame the
 	// reporting pass records refused-by-class-G, so walk keeps its S108
