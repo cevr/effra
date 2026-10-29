@@ -90,7 +90,8 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 			op.typ = valueType
 		}
 	}
-	covered := newRow()
+	// covered: the arm types in the row; seen: every arm type.
+	covered, seen := newRow(), newRow()
 	var group *switchGroup
 	if x.Bind != nil && x.Bind.Name != "_" {
 		group = &switchGroup{}
@@ -126,15 +127,19 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 				continue
 			}
 			types = append(types, t)
+			// A duplicate arm is a fact of the arms alone: it holds
+			// whatever the row, so a row check on this catch (Catch 1 or
+			// the row half of Catch 2) never hides it (round 13 review M1).
+			if seen.has(c.types, t) {
+				c.errorf(te, CodeType, "%s is caught twice (rows.md, Catch 2)", t)
+				continue
+			}
+			seen = seen.with(c.types, t)
 			if !valid {
 				continue
 			}
 			if !row.has(c.types, t) {
 				c.errorf(te, CodeType, "%s is not in the caught row %s (rows.md, Catch 2)", t, rowText(row))
-				continue
-			}
-			if covered.has(c.types, t) {
-				c.errorf(te, CodeType, "%s is caught twice (rows.md, Catch 2)", t)
 				continue
 			}
 			covered = covered.with(c.types, t)
