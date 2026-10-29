@@ -250,6 +250,92 @@ func TestSelfCallWorkLinear(t *testing.T) {
 	}
 }
 
+// armsSource is the round 14 review's gen-arms.ts: n error types T0…T(n-1),
+// and main catches f() with the arms E, T0…T(n-1). In mode "out" f fails E
+// alone, so every Ti is a Catch 2; in "written" f's written row holds them
+// all; in "inferred" f's inferred row does, from n tries. With catch unset,
+// main is empty: the same declarations without the catch.
+func armsSource(n int, mode string, catch bool) string {
+	var b strings.Builder
+	b.WriteString("type E {}\n")
+	for i := range n {
+		fmt.Fprintf(&b, "type T%d {}\n", i)
+	}
+	b.WriteString("func e() fails E { return E{} }\n")
+	switch mode {
+	case "written":
+		b.WriteString("func f() fails E")
+		for i := range n {
+			fmt.Fprintf(&b, " | T%d", i)
+		}
+		b.WriteString(" { return E{} }\n")
+	case "inferred":
+		for i := range n {
+			fmt.Fprintf(&b, "func g%d() fails T%d { return T%d{} }\n", i, i, i)
+		}
+		b.WriteString("func f() {\n\ttry e()\n")
+		for i := range n {
+			fmt.Fprintf(&b, "\ttry g%d()\n", i)
+		}
+		b.WriteString("}\n")
+	default:
+		b.WriteString("func f() { try e() }\n")
+	}
+	if !catch {
+		b.WriteString("func main() {}\n")
+		return b.String()
+	}
+	b.WriteString("func main() {\n\tf() catch {\n\tcase E:\n")
+	for i := range n {
+		fmt.Fprintf(&b, "\tcase T%d:\n", i)
+	}
+	b.WriteString("\t}\n}\n")
+	return b.String()
+}
+
+// TestCatchArmsWorkLinear: a catch with n arms costs identity work linear
+// in its arms (round 14 review M1: a Row copied per arm made it O(n²)). The
+// catch's share is the table's charged work (typeTable.work) of the source
+// minus that of the same declarations without the catch, bounded by
+// workFactor times the catch's syntax nodes, from n = 1000 to n = 32000. A
+// written or inferred row of n types costs its own work outside the catch,
+// which the difference leaves out. The test logs the time.
+func TestCatchArmsWorkLinear(t *testing.T) {
+	for _, mode := range []string{"out", "written", "inferred"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			for _, n := range []int{1000, 2000, 4000, 8000, 16000, 32000} {
+				src, base := armsSource(n, mode, true), armsSource(n, mode, false)
+				start := time.Now()
+				c, diags := checkSettling(src, false)
+				elapsed := time.Since(start)
+				cb, baseDiags := checkSettling(base, false)
+				if len(baseDiags) != 0 {
+					t.Fatalf("n = %d: the source without the catch: %v", n, baseDiags[0])
+				}
+				want := 0
+				if mode == "out" {
+					want = n
+				}
+				if len(diags) != want {
+					t.Fatalf("n = %d: want %d diagnostics; got %d (first %v)", n, want, len(diags), diags[:min(len(diags), 1)])
+				}
+				for _, d := range diags {
+					if d.Code != CodeType || !strings.Contains(d.Message, "is not in the caught row") {
+						t.Fatalf("n = %d: want only Catch 2 on a type the row lacks; got %v", n, d)
+					}
+				}
+				nodes := sourceNodes(t, src) - sourceNodes(t, base)
+				work := c.types.work - cb.types.work
+				t.Logf("n = %d: %d catch nodes; catch work %d (%.2f per node); total work %d; %s", n, nodes, work, float64(work)/float64(nodes), c.types.work, elapsed)
+				if work > workFactor*nodes {
+					t.Errorf("n = %d: the catch charged %d steps for %d syntax nodes (bound %d)", n, work, nodes, workFactor*nodes)
+				}
+			}
+		})
+	}
+}
+
 // gwaitSource is a call that typing from empty rows cannot resolve: the
 // catch arm `case G as g` takes G's instance from w's row, which is empty
 // until w settles, so g.m() waits for the worklist.

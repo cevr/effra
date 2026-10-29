@@ -68,6 +68,9 @@ type typeTable struct {
 	// measure of signature identity work, round 11 M2); sortCmps counts the
 	// comparisons of sorts run while a counter is attached (round 11 M3).
 	sigBuilds, sortCmps int
+	// work counts every step charged, with or without a counter attached
+	// (the tests' measure of a catch's row work, round 14 review M1).
+	work int
 }
 
 // nodeKey is one node of a type: its constructor and its children's ids.
@@ -106,6 +109,7 @@ func newTypeTable() *typeTable {
 
 // charge charges w steps to the running lookup, if any.
 func (tab *typeTable) charge(w int) {
+	tab.work += w
 	if tab.b != nil {
 		tab.b.charge(w)
 	}
