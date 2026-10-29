@@ -15,5 +15,5 @@ func pick(s Sum) string {
 }
 func main() needs Console {
 	let box = Box{}
-	Console.Println(pick(box.Choice))
+	Console.Println("\(pick(box.Choice))")
 }

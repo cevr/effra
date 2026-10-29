@@ -3,5 +3,5 @@ type Item { ID string }
 func main() needs Console {
 	let Item = Item{ID: "ok"}
 	let clone = Item
-	Console.Println(clone)
+	Console.Println("\(clone)")
 }

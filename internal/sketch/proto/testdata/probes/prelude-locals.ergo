@@ -6,5 +6,5 @@ func main() needs Console {
 	let Println = "Println"
 	let After = "After"
 	let with2 = "with"
-	Console.Println(Console, Scheduler, LiveScheduler, Println, After, with2)
+	Console.Println("\(Console) \(Scheduler) \(LiveScheduler) \(Println) \(After) \(with2)")
 }

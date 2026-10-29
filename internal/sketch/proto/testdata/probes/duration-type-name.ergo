@@ -2,5 +2,5 @@
 type duration { Value string }
 func main() needs Console {
 	let value = 1s
-	Console.Println(value.Value)
+	Console.Println("\(value.Value)")
 }

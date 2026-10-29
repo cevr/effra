@@ -31,10 +31,10 @@ func main() needs Console {
 	case timeout.Expired:
 		"timed out"
 	}
-	Console.Println(first)
+	Console.Println("\(first)")
 	let second = with Clock { stall() } catch {
 	case timeout.Expired:
 		"timed out"
 	}
-	Console.Println(second)
+	Console.Println("\(second)")
 }

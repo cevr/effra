@@ -5,5 +5,5 @@ func main() needs Console {
 		let x2 = x + " inner"
 		x2
 	}
-	Console.Println(value, x)
+	Console.Println("\(value) \(x)")
 }

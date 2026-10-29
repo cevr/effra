@@ -12,5 +12,5 @@ func main() needs Console {
 	case Fault:
 		"escaped"
 	}
-	Console.Println(v)
+	Console.Println("\(v)")
 }

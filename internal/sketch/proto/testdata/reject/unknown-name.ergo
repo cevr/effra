@@ -32,5 +32,5 @@ func Charge(_ FakeGateway, order Order) string fails GatewayDown {
 }
 
 func main() needs Console {
-	Console.Println(missing)
+	Console.Println("\(missing)")
 }

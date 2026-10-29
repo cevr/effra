@@ -2,4 +2,4 @@
 type Fault {}
 func fallible() fails Fault      { return Fault{} }
 func identity(value Fault) Fault { return value }
-func main() needs Console        { Console.Println(identity(Fault{})) }
+func main() needs Console        { Console.Println("\(identity(Fault{}))") }

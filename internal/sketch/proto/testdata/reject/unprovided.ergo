@@ -44,5 +44,5 @@ func main() needs Console {
 	case GatewayDown:
 		"gateway down"
 	}
-	Console.Println(outcome)
+	Console.Println("\(outcome)")
 }

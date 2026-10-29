@@ -2,5 +2,5 @@
 func main() needs Console {
 	let string = "shadow"
 	let value = "ok"
-	Console.Println(string, value)
+	Console.Println("\(string) \(value)")
 }

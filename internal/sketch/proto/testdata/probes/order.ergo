@@ -9,4 +9,4 @@ func right() string needs Console {
 	Console.Println("right")
 	return "R"
 }
-func main() needs Console { Console.Println(left() + right()) }
+func main() needs Console { Console.Println("\(left() + right())") }

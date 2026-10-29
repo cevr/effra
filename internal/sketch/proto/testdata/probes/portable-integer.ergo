@@ -1,2 +1,2 @@
 // out: 2147483648
-func main() needs Console { Console.Println(2147483648) }
+func main() needs Console { Console.Println("\(2147483648)") }

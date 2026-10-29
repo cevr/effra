@@ -5,4 +5,4 @@ func f() string {
 	return "after"
 }
 func row() fails Fault    { return Fault{} }
-func main() needs Console { Console.Println(f()) }
+func main() needs Console { Console.Println("\(f())") }

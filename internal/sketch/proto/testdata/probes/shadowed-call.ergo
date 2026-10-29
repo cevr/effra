@@ -4,5 +4,5 @@ func unused() fails Fault { return Fault{} }
 func val() string         { return "global" }
 func main() needs Console {
 	let val = "local"
-	Console.Println(val, val())
+	Console.Println("\(val) \(val())")
 }

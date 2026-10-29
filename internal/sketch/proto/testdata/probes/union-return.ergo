@@ -6,8 +6,9 @@ type Fault {}
 func inner() Item fails Fault   { return Item{} }
 func outer() Choice fails Fault { return inner() }
 func main() needs Console {
-	Console.Println(outer() catch {
+	let line = outer() catch {
 	case Fault:
 		Other{}
-	})
+	}
+	Console.Println("\(line)")
 }

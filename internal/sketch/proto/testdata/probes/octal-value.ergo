@@ -1,2 +1,2 @@
 // want S108
-func main() needs Console { Console.Println(010) }
+func main() needs Console { Console.Println("\(010)") }

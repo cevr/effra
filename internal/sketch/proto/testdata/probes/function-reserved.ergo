@@ -2,4 +2,4 @@
 type Fault {}
 func unused() fails Fault { return Fault{} }
 func fmt() string         { return "x" }
-func main() needs Console { Console.Println(fmt()) }
+func main() needs Console { Console.Println("\(fmt())") }

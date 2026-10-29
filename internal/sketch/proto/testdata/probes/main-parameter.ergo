@@ -1,2 +1,2 @@
 // want S109
-func main(value string) needs Console { Console.Println(value) }
+func main(value string) needs Console { Console.Println("\(value)") }

@@ -17,5 +17,5 @@ func main() needs Console {
 	case timeout.Expired:
 		"cycle reached runtime"
 	}
-	Console.Println(value)
+	Console.Println("\(value)")
 }

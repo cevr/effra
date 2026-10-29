@@ -65,7 +65,7 @@ func report(id string) needs Console {
 	case timeout.Expired:
 		"gateway timed out"
 	}
-	Console.Println(outcome)
+	Console.Println("\(outcome)")
 }
 
 func main() needs Console {

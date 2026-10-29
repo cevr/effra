@@ -11,5 +11,5 @@ func main() needs Console {
 		"ok"
 	}
 	let y = a()
-	Console.Println(x, y)
+	Console.Println("\(x) \(y)")
 }

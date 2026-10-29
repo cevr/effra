@@ -5,6 +5,6 @@ func main() needs Console {
 	let x = "outer"
 	if "a" == "a" {
 		let x2 = x
-		Console.Println(x2)
+		Console.Println("\(x2)")
 	}
 }

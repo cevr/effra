@@ -2,9 +2,10 @@
 import timeout
 func main() needs Console {
 	with wire { Scheduler: LiveScheduler{} } {
-		Console.Println(timeout.After(timeout.After(1s) { 1s }) { "ok" } catch {
+		let line = timeout.After(timeout.After(1s) { 1s }) { "ok" } catch {
 		case timeout.Expired:
 			"late"
-		})
+		}
+		Console.Println("\(line)")
 	}
 }

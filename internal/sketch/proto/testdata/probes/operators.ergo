@@ -7,5 +7,5 @@ func tick() bool needs Console {
 }
 func main() needs Console {
 	let x = ("a" == "b") && tick()
-	Console.Println(x)
+	Console.Println("\(x)")
 }

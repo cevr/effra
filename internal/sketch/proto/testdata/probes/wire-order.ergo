@@ -7,7 +7,7 @@ func read() string needs Store { return Store.Get() }
 func main() needs Console {
 	with wire { Store: Holder{Value: "outer"} } {
 		with wire { Store: Holder{Value: "inner"}, Box: Holder{Value: read()} } {
-			Console.Println(Box.Get(), Store.Get())
+			Console.Println("\(Box.Get()) \(Store.Get())")
 		}
 	}
 }

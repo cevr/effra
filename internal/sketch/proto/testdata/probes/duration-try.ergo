@@ -4,9 +4,10 @@ type Fault {}
 func delay() fails Fault { return Fault{} }
 func main() needs Console {
 	with wire { Scheduler: LiveScheduler{} } {
-		Console.Println(timeout.After(1s) { "ok" } catch {
+		let line = timeout.After(1s) { "ok" } catch {
 		case timeout.Expired:
 			"late"
-		})
+		}
+		Console.Println("\(line)")
 	}
 }

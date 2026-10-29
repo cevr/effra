@@ -7,5 +7,5 @@ func main() needs Console {
 	case timeout.Expired:
 		"late"
 	}
-	Console.Println(value)
+	Console.Println("\(value)")
 }

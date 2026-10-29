@@ -4,4 +4,7 @@ type Holder { Value string }
 func Get(h Holder) string { return h.Value }
 func envc() string        { return "ok" }
 let W = wire { Store: Holder{Value: envc()} }
-func main() needs Console { Console.Println(with W { Store.Get() }) }
+func main() needs Console {
+	let line = with W { Store.Get() }
+	Console.Println("\(line)")
+}

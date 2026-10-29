@@ -1,5 +1,5 @@
 // out: ok
 func main() needs Console {
 	let xª = "ok"
-	Console.Println(xª)
+	Console.Println("\(xª)")
 }

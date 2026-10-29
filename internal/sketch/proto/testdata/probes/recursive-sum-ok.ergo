@@ -4,5 +4,5 @@ type End {}
 type Link = Node | End
 func main() needs Console {
 	let node = Node{Next: End{}}
-	Console.Println(node)
+	Console.Println("\(node)")
 }

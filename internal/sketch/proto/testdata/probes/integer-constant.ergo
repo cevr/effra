@@ -1,5 +1,5 @@
 // want S108
 func main() needs Console {
 	let value = 9223372036854775807 + 1
-	Console.Println(value)
+	Console.Println("\(value)")
 }

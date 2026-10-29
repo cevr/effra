@@ -8,6 +8,6 @@ func Get(h Holder) string      { return h.Value }
 func read() string needs Store { return Store.Get() }
 func main() needs Console {
 	with wire { Box: Holder{Value: read()} } {
-		Console.Println(Box.Get())
+		Console.Println("\(Box.Get())")
 	}
 }

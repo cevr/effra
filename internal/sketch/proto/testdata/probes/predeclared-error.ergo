@@ -8,5 +8,5 @@ func main() needs Console {
 	case timeout.Expired:
 		"late"
 	}
-	Console.Println(error, x)
+	Console.Println("\(error) \(x)")
 }

@@ -11,5 +11,5 @@ type Box {
 }
 func main() needs Console {
 	let value = Box{"Console", "Println", "with", "timeout", "After", "duration", "LiveScheduler", "Scheduler"}
-	Console.Println(value.Console, value.Println, value.with2, value.timeout, value.After, value.duration, value.LiveScheduler, value.Scheduler)
+	Console.Println("\(value.Console) \(value.Println) \(value.with2) \(value.timeout) \(value.After) \(value.duration) \(value.LiveScheduler) \(value.Scheduler)")
 }

@@ -6,5 +6,5 @@ type Box {
 }
 func main() needs Console {
 	let value = Box{string: "ok", len: 1, init: "field"}
-	Console.Println(value.string, value.len, value.init)
+	Console.Println("\(value.string) \(value.len) \(value.init)")
 }

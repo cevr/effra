@@ -12,4 +12,7 @@ func build() string {
 	}
 }
 let W = wire { Store: Holder{Value: build()} }
-func main() needs Console { Console.Println(with W { Store.Get() }) }
+func main() needs Console {
+	let line = with W { Store.Get() }
+	Console.Println("\(line)")
+}

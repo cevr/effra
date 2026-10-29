@@ -8,5 +8,5 @@ func main() needs Console {
 	case Fault:
 		"b"
 	}
-	Console.Println(value)
+	Console.Println("\(value)")
 }

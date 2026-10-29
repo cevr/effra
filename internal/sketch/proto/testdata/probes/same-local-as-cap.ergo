@@ -4,5 +4,5 @@ type Holder { Value string }
 func Get(h Holder) string { return h.Value }
 func main() needs Console {
 	let Store = Holder{Value: "local"}
-	Console.Println(Store.Value)
+	Console.Println("\(Store.Value)")
 }
