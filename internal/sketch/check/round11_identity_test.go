@@ -337,9 +337,9 @@ func genericInferred(seed uint64) string {
 	rng := rand.New(rand.NewPCG(seed, seed^0x9e37))
 	var b strings.Builder
 	b.WriteString("package main\ntype Bang struct{}\ntype Fault[T any] struct{ V T }\ntype Cap interface{ M() }\n")
-	// The bodiless functions are extern go in the decided syntax; //ef:go
-	// is the translator's old spelling of it.
-	b.WriteString("//ef:go fixture.fail\nfunc fail() error[Bang]\n//ef:go fixture.work\nfunc work() needs Cap\n//ef:go fixture.mark\nfunc mark[T any]() error[Fault[T]]\n")
+	// The bodiless functions are extern go in the decided syntax; fromOld
+	// binds each one to extern go fixture.<name>.
+	b.WriteString("func fail() error[Bang]\nfunc work() needs Cap\nfunc mark[T any]() error[Fault[T]]\n")
 	types := []string{"int", "string", "Bang", "[]int"}
 	for i := range 6 {
 		ty := types[rng.IntN(len(types))]

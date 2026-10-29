@@ -34,8 +34,8 @@ func keyedLiterals(seed uint64) string {
 	decls := []string{
 		"type Bang struct{}",
 		"type Key[T any] struct{}",
-		"//ef:go fixture.KeyOf\nfunc KeyOf[T any](x T) Key[T]",
-		"//ef:go fixture.mark\nfunc mark() error[Bang]",
+		"func KeyOf[T any](x T) Key[T]",
+		"func mark() error[Bang]",
 		"type S struct{ h0 int; K KT }",
 	}
 	for i := range n {

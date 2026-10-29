@@ -344,7 +344,7 @@ func universe() *Scope {
 			s.insert(name, &Builtin{Name: name})
 		}
 		// go.Foreign (a capability) and go.Error (an error type) are
-		// predeclared for //ef:go bindings (grammar.md, Declarations 3).
+		// predeclared for extern go bindings (grammar.md, Declarations 3).
 		goPkg := &Package{Path: "go", Name: "go", Scope: newScope(nil), qualify: true}
 		foreign := &TypeName{Name: "Foreign", Pkg: goPkg, id: newID()}
 		foreign.Type = &Named{Obj: foreign, under: &Interface{}, state: 2, foreign: true}

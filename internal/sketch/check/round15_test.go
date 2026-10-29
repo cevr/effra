@@ -40,10 +40,10 @@ func oscillate(t *testing.T, src string) (*checker, []Diagnostic) {
 
 // oscillatingRing is a ring of n functions with inferred rows, each calling
 // the next, and a Bang error type. The bodiless mark is extern go in the
-// decided syntax (fromOld reads //ef:go as it).
+// decided syntax (fromOld binds it to extern go fixture.mark).
 func oscillatingRing(n int) string {
 	var b strings.Builder
-	b.WriteString("package main\ntype Bang struct{}\n//ef:go fixture.mark\nfunc mark() error[Bang]\n")
+	b.WriteString("package main\ntype Bang struct{}\nfunc mark() error[Bang]\n")
 	for i := range n {
 		fmt.Fprintf(&b, "func f%d() { try f%d() }\n", i, (i+1)%n)
 	}
@@ -57,7 +57,7 @@ func distinctRing(n int) string {
 	var b strings.Builder
 	b.WriteString("package main\n")
 	for i := range n {
-		fmt.Fprintf(&b, "type E%d struct{}\n//ef:go fixture.mark%d\nfunc mark%d() error[E%d]\n", i, i, i, i)
+		fmt.Fprintf(&b, "type E%d struct{}\nfunc mark%d() error[E%d]\n", i, i, i)
 	}
 	for i := range n {
 		fmt.Fprintf(&b, "func f%d() { try mark%d(); try f%d() }\n", i, i, (i+1)%n)

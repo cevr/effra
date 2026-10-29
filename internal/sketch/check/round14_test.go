@@ -64,27 +64,20 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 	}
 	if errors {
 		emit("type Bang struct{}")
-		// A bodiless function is extern go in the decided syntax; the old
-		// directive //ef:go is the translator's spelling of it.
-		emit("//ef:go fixture.mark")
+		// A bodiless function is extern go in the decided syntax; fromOld
+		// binds each one to extern go fixture.<name>.
 		emit("func mark() error[Bang]")
 		emit("type Box[T any] interface{ M(T) }")
-		emit("//ef:go fixture.BoxOf")
 		emit("func BoxOf[T any](x T) Box[T]")
-		emit("//ef:go fixture.Choose")
 		emit("func Choose[T any](x T, y T) error[Bang]")
 		// E first: the decided list [T, E error] would make T an error row.
-		emit("//ef:go fixture.Run")
 		emit("func Run[E error, T any](x T, y T, callback func() error[E]) error[E]")
 	} else {
 		emit("type Cap interface{ M() }")
 		emit("type Box[T any] interface{ M(T) }")
-		emit("//ef:go fixture.BoxOf")
 		emit("func BoxOf[T any](x T) Box[T]")
-		emit("//ef:go fixture.Choose")
 		emit("func Choose[T any](x T, y T) needs Cap")
 		emit("func Same[T any](x T, y T) {}")
-		emit("//ef:go fixture.Run")
 		emit("func Run[T any](x T, y T, callback func() needs R) needs R")
 	}
 	// Which members are used as values, and which of those write rows.
