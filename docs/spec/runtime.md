@@ -126,7 +126,7 @@ Status: **designed, not yet implemented** ([#69](https://github.com/cevr/ergo/is
 
 ### G4. `tasks.Set`
 
-1. `tasks.Set(policy)` owns an unbounded number of tasks and drops finished ones. It is a resource, owned by a function or a provider.
+1. `tasks.Set(policy)` owns an unbounded number of tasks and drops finished ones. It is a resource: the block that acquired it owns it, or the scope it moved to, such as a provider ([resources.md](resources.md) R4); its owner scope releases it when that scope ends (R5).
 2. The policy is fail-fast, `tasks.LogFailures`, or restart with a `schedule`: `tasks.Restart(schedule.Exponential(1s).UpTo(5))`.
 3. `Set.Go` takes a `func` literal, because the Set keeps it after `Go` returns. The literal escapes, so it may capture a resource only under the structured-lend rule: the Set must be released before the borrow of the resource ends ([resources.md](resources.md#closures)). In `set.Go(func() { actor.Pump(b, signals) })`, when `set` and `b` are bound in the same scope, `set` must be declared after `b`. Other owner arrangements follow R27 and R31: for example, a `set` bound inside a `with` block nested in `b`'s scope is released first and qualifies. In every arrangement, `b.Stop()` while `set` may still run the literal is an error.
 4. A restart policy needs a reusable factory that captures no moved resource. A connection moved into its handler cannot restart, so such a Set uses `tasks.LogFailures`.
