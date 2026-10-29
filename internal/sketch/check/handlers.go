@@ -89,7 +89,7 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 	}
 	var valueType Type
 	if hasValue {
-		valueType = c.defaultOf(&op)
+		valueType = c.typeOf(&op)
 		if op.mode == modeConst {
 			op.typ = valueType
 		}

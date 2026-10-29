@@ -17,8 +17,8 @@ type Type interface {
 // BasicKind is the kind of a basic type.
 type BasicKind int
 
-// The basic kinds. The untyped kinds are the types of untyped constants
-// (Go's model): they take a default type where no other type applies.
+// The basic kinds. A literal takes one of these types, or a declared type
+// over one, from its context (196u); there are no untyped kinds.
 const (
 	Invalid BasicKind = iota
 	Bool
@@ -39,11 +39,6 @@ const (
 	Complex64
 	Complex128
 	Duration
-	UntypedBool
-	UntypedInt
-	UntypedRune
-	UntypedFloat
-	UntypedString
 )
 
 // Basic is a predeclared basic type.
@@ -252,9 +247,8 @@ var Typ = func() []*Basic {
 		Invalid: "invalid type", Bool: "bool", String: "string", Int: "int", Int8: "int8", Int16: "int16", Int32: "int32", Int64: "int64",
 		Uint: "uint", Uint8: "uint8", Uint16: "uint16", Uint32: "uint32", Uint64: "uint64", Uintptr: "uintptr",
 		Float32: "float32", Float64: "float64", Complex64: "complex64", Complex128: "complex128", Duration: "duration",
-		UntypedBool: "untyped bool", UntypedInt: "untyped int", UntypedRune: "untyped rune", UntypedFloat: "untyped float", UntypedString: "untyped string",
 	}
-	out := make([]*Basic, UntypedString+1)
+	out := make([]*Basic, Duration+1)
 	for k := range out {
 		out[k] = &Basic{Kind: BasicKind(k), Name: names[BasicKind(k)]}
 	}
@@ -647,14 +641,9 @@ func isBasic(t Type, kinds ...BasicKind) bool {
 	return false
 }
 
-func isUntyped(t Type) bool {
-	b, ok := t.(*Basic)
-	return ok && b.Kind >= UntypedBool
-}
-
 func isInteger(t Type) bool {
 	b, ok := under(t).(*Basic)
-	return ok && (b.Kind >= Int && b.Kind <= Uintptr || b.Kind == UntypedInt || b.Kind == UntypedRune)
+	return ok && (b.Kind >= Int && b.Kind <= Uintptr)
 }
 
 func isUnsigned(t Type) bool {
@@ -664,13 +653,13 @@ func isUnsigned(t Type) bool {
 
 func isFloat(t Type) bool {
 	b, ok := under(t).(*Basic)
-	return ok && (b.Kind == Float32 || b.Kind == Float64 || b.Kind == UntypedFloat)
+	return ok && (b.Kind == Float32 || b.Kind == Float64)
 }
 
 // isComplex reports a complex type. Complex values have arithmetic and ==,
 // no ordering, and convert only to and from complex types (Go's rules; Q5
 // admits every Go numeric type, N2). There is no imaginary literal and no
-// complex, real or imag builtin, so no untyped complex constant arises.
+// complex, real or imag builtin, so no literal is complex.
 func isComplex(t Type) bool {
 	b, ok := under(t).(*Basic)
 	return ok && (b.Kind == Complex64 || b.Kind == Complex128)
@@ -680,12 +669,12 @@ func isNumeric(t Type) bool { return isInteger(t) || isFloat(t) || isComplex(t) 
 
 func isString(t Type) bool {
 	b, ok := under(t).(*Basic)
-	return ok && (b.Kind == String || b.Kind == UntypedString)
+	return ok && (b.Kind == String)
 }
 
 func isBoolean(t Type) bool {
 	b, ok := under(t).(*Basic)
-	return ok && (b.Kind == Bool || b.Kind == UntypedBool)
+	return ok && (b.Kind == Bool)
 }
 
 func isDuration(t Type) bool { return isBasic(t, Duration) }
@@ -812,24 +801,4 @@ func (i *Interface) method(name string) *Method {
 		}
 	}
 	return i.index[name]
-}
-
-func defaultType(t Type) Type {
-	b, ok := t.(*Basic)
-	if !ok {
-		return t
-	}
-	switch b.Kind {
-	case UntypedBool:
-		return Typ[Bool]
-	case UntypedInt:
-		return Typ[Int]
-	case UntypedRune:
-		return Typ[Int32]
-	case UntypedFloat:
-		return Typ[Float64]
-	case UntypedString:
-		return Typ[String]
-	}
-	return t
 }

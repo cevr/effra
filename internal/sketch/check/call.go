@@ -335,10 +335,6 @@ func inferExample(fun syntax.Expr, sig *Signature) string {
 	return name + "[" + strings.Join(parts, ", ") + "](…)"
 }
 
-func isUntypedNumeric(b *Basic) bool {
-	return b.Kind == UntypedInt || b.Kind == UntypedRune || b.Kind == UntypedFloat
-}
-
 // explicitArgs carries written type arguments to the call.
 type explicitArgs struct{ targs []Type }
 
@@ -452,9 +448,9 @@ func (in *inferer) unifyRow(p, a *Row) {
 }
 
 // callGeneric infers the type arguments of a call to a generic function:
-// typed value arguments first, then untyped constants with their default
-// types, then function literals and trailing blocks, whose rows and results
-// bind the remaining parameters (D6; Go's order for untyped arguments).
+// typed value arguments and function literals first, in source order, then
+// the literals' common defaults (196u rule 6), then a trailing block, whose
+// rows and result bind the remaining parameters (D6).
 func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Type, fun operand) operand {
 	if ea, ok := fun.obj.(*explicitArgs); ok {
 		explicit = ea.targs
@@ -491,14 +487,15 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 			c.errorf(at, CodeType, "the argument has type %s, which does not match %s, inferred for %s (D6; type inference)", t, want, pt)
 		}
 	}
+	var deferred []int
 	for i := 0; i < len(args.exprs); i++ {
 		pt := paramType(sig, i)
 		if lit, ok := args.exprs[i].(*syntax.FuncLit); ok {
 			// A function literal's parameter and result types are written
 			// (#214 would infer them), so it is a typed argument: it
 			// unifies in source order with the others, before the
-			// constants default, as in Go (round-7 M3; D6 rule 2). Only
-			// its unwritten rows take the parameter type's, when known.
+			// literals default (round-7 M3; D6 rule 2). Only its unwritten
+			// rows take the parameter type's, when known.
 			expected, _ := under0(c.subst(pt, in.m)).(*Signature)
 			op := c.funcLit(lit, expected, in)
 			op.expr = lit
@@ -522,6 +519,13 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 			}
 			continue
 		}
+		if !allExplicit && in.mentions(pt) && c.isLiteral(args.exprs[i]) {
+			// A literal binds a parameter only when no typed argument does
+			// (196u rule 6), so it is checked once the typed arguments
+			// have bound theirs, with its parameter's type expected.
+			deferred = append(deferred, i)
+			continue
+		}
 		var hint Type
 		if !in.hasFree(pt) {
 			hint = c.subst(pt, in.m)
@@ -541,7 +545,7 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 		}
 		// Every type argument written: nothing is inferred, and each
 		// argument is only assigned (Go calls no inference then).
-		if isUntyped(op.typ) || allExplicit || failed || !in.mentions(pt) {
+		if allExplicit || failed || !in.mentions(pt) {
 			continue
 		}
 		if !in.unify(pt, op.typ, unifyAssign) {
@@ -550,65 +554,43 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 		}
 	}
 	if failed {
+		for _, i := range deferred {
+			c.valueExpr(args.exprs[i], nil) // its own errors still report
+		}
 		return bad(x)
 	}
-	// Untyped constants bind a parameter no typed argument bound: all the
-	// constants of one parameter combine to the widest numeric kind (int,
-	// rune, float), then default once, as go/types maxUntyped does, so
-	// Two(1, 'a') and Two('a', 1) both infer int32 (round-6 M2). Constants
-	// of different non-numeric kinds do not combine (S108).
-	widest := map[*TypeParam]*Basic{}
+	// A parameter that only literals bind takes their common default, and
+	// mixed defaults are S108 (196u rule 6): Two(1, 'a') binds int and
+	// rune, so it names no type. There is no widening to the widest kind (Go)
+	// and no inference through a constraint before the default.
+	defaults := map[*TypeParam]Type{}
 	var order []*TypeParam
-	for i := 0; i < len(args.exprs); i++ {
-		if ops[i] == nil || ops[i].invalid() || !isUntyped(ops[i].typ) {
-			continue
-		}
+	for _, i := range deferred {
 		tp, ok := paramType(sig, i).(*TypeParam)
 		if !ok || !in.free(tp) {
 			continue
 		}
-		b := ops[i].typ.(*Basic)
-		prev, seen := widest[tp]
+		c.inferOps++
+		c.silent++
+		op := c.expr(args.exprs[i], nil)
+		c.silent--
+		if op.invalid() {
+			// Its own diagnostic, and no other (D3).
+			c.valueExpr(args.exprs[i], nil)
+			return bad(x)
+		}
+		prev, seen := defaults[tp]
 		switch {
 		case !seen:
-			widest[tp] = b
+			defaults[tp] = op.typ
 			order = append(order, tp)
-		case prev.Kind == b.Kind:
-		case isUntypedNumeric(prev) && isUntypedNumeric(b):
-			if b.Kind > prev.Kind {
-				widest[tp] = b
-			}
-		default:
-			c.errorf(args.exprs[i], CodeType, "mismatched constants %s and %s for %s; write the type arguments, e.g. %s (D6; type inference)", prev, b, tp.Name, inferExample(x.Fun, sig))
+		case !c.identical(prev, op.typ):
+			c.errorf(x, CodeType, "cannot infer %s; write the type arguments, e.g. %s: its literal arguments take %s and %s (D6; 196u rule 6)", tp.Name, inferExample(x.Fun, sig), prev, op.typ)
 			return bad(x)
 		}
 	}
-	// A parameter bound only by constants that a constraint mentions: Go
-	// infers it through the constraint (core types, method signatures)
-	// before it defaults, which the subset does not do, so the call is
-	// refused before any guess (round-7 M2; D6 rule 3 as amended in
-	// round 8). A constraint error stays for parameters fixed by typed or
-	// written arguments.
-	// The parameters the constraints mention are collected once per call,
-	// a walk over the constraints, then each constant-bound parameter is a
-	// set lookup: linear in the signature (round-8 M4; round 9 class C).
-	if len(order) > 0 {
-		mentioned := map[*TypeParam]bool{}
-		for _, q := range sig.TParams {
-			if q.Constraint != nil {
-				c.paramsIn(q.Constraint, mentioned)
-			}
-		}
-		for _, tp := range order {
-			c.inferOps++
-			if mentioned[tp] {
-				c.cannotInfer(x, tp.Name, x.Fun, sig)
-				return bad(x)
-			}
-		}
-	}
 	for _, tp := range order {
-		in.m[tp] = defaultType(widest[tp])
+		in.m[tp] = defaults[tp]
 	}
 	if args.trailing != nil {
 		// A trailing block writes no types: its result binds what is still
@@ -693,73 +675,17 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 			}
 			continue
 		}
-		if ops[i] != nil {
-			c.assign(ops[i], pt, "argument")
+		if ops[i] == nil {
+			// A deferred literal takes its parameter's type (D-A2).
+			op, _ := c.argValue(args.exprs[i], pt, x)
+			ops[i] = &op
 		}
+		c.assign(ops[i], pt, "argument")
 	}
 	return c.result(x, inst)
 }
 
 // ---------------------------------------------------------------- literals and blocks
-
-// paramsIn adds the type parameters t mentions to set, one visit per
-// sub-term (counted in inferOps).
-func (c *checker) paramsIn(t Type, set map[*TypeParam]bool) {
-	c.inferOps++
-	switch t := t.(type) {
-	case *TypeParam:
-		set[t] = true
-	case *Named:
-		for _, a := range t.TArgs {
-			c.paramsIn(a, set)
-		}
-	case *RowArg:
-		for _, e := range t.Row.Elems() {
-			c.paramsIn(e, set)
-		}
-	case *Slice:
-		c.paramsIn(t.Elem, set)
-	case *Map:
-		c.paramsIn(t.Key, set)
-		c.paramsIn(t.Elem, set)
-	case *Pointer:
-		c.paramsIn(t.Elem, set)
-	case *Tuple:
-		for _, e := range t.Types {
-			c.paramsIn(e, set)
-		}
-	case *Struct:
-		for _, f := range t.Fields {
-			c.paramsIn(f.Type, set)
-		}
-	case *Union:
-		for _, v := range t.Variants {
-			c.paramsIn(v, set)
-		}
-	case *Signature:
-		for _, p := range t.Params {
-			c.paramsIn(p.Type, set)
-		}
-		for _, r := range t.Results {
-			c.paramsIn(r, set)
-		}
-		for _, e := range t.Errors.Elems() {
-			c.paramsIn(e, set)
-		}
-		for _, e := range t.Uses.Elems() {
-			c.paramsIn(e, set)
-		}
-	case *Interface:
-		for _, m := range t.Methods {
-			if m.Sig != nil {
-				c.paramsIn(m.Sig, set)
-			}
-		}
-	case *MachineType:
-		c.paramsIn(t.State, set)
-		c.paramsIn(t.Signal, set)
-	}
-}
 
 // funcLit checks a function literal. Its rows are declared when written,
 // else taken from the function type it is passed to when that type's rows
@@ -906,9 +832,9 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 }
 
 // yieldingBlock checks a block that yields its last expression: a with
-// block, a trailing block, a go block. When results are known, the last
-// expression is assigned to them; otherwise the result is its type (an
-// untyped constant's default type), or no value; a single unknown result
+// block or a trailing block. When results are known, the last
+// expression is assigned to them; otherwise the result is its type (a
+// literal's default type), or no value; a single unknown result
 // is still the expected type of the last expression, as a hint (M16). pass
 // receives the last expression's failure row, which passes through
 // (rows.md, With 6).
@@ -970,7 +896,7 @@ func (c *checker) yieldingBlock(at syntax.Node, list []syntax.Stmt, results []Ty
 	if op.mode == modeNoValue {
 		return NoValue
 	}
-	return c.defaultOf(&op)
+	return c.typeOf(&op)
 }
 
 // needNoValueOrCall accepts the last expression of a block whose value is

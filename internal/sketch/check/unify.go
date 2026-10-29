@@ -162,9 +162,6 @@ func (in *inferer) nify(x, y Type, mode unifyMode, depth int) bool {
 		}
 		b := in.m[px]
 		if b == nil {
-			if isUntyped(y) {
-				return true
-			}
 			in.m[px] = y
 			return true
 		}

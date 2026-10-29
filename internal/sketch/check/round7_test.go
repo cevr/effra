@@ -7,9 +7,10 @@ import (
 
 // TestInferenceSubset: the reviewer's round-6 witnesses under D6 as
 // amended in round 7. Inference is sound and a documented subset of Go's:
-//   - untyped constants of one parameter combine across arguments, as
-//     go/types maxUntyped does, so Two(1, 'a') infers int32 in either
-//     order (M2): returning it as int is S108, as int32 is valid;
+//   - a parameter only literals bind takes their common default, and
+//     mixed defaults are refused (196u rule 6): Two(1, 'a') names no type
+//     in either order, though go/types infers int32 (M2); the written
+//     Two[int](1, 'a') stays valid;
 //   - inference through method constraints (M3) and generic functions as
 //     arguments (M4) are outside
 //     the subset: go/types accepts each call, Ergo refuses it with the one
@@ -52,12 +53,12 @@ func UseN[T comparable, P I[T]](x P) {}
 		name, body string
 		want       verdict
 	}{
-		{"untyped-int-rune-int32", `func F() int32 { return Two(1, 'a') }`, valid},
-		{"untyped-rune-int-int32", `func F() int32 { return Two('a', 1) }`, valid},
-		{"untyped-int-rune-as-int", `func F() int { return Two(1, 'a') }`, invalid},
-		{"untyped-rune-int-as-int", `func F() int { return Two('a', 1) }`, invalid},
-		{"untyped-explicit-int", `func F() int { return Two[int](1, 'a') }`, valid},
-		{"untyped-mismatched-kinds", `func F() { _ = Two(1, "a") }`, invalid},
+		{"literals-int-rune", `func F() int32 { return Two(1, 'a') }`, refused},
+		{"literals-rune-int", `func F() int32 { return Two('a', 1) }`, refused},
+		{"literals-int-rune-as-int", `func F() int { return Two(1, 'a') }`, invalid},
+		{"literals-rune-int-as-int", `func F() int { return Two('a', 1) }`, invalid},
+		{"literals-explicit-int", `func F() int { return Two[int](1, 'a') }`, valid},
+		{"literals-mismatched-kinds", `func F() { _ = Two(1, "a") }`, invalid},
 		{"method-constraint", `func F(x S) { Use(x) }`, refused},
 		{"method-constraint-named", `func F(x S) { UseN(x) }`, refused},
 		{"method-constraint-explicit", `func F(x S) { Use[int](x) }`, valid},

@@ -45,8 +45,11 @@ import (
 // indices, parentheses, selectors, calls, composite literals) must carry
 // the same type in Ergo's Info.Types, generic signatures with their type
 // parameters and constraints; a type expression Ergo records must match
-// too (round-4 M3). Prior art: Csmith-style differential testing; Go
-// cross-checks types2 against go/types the same way.
+// too (round-4 M3). go/types reads the lowered Go text, where each literal
+// is converted to the one type Ergo gave it (196u rule 8;
+// difflower_test.go), so it checks the types the lowering emits rather
+// than Go's untyped constants. Prior art: Csmith-style differential
+// testing; Go cross-checks types2 against go/types the same way.
 
 // diffFunc is a generated generic function: its parameter count and its
 // value parameter types, written over P and Q.
@@ -498,70 +501,40 @@ func diffCheck(src string, cycleOnly bool) []string {
 }
 
 // isRefusal reports whether d is one of Ergo's documented refusals of a
-// Go-valid program: the inferred subset's S108 "cannot infer T; write the
-// type arguments" (D6 as amended in round 7), or the S108 for a shift by a
-// non-constant count of an untyped constant (types.md, Operators 1; round
-// 9 class A).
+// program whose lowering Go accepts: the inferred subset's S108 "cannot
+// infer T; write the type arguments" (D6 as amended in round 7).
 func isRefusal(d string) bool {
-	if !strings.Contains(d, "S108") {
-		return false
-	}
-	return strings.Contains(d, "cannot infer") && strings.Contains(d, "write the type arguments") ||
-		strings.Contains(d, "the left operand of a shift by a non-constant count needs a type")
+	return strings.Contains(d, "S108") && strings.Contains(d, "cannot infer") && strings.Contains(d, "write the type arguments")
 }
 
-// diffCount is diffCheck that also reports a refusal: Go accepts and every
-// Ergo diagnostic is the inferred subset's refusal. The direction is the
-// contract (D6 as amended in round 7): Ergo accepting implies Go accepting
-// with the same types; Ergo rejecting what Go accepts is allowed only as
-// that refusal.
+// goCheck runs go/types over f, recording into info when it is not nil.
+func goCheck(fset *token.FileSet, f *ast.File, info *types.Info) []string {
+	var errs []string
+	conf := types.Config{Error: func(e error) { errs = append(errs, e.Error()) }}
+	_, _ = conf.Check("p", fset, []*ast.File{f}, info)
+	return errs
+}
+
+// diffCount is diffCheck that also reports a refusal. The direction is the
+// contract (D6 as amended in round 7; spec D-A6): Ergo accepting implies Go
+// accepting the lowered text, where each literal is converted to its one
+// Ergo type (196u rule 8; difflower_test.go), with the same types. Ergo
+// rejecting what Go accepts as written is a refusal: either 196u types the
+// program invalid (its lowered text, each literal of one type, is invalid
+// Go too: `1 + 'a'`, `Two(1, 'a')`, `var f float64 = 1 << n`), or every
+// diagnostic is the inferred subset's refusal.
 func diffCount(src string, cycleOnly bool) ([]string, bool) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "p.go", src, 0)
 	if err != nil {
 		return []string{"go cannot parse the generated program: " + err.Error()}, false
 	}
-	info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}}
-	var goErrs []string
-	conf := types.Config{Error: func(e error) { goErrs = append(goErrs, e.Error()) }}
-	_, _ = conf.Check("p", fset, []*ast.File{file}, info)
+	goErrs := goCheck(fset, file, nil)
 	ergoSrc := fromOld(src)
 	pkg, diags := CheckSource(ergoSrc)
 	var ds []string
 	for _, d := range diags {
 		ds = append(ds, d.String())
-	}
-	if len(goErrs) == 0 && len(ds) > 0 {
-		for _, d := range ds {
-			if !isRefusal(d) {
-				return []string{fmt.Sprintf("ergo rejects a program go accepts, not with the refusal: %q", ds)}, false
-			}
-		}
-		return nil, true
-	}
-	if len(goErrs) > 0 && len(ds) == 0 {
-		return []string{fmt.Sprintf("ergo accepts a program go rejects (unsound): go %q", goErrs)}, false
-	}
-	if len(goErrs) > 0 && !cycleOnly {
-		return nil, false
-	}
-	if len(goErrs) > 0 {
-		// Both reject: the generated programs fail only by instantiation
-		// cycles, so each checker must name one, and nothing else.
-		var out []string
-		for _, e := range goErrs {
-			// A tab starts a continuation line of the error before
-			// ("P instantiated as []P").
-			if !strings.Contains(e, "instantiation cycle") && !strings.HasPrefix(e, "\t") && !strings.Contains(e, ": \t") {
-				out = append(out, "go rejects the generated program for another reason (generator bug): "+e)
-			}
-		}
-		for _, d := range ds {
-			if !strings.Contains(d, "instantiation cycle") {
-				out = append(out, "ergo rejects for another reason: "+d)
-			}
-		}
-		return out, false
 	}
 	// The two texts' expressions match by their kept tokens (align_test.go).
 	ergoFile, err := syntax.Parse(ergoSrc)
@@ -579,23 +552,69 @@ func diffCount(src string, cycleOnly bool) ([]string, bool) {
 			ergoTypes[k] = append(ergoTypes[k], keys.key(t))
 		}
 	}
+	// The lowered text: the same file, each literal converted in place.
+	lfset := token.NewFileSet()
+	lowered, _ := parser.ParseFile(lfset, "p.go", src, 0)
+	offsets := func(x ast.Node) span {
+		return span{lfset.Position(x.Pos()).Offset, lfset.Position(x.End()).Offset}
+	}
+	made, err := lowerLiterals(lowered, func(x ast.Expr) (string, bool) {
+		sp := offsets(x)
+		k, ok := alignKeyOf(goRegs, sp.from, sp.to)
+		if !ok || len(ergoTypes[k]) == 0 {
+			return "", false
+		}
+		return ergoTypes[k][0], true
+	})
+	if err != nil {
+		return []string{fmt.Sprintf("the lowering: %v\n%s", err, src)}, false
+	}
+	info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}}
+	lowErrs := goCheck(lfset, lowered, info)
+	if len(goErrs) == 0 && len(ds) > 0 {
+		if len(lowErrs) > 0 {
+			return nil, true // 196u types it invalid
+		}
+		for _, d := range ds {
+			if !isRefusal(d) {
+				return []string{fmt.Sprintf("ergo rejects a program go accepts, not with the refusal: %q", ds)}, false
+			}
+		}
+		return nil, true
+	}
+	if len(ds) == 0 && len(lowErrs) > 0 {
+		return []string{fmt.Sprintf("ergo accepts a program whose lowering go rejects (unsound): go %q", lowErrs)}, false
+	}
+	if len(ds) > 0 && !cycleOnly {
+		return nil, false
+	}
+	if len(ds) > 0 {
+		// Both reject: the generated programs fail only by instantiation
+		// cycles, so each checker must name one, and nothing else.
+		var out []string
+		for _, e := range goErrs {
+			// A tab starts a continuation line of the error before
+			// ("P instantiated as []P").
+			if !strings.Contains(e, "instantiation cycle") && !strings.HasPrefix(e, "\t") && !strings.Contains(e, ": \t") {
+				out = append(out, "go rejects the generated program for another reason (generator bug): "+e)
+			}
+		}
+		for _, d := range ds {
+			if !strings.Contains(d, "instantiation cycle") {
+				out = append(out, "ergo rejects for another reason: "+d)
+			}
+		}
+		return out, false
+	}
 	var out []string
 	text := func(sp span) string { return src[sp.from:sp.to] }
-	ast.Inspect(file, func(n ast.Node) bool {
-		x, ok := n.(ast.Expr)
-		if !ok {
-			return true
-		}
-		// Every expression node go/types records: identifiers, index and
-		// selector expressions, parentheses, calls, composite and basic
-		// literals, unary and binary operations, function literals
-		// (round-7 M1: the final contextual types, sub-expressions
-		// included).
+	var compare func(x ast.Expr)
+	compare = func(x ast.Expr) {
 		tv, ok := info.Types[x]
 		if !ok {
-			return true
+			return
 		}
-		sp := span{fset.Position(x.Pos()).Offset, fset.Position(x.End()).Offset}
+		sp := offsets(x)
 		gt := goKey(tv.Type)
 		k, inRegion := alignKeyOf(goRegs, sp.from, sp.to)
 		if !inRegion {
@@ -605,7 +624,7 @@ func diffCount(src string, cycleOnly bool) ([]string, bool) {
 			if tv.IsValue() {
 				out = append(out, fmt.Sprintf("%s: a value outside every body and variable", text(sp)))
 			}
-			return true
+			return
 		}
 		ets, ok := ergoTypes[k]
 		same := false
@@ -624,6 +643,25 @@ func diffCount(src string, cycleOnly bool) ([]string, bool) {
 		case !same:
 			out = append(out, fmt.Sprintf("%s: ergo %s, go %s", text(sp), strings.Join(ets, " or "), gt))
 		}
+	}
+	ast.Inspect(lowered, func(n ast.Node) bool {
+		x, ok := n.(ast.Expr)
+		if !ok {
+			return true
+		}
+		if call, ok := x.(*ast.CallExpr); ok && made[call] {
+			// A converted literal: the conversion and the literal carry its
+			// one type. Inside it Go keeps a constant operation's operands
+			// untyped, which the lowering never needs, so they are not
+			// compared.
+			compare(call)
+			compare(call.Args[0])
+			return false
+		}
+		// Every expression node go/types records: identifiers, index and
+		// selector expressions, parentheses, calls, composite and basic
+		// literals, unary and binary operations, function literals.
+		compare(x)
 		return true
 	})
 	sort.Strings(out)
@@ -759,8 +797,8 @@ func inferProgram(rng *rand.Rand, wrap int) string {
 	fmt.Fprintf(&b, "func Main(%s) {\n", strings.Join(values, ", "))
 	name := func(v string) string { return v[:strings.Index(v, " ")] }
 	for range 1 + rng.Intn(2) {
-		// An argument is a value, or an untyped constant (combined
-		// across the arguments of one parameter, as go/types maxUntyped).
+		// An argument is a value, or a literal expression (a parameter
+		// only literals bind takes their common default; 196u rule 6).
 		arg := func() string {
 			if rng.Intn(4) == 0 {
 				return inferConstants[rng.Intn(len(inferConstants))]
@@ -775,18 +813,19 @@ func inferProgram(rng *rand.Rand, wrap int) string {
 		var call string
 		switch rng.Intn(12) {
 		case 9:
-			// An annotated literal is a typed argument, unified before the
-			// constants default, in either position (round-7 M3).
+			// An annotated function literal is a typed argument, unified
+			// before the literals default, in either position (round-7 M3).
 			call = fmt.Sprintf("Apply(%s, %s)", lit(), v)
 		case 10:
 			call = fmt.Sprintf("Rev(%s, %s)", v, lit())
 		case 11:
-			// A parameter a constraint mentions: refused when only a
-			// constant binds it (round-7 M2).
+			// A parameter a constraint mentions: a literal binds it to its
+			// default, where go/types infers through the constraint, so
+			// the constraint may fail (a 196u refusal; round-7 M2).
 			call = fmt.Sprintf("Dep(%s, %s)", v, w)
 		case 7:
-			// A result in context: Info records the converted type of the
-			// argument and its constant sub-expressions (round-7 M1).
+			// A result in context: Info records the argument's one type
+			// (round-7 M1; 196u rule 7).
 			call = fmt.Sprintf("Id(%s)", v)
 		case 8:
 			call = fmt.Sprintf("Id[%s](%s)", types[rng.Intn(len(types))], v)
@@ -860,11 +899,12 @@ func nestedCheck(seed int64) []string {
 	return out
 }
 
-// inferConstants are the untyped constant arguments the inference generator
-// writes (round-7 M1): literals of each kind, parentheses, unary and binary
-// operations, comparisons and constant-producing builtin calls; and a few
-// typed operations with a constant operand, which takes the other side's
-// type.
+// inferConstants are the constant arguments the inference generator writes
+// (round-7 M1): literals of each kind, parentheses, unary and binary
+// operations, comparisons and a constant-producing builtin call, where two
+// literals of different defaults are a 196u refusal (`1 + 'a'`); a few
+// typed operations with a literal operand, which takes the other side's
+// type; and conversions, whose literal operand takes its default (D-A3).
 var inferConstants = []string{
 	"1", "'a'", "\"s\"", "true",
 	"(1)", "-1", "-'a'", "!true", "(('a'))",

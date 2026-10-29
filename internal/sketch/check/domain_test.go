@@ -797,12 +797,12 @@ type S {}
 func M(_ S, x int) {}
 type Box[T comparable, V I[T]] { X T, Y V }
 func F() { _ = Box[int, S]{1, S{}} }`},
-	// T is bound only by a constant and V's constraint mentions it: Go
-	// infers T through the constraint, the subset refuses (D6 rule 3 as
-	// amended in round 8); the typed and explicit forms are valid. T is
+	// T is bound only by a literal and V's constraint mentions it: the
+	// literal's default binds T (196u rule 6), and S satisfies I[int]; a
+	// string literal binds T to string, which S does not satisfy. T is
 	// comparable, not any, which the decided language does not spell
 	// before a constrained parameter (#196).
-	{"dependent-constraint-call", "S108", `type I[T] { M(T) }
+	{"dependent-constraint-call", "", `type I[T] { M(T) }
 type S {}
 func M(_ S, x int) {}
 func Use[T comparable, V I[T]](x T, v V) {}

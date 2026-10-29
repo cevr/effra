@@ -109,7 +109,7 @@ func G() int {
 	return c.bump(1, 2)
 }
 `, want: []selfWant{
-			{"S108", "cannot use untyped string as int in argument", 9},
+			{"S108", "a string literal takes only a string type, not int", 9},
 			{"S108", "too many arguments: want 1, have 2", 14},
 		}},
 		{name: "result type", src: `

@@ -118,10 +118,8 @@ type checker struct {
 	nodeCheck      func(*bodyNode) bool
 	convergeChecks int
 	grew           map[*Func][2]bool
-	// untyped holds the expressions Info records with an untyped type, and
-	// whether each was a constant, until a context converts them
-	// (updateExprType; go/types check.untyped).
-	untyped map[syntax.Expr]bool
+	// literals keeps isLiteral's answer for each operation it has seen.
+	literals map[syntax.Expr]bool
 	// callee is the selector a call is about to check as its callee: only
 	// there does x.f reach a package function on x's type (196m rule 4).
 	callee *syntax.SelectorExpr
@@ -401,8 +399,8 @@ func universe() *Scope {
 		errName.Type = &Named{Obj: errName, under: &Interface{}, state: 2}
 		universeOnce.errorName = errName
 		s.insert("error", errName)
-		s.insert("true", &Const{Name: "true", Type: Typ[UntypedBool], Val: true})
-		s.insert("false", &Const{Name: "false", Type: Typ[UntypedBool], Val: false})
+		s.insert("true", &Const{Name: "true", Type: Typ[Bool], Val: true})
+		s.insert("false", &Const{Name: "false", Type: Typ[Bool], Val: false})
 		for _, name := range []string{"len", "with"} {
 			s.insert(name, &Builtin{Name: name})
 		}

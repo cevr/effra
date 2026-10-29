@@ -87,7 +87,7 @@ var negativeSpans = map[string][2]string{
 	"unknown-type":                       {"S104", "Missing"},
 	"unknown-wire":                       {"S104", "Missing"},
 	"unprovided-callee":                  {"S102", "read()"},
-	"untyped-integer-as-duration":        {"S108", "2"},
+	"integer-literal-as-duration":        {"S108", "2"},
 	"unused-expression":                  {"S110", "x"},
 	"unused-local":                       {"S110", "x"},
 	"unused-type-switch-binding":         {"S110", "v"},

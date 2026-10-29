@@ -17,19 +17,16 @@ func (c *checker) representable(op *operand, t *Basic) bool {
 	v := op.val
 	ok := true
 	switch {
-	case t.Kind == Bool || t.Kind == UntypedBool:
+	case t.Kind == Bool:
 		ok = v.Kind() == constant.Bool
-	case t.Kind == String || t.Kind == UntypedString:
+	case t.Kind == String:
 		ok = v.Kind() == constant.String
-	case t.Kind >= Int && t.Kind <= Uintptr || t.Kind == Duration || t.Kind == UntypedInt || t.Kind == UntypedRune:
+	case t.Kind >= Int && t.Kind <= Uintptr || t.Kind == Duration:
 		iv := constant.ToInt(v)
 		if iv.Kind() != constant.Int {
 			c.errorf(op.expr, CodeType, "%s is not an integer, so it is not representable as %s", v.ExactString(), t)
 			op.mode = modeInvalid
 			return false
-		}
-		if t.Kind == UntypedInt || t.Kind == UntypedRune {
-			return true
 		}
 		lo, hi := intBounds(t.Kind)
 		if constant.Compare(iv, token.LSS, lo) || constant.Compare(iv, token.GTR, hi) {
@@ -38,7 +35,7 @@ func (c *checker) representable(op *operand, t *Basic) bool {
 			return false
 		}
 		op.val = iv
-	case t.Kind == Float32 || t.Kind == Float64 || t.Kind == UntypedFloat:
+	case t.Kind == Float32 || t.Kind == Float64:
 		fv := constant.ToFloat(v)
 		if fv.Kind() != constant.Float && fv.Kind() != constant.Int {
 			ok = false
@@ -133,7 +130,16 @@ func (c *checker) unary(x *syntax.UnaryExpr, hint Type) operand {
 	default:
 		return c.undecided(x, "the unary operator "+x.Op.String())
 	}
-	op := c.valueExpr(x.X, hint)
+	var op operand
+	if lit, ok := x.X.(*syntax.BasicLit); ok && (x.Op == syntax.SUB || x.Op == syntax.ADD) {
+		// A signed literal fits its type after the sign: -128 is an int8
+		// (literal checks the unsigned value everywhere else).
+		op = c.basicLit(lit, hint)
+		op.expr = lit
+		c.record(lit, op)
+	} else {
+		op = c.valueExpr(x.X, hint)
+	}
 	if op.invalid() {
 		return op
 	}
@@ -162,7 +168,7 @@ func (c *checker) unary(x *syntax.UnaryExpr, hint Type) operand {
 			prec = uint(basicSize(under(t).(*Basic).Kind) * 8)
 		}
 		op.val = constant.UnaryOp(tok, op.val, prec)
-		if b, ok := t.(*Basic); ok && !isUntyped(t) {
+		if b, ok := under(t).(*Basic); ok {
 			op.expr = x
 			if !c.representable(&op, b) {
 				return bad(x)
@@ -212,16 +218,13 @@ func (c *checker) binary(x *syntax.BinaryExpr, hint Type) operand {
 	if x.Op == syntax.DOTDOT {
 		return c.notYet(x)
 	}
-	lhint, rhint := hint, hint
-	if isComparison(x.Op) || x.Op == syntax.LAND || x.Op == syntax.LOR {
-		lhint, rhint = nil, nil
+	if isComparison(x.Op) {
+		hint = nil // a comparison is bool; its operands take each other's type
 	}
-	l := c.valueExpr(x.X, lhint)
-	r := c.valueExpr(x.Y, rhint)
+	l, r := c.operands(x.X, x.Y, hint)
 	if l.invalid() || r.invalid() {
 		return bad(x)
 	}
-	// Match the operands' types: an untyped constant takes the other side's.
 	if !c.matchTypes(x, &l, &r) {
 		return bad(x)
 	}
@@ -240,9 +243,9 @@ func (c *checker) binary(x *syntax.BinaryExpr, hint Type) operand {
 			}
 		}
 		if l.mode == modeConst && r.mode == modeConst {
-			return operand{mode: modeConst, typ: Typ[UntypedBool], val: constant.MakeBool(constant.Compare(l.val, tokenOf[x.Op], r.val))}
+			return operand{mode: modeConst, typ: Typ[Bool], val: constant.MakeBool(constant.Compare(l.val, tokenOf[x.Op], r.val))}
 		}
-		return operand{mode: modeValue, typ: Typ[UntypedBool]}
+		return operand{mode: modeValue, typ: Typ[Bool]}
 	}
 	if !c.opDefined(x, x.Op, t) {
 		return bad(x)
@@ -262,16 +265,12 @@ func (c *checker) binary(x *syntax.BinaryExpr, hint Type) operand {
 		} else {
 			v = constant.BinaryOp(l.val, tok, r.val)
 		}
+		// Exact arithmetic; the typed result must fit (196u rule 3).
 		res := operand{mode: modeConst, typ: t, val: v, expr: x}
-		if b, ok := under(t).(*Basic); ok && !isUntyped(t) {
+		if b, ok := under(t).(*Basic); ok {
 			if !c.representable(&res, b) {
 				return bad(x)
 			}
-		}
-		if b, ok := t.(*Basic); ok && isUntyped(t) && (b.Kind == UntypedInt || b.Kind == UntypedRune) {
-			// Untyped integer constants stay exact; an overflow shows where
-			// the constant takes a type.
-			_ = b
 		}
 		return res
 	}
@@ -282,83 +281,44 @@ func (c *checker) binary(x *syntax.BinaryExpr, hint Type) operand {
 	return operand{mode: modeValue, typ: t}
 }
 
-// matchTypes converts an untyped operand to the other operand's type, and
-// reports mismatched types (S108).
+// matchTypes reports operands of two types (S108): both operands of a
+// binary operator have one type (196u rule 4), and == and != also compare a
+// value with an interface it is assignable to. A literal has already taken
+// the other operand's type when it could (operands), so a mismatch names
+// the literal form or the conversion to write.
 func (c *checker) matchTypes(x *syntax.BinaryExpr, l, r *operand) bool {
-	lu := l.mode == modeConst && isUntyped(l.typ)
-	ru := r.mode == modeConst && isUntyped(r.typ)
-	switch {
-	case lu && ru:
-		lk, rk := l.typ.(*Basic).Kind, r.typ.(*Basic).Kind
-		if lk == rk {
+	if c.identical(l.typ, r.typ) {
+		return true
+	}
+	if x.Op == syntax.EQL || x.Op == syntax.NEQ {
+		if ok, _ := c.assignable(l.typ, r.typ); ok {
+			l.typ = r.typ
 			return true
 		}
-		numeric := func(k BasicKind) bool { return k == UntypedInt || k == UntypedRune || k == UntypedFloat }
-		if numeric(lk) && numeric(rk) {
-			k := max(lk, rk)
-			l.typ, r.typ = Typ[k], Typ[k]
-			// Both operands now carry the larger kind, in Info too (go/types
-			// matchTypes; round-7 M1).
-			c.updateExprType(x.X, Typ[k])
-			c.updateExprType(x.Y, Typ[k])
+		if ok, _ := c.assignable(r.typ, l.typ); ok {
+			r.typ = l.typ
 			return true
 		}
-		c.errorf(x, CodeType, "mismatched types %s and %s", l.typ, r.typ)
-		return false
-	case lu:
-		if !c.untypedTo(l, r.typ, x) {
+	}
+	switch ll, rl := c.isLiteral(x.X), c.isLiteral(x.Y); {
+	case ll && !rl:
+		if msg := literalMismatch(x.X, r.typ); msg != "" {
+			c.errorf(x.X, CodeType, "%s", msg)
 			return false
 		}
-	case ru:
-		if !c.untypedTo(r, l.typ, x) {
+	case rl && !ll:
+		if msg := literalMismatch(x.Y, l.typ); msg != "" {
+			c.errorf(x.Y, CodeType, "%s", msg)
 			return false
 		}
 	}
-	if isUntyped(l.typ) && isBoolean(l.typ) && isBoolean(r.typ) {
-		l.typ = r.typ
-		c.updateExprType(x.X, r.typ)
-	}
-	if isUntyped(r.typ) && isBoolean(r.typ) && isBoolean(l.typ) {
-		r.typ = l.typ
-		c.updateExprType(x.Y, l.typ)
-	}
-	if !c.identical(l.typ, r.typ) {
-		if isComparison(x.Op) && (x.Op == syntax.EQL || x.Op == syntax.NEQ) {
-			if ok, _ := c.assignable(l.typ, r.typ); ok {
-				l.typ = r.typ
-				return true
-			}
-			if ok, _ := c.assignable(r.typ, l.typ); ok {
-				r.typ = l.typ
-				return true
-			}
-		}
-		c.errorf(x, CodeType, "mismatched types %s and %s", l.typ, r.typ)
-		return false
-	}
-	return true
-}
-
-func (c *checker) untypedTo(op *operand, t Type, x *syntax.BinaryExpr) bool {
-	if _, ok := under(t).(*Basic); !ok {
-		c.errorf(x, CodeType, "mismatched types %s and %s", op.typ, t)
-		return false
-	}
-	saved := op.expr
-	op.expr = x
-	ok := c.convertUntyped(op, t, "this operation")
-	op.expr = saved
-	if ok {
-		// The operand, not the operation, takes the type in Info
-		// (round-7 M1).
-		c.updateExprType(saved, op.typ)
-	}
-	return ok
+	c.errorf(x, CodeType, "%s", c.mismatchText(x, l.typ, r.typ))
+	return false
 }
 
 func ordered(t Type) bool {
 	b, ok := under(t).(*Basic)
-	return ok && b.Kind != Bool && b.Kind != UntypedBool && b.Kind != Invalid && !isComplex(b)
+	return ok && b.Kind != Bool && b.Kind != Invalid && !isComplex(b)
 }
 
 func (c *checker) opDefined(x syntax.Node, op syntax.Token, t Type) bool {
@@ -381,8 +341,35 @@ func (c *checker) opDefined(x syntax.Node, op syntax.Token, t Type) bool {
 	return ok
 }
 
+// shift checks x << n and x >> n (spec D-A3). A literal left operand takes
+// the expected type when that is an integer type, else int: a shift is
+// never typed from a non-integer context, so a float, string, bool or
+// duration context is S108 with the conversion to write (Go types 1 << n
+// from the context it would have without the shift, a known trap). The
+// count is any integer type, and a literal count is an int.
 func (c *checker) shift(x *syntax.BinaryExpr, hint Type) operand {
-	l := c.valueExpr(x.X, hint)
+	lhint := hint
+	if c.isLiteral(x.X) {
+		if b, ok := under0(hint).(*Basic); ok && !isInteger(b) {
+			left := "1"
+			if lit, ok := unparen(x.X).(*syntax.BasicLit); ok {
+				left = lit.Value
+			}
+			count := exprText(x.Y)
+			if lit, ok := unparen(x.Y).(*syntax.BasicLit); ok {
+				count = lit.Value
+			} else if count == "this expression" {
+				count = "n"
+			}
+			c.valueExpr(x.Y, nil)
+			c.errorf(x.X, CodeType, "the left operand of a shift is an integer, and %s is expected here; write int(%s) %s %s, then convert the result", hint, left, x.Op, count)
+			return bad(x)
+		}
+		if !isInteger(hint) {
+			lhint = nil
+		}
+	}
+	l := c.valueExpr(x.X, lhint)
 	r := c.valueExpr(x.Y, nil)
 	if l.invalid() || r.invalid() {
 		return bad(x)
@@ -396,29 +383,6 @@ func (c *checker) shift(x *syntax.BinaryExpr, hint Type) operand {
 		return bad(x)
 	}
 	lt := l.typ
-	if l.mode == modeConst && isUntyped(lt) {
-		if r.mode != modeConst {
-			// A shift by a non-constant count needs a typed left operand
-			// (types.md, Operators 1; round-8 class A). Go types it from
-			// the context it would have without the shift, a known trap
-			// (float64(1 << n) is invalid); Zig requires a fixed-width
-			// left operand. Ergo refuses a subset of Go here, so the
-			// checker never defers a shift's type.
-			left := l.val.ExactString()
-			if lit, ok := x.X.(*syntax.BasicLit); ok {
-				left = lit.Value
-			}
-			count := exprText(x.Y)
-			if count == "this expression" {
-				count = "n"
-			}
-			c.errorf(x.X, CodeType, "the left operand of a shift by a non-constant count needs a type; write int(%s) %s %s", left, x.Op, count)
-			return bad(x)
-		} else if constant.ToInt(l.val).Kind() != constant.Int {
-			c.errorf(x.X, CodeType, "cannot shift %s", l.val.ExactString())
-			return bad(x)
-		}
-	}
 	if !isInteger(lt) {
 		c.errorf(x, CodeType, "operator %s is not defined on %s", x.Op, l.typ)
 		return bad(x)
@@ -431,7 +395,7 @@ func (c *checker) shift(x *syntax.BinaryExpr, hint Type) operand {
 		}
 		v := constant.Shift(constant.ToInt(l.val), tokenOf[x.Op], uint(s))
 		res := operand{mode: modeConst, typ: lt, val: v, expr: x}
-		if b, ok := under(lt).(*Basic); ok && !isUntyped(lt) {
+		if b, ok := under(lt).(*Basic); ok {
 			if !c.representable(&res, b) {
 				return bad(x)
 			}
@@ -441,13 +405,19 @@ func (c *checker) shift(x *syntax.BinaryExpr, hint Type) operand {
 	return operand{mode: modeValue, typ: lt}
 }
 
-// conversion checks T(x) (Go's conversion rules over the language's types).
+// conversion checks T(x) (Go's conversion rules over the language's
+// types). A literal operand takes no expected type (D-A3): it is typed on
+// its own and then converted, so float64(1 << n) converts an int shift.
 func (c *checker) conversion(x *syntax.CallExpr, t Type) operand {
 	if len(x.Args) != 1 || x.Trailing != nil {
 		c.errorf(x, CodeType, "a conversion to %s takes one value", t)
 		return bad(x)
 	}
-	op := c.valueExpr(x.Args[0], t)
+	hint := t
+	if c.isLiteral(x.Args[0]) {
+		hint = nil
+	}
+	op := c.valueExpr(x.Args[0], hint)
 	if op.invalid() || isInvalid(t) {
 		return bad(x)
 	}
@@ -458,14 +428,11 @@ func (c *checker) conversion(x *syntax.CallExpr, t Type) operand {
 			switch {
 			case isNumeric(tb) && (isNumeric(ob) || ob.Kind == Duration):
 				okConv = true
-			case tb.Kind == Duration && isInteger(ob) && !isUntyped(ob):
+			case tb.Kind == Duration && isInteger(ob):
 				okConv = true
-			case tb.Kind == Duration && isUntyped(ob):
-				okConv = isInteger(ob)
 			case isString(tb) && isString(ob):
 				okConv = true
 			case isString(tb) && isInteger(ob):
-				c.convertedArg(x.Args[0], op, t)
 				return operand{mode: modeValue, typ: t}
 			case isBoolean(tb) && isBoolean(ob):
 				okConv = true
@@ -484,35 +451,14 @@ func (c *checker) conversion(x *syntax.CallExpr, t Type) operand {
 			if !c.representable(&res, tb) {
 				return bad(x)
 			}
-			c.convertedArg(x.Args[0], op, t)
 			return res
 		}
 	}
 	if c.convertible(op.typ, t) {
-		c.convertedArg(x.Args[0], op, t)
 		return operand{mode: modeValue, typ: t}
 	}
 	c.errorf(x, CodeType, "cannot convert %s to %s", op.typ, t)
 	return bad(x)
-}
-
-// convertedArg finalizes an untyped conversion argument, as go/types
-// conversion does (a context site of updateExprType): the argument takes
-// the conversion's type, except that a conversion to an interface or to a
-// type without constants gives it its default type, and an integer
-// constant converted to a string keeps its untyped kind.
-func (c *checker) convertedArg(arg syntax.Expr, op operand, t Type) {
-	if !isUntyped(op.typ) {
-		return
-	}
-	final := t
-	switch b, isBasic := under(t).(*Basic); {
-	case asInterface(t) != nil || (op.mode == modeConst && !isBasic):
-		final = defaultType(op.typ)
-	case op.mode == modeConst && isInteger(op.typ) && isBasic && isString(b):
-		final = op.typ
-	}
-	c.updateExprType(arg, final)
 }
 
 func (c *checker) convertible(v, t Type) bool {

@@ -1068,7 +1068,7 @@ func (c *checker) checkPkgVar(pv *pkgVar) {
 			c.assign(&op, declared, "var "+pv.obj.Name)
 			pv.obj.Type = declared
 		} else {
-			pv.obj.Type = c.defaultOf(&op)
+			pv.obj.Type = c.typeOf(&op)
 		}
 	default:
 		c.errorf(pv.spec, CodeType, "%d names and %d values", len(pv.spec.Names), len(pv.spec.Values))

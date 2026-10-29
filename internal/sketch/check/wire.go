@@ -281,7 +281,7 @@ func (c *checker) wireEntry(e *syntax.WireEntry) []Type {
 			c.errorf(e.Value, CodeType, "this provider has no value")
 			continue
 		}
-		pt := c.defaultOf(&op)
+		pt := c.typeOf(&op)
 		if isInvalid(pt) {
 			continue
 		}

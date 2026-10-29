@@ -2,9 +2,7 @@ package check
 
 import (
 	"go/constant"
-	"go/token"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"ergo.local/prototype/internal/sketch/syntax"
@@ -54,85 +52,19 @@ func (o *operand) fallible() bool { return !o.errs.Empty() }
 
 func bad(x syntax.Expr) operand { return operand{mode: modeInvalid, typ: invalid, expr: x} }
 
-// record notes the type of an expression for later passes.
+// record notes the type of an expression for later passes. A literal has
+// its one type when it is checked (196u rule 7), so Info records each
+// expression once, with no update pass.
 func (c *checker) record(x syntax.Expr, op operand) {
 	if c.silent == 0 && op.typ != nil && op.mode != modeInvalid {
 		c.pkg.Info.Types[x] = op.typ
-		if isUntyped(op.typ) {
-			if c.untyped == nil {
-				c.untyped = map[syntax.Expr]bool{}
-			}
-			c.untyped[x] = op.mode == modeConst
-		} else if c.untyped != nil {
-			delete(c.untyped, x)
-		}
-	}
-}
-
-// updateExprType gives an untyped expression the type its context
-// converts it to, as go/types updateExprType does (round-7 M1; D1): Info
-// then records the final contextual type, not the untyped one. Parentheses
-// pass the type to their operand; a non-constant unary or binary operation
-// passes it to its operands (a shift to its left operand only, a
-// comparison to neither, since its result type does not depend on them).
-// A constant operation keeps its operands untyped, as in Go: they are
-// never materialized. An untyped target updates without finalizing.
-//
-// It is the one finalization path (round-8 class B). The context sites
-// where an untyped operand meets a type, and the function each one runs
-// through, with a row each in TestContextSites:
-//   - assignment, var and := with a written type, return, a call argument
-//     (plain, explicit or inferred once bound), a composite-literal
-//     element, field and key, a map index, a slice or array index and a
-//     slice bound, a channel send, a range key, a block's value, and the
-//     arguments of append, make and delete: assign → convertUntyped;
-//   - := and var without a type, an empty-interface target and a switch
-//     tag: defaultOf, or convertUntyped's default branch;
-//   - a conversion T(x): convertedArg;
-//   - a binary operation with one typed operand, a comparison, an
-//     assignment operation and a switch case value against its tag:
-//     matchTypes and untypedTo;
-//   - min and max: every argument takes the result's type (builtin);
-//   - len and cap of a constant keep it untyped, as in go/types.
-//
-// A shift by a non-constant count of an untyped constant is S108 (class
-// A), so no shift defers its type to the context.
-func (c *checker) updateExprType(x syntax.Expr, t Type) {
-	if c.silent != 0 || x == nil || t == nil || isInvalid(t) {
-		return
-	}
-	isConst, found := c.untyped[x]
-	if !found {
-		return
-	}
-	switch x := x.(type) {
-	case *syntax.ParenExpr:
-		c.updateExprType(x.X, t)
-	case *syntax.UnaryExpr:
-		if !isConst {
-			c.updateExprType(x.X, t)
-		}
-	case *syntax.BinaryExpr:
-		if !isConst {
-			switch x.Op {
-			case syntax.EQL, syntax.NEQ, syntax.LSS, syntax.LEQ, syntax.GTR, syntax.GEQ:
-			case syntax.SHL, syntax.SHR:
-				c.updateExprType(x.X, t)
-			default:
-				c.updateExprType(x.X, t)
-				c.updateExprType(x.Y, t)
-			}
-		}
-	}
-	c.pkg.Info.Types[x] = t
-	if !isUntyped(t) {
-		delete(c.untyped, x)
 	}
 }
 
 // expr checks x with an optional expected type (bidirectional: composite
-// literals, function literals and untyped constants take it). The result
-// may be fallible, a type or a package; positions decide what they accept.
+// literals, function literals and literals take it; literals.go lists the
+// sites that pass one). The result may be fallible, a type or a package;
+// positions decide what they accept.
 func (c *checker) expr(x syntax.Expr, hint Type) operand {
 	op := c.expr0(x, hint)
 	op.expr = x
@@ -256,9 +188,9 @@ func exprText(x syntax.Expr) string {
 func (c *checker) expr0(x syntax.Expr, hint Type) operand {
 	switch x := x.(type) {
 	case *syntax.Ident:
-		return c.ident(x)
+		return c.boolLiteral(c.ident(x), hint)
 	case *syntax.BasicLit:
-		return c.basicLit(x)
+		return c.literal(x, hint)
 	case *syntax.ParenExpr:
 		// Parentheses keep what the operand denotes: (x) = 1 assigns x,
 		// as in Go (N4). A generic function is the exception: Go reads
@@ -331,14 +263,14 @@ func (c *checker) expr0(x syntax.Expr, hint Type) operand {
 
 // interpolated checks `"a \(x) b"`: each interpolated expression is a
 // value of any type, printed as Go's %v prints it, and the whole is a
-// string (grammar.md, Lexical; the Console.Println rule of #196). An
-// untyped constant takes its default type, as an argument of Go's
-// fmt.Sprint does.
+// string (grammar.md, Lexical; the Console.Println rule of #196). A
+// literal takes its default type, as an argument of Go's fmt.Sprint
+// does.
 func (c *checker) interpolated(x *syntax.InterpolatedString) operand {
 	ok := true
 	for _, e := range x.Exprs {
 		op := c.valueExpr(e, nil)
-		if op.invalid() || isInvalid(c.defaultOf(&op)) {
+		if op.invalid() || isInvalid(c.typeOf(&op)) {
 			ok = false
 		}
 	}
@@ -516,73 +448,6 @@ func (c *checker) ensurePkgVar(v *Var) {
 	}
 }
 
-// ---------------------------------------------------------------- literals
-
-func (c *checker) basicLit(x *syntax.BasicLit) operand {
-	switch x.Kind {
-	case syntax.INT:
-		if len(x.Value) > 1 && x.Value[0] == '0' {
-			c.errorf(x, CodeType, "the integer literal %s has a leading zero; Go would read it as octal (grammar.md, Literals 1)", x.Value)
-			return bad(x)
-		}
-		v := constant.MakeFromLiteral(x.Value, token.INT, 0)
-		if v.Kind() == constant.Unknown {
-			c.errorf(x, CodeType, "malformed integer literal %s", x.Value)
-			return bad(x)
-		}
-		return operand{mode: modeConst, typ: Typ[UntypedInt], val: v}
-	case syntax.DURATION:
-		i := 0
-		for i < len(x.Value) && x.Value[i] >= '0' && x.Value[i] <= '9' {
-			i++
-		}
-		digits, unit := x.Value[:i], x.Value[i:]
-		if len(digits) > 1 && digits[0] == '0' {
-			c.errorf(x, CodeType, "the duration literal %s has a leading zero", x.Value)
-			return bad(x)
-		}
-		scale := map[string]int64{"ns": 1, "us": 1e3, "ms": 1e6, "s": 1e9, "m": 60e9, "h": 3600e9}[unit]
-		n := constant.MakeFromLiteral(digits, token.INT, 0)
-		v := constant.BinaryOp(n, token.MUL, constant.MakeInt64(scale))
-		if !fitsInt64(v) {
-			c.errorf(x, CodeType, "the duration %s overflows int64 nanoseconds (grammar.md, Literals 2)", x.Value)
-			return bad(x)
-		}
-		return operand{mode: modeConst, typ: Typ[Duration], val: v}
-	case syntax.STRING:
-		s, err := strconv.Unquote(x.Value)
-		if err != nil {
-			c.errorf(x, CodeType, "invalid escape in the string literal %s (grammar.md, Literals 3)", x.Value)
-			return bad(x)
-		}
-		return operand{mode: modeConst, typ: Typ[UntypedString], val: constant.MakeString(s)}
-	case syntax.RUNE:
-		s, err := strconv.Unquote(x.Value)
-		if err != nil {
-			c.errorf(x, CodeType, "malformed rune literal %s", x.Value)
-			return bad(x)
-		}
-		r := []rune(s)
-		if len(r) != 1 {
-			c.errorf(x, CodeType, "malformed rune literal %s", x.Value)
-			return bad(x)
-		}
-		return operand{mode: modeConst, typ: Typ[UntypedRune], val: constant.MakeInt64(int64(r[0]))}
-	case syntax.FLOAT:
-		// Go's float literal forms (grammar.md, Lexical): an untyped float
-		// constant, as Go's 1.5 is, checked by the same constant rules as
-		// a float constant made by arithmetic.
-		v := constant.MakeFromLiteral(x.Value, token.FLOAT, 0)
-		if v.Kind() == constant.Unknown {
-			c.errorf(x, CodeType, "malformed float literal %s", x.Value)
-			return bad(x)
-		}
-		return operand{mode: modeConst, typ: Typ[UntypedFloat], val: v}
-	}
-	c.errorf(x, CodeType, "unexpected literal")
-	return bad(x)
-}
-
 func fitsInt64(v constant.Value) bool {
 	_, exact := constant.Int64Val(constant.ToInt(v))
 	return exact
@@ -637,7 +502,7 @@ func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 				// value: int(1) and int64(1) are distinct (round-2 M7).
 				dyn := u.Key
 				if asInterface(u.Key) != nil {
-					dyn = defaultType(k.typ)
+					dyn = k.typ
 				}
 				key := constKey{c.types.id(dyn), k.val.Kind().String() + ":" + k.val.ExactString()}
 				if seen[key] {
@@ -691,36 +556,47 @@ func (c *checker) literalType(x *syntax.CompositeLit, hint Type) Type {
 		set[tp] = true
 	}
 	inf := &inferer{c: c, m: m, set: set}
-	for i, e := range x.Elts {
-		var ft Type
-		val := e
-		if kv, ok := e.(*syntax.KeyValueExpr); ok {
-			id, _ := kv.Key.(*syntax.Ident)
-			if id == nil {
+	// Typed field values bind first; a parameter only literals bind takes
+	// their common default, and mixed defaults are S108, as for a call
+	// (196u rule 6).
+	byLiteral := map[*TypeParam]Type{}
+	for _, lits := range []bool{false, true} {
+		for i, e := range x.Elts {
+			var ft Type
+			val := e
+			if kv, ok := e.(*syntax.KeyValueExpr); ok {
+				id, _ := kv.Key.(*syntax.Ident)
+				if id == nil {
+					continue
+				}
+				f, _ := s.field(id.Name)
+				if f == nil {
+					continue
+				}
+				ft, val = f.Type, kv.Value
+			} else if i < len(s.Fields) {
+				ft = s.Fields[i].Type
+			}
+			if ft == nil || c.isLiteral(val) != lits {
 				continue
 			}
-			f, _ := s.field(id.Name)
-			if f == nil {
+			c.silent++
+			op := c.expr(val, nil)
+			c.silent--
+			if op.invalid() || op.mode == modeType {
 				continue
 			}
-			ft, val = f.Type, kv.Value
-		} else if i < len(s.Fields) {
-			ft = s.Fields[i].Type
+			if tp, isParam := ft.(*TypeParam); lits && isParam && set[tp] {
+				if prev, seen := byLiteral[tp]; seen && !c.identical(prev, op.typ) {
+					c.errorf(x.Type, CodeType, "cannot infer the type argument %s of %s: its literals take %s and %s; write %s[…] (D6)", tp.Name, n.Obj.Name, prev, op.typ, n.Obj.Name)
+					return nil
+				}
+				if m[tp] == nil {
+					byLiteral[tp] = op.typ
+				}
+			}
+			_ = inf.unify(ft, op.typ, unifyAssign) // a mismatch is the field assignment's error
 		}
-		if ft == nil {
-			continue
-		}
-		c.silent++
-		op := c.expr(val, nil)
-		c.silent--
-		if op.invalid() || op.mode == modeType {
-			continue
-		}
-		vt := op.typ
-		if op.mode == modeConst {
-			vt = defaultType(vt)
-		}
-		_ = inf.unify(ft, vt, unifyAssign) // a mismatch is the field assignment's error
 	}
 	targs := make([]Type, len(n.TParams))
 	for i, tp := range n.TParams {
@@ -1143,22 +1019,15 @@ func (c *checker) index(x *syntax.IndexExpr, hint Type) operand {
 	return bad(x)
 }
 
-// intIndex checks an index, a slice bound or a make size: an integer, and a
-// constant one is a nonnegative int (S108), as in Go. It returns the
-// constant's value when there is one.
+// intIndex checks an index or a slice bound: an integer, where a literal
+// takes int (D-A2), and a constant one is a nonnegative int (S108), as in
+// Go. It returns the constant's value when there is one.
 func (c *checker) intIndex(x syntax.Expr) (int64, bool) {
 	op := c.valueExpr(x, Typ[Int])
 	if op.invalid() {
 		return 0, false
 	}
-	untypedConst := op.mode == modeConst && op.val != nil && isUntyped(op.typ)
-	switch {
-	case untypedConst && isNumeric(op.typ):
-		// An untyped constant becomes an int: it must be representable.
-		if !c.assign(&op, Typ[Int], "index") {
-			return 0, false
-		}
-	case !isInteger(op.typ):
+	if !isInteger(op.typ) {
 		c.errorf(x, CodeType, "an index must be an integer, not %s", op.typ)
 		return 0, false
 	}
@@ -1226,7 +1095,7 @@ func (c *checker) sliceExpr(x *syntax.SliceExpr) operand {
 				c.errorf(x, CodeType, "a 3-index slice of a string")
 				return bad(x)
 			}
-			return operand{mode: modeValue, typ: defaultType(base.typ)}
+			return operand{mode: modeValue, typ: base.typ}
 		}
 	}
 	c.errorf(x, CodeType, "cannot slice %s", base.typ)
@@ -1235,9 +1104,10 @@ func (c *checker) sliceExpr(x *syntax.SliceExpr) operand {
 
 // ---------------------------------------------------------------- assignment
 
-// assign checks that op may be assigned to t: an untyped constant must be
-// representable (S108 on overflow), an untyped integer never becomes a
-// duration (D2), and the value must be assignable.
+// assign checks that op may be assigned to t. A literal already has its
+// one type (literals.go), so a literal that could not take t, and a name
+// of another basic type, are S108 with the form to write (196u rules 1 and
+// 3): no value converts by itself.
 func (c *checker) assign(op *operand, t Type, what string) bool {
 	if op.invalid() || t == nil || containsInvalid(t) || containsInvalid(op.typ) {
 		// Already reported where the invalid part came from (D3).
@@ -1248,104 +1118,36 @@ func (c *checker) assign(op *operand, t Type, what string) bool {
 		op.mode = modeInvalid
 		return false
 	}
-	if tp, ok := t.(*TypeParam); ok && isUntyped(op.typ) {
-		c.errorf(op.expr, CodeType, "cannot use an untyped constant as %s of type %s", what, tp)
-		return false
-	}
-	if isUntyped(op.typ) {
-		return c.convertUntyped(op, t, what)
-	}
 	if ok, why := c.assignable(op.typ, t); !ok {
-		if why != "" {
+		switch msg := literalMismatch(op.expr, t); {
+		case msg != "":
+			c.errorf(op.expr, CodeType, "%s", msg)
+		case why != "":
 			c.errorf(op.expr, CodeType, "cannot use %s as %s in %s: %s", op.typ, t, what, why)
-		} else {
-			c.errorf(op.expr, CodeType, "cannot use %s as %s in %s", op.typ, t, what)
-		}
-		op.mode = modeInvalid
-		return false
-	}
-	return true
-}
-
-// convertUntyped gives an untyped constant the type t.
-func (c *checker) convertUntyped(op *operand, t Type, what string) bool {
-	target := t
-	if it := asInterface(t); it != nil {
-		if len(it.Methods) == 0 && !it.Comparable {
-			op.typ = defaultType(op.typ)
-			if b, ok := op.typ.(*Basic); ok && !c.representable(op, b) {
-				return false
+		default:
+			if id, isName := unparen(op.expr).(*syntax.Ident); isName && c.convertible(op.typ, t) {
+				if _, isVar := c.lookup(id.Name).(*Var); isVar {
+					c.errorf(op.expr, CodeType, "%s is %s; write %s(%s) or declare %s %s", id.Name, op.typ, t, id.Name, id.Name, t)
+					break
+				}
 			}
-			c.updateExprType(op.expr, op.typ)
-			return true
-		}
-		target = defaultType(op.typ)
-		if why := c.implements(target, it); why != "" {
-			c.errorf(op.expr, CodeType, "cannot use %s as %s in %s: %s", op.typ, t, what, why)
-			op.mode = modeInvalid
-			return false
-		}
-		op.typ = target
-		c.updateExprType(op.expr, target)
-		return true
-	}
-	b, ok := under(target).(*Basic)
-	if !ok {
-		c.errorf(op.expr, CodeType, "cannot use %s as %s in %s", op.typ, t, what)
-		op.mode = modeInvalid
-		return false
-	}
-	src := op.typ.(*Basic)
-	compatible := false
-	switch src.Kind {
-	case UntypedBool:
-		compatible = b.Kind == Bool
-	case UntypedString:
-		compatible = b.Kind == String
-	case UntypedInt, UntypedRune, UntypedFloat:
-		compatible = b.Kind >= Int && b.Kind <= Complex128
-	}
-	if !compatible {
-		if b.Kind == Duration && (src.Kind == UntypedInt || src.Kind == UntypedRune) {
-			c.errorf(op.expr, CodeType, "an untyped integer is not a duration: write a duration literal such as %ss (D2; #175)", constText(op.val))
-		} else {
 			c.errorf(op.expr, CodeType, "cannot use %s as %s in %s", op.typ, t, what)
 		}
 		op.mode = modeInvalid
 		return false
 	}
-	if !c.representable(op, b) {
-		return false
-	}
-	op.typ = t
-	c.updateExprType(op.expr, t)
 	return true
 }
 
-func constText(v constant.Value) string {
-	if v == nil {
-		return "1"
-	}
-	return v.ExactString()
-}
-
-// defaultOf gives an operand its type for a declaration without a written
-// type: an untyped constant takes its default type.
-func (c *checker) defaultOf(op *operand) Type {
+// typeOf is the type a declaration without a written type takes from op:
+// its one type, since every literal has one (196u rule 2).
+func (c *checker) typeOf(op *operand) Type {
 	if op.invalid() {
 		return invalid
 	}
 	if op.mode == modeNoValue {
 		c.errorf(op.expr, CodeType, "this expression has no value")
 		return invalid
-	}
-	if isUntyped(op.typ) {
-		t := defaultType(op.typ)
-		if !c.representable(op, t.(*Basic)) {
-			return invalid
-		}
-		c.updateExprType(op.expr, t)
-		return t
 	}
 	if tup, ok := op.typ.(*Tuple); ok {
 		c.errorf(op.expr, CodeType, "%d values where one is expected", len(tup.Types))

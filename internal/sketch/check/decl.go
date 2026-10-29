@@ -835,24 +835,6 @@ func (n *Named) instanceUnder(inst *Named) Type {
 	return inst.ctx.subst(n.under, m)
 }
 
-// constLen evaluates an array length.
-func (c *checker) constLen(x syntax.Expr) (int64, bool) {
-	lit, ok := x.(*syntax.BasicLit)
-	if !ok || lit.Kind != syntax.INT {
-		c.errorf(x, CodeType, "an array length is an integer literal")
-		return 0, false
-	}
-	n, err := strconv.ParseInt(lit.Value, 10, 64)
-	if err != nil || n < 0 {
-		c.errorf(x, CodeType, "invalid array length %s", lit.Value)
-		return 0, false
-	}
-	// The length is a constant expression: Info records it untyped, as
-	// go/types does (D1).
-	c.record(x, operand{mode: modeConst, typ: Typ[UntypedInt]})
-	return n, true
-}
-
 // ---------------------------------------------------------------- rows in signatures
 
 // rowExpr resolves the elements of an error row or a capability row.

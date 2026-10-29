@@ -5,15 +5,17 @@ import (
 	"testing"
 )
 
-// TestInferenceOrder: D6 rules 2 and 3 as amended in round 8.
-//   - A type parameter bound only by untyped constants that occurs in the
-//     constraint of a type parameter is refused with the one S108 "cannot
-//     infer T; write the type arguments" at the call, before any defaulting
-//     guess (round-7 M2). A real constraint error stays when every type
-//     argument is fixed by typed or written arguments.
+// TestInferenceOrder: D6 rules 2 and 3 as amended in round 8, and 196u
+// rule 6.
+//   - A type parameter only literals bind takes their default, even when
+//     the constraint of another parameter mentions it: there is no
+//     inference through a constraint before the default, so G(1, s) binds
+//     T to int and is the one S108 constraint error, where go/types infers
+//     int8 from s's method (round-7 M2). Its lowering, G(int(1), s), is
+//     invalid Go too, so the differential counts it as a 196u refusal.
 //   - A function literal whose parameter and result types are all written
 //     is a typed argument: typed arguments unify first, in source order,
-//     then untyped constants default (round-7 M3). A failed call reports
+//     then the literals default (round-7 M3). A failed call reports
 //     one diagnostic and its result is invalid, so nothing cascades.
 func TestInferenceOrder(t *testing.T) {
 	const decls = `type S struct{}
@@ -48,16 +50,16 @@ func Rev[T any](x T, f func(T) T) T { return f(x) }
 	const (
 		valid verdict = iota
 		invalid
-		refused
+		defaulted
 	)
 	cases := []struct {
 		name, body string
 		want       verdict
 	}{
-		{"constraint-constant", `func F(s S) { G(1, s) }`, refused},
-		{"constraint-rune", `func F(r R) { G('a', r) }`, refused},
-		{"constraint-named", `func F(s S) { GN(1, s) }`, refused},
-		{"constraint-result", `func F(q Q) { GR(1, q) }`, refused},
+		{"constraint-constant", `func F(s S) { G(1, s) }`, defaulted},
+		{"constraint-rune", `func F(r R) { G('a', r) }`, defaulted},
+		{"constraint-named", `func F(s S) { GN(1, s) }`, defaulted},
+		{"constraint-result", `func F(q Q) { GR(1, q) }`, defaulted},
 		{"constraint-explicit", `func F(s S) { G[int8](1, s) }`, valid},
 		{"constraint-typed", `func F(s S, v int8) { G(v, s) }`, valid},
 		{"constraint-typed-mismatch", `func F(s S, v int) { G(v, s) }`, invalid},
@@ -93,9 +95,12 @@ func Rev[T any](x T, f func(T) T) T { return f(x) }
 				if len(ds) != 1 || !strings.Contains(ds[0], "S108") {
 					t.Fatalf("want one S108, got %q", ds)
 				}
-			case refused:
-				if len(ds) != 1 || !isRefusal(ds[0]) {
-					t.Fatalf("want exactly the refusal, got %q", ds)
+			case defaulted:
+				if len(ds) != 1 || !strings.Contains(ds[0], "S108") || !strings.Contains(ds[0], "does not satisfy the constraint") {
+					t.Fatalf("want exactly the constraint error, got %q", ds)
+				}
+				if d, refusal := diffCount(src, true); len(d) > 0 || !refusal {
+					t.Fatalf("want a 196u refusal, got %q (refusal %v)", d, refusal)
 				}
 			}
 		})

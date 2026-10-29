@@ -590,10 +590,10 @@ func g() int fails Bang { return 1 }
 func label() string fails Bang { return "g = \(try g())" }
 func main() {}
 `, nil},
-	{"float literal", "a float literal is an untyped float constant", `
+	{"float literal", "a float literal takes a float type; two literals take their defaults", `
 func f() float64 {
 	let x float64 = 1.5
-	let y = 2.5e-1 + 1
+	let y = 2.5e-1 + 1.0
 	return x * y * 2.0
 }
 func main() {}

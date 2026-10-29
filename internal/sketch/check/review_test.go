@@ -320,7 +320,7 @@ type S {}
 func M(s *S) {}
 extern go fixture.Take func Take(x I)
 func F(s S) { Take(s) }`},
-	{"N2", "complex-types", "", `func F() complex128 { return 1 }
+	{"N2", "complex-types", "", `func F() complex128 { return complex128(1) }
 func G(a, b complex64) complex64 { return a*b + a/b - b }
 func H(a complex128) bool { return a == a }`},
 	{"N2", "complex-ordering", "S108", `func F(a, b complex128) bool { return a < b }`},

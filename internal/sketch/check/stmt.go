@@ -203,7 +203,7 @@ func (c *checker) varDecl(d *syntax.VarDecl) {
 					c.assign(&op, declared, "var "+spec.Names[i].Name)
 					types[i] = declared
 				} else {
-					types[i] = c.defaultOf(&op)
+					types[i] = c.typeOf(&op)
 				}
 			}
 			for i, n := range spec.Names {
@@ -286,7 +286,7 @@ func (c *checker) assignStmt(s *syntax.AssignStmt) {
 	if s.Tok == syntax.ASSIGN {
 		if isBlank(l) {
 			op := c.valueExpr(r, nil)
-			c.defaultOf(&op)
+			c.typeOf(&op)
 			return
 		}
 		lop := c.lhs(l)
@@ -575,16 +575,15 @@ func (c *checker) forStmt(s *syntax.ForStmt) {
 }
 
 // countRange checks `for i in lo..hi { }` (grammar.md, One for): the
-// bounds are integers of one type, two literals take int, and the one
-// binding counts from lo up to hi, excluding hi, as Go's `for i := lo; i <
-// hi; i++` does.
+// bounds are integers of one type, a literal bound takes the other's type
+// and two literals take int (196u rules 2 and 4), and the one binding
+// counts from lo up to hi, excluding hi, as Go's `for i := lo; i < hi;
+// i++` does.
 func (c *checker) countRange(s *syntax.RangeStmt, r *syntax.BinaryExpr) {
-	lo := c.valueExpr(r.X, nil)
-	hi := c.valueExpr(r.Y, nil)
+	lo, hi := c.operands(r.X, r.Y, nil)
 	t := Type(invalid)
 	if !lo.invalid() && !hi.invalid() && c.matchTypes(r, &lo, &hi) {
-		t = c.defaultOf(&lo)
-		c.defaultOf(&hi)
+		t = c.typeOf(&lo)
 		if !isInvalid(t) && !isInteger(under(t)) {
 			c.errorf(r, CodeType, "a range's bounds are integers, not %s", t)
 			t = invalid
@@ -634,10 +633,7 @@ func (c *checker) rangeStmt(s *syntax.RangeStmt) {
 			case isString(u):
 				kt, vt = Typ[Int], Typ[Int32]
 			case isInteger(u):
-				kt, vt = defaultType(x.typ), nil
-				if x.mode == modeConst {
-					c.assign(&x, kt, "range")
-				}
+				kt, vt = x.typ, nil
 			default:
 				c.errorf(s.X, CodeType, "cannot range over %s", x.typ)
 			}
@@ -671,7 +667,7 @@ func (c *checker) switchStmt(s *syntax.SwitchStmt) {
 	tagType := Type(Typ[Bool])
 	if s.Tag != nil {
 		tag = c.valueExpr(s.Tag, nil)
-		tagType = c.defaultOf(&tag)
+		tagType = c.typeOf(&tag)
 	}
 	pop := c.push(brSwitch)
 	defer pop()
