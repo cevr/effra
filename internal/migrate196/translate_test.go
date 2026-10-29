@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"ergo.local/prototype/internal/migrate196/oldsyntax"
 	"ergo.local/prototype/internal/sketch/proto"
 	"ergo.local/prototype/internal/sketch/syntax"
 )
@@ -200,6 +201,18 @@ func TestRules(t *testing.T) {
 		// M11: an embed never stands before an entry.
 		{"wire embed after entries", "package p\n\nwire W {\n\tBase\n\tClock = Fixed{}\n}\n\nwire V { Base; Clock = Fixed{} }\n",
 			"let W = wire {\n\tClock: Fixed{},\n\tBase,\n}\n\nlet V = wire { Clock: Fixed{}, Base }\n"},
+		// Round-2 M2: a shadow rename and a switch snapshot take their
+		// numbered names from one table, so no block declares one twice.
+		{"fresh names never meet", "package main\n\nfunc g() int { return 1 }\n\nfunc use(i int) {}\n\nfunc f(x int, c bool) {\n\txSubject := 0\n\tuse(xSubject)\n\tif c {\n\t\txSubject := 5\n\t\tswitch x {\n\t\tcase g():\n\t\t\tuse(xSubject)\n\t\t}\n\t}\n}\n",
+			"func g() int { return 1 }\n\nfunc use(i int) {}\n\nfunc f(x int, c bool) {\n\tlet xSubject = 0\n\tuse(xSubject)\n\tif c {\n\t\tlet xSubject2 = 5\n\t\tlet xSubject3 = x\n\t\tif xSubject3 == g() {\n\t\t\tuse(xSubject2)\n\t\t}\n\t}\n}\n"},
+		// Round-2 m2: a case expression, a switch tag and a for header are
+		// translated on their own; their rewrites and renames are kept.
+		{"case expression rewritten", "package main\n\ntype E struct{}\n\nfunc f() (int, error[E]) {\n\treturn 1\n}\n\nfunc use(i int) {}\n\nfunc g(x int, n int) error[E] {\n\tswitch x {\n\tcase n + try f():\n\t\tuse(1)\n\tcase n:\n\t\tuse(2)\n\t}\n\treturn E{}\n}\n",
+			"type E {}\n\nfunc f() int fails E {\n\treturn 1\n}\n\nfunc use(i int) {}\n\nfunc g(x int, n int) fails E {\n\tlet xSubject = x\n\tif xSubject == (try n + f()) {\n\t\tuse(1)\n\t} else if xSubject == n {\n\t\tuse(2)\n\t}\n\treturn E{}\n}\n"},
+		{"renamed names in case expressions and for headers", "package main\n\nfunc use(i int) {}\n\nfunc g(t int, c bool) {\n\tx := 1\n\tif c {\n\t\tx := 2\n\t\tfor i := 0; i < x; i++ {\n\t\t\tuse(i)\n\t\t}\n\t\tswitch t {\n\t\tcase x:\n\t\t\tuse(1)\n\t\tcase x + 1:\n\t\t\tuse(2)\n\t\t}\n\t}\n\tuse(x)\n}\n",
+			"func use(i int) {}\n\nfunc g(t int, c bool) {\n\tlet x = 1\n\tif c {\n\t\tlet x2 = 2\n\t\tfor i in 0..x2 {\n\t\t\tuse(i)\n\t\t}\n\t\tif t == x2 {\n\t\t\tuse(1)\n\t\t} else if t == x2+1 {\n\t\t\tuse(2)\n\t\t}\n\t}\n\tuse(x)\n}\n"},
+		{"renamed receiver", "package p\n\nfunc (in Box) M() int {\n\treturn in.N\n}\n",
+			"func M(in2 Box) int {\n\treturn in2.N\n}\n"},
 		{"test", "package p\n\nfunc TestAdd() needs testing.T {\n\tT.Equal(1+1, 2)\n\tT.True(ok())\n}\n",
 			"test Add {\n\tassert 1+1 == 2\n\tassert ok()\n}\n"},
 		{"keyword names", "package p\n\nfunc f(in int64) int64 {\n\tmatch := in\n\treturn match\n}\n",
@@ -258,6 +271,8 @@ func TestNotes(t *testing.T) {
 		{"defer with a computed argument", "package p\n\nfunc f(n int64) {\n\tdefer done(n + 1)\n}\n", "a defer that is not a call with stable arguments"},
 		// M11: a commented embed before an entry is moved by hand.
 		{"commented embed before an entry", "package p\n\nwire W {\n\tBase // the shared part\n\tClock = Fixed{}\n}\n", "an embed with a comment before an entry"},
+		// Round-2 m2: a note inside a case expression is kept.
+		{"case expression with a note", "package main\n\nfunc use(i int) {}\n\nfunc g(x int, m map[string]int) {\n\tswitch x {\n\tcase len(map[string]int{}):\n\t\tuse(1)\n\tcase cap(m):\n\t\tuse(2)\n\t}\n}\n", "cap has no decided form"},
 		{"multi-type catch arm reads", "package p\n\nfunc f() string {\n\treturn g() catch e {\n\tcase A, B:\n\t\tshow(e)\n\t}\n}\n", "several types reads e"},
 		{"comma ok", "package p\n\nfunc f(m map[string]int64) {\n\tv, ok := m[\"a\"]\n\tuse(v, ok)\n}\n", "comma-ok"},
 		{"label", "package p\n\nfunc f() {\nL:\n\tfor {\n\t\tbreak L\n\t}\n}\n", "label"},
@@ -311,5 +326,39 @@ func TestGoStringsAndMarkdown(t *testing.T) {
 	want = "1. Item:\n\n   ```go\n   let x = 1\n   use(x)\n   ```\n\n```go\nlet y = 2\nuse(y)\n```\n"
 	if len(notes) > 0 || got != want {
 		t.Fatalf("Markdown indented (notes %v):\n%s", notes, got)
+	}
+	// Round-2 m7: a body fence whose translation needs an import is a
+	// note, never the func snippet() wrapper; a file fence with a package
+	// line starts at its first declaration.
+	md = "```go\nx := 1\ndefer report(x)\n```\n"
+	got, notes = Markdown(md)
+	if got != md || len(notes) != 1 || !strings.Contains(notes[0].Text, "a body fence whose translation imports a package") {
+		t.Fatalf("Markdown body import (notes %v):\n%s", notes, got)
+	}
+	md = "```go\npackage main\n\nfunc main() {\n\tdefer report(1)\n}\n```\n"
+	got, notes = Markdown(md)
+	want = "```go\nimport scope\n\nfunc main() {\n\tscope.OnExit() { report(1) }\n}\n```\n"
+	if len(notes) > 0 || got != want {
+		t.Fatalf("Markdown package fence (notes %v):\n%s", notes, got)
+	}
+}
+
+// TestOverlapNote (round-2 m3): two rewrites of one span leave a note
+// that names both constructs and the place.
+func TestOverlapNote(t *testing.T) {
+	src := "package p\n\nfunc f() {}\n"
+	file, err := oldsyntax.Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := &translator{src: src, file: file}
+	tr.cur = "the switch statement"
+	tr.replace(16, 21, "g")
+	tr.cur = "a shadow rename"
+	tr.replace(18, 19, "x")
+	tr.apply()
+	want := "two rewrites overlap at 3:8 (the switch statement and a shadow rename); finish this by hand"
+	if len(tr.notes) != 1 || tr.notes[0].Text != want || tr.notes[0].Line != 3 {
+		t.Fatalf("notes %v, want %q", tr.notes, want)
 	}
 }

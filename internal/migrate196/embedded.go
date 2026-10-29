@@ -147,7 +147,9 @@ func Markdown(src string) (string, []Note) {
 			for _, n := range ns {
 				notes = append(notes, Note{Line: start + 1, Text: n.Text})
 			}
-			chunks = append(chunks, text)
+			if text != "" { // a chunk of only a package clause translates to nothing
+				chunks = append(chunks, text)
+			}
 		}
 		if len(chunks) > 0 {
 			for _, line := range strings.Split(strings.Join(chunks, "\n\n"), "\n") {
@@ -187,7 +189,12 @@ func translateChunk(chunk string) (string, []Note) {
 	if len(notes) > 0 {
 		return chunk, notes
 	}
-	out = strings.TrimRight(out, "\n")
+	out = strings.Trim(out, "\n")
+	if body && strings.HasPrefix(out, "import ") {
+		// The body uses a library package (task, scope) that needs an
+		// import, and a body fence cannot hold one (round-2 review, m7).
+		return chunk, []Note{{Text: "a body fence whose translation imports a package: make the fence a file with the import by hand"}}
+	}
 	if body {
 		ls := strings.Split(out, "\n")
 		if len(ls) >= 2 && strings.HasPrefix(ls[0], "func snippet() {") && ls[len(ls)-1] == "}" {

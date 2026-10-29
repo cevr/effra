@@ -58,6 +58,7 @@ type edit struct {
 	start, end int
 	text       string
 	seq        int
+	what       string // the construct whose rewrite made the edit
 }
 
 type translator struct {
@@ -76,12 +77,15 @@ type translator struct {
 	structs map[string]bool // struct type names of the file
 	fresh   map[string]bool // names the translator added (freshName)
 	imports map[string]bool // library packages the rewrites use (task, scope)
+	cur     string          // the construct being rewritten, for overlap notes
+	seq     int             // the next edit's sequence number
 }
 
 // ---------------------------------------------------------------- edits and notes
 
 func (t *translator) replace(start, end oldsyntax.Pos, text string) {
-	t.edits = append(t.edits, edit{int(start), int(end), text, len(t.edits)})
+	t.edits = append(t.edits, edit{int(start), int(end), text, t.seq, t.cur})
+	t.seq++
 }
 
 func (t *translator) insert(at oldsyntax.Pos, text string) { t.replace(at, at, text) }
@@ -95,8 +99,15 @@ func (t *translator) text(n oldsyntax.Node) string { return t.src[n.Pos():n.End(
 // apply performs the edits from the end of the source backwards. Edits that
 // overlap are a translator bug: the later one becomes a note.
 func (t *translator) apply() string {
-	sort.SliceStable(t.edits, func(i, j int) bool {
-		a, b := t.edits[i], t.edits[j]
+	return t.applyEdits(0, len(t.src), t.edits)
+}
+
+// applyEdits returns src[start:end] with edits applied, in source order.
+// Two edits that overlap leave the later one out, with a note that names
+// both constructs (round-2 review, m3).
+func (t *translator) applyEdits(start, end int, edits []edit) string {
+	sort.SliceStable(edits, func(i, j int) bool {
+		a, b := edits[i], edits[j]
 		if a.start != b.start {
 			return a.start < b.start
 		}
@@ -106,18 +117,55 @@ func (t *translator) apply() string {
 		return a.seq < b.seq
 	})
 	var b strings.Builder
-	last := 0
-	for _, e := range t.edits {
+	last := start
+	var prev edit
+	for _, e := range edits {
 		if e.start < last {
-			t.note(oldsyntax.Pos(e.start), "internal: overlapping rewrite skipped")
+			line := t.file.Line(oldsyntax.Pos(e.start))
+			col := e.start - strings.LastIndexByte(t.src[:e.start], '\n')
+			t.note(oldsyntax.Pos(e.start), "two rewrites overlap at %d:%d (%s and %s); finish this by hand", line, col, prev.what, e.what)
 			continue
 		}
 		b.WriteString(t.src[last:e.start])
 		b.WriteString(e.text)
 		last = e.end
+		prev = e
 	}
-	b.WriteString(t.src[last:])
+	b.WriteString(t.src[last:end])
 	return b.String()
+}
+
+// textOf returns the translated text of src[start:end]: every edit that
+// lies inside it is applied to it and leaves the file's edits. A rewrite
+// that replaces a span whole takes the text of its parts this way, so the
+// renames and rewrites inside them are kept, not overlapped.
+func (t *translator) textOf(start, end oldsyntax.Pos) string {
+	var inner, rest []edit
+	for _, e := range t.edits {
+		if e.start >= int(start) && e.end <= int(end) {
+			inner = append(inner, e)
+		} else {
+			rest = append(rest, e)
+		}
+	}
+	t.edits = rest
+	return t.applyEdits(int(start), int(end), inner)
+}
+
+// translated rewrites the subtree n on its own, then returns its text with
+// those rewrites (textOf), and marks it skipped so that the walk does not
+// rewrite it again.
+func (t *translator) translated(n oldsyntax.Node) string {
+	if !t.isSkipped(n) {
+		saved := t.cur
+		oldsyntax.Inspect(n, func(c oldsyntax.Node) bool {
+			t.node(c)
+			return true
+		})
+		t.cur = saved
+		t.skip(n)
+	}
+	return t.textOf(n.Pos(), n.End())
 }
 
 // ---------------------------------------------------------------- the walk
@@ -184,7 +232,22 @@ func (t *translator) run() {
 	})
 }
 
+// kindOf names a construct for an overlap note: "a switch statement" from
+// *oldsyntax.SwitchStmt.
+func kindOf(n oldsyntax.Node) string {
+	name := strings.TrimPrefix(fmt.Sprintf("%T", n), "*oldsyntax.")
+	var b strings.Builder
+	for i, r := range name {
+		if i > 0 && unicode.IsUpper(r) {
+			b.WriteByte(' ')
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return "the " + strings.NewReplacer(" stmt", " statement", " expr", " expression", " decl", " declaration", " lit", " literal").Replace(b.String())
+}
+
 func (t *translator) decl(d oldsyntax.Decl) {
+	t.cur = kindOf(d)
 	switch d := d.(type) {
 	case *oldsyntax.ImportDecl:
 		t.importDecl(d)
@@ -373,19 +436,18 @@ func (t *translator) letWord(names []*oldsyntax.Ident, top bool, at oldsyntax.No
 func (t *translator) keywordName(*oldsyntax.Ident) {}
 
 // renameKeywords renames each name that the decided grammar made a keyword
-// (`with`, `in`, `test`, …) to the name and the first free number (`with2`,
+// (`with`, `in`, `test`, …) to a fresh numbered name (freshName: `with2`,
 // as the prototype refuses a trailing `_`), everywhere in
 // the file: a consistent renaming keeps the meaning of a one-file program.
 // The with form's own `with` and the `go` qualifier are not names.
 func (t *translator) renameKeywords() {
-	used := map[string]bool{}
+	t.cur = "a keyword rename"
 	var hits []*oldsyntax.Ident
 	oldsyntax.Inspect(t.file, func(n oldsyntax.Node) bool {
 		id, ok := n.(*oldsyntax.Ident)
 		if !ok {
 			return true
 		}
-		used[id.Name] = true
 		if !syntax.IsKeyword(id.Name) || id == t.file.Name {
 			return true
 		}
@@ -405,9 +467,8 @@ func (t *translator) renameKeywords() {
 	renamed := map[string]string{}
 	for _, id := range hits {
 		name, ok := renamed[id.Name]
-		for i := 2; !ok; i++ {
-			name = fmt.Sprintf("%s%d", id.Name, i)
-			ok = !used[name]
+		if !ok {
+			name = t.freshName(id.Name)
 		}
 		renamed[id.Name] = name
 		t.replace(id.Pos(), id.End(), name)
@@ -658,12 +719,14 @@ func (t *translator) funcDecl(d *oldsyntax.FuncDecl) {
 	}
 	if d.Recv != nil {
 		r := d.Recv.List[0]
-		recv := t.text(r.Type)
+		// The receiver moves; its name and type keep their renames.
+		recv := t.textOf(r.Type.Pos(), r.Type.End())
 		if len(r.Names) > 0 {
-			recv = r.Names[0].Name + " " + recv
+			recv = t.textOf(r.Names[0].Pos(), r.Names[0].End()) + " " + recv
 		} else {
 			recv = "_ " + recv
 		}
+		t.textOf(d.Recv.Opening, d.Name.Pos())
 		t.replace(d.Recv.Opening, d.Name.Pos(), "")
 		sep := ", "
 		if len(d.Type.Params.List) == 0 {
@@ -770,9 +833,9 @@ func (t *translator) testDecl(d *oldsyntax.FuncDecl) bool {
 				// is `assert a == (b || c)`, never `a == b || c` (M3).
 				o0, c0 := grouping(n.Args[0], oldsyntax.EQL.Precedence())
 				o1, c1 := grouping(n.Args[1], oldsyntax.EQL.Precedence())
-				edits = append(edits, edit{int(n.Pos()), int(n.Args[0].Pos()), "assert " + o0, 0}, edit{int(n.Args[0].End()), int(n.Args[1].Pos()), c0 + " == " + o1, 0}, edit{int(n.Rparen), int(n.Rparen) + 1, c1, 0})
+				edits = append(edits, edit{int(n.Pos()), int(n.Args[0].Pos()), "assert " + o0, 0, ""}, edit{int(n.Args[0].End()), int(n.Args[1].Pos()), c0 + " == " + o1, 0, ""}, edit{int(n.Rparen), int(n.Rparen) + 1, c1, 0, ""})
 			case sel.Sel.Name == "True" && len(n.Args) == 1:
-				edits = append(edits, edit{int(n.Pos()), int(n.Args[0].Pos()), "assert ", 0}, edit{int(n.Rparen), int(n.Rparen) + 1, "", 0})
+				edits = append(edits, edit{int(n.Pos()), int(n.Args[0].Pos()), "assert ", 0, ""}, edit{int(n.Rparen), int(n.Rparen) + 1, "", 0, ""})
 			default:
 				ok = false
 			}
@@ -812,6 +875,7 @@ func (t *translator) node(n oldsyntax.Node) {
 	if t.isSkipped(n) {
 		return
 	}
+	t.cur = kindOf(n)
 	switch n := n.(type) {
 	case *oldsyntax.Field:
 		for _, id := range n.Names {
@@ -1151,6 +1215,7 @@ func (t *translator) catch(c *oldsyntax.CatchExpr) {
 	if c.Bind == nil {
 		return
 	}
+	name := t.textOf(c.Bind.Pos(), c.Bind.End()) // the binding keeps a rename
 	t.replace(c.Bind.Pos()-1, c.Bind.End(), "")
 	for _, a := range c.Arms {
 		if !t.reads(a.Body, c.Bind.Name) {
@@ -1160,7 +1225,7 @@ func (t *translator) catch(c *oldsyntax.CatchExpr) {
 			t.note(a.Case, "a catch arm with several types reads %s", c.Bind.Name)
 			continue
 		}
-		t.insert(a.Types[0].End(), " as "+c.Bind.Name)
+		t.insert(a.Types[0].End(), " as "+name)
 	}
 }
 
@@ -1218,7 +1283,7 @@ func (t *translator) identRole(id *oldsyntax.Ident) string {
 // its function writes (the binding is a snapshot taken at the switch), the
 // arm must not declare either name (a read would resolve to the new one),
 // and no read may be a key of a literal whose type the file does not show.
-func (t *translator) renameReads(sw oldsyntax.Node, at oldsyntax.Pos, list []oldsyntax.Stmt, from, to string) {
+func (t *translator) renameReads(sw oldsyntax.Node, at oldsyntax.Pos, list []oldsyntax.Stmt, from, to, toText string) {
 	if !t.declaredBefore(sw, to) || t.written(t.outerFunc(sw), to) {
 		t.note(at, "an arm with several types reads %s: bind the subject with let first", from)
 		return
@@ -1246,7 +1311,8 @@ func (t *translator) renameReads(sw oldsyntax.Node, at oldsyntax.Pos, list []old
 	}
 	for _, id := range ids {
 		if t.identRole(id) == "read" {
-			t.replace(id.Pos(), id.End(), to)
+			t.textOf(id.Pos(), id.End()) // a rename of the binding gives way
+			t.replace(id.Pos(), id.End(), toText)
 		}
 	}
 }
@@ -1428,20 +1494,12 @@ func (t *translator) renameShadow(a *oldsyntax.AssignStmt, id *oldsyntax.Ident) 
 			return false
 		}
 	}
-	used := map[string]bool{}
-	oldsyntax.Inspect(t.file, func(n oldsyntax.Node) bool {
-		if x, ok := n.(*oldsyntax.Ident); ok {
-			used[x.Name] = true
-		}
-		return true
-	})
-	name := ""
-	for i := 2; ; i++ {
-		name = fmt.Sprintf("%s%d", id.Name, i)
-		if !used[name] {
-			break
-		}
-	}
+	// The new name comes from the one table of fresh names, so it never
+	// meets a name another rewrite added (round-2 review, M2).
+	saved := t.cur
+	t.cur = "a shadow rename"
+	defer func() { t.cur = saved }()
+	name := t.freshName(id.Name)
 	t.replace(id.Pos(), id.End(), name)
 	for _, s := range list[k+1:] {
 		oldsyntax.Inspect(s, func(n oldsyntax.Node) bool {
@@ -1531,9 +1589,15 @@ func (t *translator) hoistInit(stmtPos oldsyntax.Pos, init oldsyntax.Stmt, next 
 	for i, l := range a.Lhs {
 		names[i] = l.(*oldsyntax.Ident)
 	}
+	// The names and the value keep their own rewrites (round-2 review,
+	// m2): the init's span is replaced whole.
+	let := t.letWord(names, false, a)
+	value := t.translated(a.Rhs[0])
+	lhs := t.textOf(a.Lhs[0].Pos(), a.TokPos)
 	t.skip(init)
+	t.textOf(init.Pos(), next)
 	indent := t.indentOf(stmtPos)
-	t.insert(stmtPos, t.letWord(names, false, a)+t.src[a.Lhs[0].Pos():a.TokPos]+"= "+t.text(a.Rhs[0])+"\n"+indent)
+	t.insert(stmtPos, let+lhs+"= "+value+"\n"+indent)
 	t.replace(init.Pos(), next, "")
 }
 
@@ -1605,33 +1669,49 @@ func (t *translator) forStmt(f *oldsyntax.ForStmt) {
 		cx, _ := cond.X.(*oldsyntax.Ident)
 		px, _ := post.X.(*oldsyntax.Ident)
 		if cx != nil && px != nil && cx.Name == id.Name && px.Name == id.Name && !t.written(f.Body, id.Name) && stable(init.Rhs[0]) && stable(cond.Y) {
-			t.replace(f.Init.Pos(), f.Body.Pos(), id.Name+" in "+t.text(init.Rhs[0])+".."+t.text(cond.Y)+" ")
+			// The header is replaced whole; its parts keep their renames.
+			name := t.textOf(id.Pos(), id.End())
+			from, to := t.translated(init.Rhs[0]), t.translated(cond.Y)
 			t.skip(f.Init)
+			t.skip(f.Cond)
 			t.skip(f.Post)
+			t.textOf(f.Init.Pos(), f.Body.Pos())
+			t.replace(f.Init.Pos(), f.Body.Pos(), name+" in "+from+".."+to+" ")
 			return
 		}
 	}
-	var step string
+	stepped := false
 	switch p := f.Post.(type) {
 	case *oldsyntax.IncDecStmt:
-		if x, ok := p.X.(*oldsyntax.Ident); ok && x.Name == id.Name {
-			step = map[oldsyntax.Token]string{oldsyntax.INC: " += 1", oldsyntax.DEC: " -= 1"}[p.Tok]
-			step = id.Name + step
-		}
+		x, ok := p.X.(*oldsyntax.Ident)
+		stepped = ok && x.Name == id.Name
 	case *oldsyntax.AssignStmt:
-		if x, ok := p.Lhs[0].(*oldsyntax.Ident); ok && len(p.Lhs) == 1 && len(p.Rhs) == 1 && x.Name == id.Name && p.Tok != oldsyntax.DEFINE {
-			step = t.text(p)
-		}
+		x, ok := p.Lhs[0].(*oldsyntax.Ident)
+		stepped = ok && len(p.Lhs) == 1 && len(p.Rhs) == 1 && x.Name == id.Name && p.Tok != oldsyntax.DEFINE
 	}
 	// Go gives each iteration its own i, so a function literal or a task
 	// in the body that names i sees that iteration's value; one `let mut`
 	// outside the loop would be shared by all of them.
-	if step == "" || t.continuesLoop(f) || t.usedAfter(f, id.Name) || t.declaredBefore(f, id.Name) || t.capturedIn(f.Body, id.Name) {
+	if !stepped || t.continuesLoop(f) || t.usedAfter(f, id.Name) || t.declaredBefore(f, id.Name) || t.capturedIn(f.Body, id.Name) {
 		t.note(f.Pos(), "a three-clause for whose bounds may change, or with continue: write for i in a..b or a for cond loop by hand")
 		return
 	}
+	// The init and the post statement move; each keeps its rewrites.
+	name := t.textOf(id.Pos(), id.End())
+	value := t.translated(init.Rhs[0])
+	var step string
+	switch p := f.Post.(type) {
+	case *oldsyntax.IncDecStmt:
+		step = t.textOf(p.X.Pos(), p.X.End()) + map[oldsyntax.Token]string{oldsyntax.INC: " += 1", oldsyntax.DEC: " -= 1"}[p.Tok]
+	case *oldsyntax.AssignStmt:
+		step = t.translated(p)
+	}
+	t.skip(f.Init)
+	t.skip(f.Post)
+	t.textOf(f.Init.Pos(), f.Cond.Pos())
+	t.textOf(f.Cond.End(), f.Body.Pos())
 	indent := t.indentOf(f.For)
-	t.insert(f.For, "let mut "+id.Name+" = "+t.text(init.Rhs[0])+"\n"+indent)
+	t.insert(f.For, "let mut "+name+" = "+value+"\n"+indent)
 	t.replace(f.Init.Pos(), f.Cond.Pos(), "")
 	t.replace(f.Cond.End(), f.Body.Pos(), " ")
 	if strings.Contains(t.src[f.Body.Lbrace:f.Body.Rbrace], "\n") {
@@ -1723,13 +1803,15 @@ func (t *translator) rangeStmt(r *oldsyntax.RangeStmt) {
 	// Two variables need a slice, array, map or string, so their form is
 	// fixed; with one variable or none the meaning depends on the kind
 	// of r.X, which only syntax that proves it may decide (M4).
+	// A variable keeps its rename: the head is replaced whole.
+	keyed := func(x oldsyntax.Expr) string { return t.textOf(x.Pos(), x.End()) }
 	var head string
 	kind := t.rangeKind(r.X)
 	switch {
 	case r.Value != nil && key != nil && key.Name == "_":
-		head = t.text(r.Value) + " in "
+		head = keyed(r.Value) + " in "
 	case r.Value != nil:
-		head = t.text(r.Key) + ", " + t.text(r.Value) + " in "
+		head = keyed(r.Key) + ", " + keyed(r.Value) + " in "
 	case kind == "":
 		t.note(r.Pos(), "a range over %s: its kind (count, sequence or channel) is not written; choose the for form by hand", t.text(r.X))
 		return
@@ -1738,12 +1820,13 @@ func (t *translator) rangeStmt(r *oldsyntax.RangeStmt) {
 	case r.Key == nil:
 		head = "_ in "
 	case kind == "count":
-		head = t.text(r.Key) + " in 0.."
+		head = keyed(r.Key) + " in 0.."
 	case kind == "chan":
-		head = t.text(r.Key) + " in "
+		head = keyed(r.Key) + " in "
 	default:
-		head = t.text(r.Key) + ", _ in "
+		head = keyed(r.Key) + ", _ in "
 	}
+	t.textOf(r.For+3, r.X.Pos())
 	t.replace(r.For+3, r.X.Pos(), " "+head)
 }
 
@@ -1923,7 +2006,7 @@ func (t *translator) switchStmt(s *oldsyntax.SwitchStmt) {
 			t.note(s.Pos(), "a switch on an expression with non-literal cases: bind the subject with let, then write an if chain")
 			return
 		}
-		tag = t.text(s.Tag)
+		tag = t.translated(s.Tag)
 	}
 	for i, c := range s.Clauses {
 		if c.List == nil && i != len(s.Clauses)-1 {
@@ -1972,13 +2055,15 @@ func (t *translator) switchStmt(s *oldsyntax.SwitchStmt) {
 			for j, x := range c.List {
 				// Each case expression stays one operand (M6):
 				// `case a || b` is `tag == (a || b)`; in a tagless
-				// switch, `case a, b` is `a || b`.
-				conds[j] = t.text(x)
+				// switch, `case a, b` is `a || b`. The case
+				// expression is translated on its own, so its renames
+				// and rewrites are kept (round-2 review, m2).
+				conds[j] = t.translated(x)
 				if tag != "" {
-					op, cp := grouping(x, oldsyntax.EQL.Precedence())
+					op, cp := groupingText(x, conds[j], oldsyntax.EQL.Precedence())
 					conds[j] = tag + " == " + op + conds[j] + cp
 				} else if len(c.List) > 1 {
-					op, cp := grouping(x, oldsyntax.LOR.Precedence())
+					op, cp := groupingText(x, conds[j], oldsyntax.LOR.Precedence())
 					conds[j] = op + conds[j] + cp
 				}
 			}
@@ -1987,9 +2072,19 @@ func (t *translator) switchStmt(s *oldsyntax.SwitchStmt) {
 				head = "} else " + head
 			}
 		}
+		t.textOf(c.Case, c.Colon+1) // nothing of the header is left to rewrite
 		t.replace(c.Case, c.Colon+1, head)
-		t.skipList(c.List)
 	}
+}
+
+// groupingText is grouping for a translated operand: a translation that
+// starts with try (a try moved to the expression's start) covers the
+// whole operand, so it is parenthesised too.
+func groupingText(x oldsyntax.Expr, text string, prec int) (string, string) {
+	if strings.HasPrefix(text, "try ") {
+		return "(", ")"
+	}
+	return grouping(x, prec)
 }
 
 // casesCall reports whether a case expression of clauses holds a call.
@@ -2046,7 +2141,7 @@ func (t *translator) typeSwitch(s *oldsyntax.TypeSwitchStmt) {
 	}
 	subjects := make([]string, len(s.Subjects))
 	for i, g := range s.Subjects {
-		subjects[i] = t.text(g.X)
+		subjects[i] = t.translated(g.X)
 	}
 	head := "match " + subjects[0] + " "
 	if len(subjects) > 1 {
@@ -2057,6 +2152,12 @@ func (t *translator) typeSwitch(s *oldsyntax.TypeSwitchStmt) {
 	} else {
 		t.replace(s.Switch, s.Init.Pos(), "")
 	}
+	// A binding keeps its renamed name; the rest of the header goes.
+	binds := make([]string, len(s.Binds))
+	for i, b := range s.Binds {
+		binds[i] = t.textOf(b.Pos(), b.End())
+	}
+	t.textOf(from, s.Lbrace)
 	t.replace(from, s.Lbrace, head)
 	for _, g := range s.Subjects {
 		t.skip(g)
@@ -2070,15 +2171,15 @@ func (t *translator) typeSwitch(s *oldsyntax.TypeSwitchStmt) {
 				continue
 			}
 			if len(c.List) == 1 && len(s.Binds) == 1 {
-				t.insert(c.List[0].End(), " as "+b.Name)
+				t.insert(c.List[0].End(), " as "+binds[i])
 				continue
 			}
-			subject, isName := s.Subjects[i].X.(*oldsyntax.Ident)
+			_, isName := s.Subjects[i].X.(*oldsyntax.Ident)
 			if !isName {
 				t.note(c.Case, "an arm with several types reads %s: bind the subject with let first", b.Name)
 				continue
 			}
-			t.renameReads(s, c.Case, c.Body, b.Name, subject.Name)
+			t.renameReads(s, c.Case, c.Body, b.Name, s.Subjects[i].X.(*oldsyntax.Ident).Name, subjects[i])
 		}
 	}
 }
