@@ -7,10 +7,11 @@ import "ergo.local/prototype/internal/sketch/syntax"
 // as invalid, with no diagnostic and no cascade, although no diagnostic of
 // its own explains it:
 //
-//   - in the silent pass whose record class G reads, while a cyclic
-//     component's rows are still being inferred, a type that typing would
-//     build from a row is provisional: the instance a bare generic catch
-//     arm takes from the caught row (catchType) may still arrive (rowWaits);
+//   - in the silent pass whose record class G reads, a type that typing
+//     would build from a row that holds an unsolved variable of a member
+//     of the open component is provisional: the instance a bare generic
+//     catch arm takes from the caught row (catchType) may still arrive
+//     (rowWaits); a row from outside the component is final;
 //   - in the reporting pass, a reference to a member class G refuses is
 //     invalid so that nothing cascades from its pinned row (groupRef); its
 //     diagnostic is the member's S108, which reportGroup decides last.
@@ -69,15 +70,51 @@ func (s frameState) String() string {
 }
 
 // rowWaits reports whether a type built from a row now waits on a row
-// still being inferred, and counts the undiagnosed read when it does. A
-// rule that builds a type from a row asks it before it reports the row
-// as lacking the type.
-func (c *checker) rowWaits() bool {
-	if c.rowsOpen == 0 {
+// still being inferred, and counts the undiagnosed read when it does: in
+// the silent pass, when the row read an unsolved variable of a member of
+// the open component (open: readRow counted it while the row's expression
+// was checked). A row from outside the component is final, so a type it
+// lacks is an error at once (round 11 review M1). A rule that builds a
+// type from a row asks it before it reports the row as lacking the type.
+func (c *checker) rowWaits(open bool) bool {
+	if c.rowsOpen == 0 || !open {
 		return false
 	}
 	c.undiagSeq++
 	return true
+}
+
+// readRow counts the reads of a callee's error row r at a call (result,
+// goExpr): an open read when r holds an unsolved variable of a member of
+// the component being checked, and a poisoned read when r holds a
+// poisoned function's variable, or, in the reporting pass of a component
+// whose pin is undecided (groupUndecided), a member's. A function whose
+// inferred row reads a poisoned row is poisoned too, so the poison
+// reaches every caller whose row it shaped.
+func (c *checker) readRow(r *Row) {
+	if r == nil || !r.vars {
+		return
+	}
+	for _, e := range r.Elems() {
+		v, ok := e.(*RowVar)
+		if !ok {
+			continue
+		}
+		root := v.root()
+		fn := root.Fn
+		if fn == nil {
+			continue
+		}
+		if !root.final && c.group[fn] {
+			c.openRowSeq++
+		}
+		if fn.poisoned || c.silent == 0 && c.groupUndecided && c.group[fn] {
+			c.poisonSeq++
+			if c.fn != nil && c.fn.fn != nil && fn.poisoned && (c.fn.fn.inferErrors || c.fn.fn.inferUses) {
+				c.fn.fn.poisoned = true
+			}
+		}
+	}
 }
 
 // readUndiagnosed counts a read of an undiagnosed value.

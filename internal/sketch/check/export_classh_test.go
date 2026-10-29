@@ -149,9 +149,10 @@ func RefWalkProblems(src string) []string {
 // The pin's verdict is also compared with the reporting pass, which types
 // the bodies on the converged rows (round 9 review M1): a frame the pin
 // dropped that the reporting pass checked is reported, and so is a frame
-// the pin kept that the reporting pass left unchecked, except a frame of a
-// call class G refuses (refusedCallFrames: by design such a call checks
-// nothing of its own, and the S108 is at the refused member), and except a
+// the pin kept that the reporting pass left unchecked, except a frame the
+// reporting pass recorded refused-by-class-G (by design a call class G
+// refuses checks nothing of its own, and the S108 is at the refused
+// member; round 11 review T2), and except a
 // frame the pin kept as provisional that the reporting pass recorded
 // invalid-diagnosed: reportGroup drops its use (round 10 ruling). The
 // reason is checked too: a frame of a call that names a refused member is
@@ -243,7 +244,12 @@ func frameProblems(c *checker, w *refWalker, root syntax.Node) []string {
 		switch {
 		case !v.kept() && reported:
 			out = append(out, fmt.Sprintf("%T at %d: the pin dropped the callback frame (%s), and the reporting pass checked it", f, f.Pos(), v.state))
-		case !v.kept() || reported || refusedCall[f]:
+		case !v.kept() || reported:
+		case finalState(f) == frameRefused:
+			// A call class G refuses checks nothing of its own, by design;
+			// the S108 is at the refused member (round 11 review T2: from
+			// the reporting record, which follows the member through a
+			// catch binding or a local, not from its name in the call).
 		case v.state == frameProvisional && finalState(f) == frameInvalid:
 			// The one newly consistent pair (round 10 ruling): the use is
 			// dropped from the S108 (reportGroup).

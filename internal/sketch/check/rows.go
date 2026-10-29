@@ -285,8 +285,10 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 			c.group[n.fn] = true
 		}
 	}
-	c.groupValue, c.grew, c.pinKept = map[*Func][2]groupSite{}, map[*Func][2]bool{}, map[any][]guardedUse{}
-	defer func() { c.group, c.groupValue, c.grew, c.pinKept = nil, nil, nil, nil }()
+	c.groupValue, c.grew, c.pinKept, c.provPinned, c.groupUndecided = map[*Func][2]groupSite{}, map[*Func][2]bool{}, map[any][]guardedUse{}, map[*Func]bool{}, false
+	defer func() {
+		c.group, c.groupValue, c.grew, c.pinKept, c.provPinned, c.groupUndecided = nil, nil, nil, nil, nil, false
+	}()
 	cyclic := len(scc) > 1
 	if !cyclic {
 		for _, e := range scc[0].edges {
@@ -343,6 +345,16 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 			if settled && n.fn != nil {
 				c.settled[n.fn] = true
 			}
+		}
+	}
+	// A refused member whose pin rests on a provisional frame ends with a
+	// diagnostic either way: its S108, or, when reportGroup drops every use,
+	// the frame's own. Until reportGroup decides, the members' rows are no
+	// evidence for a row check in the reporting pass (readRow; round 11
+	// review m1).
+	for f := range c.provPinned {
+		if c.refused(f) {
+			c.groupUndecided = true
 		}
 	}
 	for _, n := range scc {
@@ -411,8 +423,11 @@ func (c *checker) endLit(l *litFrame) bool {
 // choosing a fixpoint.
 func (c *checker) pinGroup(scc []*bodyNode) {
 	c.groupSites(scc, c.groupValue, func(owner any) map[*Func][2]useSite {
-		uses, kept := c.liveUses(owner)
+		uses, kept, prov := c.liveUses(owner)
 		c.pinKept[owner] = kept
+		for _, f := range prov {
+			c.provPinned[f] = true
+		}
 		return uses
 	})
 	var pin []*RowVar
@@ -554,8 +569,26 @@ func (c *checker) refused(f *Func) bool {
 // exceeded row has no S108 for it, and none at all when no exceeded row
 // keeps a use. Its references stay invalid, so nothing cascades from the
 // pinned row either.
+//
+// When a member's S108 is dropped, its pinned row stays (its references
+// stay invalid), and every inferred row of the component was solved
+// under it, so each is poisoned (Func.poisoned, the error-row analogue of
+// Elm and Roc's error type): a row check that reads one is silent
+// (readRow), so nothing cascades from the dropped S108 (round 11 review
+// m1).
 func (c *checker) reportGroup(scc []*bodyNode) {
 	var sites map[*Func][2]groupSite
+	dropped := false
+	defer func() {
+		if !dropped {
+			return
+		}
+		for _, n := range scc {
+			if n.fn != nil && (n.fn.inferErrors || n.fn.inferUses) {
+				n.fn.poisoned = true
+			}
+		}
+	}()
 	for _, n := range scc {
 		f := n.fn
 		if f == nil || !c.refused(f) {
@@ -570,6 +603,7 @@ func (c *checker) reportGroup(scc []*bodyNode) {
 			ex[k] = ex[k] && sites[f][k].ok
 		}
 		if !ex[0] && !ex[1] {
+			dropped = true
 			continue
 		}
 		params := "()"

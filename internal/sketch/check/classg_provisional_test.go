@@ -120,6 +120,141 @@ var provisionalRows = []struct {
 			"10:7 S108 generic type main.H needs type arguments",
 		},
 	},
+	// The arm catches a row from outside the component (b5): the row is
+	// final, so the arm's error is reported at once, its frame is
+	// invalid-diagnosed in the silent pass, and walk is not pinned: no
+	// "cannot fail" follows (round 11 review M1).
+	{
+		name: "b5: the arm catches a non-member's final row",
+		src: `type E {}
+type G[T] {}
+type H[T] {}
+func load() fails G[int] { return G[int]{} }
+func boom() fails E { return E{} }
+func keep[T, F](g H[T], f F) {}
+func walk() {
+	try boom()
+	load() catch {
+	case G[int]:
+	case H as h:
+		h.keep(func() { walk() })
+	}
+	try w()
+}
+func w() { try walk() }
+func outer() {
+	w() catch {
+	case E:
+	}
+}
+func main() {}
+`,
+		want: []string{"11:7 S108 generic type main.H needs type arguments"},
+	},
+	// The arm catches a member's row (b4): the pin keeps the use, the
+	// S108 is dropped, and the component's rows are poisoned, so outer's
+	// catch reports nothing from walk's pinned row (round 11 review m1).
+	{
+		name: "b4: a dropped S108 poisons the component's rows",
+		src: `type E {}
+type G[T] {}
+type H[T] {}
+func load() fails G[int] { return G[int]{} }
+func boom() fails E { return E{} }
+func keep[T, F](g H[T], f F) {}
+func walk() {
+	try boom()
+	try w() catch {
+	case G[int]:
+	case H as h:
+		h.keep(func() { walk() })
+	}
+}
+func w() {
+	try load()
+	try walk()
+}
+func outer() {
+	w() catch {
+	case G[int]:
+	case E:
+	}
+}
+func main() {}
+`,
+		want: []string{"11:7 S108 generic type main.H needs type arguments"},
+	},
+	// A local bound to a refused member is a callee whose frame the
+	// reporting pass records refused-by-class-G, so walk keeps its S108
+	// (round 11 review T1).
+	{
+		name: "f1: a refused member reaches the callee through a local",
+		src: `type Cap { M() }
+func pick[T](x T) T { return x }
+func walk() {
+	Cap.M()
+	let h = pick(other)
+	h(func() { walk() })
+	w()
+}
+func other(f func()) { Cap.M(); walk() }
+func w() { walk() }
+func main() {}
+`,
+		want: []string{
+			"3:6 S108 walk is used as a value through the function literal at 6:4 inside its own recursive group; write its capability row: func walk() needs …",
+			"9:6 S108 other is used as a value at 5:15 inside its own recursive group; write its capability row: func other(…) needs …",
+		},
+	},
+	// The arm catches the row of a refused member (b2, b3): the binding is
+	// undiagnosed, its frame refused-by-class-G, so walk keeps its S108;
+	// the arm reports nothing from the invalid operand's empty row (round
+	// 11 review T2 and O1).
+	{
+		name: "b2: the arm catches a refused member",
+		src: `type Cap { M() }
+type G[T] {}
+func load() fails G[int] { return G[int]{} }
+func keep[T, F](g G[T], f F) {}
+func walk() {
+	Cap.M()
+	w() catch {
+	case G as g:
+		g.keep(func() { walk() })
+	}
+}
+func w() {
+	try load()
+	walk()
+	let k = w
+	_ = k
+}
+func main() {}
+`,
+		want: []string{
+			"5:6 S108 walk is used as a value through the function literal at 9:10 inside its own recursive group; write its capability row: func walk() needs …",
+			"12:6 S108 w is used as a value at 15:10 inside its own recursive group; write its error row: func w() error[…]",
+		},
+	},
+	{
+		name: "b3: the arm catches a refused member, its only use",
+		src: `type G[T] {}
+func load() fails G[int] { return G[int]{} }
+func keep[T, F](g G[T], f F) {}
+func walk() {
+	w() catch {
+	case G as g:
+		g.keep(func() { w() })
+	}
+}
+func w() {
+	try load()
+	walk()
+}
+func main() {}
+`,
+		want: []string{"10:6 S108 w is used as a value through the function literal at 7:10 inside its own recursive group; write its error row: func w() error[…]"},
+	},
 }
 
 func TestClassGProvisionalFrame(t *testing.T) {

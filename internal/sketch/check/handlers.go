@@ -27,6 +27,7 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 		op.errs = nil
 		return op
 	}
+	poisonMark := c.poisonSeq
 	op := c.expr(x.X, hint)
 	if op.invalid() {
 		return bad(x)
@@ -39,7 +40,9 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 			return bad(x)
 		}
 	}
-	if !op.fallible() {
+	// A poisoned row is no evidence that the expression cannot fail
+	// (readRow; rows.md, Capability rows 6).
+	if !op.fallible() && c.poisonSeq == poisonMark {
 		c.errorf(x, CodeType, "try on an expression that cannot fail (rows.md, Error rows 6)")
 		op.addressable = false
 		return op
@@ -56,8 +59,14 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 // statements: when the catch's value is used, the arm's last statement
 // yields it, and return in an arm leaves the function (rows.md, Catch 7).
 func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool) operand {
+	openMark, poisonMark := c.openRowSeq, c.poisonSeq
 	op := c.expr(x.X, hint)
 	valid := !op.invalid()
+	// open: the row may still grow in this component (rowWaits). rowKnown:
+	// the row is evidence for the row checks below; a poisoned row is not
+	// (readRow; round 11 review m1). operandOK: the caught expression is
+	// valid, so an arm its row lacks is not a cascade of its diagnostic.
+	open, rowKnown, operandOK := c.openRowSeq != openMark, c.poisonSeq == poisonMark, valid
 	if valid {
 		switch op.mode {
 		case modeValue, modeConst, modeNoValue:
@@ -74,7 +83,7 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 	// on the value resolves before the rows settle (selfcalls.go; round 8
 	// review M1).
 	hasValue := valid && op.mode != modeNoValue
-	if valid && row.Empty() {
+	if valid && rowKnown && row.Empty() {
 		c.errorf(x.X, CodeType, "catch on an expression that cannot fail (rows.md, Catch 1)")
 		valid = false
 	}
@@ -116,7 +125,7 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 				continue
 			}
 			te = core
-			t := c.catchType(te, row)
+			t := c.catchType(te, row, open, operandOK)
 			if t == nil {
 				continue
 			}
@@ -124,7 +133,7 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 			if !valid {
 				continue
 			}
-			if !row.has(c.types, t) {
+			if rowKnown && !row.has(c.types, t) {
 				c.errorf(te, CodeType, "%s is not in the caught row %s (rows.md, Catch 2)", t, rowText(row))
 				continue
 			}
@@ -172,7 +181,7 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 		return bad(x)
 	}
 	rest := row.minus(c.types, covered)
-	if !partial && !rest.Empty() {
+	if !partial && rowKnown && !rest.Empty() {
 		c.errorAt(x.Catch, x.Catch+5, CodeNotTotal, "this catch does not handle %s; a catch without try handles every error of the row (rows.md, Catch 4)", rowText(rest))
 	}
 	res := operand{mode: modeValue, typ: valueType}
@@ -186,10 +195,15 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 }
 
 // catchType resolves an arm's type. A generic error type written without
-// type arguments takes the instance its row holds. While the rows are
-// still being inferred, a row that holds no instance yet leaves the type
-// provisional (rowWaits), not an error: nil, with no diagnostic.
-func (c *checker) catchType(te syntax.Expr, row *Row) Type {
+// type arguments takes the instance its row holds. A row that holds no
+// instance gives nil with no diagnostic when it may still grow in this
+// component (open: the type is provisional, rowWaits) or is no evidence
+// (evidence false: the caught expression is invalid, so its own
+// diagnostic explains the empty row); otherwise the arm needs its type
+// arguments (round 11 review M1 and O1). A poisoned row does not silence
+// this error: it makes the binding invalid, so it is the diagnostic an
+// invalid-diagnosed frame, and a dropped S108, rest on.
+func (c *checker) catchType(te syntax.Expr, row *Row, open, evidence bool) Type {
 	t := c.typExpr0(te, c.localTypeCtx())
 	if isInvalid(t) {
 		return nil
@@ -200,7 +214,7 @@ func (c *checker) catchType(te syntax.Expr, row *Row) Type {
 				return en
 			}
 		}
-		if c.rowWaits() {
+		if c.rowWaits(open) || !evidence {
 			return nil
 		}
 		c.errorf(te, CodeType, "generic type %s needs type arguments", n)
@@ -281,6 +295,7 @@ func (c *checker) goExpr(x *syntax.GoExpr) operand {
 		if len(sig.Results) == 1 {
 			value = sig.Results[0]
 		}
+		c.readRow(sig.Errors)
 		errs = c.types.resolve(sig.Errors)
 	}
 	task := preludeType("Task")

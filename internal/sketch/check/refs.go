@@ -512,8 +512,9 @@ func (v frameVerdict) kept() bool { return v.state != frameInvalid }
 // (a callee invalid for a diagnosed reason) carries no row, so nothing
 // inside it is a use (D3; round 8 review M2). A provisional frame, and
 // every frame inside it, which typing did not enter, keeps its uses
-// (provisional.go; round 9 review M1). kept is the guarded uses counted.
-func (c *checker) liveUses(owner any) (uses map[*Func][2]useSite, kept []guardedUse) {
+// (provisional.go; round 9 review M1). kept is the guarded uses counted,
+// and provisional the functions those in a provisional frame use.
+func (c *checker) liveUses(owner any) (uses map[*Func][2]useSite, kept []guardedUse, provisional []*Func) {
 	return c.usesIn(owner, c.guardedRefs[owner], c.guardTrace)
 }
 
@@ -523,16 +524,16 @@ func (c *checker) liveUses(owner any) (uses map[*Func][2]useSite, kept []guarded
 // the bodies on the converged rows (round 10 ruling). A use in a frame
 // refused by class G stays, so a class G refusal is never dropped.
 func (c *checker) reportedUses(owner any) map[*Func][2]useSite {
-	uses, _ := c.usesIn(owner, c.pinKept[owner], nil)
+	uses, _, _ := c.usesIn(owner, c.pinKept[owner], nil)
 	return uses
 }
 
 // usesIn is owner's uses outside every callback frame and the uses of gs
 // whose frame is not invalid-diagnosed in owner's latest check, with the
-// guarded uses it kept.
-func (c *checker) usesIn(owner any, gs []guardedUse, trace map[syntax.Node]frameVerdict) (map[*Func][2]useSite, []guardedUse) {
+// guarded uses it kept, and the functions used in a provisional frame.
+func (c *checker) usesIn(owner any, gs []guardedUse, trace map[syntax.Node]frameVerdict) (map[*Func][2]useSite, []guardedUse, []*Func) {
 	if len(gs) == 0 {
-		return c.valueRefs[owner], nil
+		return c.valueRefs[owner], nil, nil
 	}
 	out := maps.Clone(c.valueRefs[owner])
 	if out == nil {
@@ -541,9 +542,14 @@ func (c *checker) usesIn(owner any, gs []guardedUse, trace map[syntax.Node]frame
 	gen := c.bodyGen[owner]
 	memo := map[*guardNode]frameState{}
 	var kept []guardedUse
+	var prov []*Func
 	for _, g := range gs {
-		if c.chainState(g.guard, gen, memo, trace) == frameInvalid {
+		st := c.chainState(g.guard, gen, memo, trace)
+		if st == frameInvalid {
 			continue
+		}
+		if st == frameProvisional {
+			prov = append(prov, g.f)
 		}
 		kept = append(kept, g)
 		uses := out[g.f]
@@ -554,7 +560,7 @@ func (c *checker) usesIn(owner any, gs []guardedUse, trace map[syntax.Node]frame
 		}
 		out[g.f] = uses
 	}
-	return out, kept
+	return out, kept, prov
 }
 
 // callSite is where a call at the current point of the walk uses each row

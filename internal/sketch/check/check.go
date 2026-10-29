@@ -177,12 +177,23 @@ type checker struct {
 	// class G uses inside callback frames that the pin counted
 	// (pinGroup), which reportGroup filters with the reporting pass.
 	pinKept map[any][]guardedUse
+	// provPinned holds the members with a pin-counted use in a provisional
+	// frame (pinGroup).
+	provPinned map[*Func]bool
 	// Undiagnosed reads (provisional.go; round 9 review M1): rowsOpen is
 	// set while a cyclic component's rows are still being inferred,
 	// undiagSeq counts the reads of an undiagnosed value, and stmtMark and
 	// callMark are undiagSeq at the start of the current statement and call.
 	rowsOpen                      int
 	undiagSeq, stmtMark, callMark int
+	// Row reads (provisional.go readRow; round 11 review): openRowSeq
+	// counts the reads of a row that holds an unsolved variable of a
+	// member of the component being checked, and poisonSeq the reads of a
+	// poisoned row. groupUndecided is set when the pin of the component
+	// being checked rests on a provisional frame: until reportGroup
+	// decides, its members' rows are not evidence for a row check.
+	openRowSeq, poisonSeq int
+	groupUndecided        bool
 	// useGens, set only by a test, receives the body checks in which typing
 	// resolved each identifier (RefWalkProblems: an independent witness
 	// of which frames a check typed).
