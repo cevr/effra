@@ -234,6 +234,15 @@ func TestRules(t *testing.T) {
 		// named receiver names them _ (a list is all named or all unnamed).
 		{"receiver before unnamed parameters", "package p\n\ntype S struct{}\n\nfunc (S) M(int) {}\n\nfunc (s S) N(int, string) {}\n\nfunc (S) O(x int) {}\n",
 			"type S {}\n\nfunc M(S, int) {}\n\nfunc N(s S, _ int, _ string) {}\n\nfunc O(_ S, x int) {}\n"},
+		// Merge round: a union variant is translated before the variants
+		// join, so an error row inside one is written with fails.
+		{"union variant with an error row", "package main\n\ntype V[T any] struct{}\n\ntype A struct{}\n\ntype U[T any] interface{ V[func(A) error[T]] | V[map[string]T] }\n",
+			"type V[T] {}\n\ntype A {}\n\ntype U[T] = V[func(A) fails T] | V[Map[string, T]]\n"},
+		// Merge round: an implicit parameter beside a bracket list joins
+		// the list, after the written ones; an any before only unconstrained
+		// parameters is dropped.
+		{"implicit parameter beside a bracket list", "package p\n\ntype Cap interface{ M() }\n\nfunc Run[T any](x T, f func() needs R) needs R { return x }\n",
+			"type Cap { M() }\n\nfunc Run[T, R](x T, f func() needs R) needs R { return x }\n"},
 		// Round-4 review O1: a wire written as a composite literal keeps
 		// its parentheses in the with header.
 		{"with a literal wire", "package p\n\nfunc f() {\n\twith(Cfg{Port: 1}) {\n\t\tuse(1)\n\t}\n\twith(Live, Cfg{}) {\n\t\tuse(2)\n\t}\n\twith(Cfg{}, run)\n}\n",

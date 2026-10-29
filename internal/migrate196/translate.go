@@ -742,7 +742,7 @@ func (t *translator) typeDecl(d *oldsyntax.TypeDecl) {
 		if s.Union != nil {
 			parts := make([]string, len(s.Union))
 			for i, x := range s.Union {
-				parts[i] = t.text(x)
+				parts[i] = t.translated(x)
 			}
 			t.replace(s.Interface, s.Rbrace+1, "= "+strings.Join(parts, " | "))
 			t.skip(s)
@@ -844,7 +844,7 @@ func (t *translator) typeParams(l *oldsyntax.FieldList) {
 			// `[T, P I[T]]` constrains T too), so it is a note.
 			later := false
 			for _, g := range l.List[i+1:] {
-				later = later || !isAny(g)
+				later = later || g.Type != nil && !isAny(g)
 			}
 			id := f.Type.(*oldsyntax.Ident)
 			t.skip(id)
@@ -902,13 +902,28 @@ func (t *translator) funcDecl(d *oldsyntax.FuncDecl) {
 	}
 	t.lawDecl(d)
 	t.typeParams(d.TypeParams)
-	var implicit []string
-	if d.TypeParams == nil {
-		implicit = t.implicitParams(d.Type)
-		if d.Recv != nil {
-			implicit = append(t.implicitParams(d.Recv), implicit...)
+	// The old checker made every otherwise unbound one-letter type name an
+	// implicit parameter, beside a bracket list too; the decided list
+	// declares each one.
+	implicit := t.implicitParams(d.Type)
+	if d.Recv != nil {
+		implicit = append(t.implicitParams(d.Recv), implicit...)
+	}
+	implicit = unique(implicit)
+	if d.TypeParams != nil {
+		declared := map[string]bool{}
+		for _, f := range d.TypeParams.List {
+			for _, n := range f.Names {
+				declared[n.Name] = true
+			}
 		}
-		implicit = unique(implicit)
+		var rest []string
+		for _, name := range implicit {
+			if !declared[name] {
+				rest = append(rest, name)
+			}
+		}
+		implicit = rest
 	}
 	if d.Recv != nil {
 		r := d.Recv.List[0]
@@ -943,8 +958,12 @@ func (t *translator) funcDecl(d *oldsyntax.FuncDecl) {
 		}
 		t.insert(d.Type.Params.Opening+1, recv+sep)
 	}
-	if len(implicit) > 0 {
+	switch {
+	case len(implicit) == 0:
+	case d.TypeParams == nil:
 		t.insert(d.Name.End(), "["+strings.Join(implicit, ", ")+"]")
+	default:
+		t.insert(d.TypeParams.Closing, ", "+strings.Join(implicit, ", "))
 	}
 }
 
