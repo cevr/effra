@@ -95,9 +95,20 @@ type wireGroup struct {
 func (c *checker) wireSource() (size int, groups []*wireGroup, wired bool) {
 	size = 1
 	byKey := map[string]*wireGroup{}
+	owners := map[*syntax.FuncDecl]*Named{}
+	for _, f := range c.funcs {
+		if f.owner != nil {
+			owners[f.Decl] = f.owner
+		}
+	}
 	for _, f := range c.files {
 		for _, d := range f.syntax.Decls {
 			key := declKey(d)
+			if fd, ok := d.(*syntax.FuncDecl); ok && owners[fd] != nil {
+				// Functions of one name on distinct types (196m) are
+				// distinct declarations, keyed as methods were.
+				key = "func " + owners[fd].Obj.Name + "." + fd.Name.Name
+			}
 			syntax.Inspect(d, func(n syntax.Node) bool {
 				switch n := n.(type) {
 				case *syntax.WireDecl:

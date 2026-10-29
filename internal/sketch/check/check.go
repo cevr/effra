@@ -122,8 +122,11 @@ type checker struct {
 	// whether each was a constant, until a context converts them
 	// (updateExprType; go/types check.untyped).
 	untyped map[syntax.Expr]bool
-	kinds   declKinds // solved bracket kinds of the package's generic types
-	init    initDeps  // references of each package-level body (initialization order)
+	// callee is the selector a call is about to check as its callee: only
+	// there does x.f reach a package function on x's type (196m rule 4).
+	callee *syntax.SelectorExpr
+	kinds  declKinds // solved bracket kinds of the package's generic types
+	init   initDeps  // references of each package-level body (initialization order)
 	// totalitySteps records the solver steps of each type switch reported
 	// (not silent), in check order: the deterministic cost the tests bound.
 	totalitySteps []int

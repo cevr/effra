@@ -155,6 +155,14 @@ func (c *checker) collect() {
 				fn := &Func{Name: d.Name.Name, Pkg: c.pkg, Pos: d.Name.Pos(), Decl: d, file: fi}
 				c.funcs = append(c.funcs, fn)
 				if d.Recv == nil {
+					// A second function of one name waits for the
+					// types: collectSelfFuncs accepts the group when the
+					// first parameters are distinct local types (196m
+					// rule 3) and reports the redeclaration otherwise.
+					if prev, ok := c.pkg.Scope.names[d.Name.Name].(*Func); ok && d.Name.Name != "_" {
+						prev.same = append(prev.same, fn)
+						continue
+					}
 					if c.declare(d.Name, fn) {
 						c.pkg.Funcs = append(c.pkg.Funcs, fn)
 					}
@@ -1305,6 +1313,131 @@ func (c *checker) collectMethods() {
 			}
 		}
 	}
+	c.collectSelfFuncs()
+}
+
+// collectSelfFuncs resolves x.f(…) to package functions (196m; round-6
+// ruling B1). A package function whose first parameter's type is T or *T,
+// for a non-interface type T declared in this package, is what x.f(…)
+// calls on a value of T (rule 1) and what makes T satisfy an operation
+// type (rule 2). It stays a function, with a function's rows, and a plain
+// call f(x, …) still calls it. A field of T named f wins: x.f is the field
+// and the function is reached only by a plain call. main is never reached
+// this way.
+//
+// Several package functions may share a name when each one's first
+// parameter is a distinct such type (rule 3); they are called only as
+// x.f(…). Any other repetition of a name is the redeclaration it always
+// was, reported at each later function.
+func (c *checker) collectSelfFuncs() {
+	for _, f := range c.funcs {
+		if f.Decl.Recv == nil && f.Name != "main" {
+			c.cur = f.file
+			f.owner, f.selfArgs, f.Ptr = c.selfOwner(f)
+		}
+	}
+	for _, f := range c.pkg.Funcs {
+		if len(f.same) == 0 {
+			continue
+		}
+		group := append([]*Func{f}, f.same...)
+		owners := map[*Named]bool{}
+		valid := true
+		for _, g := range group {
+			if g.owner == nil || owners[g.owner] {
+				valid = false
+				break
+			}
+			owners[g.owner] = true
+		}
+		if valid {
+			for _, g := range group {
+				g.overloaded = true
+			}
+			c.pkg.Funcs = append(c.pkg.Funcs, f.same...)
+			continue
+		}
+		for _, g := range f.same {
+			c.cur = g.file
+			c.errorf(g.Decl.Name, CodeType, "%s is already declared in this package", g.Name)
+			g.owner, g.selfArgs, g.Ptr = nil, nil, false
+		}
+	}
+	for _, f := range c.funcs {
+		if f.owner != nil {
+			f.owner.addMethod(f)
+		}
+	}
+}
+
+// selfOwner returns the type x.f(…) reaches f from, or nil: the type of
+// f's first parameter, written T, *T or, for a generic T, T[A, B] whose
+// arguments are distinct type parameters of f, which a call on an instance
+// binds.
+func (c *checker) selfOwner(f *Func) (*Named, []syntax.Expr, bool) {
+	d := f.Decl
+	if d.Type == nil || d.Type.Params == nil || len(d.Type.Params.List) == 0 {
+		return nil, nil, false
+	}
+	rt := d.Type.Params.List[0].Type
+	ptr := false
+	if s, ok := rt.(*syntax.StarExpr); ok {
+		rt, ptr = s.X, true
+	}
+	var args []syntax.Expr
+	if ix, ok := rt.(*syntax.IndexExpr); ok {
+		rt, args = ix.X, ix.Indices
+	}
+	id, ok := rt.(*syntax.Ident)
+	if !ok {
+		return nil, nil, false
+	}
+	tn, ok := c.pkg.Scope.names[id.Name].(*TypeName)
+	if !ok {
+		return nil, nil, false
+	}
+	n, _ := tn.Type.(*Named)
+	if n == nil || n.Obj.Pkg != c.pkg || n.method(f.Name) != nil {
+		return nil, nil, false
+	}
+	if _, isIface := n.underlying().(*Interface); isIface {
+		return nil, nil, false
+	}
+	if s := asStruct(n); s != nil {
+		if fld, _ := s.field(f.Name); fld != nil {
+			return nil, nil, false
+		}
+	}
+	if len(args) != len(n.TParams) || !c.selfArgsOK(d, args) {
+		return nil, nil, false
+	}
+	return n, args, ptr
+}
+
+// selfArgsOK reports whether every type argument of a first parameter's
+// type is a distinct type parameter of the function: one its bracket list
+// declares, or an implicit one (a parameter name no type declares).
+func (c *checker) selfArgsOK(d *syntax.FuncDecl, args []syntax.Expr) bool {
+	declared := map[string]bool{}
+	if d.TypeParams != nil {
+		for _, field := range d.TypeParams.List {
+			for _, name := range field.Names {
+				declared[name.Name] = true
+			}
+		}
+	}
+	seen := map[string]bool{}
+	for _, a := range args {
+		id, ok := a.(*syntax.Ident)
+		if !ok || seen[id.Name] {
+			return false
+		}
+		if !declared[id.Name] && !(isParamName(id.Name) && c.typeObject(id.Name, c.cur) == nil) {
+			return false
+		}
+		seen[id.Name] = true
+	}
+	return true
 }
 
 // inferFlags decides which rows of a function are inferred from its body

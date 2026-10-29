@@ -30,7 +30,8 @@ import "ergo.local/prototype/internal/sketch/syntax"
 //
 // References that need types (a method through a selector, a function of
 // another package) are no edge: a method and an imported function spell
-// their rows.
+// their rows. A call x.f(…) that can reach a package function on x's type
+// (196m) is an edge to every such function named f (selfCallee).
 //
 // The walk also finds the class G value uses (rows.go pinGroup), so they do
 // not depend on typing either (round 16). A reference to a package function
@@ -401,6 +402,41 @@ func (w *refWalker) callee(fun syntax.Expr) {
 	}
 }
 
+// selfCallee records the edges of a call x.f(…) that can reach a package
+// function on x's type (196m). Which function it reaches needs x's type, so
+// the walk takes every package function named f that some x.f(…) reaches:
+// a lexical over-approximation that keeps the graph independent of typing,
+// as a plain call's edge is. Each is a callee, so a value use only through
+// a frame that carries its row as a value.
+func (w *refWalker) selfCallee(fun syntax.Expr) {
+	sel, ok := unparen(fun).(*syntax.SelectorExpr)
+	if !ok {
+		return
+	}
+	if id, ok := sel.X.(*syntax.Ident); ok && !w.local(id.Name) {
+		if _, isPkg := w.c.typeObject(id.Name, w.c.cur).(*PkgName); isPkg {
+			return
+		}
+	}
+	first, ok := w.c.pkg.Scope.names[sel.Sel.Name].(*Func)
+	if !ok {
+		return
+	}
+	edge := func(f *Func) {
+		if f.owner == nil {
+			return
+		}
+		w.refs[f] = true
+		if f.inferErrors || f.inferUses {
+			w.valueUse(f, true, sel.Sel.Pos())
+		}
+	}
+	edge(first)
+	for _, f := range first.same {
+		edge(f)
+	}
+}
+
 // calleeSig returns the signature of a call's callee when it is fixed
 // before any body is typed (decl.go run resolves every signature first):
 //   - a plain identifier, possibly instantiated, that names a function of
@@ -512,7 +548,7 @@ func memberSig(t Type, name string) *Signature {
 		return nil
 	case *Struct:
 		if f := n.method(name); f != nil {
-			return f.Sig
+			return declaredMethodSig(f)
 		}
 		if fld, _ := u.field(name); fld != nil {
 			sig, _ := under0(fld.Type).(*Signature)
@@ -520,9 +556,19 @@ func memberSig(t Type, name string) *Signature {
 		}
 	}
 	if f := n.method(name); f != nil {
-		return f.Sig
+		return declaredMethodSig(f)
 	}
 	return nil
+}
+
+// declaredMethodSig is the signature a call x.f(…) of the method f checks
+// its arguments against: a package function on x's type without the first
+// parameter, which x fills (196m).
+func declaredMethodSig(f *Func) *Signature {
+	if f.owner != nil && f.Sig != nil && len(f.Sig.Params) > 0 {
+		return dropSelf(f.Sig)
+	}
+	return f.Sig
 }
 
 // closedRows reports which rows (errors, capabilities) of a parameter of
@@ -650,6 +696,7 @@ func (w *refWalker) expr(x syntax.Expr) {
 		} else {
 			w.callee(x.Fun)
 			w.expr(x.Fun)
+			w.selfCallee(x.Fun)
 			sig := w.calleeSig(x.Fun)
 			spread := x.Ellipsis.IsValid()
 			for i, a := range x.Args {

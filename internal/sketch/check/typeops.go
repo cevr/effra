@@ -2,6 +2,8 @@ package check
 
 import (
 	"fmt"
+
+	"ergo.local/prototype/internal/sketch/syntax"
 )
 
 // ---------------------------------------------------------------- substitution
@@ -256,6 +258,9 @@ func (c *checker) methodOf(t Type, name string) (*Signature, *Func) {
 	switch t := t.(type) {
 	case *Named:
 		if f := t.method(name); f != nil {
+			if f.owner != nil {
+				return c.selfSig(t, f), f
+			}
 			sig := c.funcSig(f)
 			if t.Orig != nil {
 				m := map[*TypeParam]Type{}
@@ -287,6 +292,56 @@ func (c *checker) methodOf(t Type, name string) (*Signature, *Func) {
 		}
 	}
 	return nil, nil
+}
+
+// selfSig is the signature x.f(…) calls for a value of t (196m): f's
+// without its first parameter, which x fills. On an instance of a generic
+// t, the type parameters the first parameter names take t's type
+// arguments; f's other type parameters stay the signature's own.
+func (c *checker) selfSig(t *Named, f *Func) *Signature {
+	sig := c.funcSig(f)
+	if len(sig.Params) == 0 {
+		return sig
+	}
+	m := selfBinding(t, f)
+	out := dropSelf(sig)
+	if len(m) == 0 {
+		return out
+	}
+	nb := 0
+	for i, tp := range sig.TParams {
+		if _, bound := m[tp]; !bound && i < sig.NBracket {
+			nb++
+		}
+	}
+	s := c.subst(out, m).(*Signature)
+	s.NBracket = nb
+	return s
+}
+
+// selfBinding maps the type parameters of f that its first parameter's
+// type arguments name to t's type arguments, by position.
+func selfBinding(t *Named, f *Func) map[*TypeParam]Type {
+	m := map[*TypeParam]Type{}
+	for i, a := range f.selfArgs {
+		id, _ := a.(*syntax.Ident)
+		if id == nil || i >= len(t.TArgs) || f.Sig == nil {
+			continue
+		}
+		for _, tp := range f.Sig.TParams {
+			if tp.Name == id.Name {
+				m[tp] = t.TArgs[i]
+			}
+		}
+	}
+	return m
+}
+
+// dropSelf is sig without its first parameter, which x of x.f(…) fills.
+func dropSelf(sig *Signature) *Signature {
+	out := *sig
+	out.Params = sig.Params[1:]
+	return &out
 }
 
 // implements checks method-row compatibility: for every method of it, v has

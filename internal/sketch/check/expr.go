@@ -414,6 +414,10 @@ func (c *checker) ident(x *syntax.Ident) operand {
 			c.errorf(x, CodeEntry, "main is called only by the host, so it is not a value (rows.md, Capability rows 4)")
 			return bad(x)
 		}
+		if o.overloaded {
+			c.errorf(x, CodeType, "%s", overloadedText(o.Name))
+			return bad(x)
+		}
 		sig := c.funcSig(o)
 		c.recordDep(o)
 		if c.fn != nil && c.fn.reach != nil {
@@ -860,6 +864,8 @@ func (c *checker) elements(x *syntax.CompositeLit, elem Type, n int64) int {
 // ---------------------------------------------------------------- selectors
 
 func (c *checker) selector(x *syntax.SelectorExpr) operand {
+	called := c.callee == x
+	c.callee = nil
 	if id, ok := x.X.(*syntax.Ident); ok && id.Name == "go" {
 		if o := c.lookup("go"); o != nil {
 			if pn, ok := o.(*PkgName); ok && pn.Pkg == universeOnce.goPkg {
@@ -903,6 +909,9 @@ func (c *checker) selector(x *syntax.SelectorExpr) operand {
 		}
 	}
 	sig, fn := c.methodOf(t, x.Sel.Name)
+	if fn != nil && fn.owner != nil {
+		return c.selfCall(x, base, sig, fn, called)
+	}
 	if sig != nil {
 		if fn != nil {
 			c.recordDep(fn)
@@ -918,6 +927,61 @@ func (c *checker) selector(x *syntax.SelectorExpr) operand {
 	}
 	c.errorf(x.Sel, CodeUnknown, "%s has no field or method %s", base.typ, x.Sel.Name)
 	return bad(x)
+}
+
+// selfCall checks x.f where f is a package function on x's type (196m): it
+// is reached only as the callee of x.f(…) (rule 4), and only when f is
+// visible here. The call then checks the remaining arguments against f's
+// signature without its first parameter (rule 1); x's type arguments bind
+// the type parameters that parameter names, an instantiation of f.
+func (c *checker) selfCall(x *syntax.SelectorExpr, base operand, sig *Signature, fn *Func, called bool) operand {
+	if fn.Pkg != c.pkg && !isExported(fn.Name) {
+		c.errorf(x.Sel, CodeUnknown, "%s has no field or method %s", base.typ, x.Sel.Name)
+		return bad(x)
+	}
+	if !called {
+		c.errorf(x.Sel, CodeUnknown, "%s has no field %s; the function %s on its type is reached only by a call %s.%s(…)", base.typ, x.Sel.Name, fn.Name, exprText(x.X), fn.Name)
+		return bad(x)
+	}
+	if fn.Ptr && !isPointer(base.typ) && !base.addressable {
+		c.errorf(x.X, CodeType, "%s takes *%s, and %s is not addressable", fn.Name, fn.owner.Obj.Name, exprText(x.X))
+		return bad(x)
+	}
+	if c.monoBad(fn.Sig.TParams) {
+		return bad(x)
+	}
+	c.recordDep(fn)
+	if c.fn != nil && c.fn.reach != nil {
+		c.fn.reach.funcs = append(c.fn.reach.funcs, fn)
+	}
+	if c.groupRef(fn) {
+		return bad(x)
+	}
+	t := base.typ
+	if p, ok := t.(*Pointer); ok {
+		t = p.Elem
+	}
+	if n, ok := t.(*Named); ok && len(fn.selfArgs) > 0 {
+		m := selfBinding(n, fn)
+		var tps []*TypeParam
+		var targs []Type
+		for _, tp := range fn.Sig.TParams {
+			if b, ok := m[tp]; ok {
+				tps, targs = append(tps, tp), append(targs, b)
+			}
+		}
+		c.recordInstantiation(fn.Name, tps, targs, x)
+	}
+	if len(sig.TParams) > 0 {
+		return operand{mode: modeGeneric, typ: sig, fn: fn}
+	}
+	return operand{mode: modeValue, typ: sig, fn: fn}
+}
+
+// overloadedText is the S108 of a plain reference to a name several package
+// functions share (196m rule 3).
+func overloadedText(name string) string {
+	return "several functions are named " + name + "; call it as x." + name + "(…)"
 }
 
 func isPointer(t Type) bool {
@@ -944,6 +1008,10 @@ func (c *checker) qualified(x *syntax.SelectorExpr, pn *PkgName) operand {
 		}
 		return operand{mode: modeType, typ: o.Type, obj: o}
 	case *Func:
+		if o.overloaded {
+			c.errorf(x, CodeType, "%s", overloadedText(o.Name))
+			return bad(x)
+		}
 		if len(o.Sig.TParams) > 0 {
 			return operand{mode: modeGeneric, typ: o.Sig, fn: o}
 		}

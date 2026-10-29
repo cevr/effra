@@ -48,7 +48,7 @@ func (c *checker) checkWireCycles() {
 	}
 	byMethod := map[string][]*Func{}
 	for _, f := range c.funcs {
-		if f.Recv != nil {
+		if f.Recv != nil || f.owner != nil {
 			byMethod[f.Name] = append(byMethod[f.Name], f)
 		}
 	}

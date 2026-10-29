@@ -46,6 +46,19 @@ type Func struct {
 	inferErrors, inferUses bool
 	errVar, useVar         *RowVar // the inferred rows' variables (class F)
 	called                 bool
+
+	// owner is set for a function x.f(…) reaches (196m): its first
+	// parameter's type is owner, or *owner, a type declared in this
+	// package. selfArgs are that parameter's type arguments, each a
+	// distinct type parameter of the function, which a call on an instance
+	// binds.
+	owner    *Named
+	selfArgs []syntax.Expr
+	// same holds the later package functions of the same name (196m rule
+	// 3), on the one the package scope holds; overloaded marks every
+	// function of a valid group, which is called only as x.f(…).
+	same       []*Func
+	overloaded bool
 }
 
 // Var is a variable: a parameter, a local or a package-level var.

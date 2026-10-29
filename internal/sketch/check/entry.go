@@ -254,13 +254,17 @@ func (c *checker) checkEntry() {
 // emitter generates it from the fields (types.md, Methods 5).
 func (c *checker) checkErrorMethods() {
 	for _, f := range c.funcs {
-		if f.Recv == nil || f.Name != "Error" {
+		owner := f.Recv
+		if owner == nil {
+			owner = f.owner // Error(e E) string, reached as e.Error() (196m)
+		}
+		if owner == nil || f.Name != "Error" {
 			continue
 		}
-		if _, ok := c.errorTypes[f.Recv.origin()]; !ok {
+		if _, ok := c.errorTypes[owner.origin()]; !ok {
 			continue
 		}
 		c.cur = f.file
-		c.errorf(f.Decl.Name, CodeType, "%s is an error type, so it declares no Error method: its text comes from its fields (types.md, Methods 5)", f.Recv.Obj.Name)
+		c.errorf(f.Decl.Name, CodeType, "%s is an error type, so it declares no Error method: its text comes from its fields (types.md, Methods 5)", owner.Obj.Name)
 	}
 }

@@ -26,6 +26,9 @@ func (c *checker) call(x *syntax.CallExpr, hint Type) operand {
 			return bad(x)
 		}
 	}
+	if sel, ok := unparen(x.Fun).(*syntax.SelectorExpr); ok {
+		c.callee = sel
+	}
 	fun := c.expr(x.Fun, nil)
 	switch fun.mode {
 	case modeInvalid:
