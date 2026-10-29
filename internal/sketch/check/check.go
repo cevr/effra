@@ -257,6 +257,16 @@ func (c *checker) errorAt(pos, end syntax.Pos, code, format string, args ...any)
 			// the construct where the diagnostic is reported.
 			if nl := strings.IndexByte(f.Src[pos:min(int(pos)+length, len(f.Src))], '\n'); nl >= 0 {
 				length = nl
+				// A construct that goes on past its first line is cut
+				// before a comment that ends that line, and before the
+				// blanks in front of it.
+				i := sort.Search(len(f.Comments), func(i int) bool { return f.Comments[i].Pos() > pos })
+				if i < len(f.Comments) && int(f.Comments[i].Pos()) < int(pos)+length {
+					length = int(f.Comments[i].Pos() - pos)
+				}
+				for length > 0 && (f.Src[int(pos)+length-1] == ' ' || f.Src[int(pos)+length-1] == '\t') {
+					length--
+				}
 			}
 			for length > 0 && int(pos)+length < len(f.Src) && !utf8.RuneStart(f.Src[int(pos)+length]) {
 				length++

@@ -240,6 +240,13 @@ func (c *checker) importSpec(fi *fileInfo, spec *syntax.ImportSpec) {
 		return
 	}
 	pkg, err := c.imp.Import(path)
+	if (err != nil || pkg == nil) && laterStd[path] {
+		// A decided std module that lower-v1 brings: S109, never an
+		// unknown package, and its uses do not cascade.
+		c.errorf(spec.Path, CodeOutside, "the std module %s is lower-v1's (task, scope, slice and queue); it is not checked yet", path)
+		c.bindBrokenImport(fi, spec, path)
+		return
+	}
 	if err != nil || pkg == nil {
 		c.errorf(spec.Path, CodeUnknown, "unknown package %q", path)
 		c.bindBrokenImport(fi, spec, path)
@@ -263,6 +270,10 @@ func (c *checker) importSpec(fi *fileInfo, spec *syntax.ImportSpec) {
 
 // bindBrokenImport binds the name of a failed import to an empty package,
 // so its uses add no diagnostic of their own (D3).
+// laterStd are the decided std modules lower-v1 brings (#50): an import of
+// one is S109 naming lower-v1 until the checker reads its declarations.
+var laterStd = map[string]bool{"task": true, "scope": true, "slice": true, "queue": true}
+
 func (c *checker) bindBrokenImport(fi *fileInfo, spec *syntax.ImportSpec, path string) {
 	name := path[strings.LastIndex(path, "/")+1:]
 	if spec.Kind == syntax.ImportNamed && spec.Name != nil {
@@ -1093,7 +1104,12 @@ func (c *checker) signature(ft *syntax.FuncType, ctx *typeCtx) *Signature {
 	if ft.Params != nil {
 		for i, field := range ft.Params.List {
 			var t Type
-			if el, ok := field.Type.(*syntax.Ellipsis); ok {
+			if field.Type == nil {
+				// A function literal's parameter written without a type
+				// (grammar.md; inferring it is #214).
+				c.errorf(field, CodeOutside, "a function literal parameter without a type is #214's (inferred parameter types); it is not checked yet")
+				t = invalid
+			} else if el, ok := field.Type.(*syntax.Ellipsis); ok {
 				last := i == len(ft.Params.List)-1 && len(field.Names) <= 1
 				if !last || el.Elt == nil {
 					c.errorf(field.Type, CodeType, "only the final parameter may be variadic")

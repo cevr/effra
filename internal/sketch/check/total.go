@@ -17,6 +17,10 @@ import (
 // Prior art: Maranget's usefulness algorithm, as in OCaml's Parmatch, Rust
 // and Gleam's exhaustiveness checker: totality is decided over the case
 // matrix, never by enumerating the product of the subjects.
+// matchLen is the length of the keyword a totality diagnostic spans: the
+// decided parser builds every type switch from `match` (#196).
+const matchLen = syntax.Pos(len("match"))
+
 func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 	done := c.openScope()
 	defer done()
@@ -191,7 +195,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 	}
 	if useful.over {
 		// A case whose reachability is unproven is never accepted.
-		c.errorAt(s.Switch, s.Switch+6, CodeNotTotal, "too many cases to prove which cases of this switch are reachable; split it (rows.md, Totality 5)")
+		c.errorAt(s.Switch, s.Switch+matchLen, CodeNotTotal, "too many cases to prove which cases of this switch are reachable; split it (rows.md, Totality 5)")
 		c.totalSwitch[s] = true
 		return
 	}
@@ -199,7 +203,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 		// Resolving the cases ran past the budget (round 9 class C): the
 		// switch is refused like a solver past its budget, never accepted
 		// unproven.
-		c.errorAt(s.Switch, s.Switch+6, CodeNotTotal, "too many cases to prove this switch total; split it or add default (rows.md, Totality 5)")
+		c.errorAt(s.Switch, s.Switch+matchLen, CodeNotTotal, "too many cases to prove this switch total; split it or add default (rows.md, Totality 5)")
 		c.totalSwitch[s] = true
 		return
 	}
@@ -211,7 +215,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 	}
 	switch {
 	case !ok:
-		c.errorAt(s.Switch, s.Switch+6, CodeNotTotal, "too many cases to prove this switch total; split it or add default (rows.md, Totality 5)")
+		c.errorAt(s.Switch, s.Switch+matchLen, CodeNotTotal, "too many cases to prove this switch total; split it or add default (rows.md, Totality 5)")
 	case missing:
 		parts := make([]string, n)
 		for j, idx := range w {
@@ -221,7 +225,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 		if n > 1 {
 			what = "(" + strings.Join(parts, ", ") + ")"
 		}
-		c.errorAt(s.Switch, s.Switch+6, CodeNotTotal, "this type switch is not total: no case handles %s; name every variant or add default (rows.md, Totality 2)", what)
+		c.errorAt(s.Switch, s.Switch+matchLen, CodeNotTotal, "this type switch is not total: no case handles %s; name every variant or add default (rows.md, Totality 2)", what)
 	}
 	// Reported or proved: the switch counts as total for the flow, so no
 	// missing-return diagnostic follows from an S103 (D3; round-2 N1).

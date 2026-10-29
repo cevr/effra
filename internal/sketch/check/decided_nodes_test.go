@@ -30,6 +30,14 @@ func f(m Map[string, int64], xs []int64) []int64 {
 }
 func main() {}
 `, nil},
+		{"an untyped function literal parameter is #214's", `
+func f() { _ = func(x) {} }
+func main() {}
+`, []string{"S109:2"}},
+		{"an import of a std module lower-v1 brings", `
+import task
+func main() { task.Go() { 1 } }
+`, []string{"S109:2"}},
 		{"append checks its elements", `
 func f(xs []int64) []int64 { return xs.Append("a") }
 func main() {}

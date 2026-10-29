@@ -25,9 +25,14 @@ func (c *checker) declareLocal(id *syntax.Ident, t Type) *Var {
 	}
 	sc := c.fn.scope
 	if prev, ok := sc.names[id.Name]; ok {
-		switch prev.(type) {
+		switch prev := prev.(type) {
 		case *capBinding:
 			c.errorf(id, CodeUnknown, "%s is in this function's capability row, so a local of that name in the same frame is an error; rename the local (rows-and-constraints §7 amendment 3)", id.Name)
+		case *Var:
+			// The second declaration is the error; the first is not
+			// also reported as unused (no cascade, D3).
+			prev.used = true
+			c.errorf(id, CodeType, "%s is already declared in this block", id.Name)
 		default:
 			c.errorf(id, CodeType, "%s is already declared in this block", id.Name)
 		}
