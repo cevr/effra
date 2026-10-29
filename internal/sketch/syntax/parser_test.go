@@ -492,6 +492,48 @@ func TestRoundFourForms(t *testing.T) {
 	})
 }
 
+// TestRoundFiveForms: the round-4 review's small items.
+func TestRoundFiveForms(t *testing.T) {
+	t.Run("m1 a bare Map type in value position", func(t *testing.T) {
+		for _, name := range []string{"map-type-value", "map-type-argument"} {
+			src, e := malformedError(t, name)
+			if e.Message != "a type is not a value; write a literal or a conversion" || !strings.HasPrefix(src[e.Offset:], "Map[") {
+				t.Errorf("%s: %v at %q, want the type message at Map", name, e, src[e.Offset:])
+			}
+		}
+	})
+	t.Run("O1 a composite literal in a header", func(t *testing.T) {
+		for _, c := range []struct{ name, at, msg string }{
+			{"header-keyed-literal", "Cfg{", "write (Cfg{…}), or bind it with let first"},
+			{"header-empty-literal", "cfg.Cfg{", "write (cfg.Cfg{…}), or bind it with let first"},
+		} {
+			src, e := malformedError(t, c.name)
+			if !strings.HasSuffix(e.Message, c.msg) || !strings.HasPrefix(src[e.Offset:], c.at) {
+				t.Errorf("%s: %v at %q, want %q at %q", c.name, e, src[e.Offset:], c.msg, c.at)
+			}
+		}
+		// A label on the body's next line keeps the label habit.
+		_, err := Parse("func main() {\n\tfor x in xs {\n\t\tdone: f()\n\t}\n}\n")
+		if err == nil || !strings.Contains(err.Error(), "Ergo has no labels") {
+			t.Errorf("label in a body: %v", err)
+		}
+	})
+	t.Run("Map stays a literal and a type argument", func(t *testing.T) {
+		for _, src := range []string{
+			"let m = Map[string, int]{}\n",
+			"let m = Option[Map[string, int]]{}\n",
+			"let m = Pair[Map[string, int], int]{}\n",
+			"let x = xs[Map[string, int]{}[\"a\"]]\n",
+			"func main() {\n\tfor k, v in (Map[string, int]{}) {\n\t\tuse(k, v)\n\t}\n}\n",
+			"func main() {\n\twith (Cfg{Port: 1}) {\n\t\tuse(1)\n\t}\n}\n",
+		} {
+			if _, err := Parse(src); err != nil {
+				t.Errorf("%q: %v", src, err)
+			}
+		}
+	})
+}
+
 // TestNestingLimit: every recursive construct, and every chain that
 // deepens the tree (selectors, calls, indexes, binary operators, else if),
 // charges the nesting limit, so a tree deeper than MaxNesting is S001

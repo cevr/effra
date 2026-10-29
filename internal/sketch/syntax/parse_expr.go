@@ -1,5 +1,7 @@
 package syntax
 
+import "strings"
+
 // ---------------------------------------------------------------- expressions
 
 // parseExpr parses `[ try ] CatchExpr` (#196 sketch: Expression). try
@@ -148,6 +150,7 @@ func (p *parser) parsePrimaryExpr() Expr {
 		if p.tok.tok == LBRACE && !p.isLiteralType(x) {
 			// The brace opens a body (a control clause header, a block
 			// after a statement): it is a sibling, never a link.
+			p.headerLiteral(x)
 			return x
 		}
 		switch p.tok.tok {
@@ -174,6 +177,11 @@ func (p *parser) parsePrimaryExpr() Expr {
 			}
 		case LBRACK:
 			x = p.parseIndexOrSlice(x)
+			if mapType(x) != x && (p.tok.tok != LBRACE || !p.isLiteralType(x)) {
+				// `Map[K, V]` is the map type (Parser rule 8): a value
+				// only as a composite literal's type (round-4 review m1).
+				p.errorAt(x.Pos(), len("Map"), notAValue)
+			}
 		case LPAREN:
 			x = p.parseCall(x)
 		case LBRACE:
@@ -200,6 +208,29 @@ func (p *parser) isLiteralType(x Expr) bool {
 		return true
 	}
 	return false
+}
+
+// headerLiteral reports a composite literal written bare in a control
+// clause header, `with Cfg{Port: 1} { … }`: the brace there opens the
+// body, so without this the body's `Port:` would read as a label. A body
+// that starts on the brace's line never starts with `name:`, nor with `}`
+// followed by a `{` (round-4 review O1). A `name:` on the next line stays
+// the label habit's.
+func (p *parser) headerLiteral(x Expr) {
+	if p.exprLev >= 0 || strings.Contains(p.src[p.tok.end:p.peek(1).pos], "\n") {
+		return
+	}
+	p.exprLev = 0
+	literal := p.isLiteralType(x)
+	p.exprLev = -1
+	if !literal {
+		return
+	}
+	next, after := p.peek(1).tok, p.peek(2).tok
+	if next == IDENT && after == COLON || next == RBRACE && after == LBRACE {
+		name := p.src[x.Pos():x.End()]
+		p.errorAt(x.Pos(), int(x.End()-x.Pos()), "a composite literal in a header needs parentheses: write (%s{…}), or bind it with let first", name)
+	}
 }
 
 func (p *parser) parseOperand() Expr {
@@ -352,8 +383,9 @@ const notAValue = "a type is not a value; write a literal or a conversion"
 // instantiation: `Map[string, []int]{}`, `Option[func() int]`. A type is
 // taken only when a `,` or `]` follows it; else the index is an expression.
 func (p *parser) parseIndexValue() Expr {
-	switch p.tok.tok {
-	case MUL, LBRACK, FUNC, ESCAPING:
+	switch {
+	case p.tok.tok == MUL, p.tok.tok == LBRACK, p.tok.tok == FUNC, p.tok.tok == ESCAPING:
+	case p.tok.tok == IDENT && p.tok.lit == "Map" && p.peek(1).tok == LBRACK:
 	default:
 		return p.parseExpr()
 	}
