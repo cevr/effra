@@ -298,7 +298,11 @@ func (t *translator) applyEdits(start, end int, edits []edit) string {
 // that replaces a span whole takes the text of its parts this way, so the
 // renames and rewrites inside them are kept, not overlapped.
 func (t *translator) textOf(start, end oldsyntax.Pos) string {
-	var inner, rest []edit
+	// Filtered in place: a generated source of thousands of declarations
+	// calls this once per declaration, so a fresh slice each time was
+	// most of the translation's cost.
+	var inner []edit
+	rest := t.edits[:0]
 	for _, e := range t.edits {
 		if e.start >= int(start) && e.end <= int(end) {
 			inner = append(inner, e)
@@ -828,12 +832,27 @@ func (t *translator) typeParams(l *oldsyntax.FieldList) {
 	if l == nil {
 		return
 	}
-	for _, f := range l.List {
-		if id, ok := f.Type.(*oldsyntax.Ident); ok && id.Name == "any" {
+	isAny := func(f *oldsyntax.Field) bool {
+		id, ok := f.Type.(*oldsyntax.Ident)
+		return ok && id.Name == "any"
+	}
+	for i, f := range l.List {
+		if isAny(f) {
 			// `[T any]` is written `[T]`: the constraint is a
-			// constraint, not `any` as a type.
-			t.replace(f.Names[len(f.Names)-1].End(), id.End(), "")
+			// constraint, not `any` as a type. A group that a constrained
+			// group follows would join it (`[T any, P I[T]]` read as
+			// `[T, P I[T]]` constrains T too), so it is a note.
+			later := false
+			for _, g := range l.List[i+1:] {
+				later = later || !isAny(g)
+			}
+			id := f.Type.(*oldsyntax.Ident)
 			t.skip(id)
+			if later {
+				t.note(id.Pos(), "an unconstrained type parameter before a constrained one: the decided list would give it the later constraint; reorder the parameters by hand")
+				continue
+			}
+			t.replace(f.Names[len(f.Names)-1].End(), id.End(), "")
 		}
 		if s, ok := f.Type.(*oldsyntax.SelectorExpr); ok && t.text(s) == "cmp.Ordered" {
 			t.replace(s.Pos(), s.End(), "ordered")
@@ -895,9 +914,22 @@ func (t *translator) funcDecl(d *oldsyntax.FuncDecl) {
 		r := d.Recv.List[0]
 		// The receiver moves; its name and type keep their renames.
 		recv := t.textOf(r.Type.Pos(), r.Type.End())
-		if len(r.Names) > 0 {
+		// A parameter list is all named or all unnamed: an unnamed
+		// receiver before unnamed parameters stays unnamed, and a named
+		// one names them _.
+		params := d.Type.Params.List
+		unnamed := len(params) > 0 && len(params[0].Names) == 0
+		switch {
+		case len(r.Names) > 0:
 			recv = t.textOf(r.Names[0].Pos(), r.Names[0].End()) + " " + recv
-		} else {
+			if unnamed {
+				// The first one shares the receiver's insertion point.
+				recv += ", _"
+				for _, p := range params[1:] {
+					t.insert(p.Type.Pos(), "_ ")
+				}
+			}
+		case !unnamed:
 			recv = "_ " + recv
 		}
 		t.textOf(d.Recv.Opening, d.Name.Pos())
@@ -905,6 +937,9 @@ func (t *translator) funcDecl(d *oldsyntax.FuncDecl) {
 		sep := ", "
 		if len(d.Type.Params.List) == 0 {
 			sep = ""
+		}
+		if len(r.Names) > 0 && unnamed {
+			sep = " "
 		}
 		t.insert(d.Type.Params.Opening+1, recv+sep)
 	}

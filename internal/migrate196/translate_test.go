@@ -230,6 +230,10 @@ func TestRules(t *testing.T) {
 		// with no note (`[T any]` is written `[T]`).
 		{"any constraint on a type", "package p\n\ntype Box[T any] interface{ M(T) }\n\ntype Pair[A any, B any] struct {\n\tX A\n\tY B\n}\n",
 			"type Box[T] { M(T) }\n\ntype Pair[A, B] {\n\tX A,\n\tY B,\n}\n"},
+		// Merge round: a receiver joins unnamed parameters unnamed, and a
+		// named receiver names them _ (a list is all named or all unnamed).
+		{"receiver before unnamed parameters", "package p\n\ntype S struct{}\n\nfunc (S) M(int) {}\n\nfunc (s S) N(int, string) {}\n\nfunc (S) O(x int) {}\n",
+			"type S {}\n\nfunc M(S, int) {}\n\nfunc N(s S, _ int, _ string) {}\n\nfunc O(_ S, x int) {}\n"},
 		// Round-4 review O1: a wire written as a composite literal keeps
 		// its parentheses in the with header.
 		{"with a literal wire", "package p\n\nfunc f() {\n\twith(Cfg{Port: 1}) {\n\t\tuse(1)\n\t}\n\twith(Live, Cfg{}) {\n\t\tuse(2)\n\t}\n\twith(Cfg{}, run)\n}\n",
@@ -284,6 +288,8 @@ func TestNotes(t *testing.T) {
 		{"multi-type arm on a written subject", "package p\n\nfunc f(v Value) int64 {\n\tswitch p := v.(type) {\n\tcase A, B:\n\t\treturn size(p)\n\t}\n\tv = A{}\n\treturn 0\n}\n", "several types reads p"},
 		// M13: a law moves into its operation type by hand.
 		{"law", "package p\n\nfunc LawRound(q Quantity) bool {\n\treturn q == q\n}\n", "a law function LawRound"},
+		// Merge round: dropping any would join T to the constrained group.
+		{"any before a constrained parameter", "package p\n\ntype I[T any] interface{ M(T) T }\n\nfunc Dep[T any, P I[T]](v T, p P) T { return v }\n", "an unconstrained type parameter before a constrained one"},
 		// m1: located notes, never an internal error.
 		{"else-if init", "package p\n\nfunc f(a int64) int64 {\n\tif a > 1 {\n\t\treturn 1\n\t} else if b := g(); b > 2 {\n\t\treturn b\n\t}\n\treturn 0\n}\n", "an else-if with an init statement"},
 		{"default-only tagless switch", "package p\n\nfunc f() {\n\tswitch {\n\tdefault:\n\t\tuse(1)\n\t}\n}\n", "a switch with only a default arm"},
