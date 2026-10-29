@@ -514,6 +514,25 @@ func (r *Row) minus(tab *typeTable, o *Row) *Row {
 	return out
 }
 
+// without returns the elements of r whose ids are not in drop: minus
+// against a hash set of ids, linear in r (a catch's arms, handlers.go).
+func (r *Row) without(tab *typeTable, drop map[int32]bool) *Row {
+	out := &Row{}
+	if r.Empty() {
+		return out
+	}
+	r = tab.set(r)
+	tab.charge(len(r.Elems()))
+	for i, id := range r.ids {
+		if drop[id] {
+			continue
+		}
+		out.tab, out.gen, out.vars, out.infer = tab, tab.gen, r.vars, r.infer
+		out.elems, out.ids = append(out.elems, r.elems[i]), append(out.ids, id)
+	}
+	return out
+}
+
 // subsetOf reports whether every element of r is in o.
 func (r *Row) subsetOf(tab *typeTable, o *Row) bool {
 	return r.minus(tab, o).Empty()

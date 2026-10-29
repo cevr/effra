@@ -90,8 +90,12 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 			op.typ = valueType
 		}
 	}
-	// covered: the arm types in the row; seen: every arm type.
-	covered, seen := newRow(), newRow()
+	// covered: the arm types in the row; seen: every arm type. Both are hash
+	// sets of interned ids, so an arm costs O(1) whatever the arm count (a
+	// Row copied per arm made a catch quadratic in its arms; round 14
+	// review M1). The table's generation moves only between body checks
+	// (newSolutions, rows.go), so the ids hold for the whole catch.
+	covered, seen := map[int32]bool{}, map[int32]bool{}
 	var group *switchGroup
 	if x.Bind != nil && x.Bind.Name != "_" {
 		group = &switchGroup{}
@@ -130,11 +134,13 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 			// A duplicate arm is a fact of the arms alone: it holds
 			// whatever the row, so a row check on this catch (Catch 1 or
 			// the row half of Catch 2) never hides it (round 13 review M1).
-			if seen.has(c.types, t) {
+			id := c.types.id(t)
+			c.types.charge(1)
+			if seen[id] {
 				c.errorf(te, CodeType, "%s is caught twice (rows.md, Catch 2)", t)
 				continue
 			}
-			seen = seen.with(c.types, t)
+			seen[id] = true
 			if !valid {
 				continue
 			}
@@ -142,7 +148,7 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 				c.errorf(te, CodeType, "%s is not in the caught row %s (rows.md, Catch 2)", t, rowText(row))
 				continue
 			}
-			covered = covered.with(c.types, t)
+			covered[id] = true
 		}
 		saved := c.fn.scope
 		c.fn.scope = newScope(saved)
@@ -181,7 +187,7 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 		}
 		return bad(x)
 	}
-	rest := row.minus(c.types, covered)
+	rest := row.without(c.types, covered)
 	if !partial && !rest.Empty() {
 		c.errorAt(x.Catch, x.Catch+5, CodeNotTotal, "this catch does not handle %s; a catch without try handles every error of the row (rows.md, Catch 4)", rowText(rest))
 	}
