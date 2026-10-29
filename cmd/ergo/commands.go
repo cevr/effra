@@ -52,7 +52,7 @@ const toolingReason = "semantic tooling returns on the new front end"
 var commands = []cliCommand{
 	{name: "check", usage: "check FILE [--target go]", run: checkCommand},
 	{name: "diagnostics", usage: "diagnostics FILE [--strict] [--json] [--target go]", help: diagnosticsHelp, run: diagnosticsCommand},
-	{name: "build", usage: "build FILE [-o PATH] [--target go]", run: buildCommand},
+	{name: "build", usage: "build FILE [-o PATH] [-work] [--target go]", run: buildCommand},
 	{name: "run", usage: "run FILE [--target go]", run: runCommand},
 	{name: "fmt", usage: "fmt FILE... [--check] [--json] | fmt --stdin", help: fmtHelp, run: formatCommand},
 	{name: "test", fate: pending, usage: "test FILE", reason: "lowering adds it", ticket: ticketLowering},

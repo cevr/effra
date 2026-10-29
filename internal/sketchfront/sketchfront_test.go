@@ -2,15 +2,21 @@ package sketchfront
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
+	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf16"
 
 	"ergo.local/prototype/internal/report"
+	"ergo.local/prototype/internal/sketch/build"
+	"ergo.local/prototype/internal/sketch/std"
 )
 
 // utf16Column counts the UTF-16 code units of text, independently of the
@@ -160,7 +166,12 @@ func TestSketchBuildRunsProgram(t *testing.T) {
 	}
 	output := filepath.Join(t.TempDir(), "program")
 	var stderr bytes.Buffer
-	if err := Build(analysis, filepath.Join(dir, "main.ergo"), output, &stderr); err != nil {
+	sourcePath, err := filepath.Abs(filepath.Join(dir, "main.ergo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := t.TempDir()
+	if _, err := Build(analysis, buildRequest(cache, sourcePath, output, &stderr)); err != nil {
 		t.Fatalf("build: %v\n%s", err, stderr.String())
 	}
 	got, err := exec.Command(output).Output()
@@ -170,9 +181,12 @@ func TestSketchBuildRunsProgram(t *testing.T) {
 	if !bytes.Equal(got, expected) {
 		t.Fatalf("stdout %q, want %q", got, expected)
 	}
-	// An analysis with diagnostics never builds.
-	if err := Build(Check("func main() {}\n$"), "bad.ergo", filepath.Join(t.TempDir(), "bad"), &stderr); err == nil {
+	// An analysis with diagnostics never builds and publishes nothing.
+	if _, err := Build(Check("func main() {}\n$"), buildRequest(cache, "/x/bad.ergo", filepath.Join(t.TempDir(), "bad"), &stderr)); err == nil {
 		t.Fatal("an analysis with diagnostics built")
+	}
+	if entries := moduleEntries(t, cache); len(entries) != 1 {
+		t.Fatalf("cache holds %v, want only the example's module", entries)
 	}
 }
 
@@ -188,7 +202,8 @@ func TestSketchBuildRefusesWhatTheEmitterCannotLower(t *testing.T) {
 	}
 	output := filepath.Join(t.TempDir(), "program")
 	var stderr bytes.Buffer
-	err := Build(analysis, "main.ergo", output, &stderr)
+	cache := t.TempDir()
+	_, err := Build(analysis, buildRequest(cache, "/x/main.ergo", output, &stderr))
 	var refusal *BuildError
 	if !errors.As(err, &refusal) || len(refusal.Diagnostics) == 0 {
 		t.Fatalf("build gave %v, want a BuildError", err)
@@ -200,9 +215,191 @@ func TestSketchBuildRefusesWhatTheEmitterCannotLower(t *testing.T) {
 	if _, statErr := os.Stat(output); statErr == nil {
 		t.Fatal("a refused build wrote its output")
 	}
+	if entries := moduleEntries(t, cache); len(entries) != 0 {
+		t.Fatalf("a refused build published %v", entries)
+	}
 	bad := Check("func main() needs Console {\n\tConsole.Println(missing)\n}\n")
-	err = Build(bad, "main.ergo", output, &stderr)
+	_, err = Build(bad, buildRequest(cache, "/x/main.ergo", output, &stderr))
 	if !errors.As(err, &refusal) || refusal.Diagnostics[0].Code != "S104" || !strings.HasPrefix(err.Error(), "S104 at 2:18: ") {
 		t.Fatalf("build of a checker error gave %v", err)
+	}
+}
+
+func buildRequest(cache, source, output string, stderr io.Writer) BuildRequest {
+	return BuildRequest{Source: source, Output: output, Cache: build.Cache{Root: cache}, Toolchain: build.HostToolchain(), Stderr: stderr}
+}
+
+// moduleEntries lists the published modules of the cache at root.
+func moduleEntries(t *testing.T, root string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(root, "modules"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// fileState is a published file's digest, metadata and identity.
+type fileState struct {
+	digest [32]byte
+	info   fs.FileInfo
+}
+
+// snapshotModule records every file under dir.
+func snapshotModule(t *testing.T, dir string) map[string]fileState {
+	t.Helper()
+	states := map[string]fileState{}
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(p)
+		if err != nil {
+			return err
+		}
+		states[p] = fileState{digest: sha256.Sum256(data), info: info}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return states
+}
+
+// sameFiles reports whether two snapshots hold the same files with the same
+// bytes, inode and modification time: nothing was rewritten.
+func sameFiles(a, b map[string]fileState) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for p, x := range a {
+		y, ok := b[p]
+		if !ok || x.digest != y.digest || !os.SameFile(x.info, y.info) || !x.info.ModTime().Equal(y.info.ModTime()) {
+			return false
+		}
+	}
+	return true
+}
+
+// TestBuildCachesTheEmittedModule: a cold build emits and publishes the
+// module; an unchanged build reuses it without rewriting a file; an edit
+// and a rename (same bytes at another admitted path) each publish another
+// module whose //line directives name their own path, and the executable
+// follows the edit. Spec D7, #224.
+func TestBuildCachesTheEmittedModule(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "ergo")
+	dir := t.TempDir()
+	source := filepath.Join(dir, "main.ergo")
+	text := "func main() needs Console {\n\tConsole.Println(\"one\")\n}\n"
+	run := func(path, text string) (build.Module, string) {
+		t.Helper()
+		output := filepath.Join(t.TempDir(), "program")
+		var stderr bytes.Buffer
+		module, err := Build(Check(text), buildRequest(cache, path, output, &stderr))
+		if err != nil {
+			t.Fatalf("build %s: %v\n%s", path, err, stderr.String())
+		}
+		out, err := exec.Command(output).Output()
+		if err != nil {
+			t.Fatalf("run %s: %v", path, err)
+		}
+		return module, string(out)
+	}
+	mainGo := func(module build.Module) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(module.Dir, "main.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	cold, out := run(source, text)
+	if cold.Reused || out != "one\n" || filepath.Dir(cold.Dir) != filepath.Join(cache, "modules") {
+		t.Fatalf("cold build: reused=%v dir=%s output %q", cold.Reused, cold.Dir, out)
+	}
+	if !strings.Contains(mainGo(cold), "//line "+source+":") {
+		t.Fatalf("cold module's //line directives do not name %s:\n%s", source, mainGo(cold))
+	}
+	before := snapshotModule(t, cold.Dir)
+	warm, out := run(source, text)
+	if !warm.Reused || warm.Dir != cold.Dir || out != "one\n" || !sameFiles(before, snapshotModule(t, cold.Dir)) {
+		t.Fatalf("warm build: reused=%v dir=%s output %q, files rewritten=%v", warm.Reused, warm.Dir, out, !sameFiles(before, snapshotModule(t, cold.Dir)))
+	}
+	edit, out := run(source, strings.Replace(text, "one", "two", 1))
+	if edit.Reused || edit.Dir == cold.Dir || out != "two\n" {
+		t.Fatalf("edited build: reused=%v dir=%s output %q", edit.Reused, edit.Dir, out)
+	}
+	renamed := filepath.Join(dir, "other.ergo")
+	moved, out := run(renamed, text)
+	if moved.Reused || moved.Dir == cold.Dir || moved.Dir == edit.Dir || out != "one\n" ||
+		!strings.Contains(mainGo(moved), "//line "+renamed+":") || strings.Contains(mainGo(moved), source) {
+		t.Fatalf("renamed build: reused=%v dir=%s output %q\n%s", moved.Reused, moved.Dir, out, mainGo(moved))
+	}
+	again, _ := run(source, text)
+	if !again.Reused || again.Dir != cold.Dir || !sameFiles(before, snapshotModule(t, cold.Dir)) {
+		t.Fatalf("the first module was not reused intact: reused=%v dir=%s", again.Reused, again.Dir)
+	}
+	if entries := moduleEntries(t, cache); len(entries) != 3 {
+		t.Fatalf("cache holds %d modules, want 3: %v", len(entries), entries)
+	}
+}
+
+// TestStdDependenciesSummariseEveryBundledPackage: the emission key's
+// dependency summaries cover the prelude and every importable std package,
+// and an edit, a rename or an added file in a package changes its summary.
+func TestStdDependenciesSummariseEveryBundledPackage(t *testing.T) {
+	deps := stdDependencies()
+	names := []string{}
+	for _, d := range deps {
+		names = append(names, d.Name)
+		if d.Interface == "" || d.Implementation == "" {
+			t.Fatalf("dependency %s has an empty summary", d.Name)
+		}
+	}
+	if want := append([]string{std.PreludePath}, std.Packages()...); !slices.Equal(names, want) {
+		t.Fatalf("dependencies %v, want %v", names, want)
+	}
+	base := map[string]string{"a.ergo": "type A {}\n", "b.ergo": "type B {}\n"}
+	digests := map[string]bool{sourceDependency("p", base).Interface: true}
+	for name, files := range map[string]map[string]string{
+		"edit":   {"a.ergo": "type A { X int }\n", "b.ergo": "type B {}\n"},
+		"rename": {"c.ergo": "type A {}\n", "b.ergo": "type B {}\n"},
+		"add":    {"a.ergo": "type A {}\n", "b.ergo": "type B {}\n", "c.ergo": ""},
+		"shift":  {"a.ergo": "type A {}\ntype B {}\n", "b.ergo": ""},
+	} {
+		d := sourceDependency("p", files)
+		if digests[d.Interface] || d.Interface != d.Implementation {
+			t.Fatalf("%s kept a summary or split it: %+v", name, d)
+		}
+		digests[d.Interface] = true
+	}
+}
+
+// TestBuildRefusesAnUnanchorableSource: a source path a //line directive
+// cannot name (a line feed would end the directive and turn the rest of the
+// name into Go code) or a relative one is refused before emission, and
+// nothing is published.
+func TestBuildRefusesAnUnanchorableSource(t *testing.T) {
+	cache := t.TempDir()
+	analysis := Check("func main() needs Console {\n\tConsole.Println(\"x\")\n}\n")
+	for _, path := range []string{"/x/a\nfunc init() { panic(1) }\n//.ergo", "/x/a\x00.ergo", "main.ergo", "/x/../x/main.ergo", "/x/\xff.ergo"} {
+		var stderr bytes.Buffer
+		if _, err := Build(analysis, buildRequest(cache, path, filepath.Join(t.TempDir(), "program"), &stderr)); err == nil || !strings.Contains(err.Error(), "source path") {
+			t.Fatalf("build named %q: %v", path, err)
+		}
+	}
+	if entries := moduleEntries(t, cache); len(entries) != 0 {
+		t.Fatalf("refused builds published %v", entries)
 	}
 }
