@@ -21,7 +21,7 @@ const sketchWaitSource = `func wait() needs Console, Scheduler {
 }
 
 let Clock = wire {
-	Scheduler: LiveScheduler{},
+	Scheduler: LiveScheduler,
 }
 
 func main() needs Console {
