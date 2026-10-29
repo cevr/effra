@@ -292,7 +292,7 @@ func TestReadmeSmoke(t *testing.T) {
 		for _, control := range []string{
 			"func f(x Order) Receipt fails Declined needs Payments {\n\treturn Payments.Charge(x)\n}\n",
 			// Exit cleanup that is not a release stays valid (resources.md, `scope.OnExit`).
-			"func f(done queue.Queue[int64]) {\n\tscope.OnExit() { done.Push(1) }\n\twork()\n}\n",
+			"import queue\nimport scope\n\nfunc f(done queue.Queue[int64]) {\n\tscope.OnExit() { done.Push(1) }\n\twork()\n}\n",
 		} {
 			if problem := readmeBlockProblem(control); problem != nil {
 				t.Errorf("control block refused: %v\n%s", problem, control)

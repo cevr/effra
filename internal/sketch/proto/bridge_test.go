@@ -139,9 +139,9 @@ var bridgeTable = []struct {
 	line int
 }{
 	{"for-loop", "func main() needs Console {\n\tfor i in 0..3 {\n\t\tConsole.Println(\"x\")\n\t}\n}\n", 2},
-	{"defer", "func main() needs Console {\n\tscope.OnExit() { Console.Println(\"done\") }\n\tConsole.Println(\"x\")\n}\n", 2},
+	{"defer", "import scope\n\nfunc main() needs Console {\n\tscope.OnExit() { Console.Println(\"done\") }\n\tConsole.Println(\"x\")\n}\n", 4},
 	{"typed-let", "func main() needs Console {\n\tlet s string = \"x\"\n\tConsole.Println(s)\n}\n", 2},
-	{"go-task", "func work() needs Console {\n\tConsole.Println(\"w\")\n}\n\nfunc main() needs Console {\n\tlet t = task.Go() { work() }\n\tt.Stop()\n}\n", 6},
+	{"go-task", "import task\n\nfunc work() needs Console {\n\tConsole.Println(\"w\")\n}\n\nfunc main() needs Console {\n\tlet t = task.Go() { work() }\n\tt.Stop()\n}\n", 8},
 	{"generic-function", "func same[T comparable](x T) T {\n\treturn x\n}\n\nfunc main() needs Console {\n\tConsole.Println(same(\"x\"))\n}\n", 1},
 	{"machine", "type State = Idle | Busy\ntype Idle {}\ntype Busy {}\ntype Event = Start | Halt\ntype Start {}\ntype Halt {}\n\nfunc step(s State, e Event) string {\n\treturn \"x\"\n}\n\ntype M machine[State, Event] {\n\tinitial: Idle{},\n\tstep:    step,\n}\n\nfunc main() needs Console {\n\tConsole.Println(\"x\")\n}\n", 12},
 	{"catch-binding", "type NotFound { Name string }\n\nfunc find() string fails NotFound {\n\treturn NotFound{Name: \"x\"}\n}\n\nfunc main() needs Console {\n\tlet line = find() catch {\n\tcase NotFound as e:\n\t\te.Name\n\t}\n\tConsole.Println(line)\n}\n", 9},
