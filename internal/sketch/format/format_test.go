@@ -373,6 +373,13 @@ func TestLayout(t *testing.T) {
 			"let x = f(a /* x */, b)\nlet y = f( /* y */ )\nlet z = f(a /* z */)\n",
 		},
 		{
+			// Round-2 review O1: the `)` that closes an interpolation
+			// follows the same rule.
+			"block comment before an interpolation closer",
+			"let s = \"\\(a /* c */) and \\(b /* d */)!\"\n",
+			"let s = \"\\(a /* c */) and \\(b /* d */)!\"\n",
+		},
+		{
 			"grouped names keep their line breaks",
 			"func f(a,\nb int) {}\n\ntype T {\n\tx,\ny int,\n}\n",
 			"func f(a,\n\tb int) {}\n\ntype T {\n\tx,\n\ty int,\n}\n",

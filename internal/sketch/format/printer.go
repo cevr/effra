@@ -208,10 +208,12 @@ func (p *printer) tokenEnd(pos syntax.Pos, text string, end syntax.Pos) {
 		// After a block comment on the same line, go/printer writes no
 		// blank before `,`, nor before `)` or `]` unless the comment
 		// directly follows the opener: `f(a /* x */, b)`, `f( /* x */ )`.
+		// The middle and tail segments of an interpolated string start
+		// with the `)` that closes the interpolation, so they count as `)`.
 		opener := p.file.Src[p.lastTok-1]
 		switch {
 		case text == ",",
-			text == ")" && opener != '(',
+			strings.HasPrefix(text, ")") && opener != '(',
 			text == "]" && opener != '[':
 			p.pendingSpace = false
 		}
