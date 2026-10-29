@@ -102,13 +102,20 @@ func calledSelector(fun syntax.Expr) *syntax.SelectorExpr {
 }
 
 // silentArgs checks the arguments of a call whose callee is invalid, so
-// their own mistakes are still reported, without further cascades.
+// their own mistakes are still reported, without further cascades. What
+// the callee expects is unknown, so a type argument is no mistake:
+// new(int) is one S104, never a second "int is a type" (D3).
 func (c *checker) silentArgs(x *syntax.CallExpr) {
 	for _, a := range x.Args {
 		if _, ok := a.(*syntax.FuncLit); ok {
 			continue
 		}
-		c.valueExpr(a, nil)
+		op := c.expr(a, nil)
+		if op.mode == modeType {
+			continue
+		}
+		c.needValue(&op)
+		c.handled(&op)
 	}
 }
 

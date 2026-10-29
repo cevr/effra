@@ -298,6 +298,17 @@ func (c *checker) matchTypes(x *syntax.BinaryExpr, l, r *operand) bool {
 		return true
 	}
 	if x.Op == syntax.EQL || x.Op == syntax.NEQ {
+		// A value that satisfies an operation type through its functions
+		// (196m) is not that type's value until it is converted, so == has
+		// no meaning to lower (AGENTS.md: never an unchecked passthrough).
+		for _, p := range [][2]Type{{l.typ, r.typ}, {r.typ, l.typ}} {
+			if asInterface(p[1]) != nil && asInterface(p[0]) == nil && len(asInterface(p[1]).Methods) > 0 {
+				if ok, _ := c.assignable(p[0], p[1]); ok {
+					c.errorf(x, CodeType, "cannot compare %s with %s: a %s satisfies %s through its functions, so it is not a %s value; compare two values of one type", l.typ, r.typ, p[0], p[1], p[1])
+					return false
+				}
+			}
+		}
 		if ok, _ := c.assignable(l.typ, r.typ); ok {
 			l.typ = r.typ
 			return true
