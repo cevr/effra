@@ -950,9 +950,10 @@ func TestFollowOnRows(t *testing.T) {
 	}
 }
 
-// A duplicate arm reads the arms alone, so a Catch 1, or a Catch 2 on a
-// type the row lacks, does not hide it (rows.md, Catch 2; round 13 review
-// M1). These programs have no class G at all.
+// A duplicate arm reads the arms alone, so a Catch 1, a Catch 2 on a type
+// the row lacks, or an invalid caught expression does not hide it (rows.md,
+// Catch 2; round 13 review M1, round 14 review T1). These programs have no
+// class G at all.
 func TestDuplicateArmWhateverRow(t *testing.T) {
 	for _, tc := range []struct {
 		name, src string
@@ -993,6 +994,19 @@ func main() {
 	}
 }
 `, []string{"6:7 S108 main.E is caught twice (rows.md, Catch 2)"}},
+		// The round 14 review's probe r2 (mutant DUP3): the caught
+		// expression is invalid, and the duplicate is still reported.
+		{"on an invalid caught expression", `type Q {}
+func main() {
+	nope() catch {
+	case Q:
+	case Q:
+	}
+}
+`, []string{
+			"3:2 S104 unknown name nope",
+			"5:7 S108 main.Q is caught twice (rows.md, Catch 2)",
+		}},
 	} {
 		if have := diagLines(tc.src); strings.Join(have, "\n") != strings.Join(tc.want, "\n") {
 			t.Errorf("%s:\nhave %q\nwant %q", tc.name, have, tc.want)
