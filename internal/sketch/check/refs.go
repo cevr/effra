@@ -680,11 +680,38 @@ func (w *refWalker) selfCallee(fun syntax.Expr) {
 		}
 	}
 	if f := n.method(sel.Sel.Name); f != nil && f.owner != nil {
+		if _, indexed := unparen(fun).(*syntax.IndexExpr); indexed && ownBrackets(f) == 0 {
+			// x.f[i](…) with no bracket type parameter to fill: an S104,
+			// no call of f (expr.go selfCall; round 8 review m1).
+			return
+		}
 		w.refs[f] = true
 		if f.inferErrors || f.inferUses {
 			w.valueUse(f, true, sel.Sel.Pos())
 		}
 	}
+}
+
+// ownBrackets counts the bracket type parameters of the 196m function f
+// that its first parameter does not name: the type arguments x.f[…](…)
+// fills (typeops.go selfSig counts the same on an instance).
+func ownBrackets(f *Func) int {
+	if f.Sig == nil {
+		return 0
+	}
+	named := map[string]bool{}
+	for _, a := range f.selfArgs {
+		if id, ok := a.(*syntax.Ident); ok {
+			named[id.Name] = true
+		}
+	}
+	n := 0
+	for i, tp := range f.Sig.TParams {
+		if i < f.Sig.NBracket && !named[tp.Name] {
+			n++
+		}
+	}
+	return n
 }
 
 // calleeSig returns the signature of a call's callee when it is fixed

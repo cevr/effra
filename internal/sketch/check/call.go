@@ -28,6 +28,7 @@ func (c *checker) call(x *syntax.CallExpr, hint Type) operand {
 	}
 	if sel := calledSelector(x.Fun); sel != nil {
 		c.callee = sel
+		c.calleeIndex, _ = unparen(x.Fun).(*syntax.IndexExpr)
 	}
 	fun := c.expr(x.Fun, nil)
 	if fun.mode == modeValue && isInvalid(fun.typ) {

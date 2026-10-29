@@ -52,3 +52,29 @@ func TestSelfCallForms(t *testing.T) {
 		})
 	}
 }
+
+// TestSelfCallIndexIsNoTypeArgument (round 8 review m1): in s.f[i](…) the
+// brackets are type arguments only when f has bracket type parameters its
+// first parameter does not bind. Otherwise s.f is not called: a function on
+// a type has no method value (types.md, Methods 2), so s.f[i] is the S104
+// of s.f, which suggests the call s.f()[i].
+func TestSelfCallIndexIsNoTypeArgument(t *testing.T) {
+	for _, tc := range []struct{ name, src, want string }{
+		{"a function without type parameters", "type S {}\nfunc hs(s S) []func() int { return []func() int{} }\nfunc f(s S) int { return s.hs[0]() }\nfunc main() {}\n",
+			"main.S has no field hs; the function hs on its type is reached only by a call s.hs(…): write s.hs()[0]"},
+		{"a function whose type parameters the receiver binds", "type G[T] {}\nfunc hs[T](g G[T]) []func() int { return []func() int{} }\nfunc f(g G[int]) int { return g.hs[0]() }\nfunc main() {}\n",
+			"main.G[int] has no field hs; the function hs on its type is reached only by a call g.hs(…): write g.hs()[0]"},
+		{"a local index", "type S {}\nfunc hs(s S) []func() int { return []func() int{} }\nfunc f(s S, i int) int { return s.hs[i]() }\nfunc main() {}\n",
+			"main.S has no field hs; the function hs on its type is reached only by a call s.hs(…): write s.hs()[i]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, diags := check.CheckSource(tc.src)
+			if len(diags) != 1 || diags[0].Code != "S104" || diags[0].Message != tc.want {
+				t.Errorf("want only S104 %q; got %v", tc.want, diags)
+			}
+			if p := check.RefWalkProblems(tc.src); len(p) > 0 {
+				t.Errorf("references: %s", strings.Join(p, "; "))
+			}
+		})
+	}
+}

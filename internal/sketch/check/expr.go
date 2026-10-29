@@ -935,7 +935,11 @@ func (c *checker) elements(x *syntax.CompositeLit, elem Type, n int64) int {
 
 func (c *checker) selector(x *syntax.SelectorExpr) operand {
 	called := c.callee == x
-	c.callee = nil
+	index := c.calleeIndex
+	c.callee, c.calleeIndex = nil, nil
+	if !called {
+		index = nil
+	}
 	if id, ok := x.X.(*syntax.Ident); ok && id.Name == "go" {
 		if o := c.lookup("go"); o != nil {
 			if pn, ok := o.(*PkgName); ok && pn.Pkg == universeOnce.goPkg {
@@ -990,7 +994,7 @@ func (c *checker) selector(x *syntax.SelectorExpr) operand {
 	}
 	sig, fn := c.methodOf(t, x.Sel.Name)
 	if fn != nil && fn.owner != nil {
-		return c.selfCall(x, base, sig, fn, called)
+		return c.selfCall(x, base, sig, fn, called, index)
 	}
 	if sig != nil {
 		if fn != nil {
@@ -1014,13 +1018,23 @@ func (c *checker) selector(x *syntax.SelectorExpr) operand {
 // visible here. The call then checks the remaining arguments against f's
 // signature without its first parameter (rule 1); x's type arguments bind
 // the type parameters that parameter names, an instantiation of f.
-func (c *checker) selfCall(x *syntax.SelectorExpr, base operand, sig *Signature, fn *Func, called bool) operand {
+func (c *checker) selfCall(x *syntax.SelectorExpr, base operand, sig *Signature, fn *Func, called bool, index *syntax.IndexExpr) operand {
 	if fn.Pkg != c.pkg && !isExported(fn.Name) {
 		c.errorf(x.Sel, CodeUnknown, "%s has no field or method %s", base.typ, x.Sel.Name)
 		return bad(x)
 	}
 	if !called {
 		c.errorf(x.Sel, CodeUnknown, "%s has no field %s; the function %s on its type is reached only by a call %s.%s(…)", base.typ, x.Sel.Name, fn.Name, exprText(x.X), fn.Name)
+		return bad(x)
+	}
+	if index != nil && sig.NBracket == 0 {
+		// x.f[i](…): f has no bracket type parameter x does not bind, so
+		// the brackets are no type arguments and x.f is not called; a
+		// function on a type has no method value (types.md, Methods 2;
+		// round 8 review m1).
+		src := c.cur.syntax.Src
+		idx := src[index.Lbrack+1 : index.Rbrack]
+		c.errorf(x.Sel, CodeUnknown, "%s has no field %s; the function %s on its type is reached only by a call %s.%s(…): write %s.%s()[%s]", base.typ, x.Sel.Name, fn.Name, exprText(x.X), fn.Name, exprText(x.X), fn.Name, idx)
 		return bad(x)
 	}
 	if fn.Ptr && !isPointer(base.typ) && !base.addressable {

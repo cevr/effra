@@ -125,6 +125,10 @@ type checker struct {
 	// callee is the selector a call is about to check as its callee: only
 	// there does x.f reach a package function on x's type (196m rule 4).
 	callee *syntax.SelectorExpr
+	// calleeIndex is the index around callee, x.f[…](…), or nil: its
+	// brackets are type arguments only when f has bracket type parameters
+	// x does not bind (selfCall; round 8 review m1).
+	calleeIndex *syntax.IndexExpr
 	// selfRes, set while resolveSelfCalls types the bodies with pending
 	// calls x.f(…), receives what each such call resolves to: a 196m
 	// function, or nil for another member (selector, selfCall).
