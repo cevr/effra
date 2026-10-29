@@ -88,7 +88,7 @@ func RefWalkProblems(src string) []string {
 		return nil
 	}
 	for _, wk := range walks {
-		out = append(out, frameProblems(c, wk.w)...)
+		out = append(out, frameProblems(c, wk.w, wk.root)...)
 		for _, x := range wk.w.retired {
 			if fn, ok := c.selfFinal[x]; ok {
 				out = append(out, fmt.Sprintf("%s at %d: the walk retired the call (its receiver names nothing), typing resolves %s", exprText(x), x.Pos(), depName(fn)))
@@ -140,47 +140,143 @@ func RefWalkProblems(src string) []string {
 // checked the frame in that body check when an identifier directly in the
 // frame (not in a nested frame) that the walk resolves to a package object
 // was resolved by typing in that check (c.useGens), and left it unchecked
-// when none was. A frame the walk drops that typing checked, and a frame
-// the walk keeps that typing left unchecked, are both reported. A frame
-// with no such identifier is undecided and skipped. (The reporting pass may
-// skip a frame the pin kept: a call refused by class G checks nothing of
-// its own, by design, and the S108 is at the refused member.)
-func frameProblems(c *checker, w *refWalker) []string {
+// when none was (an identifier typing resolved in some check also decides).
+// A frame recorded invalid that typing checked, a frame recorded checked
+// that typing left unchecked, and a frame recorded provisional that typing
+// checked are reported. A frame with no such identifier is undecided and
+// skipped.
+//
+// The pin's verdict is also compared with the reporting pass, which types
+// the bodies on the converged rows (round 9 review M1): a frame the pin
+// dropped that the reporting pass checked is reported, and so is a frame
+// the pin kept that the reporting pass left unchecked, except a frame of a
+// call class G refuses (refusedCallFrames: by design such a call checks
+// nothing of its own, and the S108 is at the refused member).
+func frameProblems(c *checker, w *refWalker, root syntax.Node) []string {
 	var out []string
 	nested := make(map[syntax.Node]bool, len(w.cbFrames))
 	for _, f := range w.cbFrames {
 		nested[f] = true
 	}
+	refusedCall := refusedCallFrames(c, w, root)
+	final := c.bodyGen[w.owner]
 	for _, f := range w.cbFrames {
 		v, pinned := c.guardTrace[f]
 		if !pinned {
-			v.gen = c.bodyGen[w.owner]
-			v.kept = v.gen != 0 && c.frameGen[f] == v.gen
+			v = frameVerdict{state: c.frameStateAt(f, final), gen: final}
 		}
-		known, typed := false, false
+		// The witness: the body checks in which typing resolved an
+		// identifier directly in the frame. known: the frame holds an
+		// identifier typing resolves whenever it checks the frame (one the
+		// walk resolves to a package object), or one it resolved in some
+		// check.
+		known := false
+		gens := map[int]bool{}
 		syntax.Inspect(f, func(n syntax.Node) bool {
 			if n != f && nested[n] {
 				return false
 			}
 			id, ok := n.(*syntax.Ident)
-			if !ok || w.idents[id] == nil {
+			if !ok {
 				return true
 			}
-			known = true
-			if slices.Contains(c.useGens[id], v.gen) {
-				typed = true
+			if w.idents[id] != nil || len(c.useGens[id]) > 0 {
+				known = true
+			}
+			for _, g := range c.useGens[id] {
+				gens[g] = true
 			}
 			return true
 		})
+		if !known {
+			continue
+		}
+		typed := gens[v.gen]
 		switch {
-		case !known:
-		case !v.kept && typed:
+		case v.state == frameInvalid && typed:
 			out = append(out, fmt.Sprintf("%T at %d: the walk drops the callback frame, and typing checked it", f, f.Pos()))
-		case v.kept && !typed:
+		case v.state == frameChecked && !typed:
 			out = append(out, fmt.Sprintf("%T at %d: typing left the callback frame unchecked, and the walk kept its uses", f, f.Pos()))
+		case v.state == frameProvisional && typed:
+			out = append(out, fmt.Sprintf("%T at %d: typing recorded the callback frame provisional, and checked it", f, f.Pos()))
+		}
+		if !pinned || v.gen == final {
+			continue
+		}
+		reported := gens[final]
+		switch {
+		case !v.kept() && reported:
+			out = append(out, fmt.Sprintf("%T at %d: the pin dropped the callback frame (%s), and the reporting pass checked it", f, f.Pos(), v.state))
+		case v.kept() && !reported && !refusedCall[f]:
+			out = append(out, fmt.Sprintf("%T at %d: the pin kept the callback frame (%s), and the reporting pass left it unchecked", f, f.Pos(), v.state))
 		}
 	}
 	return out
+}
+
+// refusedCallFrames is the callback frames of a call that class G refuses,
+// and the frames inside them: the call names, outside the frame (in its
+// callee or another argument), a function with the class G S108 at its
+// declaration, which the walk resolves. In the reporting pass every
+// reference to a refused member is invalid, so such a call checks none of
+// its frames (D3).
+func refusedCallFrames(c *checker, w *refWalker, root syntax.Node) map[syntax.Node]bool {
+	out := map[syntax.Node]bool{}
+	frames := map[syntax.Node]bool{}
+	for _, f := range w.cbFrames {
+		frames[f] = true
+	}
+	syntax.Inspect(root, func(n syntax.Node) bool {
+		x, ok := n.(*syntax.CallExpr)
+		if !ok {
+			return true
+		}
+		var refs []syntax.Pos
+		syntax.Inspect(x, func(m syntax.Node) bool {
+			id, ok := m.(*syntax.Ident)
+			if !ok {
+				return true
+			}
+			if fn, ok := w.idents[id].(*Func); ok && fn.Decl != nil && groupRefusedAt(c.diags, int(fn.Decl.Name.Pos())) {
+				refs = append(refs, id.Pos())
+			}
+			return true
+		})
+		var own []syntax.Node
+		for _, a := range x.Args {
+			if frames[a] {
+				own = append(own, a)
+			}
+		}
+		if x.Trailing != nil && frames[x.Trailing] {
+			own = append(own, x.Trailing)
+		}
+		for _, f := range own {
+			for _, p := range refs {
+				if p < f.Pos() || p >= f.End() {
+					out[f] = true
+				}
+			}
+		}
+		return true
+	})
+	for _, f := range w.cbFrames {
+		for g := range out {
+			if f.Pos() >= g.Pos() && f.End() <= g.End() {
+				out[f] = true
+			}
+		}
+	}
+	return out
+}
+
+func groupRefusedAt(diags []Diagnostic, off int) bool {
+	for _, d := range diags {
+		if d.Offset == off && strings.Contains(d.Message, "inside its own recursive group") {
+			return true
+		}
+	}
+	return false
 }
 
 func diagnosedAt(diags []Diagnostic, off int) bool {

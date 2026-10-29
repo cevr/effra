@@ -61,11 +61,13 @@ import (
 // Which callbacks carry a row at all is typing's verdict, not the walk's: a
 // call whose callee is invalid checks none of the literals and blocks
 // passed to it (call.go silentArgs), and typing records each function
-// literal, trailing block and with block it checks (typedFrame). The walk
-// keeps the uses it finds inside such a frame apart (guardedUse), and
-// class G counts them only when typing checked every enclosing frame in
-// the component's silent pass, which types each member from empty rows
-// (liveUses; round 8 review M2). So no callee is judged invalid by its
+// literal, trailing block and with block it checks (typedFrame) and each
+// one it skips for a diagnosed reason (skipFrames). The walk keeps the
+// uses it finds inside such a frame apart (guardedUse), and class G drops
+// them only when an enclosing frame is invalid in the component's silent
+// pass, which types each member from empty rows (liveUses; round 8 review
+// M2); a frame skipped under a value that waits on a row is provisional
+// and keeps them (provisional.go; round 9 review M1). So no callee is judged invalid by its
 // spelling, wherever the invalid value flows. Prior art: go/types records
 // each expression's type and mode once (Info.Types) and every later pass
 // reads that record; for a call whose callee is invalid it only uses the
@@ -109,7 +111,7 @@ type refWalker struct {
 	visited    map[syntax.Node]bool
 	// guard is the innermost callback frame the walk is in (nil outside
 	// every one), and guarded holds the class G value uses found inside
-	// callback frames: they count only for frames typing checked
+	// callback frames: they count unless typing recorded a frame invalid
 	// (checker.liveUses; round 8 review M2). cbFrames lists every callback
 	// frame walked, in test builds only.
 	guard    *guardNode
@@ -441,9 +443,10 @@ func (w *refWalker) valueUse(f *Func, called bool, at syntax.Pos) {
 // does not check every such frame: a call whose callee is invalid (a
 // refused import, an unknown name, a value of invalid type wherever it
 // came from) or is no function checks none of the literals and blocks
-// passed to it (call.go silentArgs). Whether typing checked a frame is
-// typing's verdict, recorded per frame (checker.frameGen), never decided
-// by the walk from the callee's spelling (round 8 review M2).
+// passed to it (call.go silentArgs). Whether typing checked a frame, or
+// skipped it as invalid or provisional, is typing's verdict, recorded per
+// frame (frameStateAt), never decided by the walk from the callee's
+// spelling (round 8 review M2; round 9 review M1).
 type guardNode struct {
 	frame syntax.Node
 	up    *guardNode
@@ -473,13 +476,14 @@ func (w *refWalker) inFrame(n syntax.Node, walk func()) {
 // until the returned function runs belong to this check (typedFrame).
 func (c *checker) beginBodyCheck(owner any) func() {
 	if c.bodyGen == nil {
-		c.bodyGen, c.frameGen = map[any]int{}, map[syntax.Node]int{}
+		c.bodyGen, c.frameGen, c.frameInv = map[any]int{}, map[syntax.Node]int{}, map[syntax.Node]int{}
 	}
 	c.genSeq++
-	saved := c.curGen
+	saved, savedMark := c.curGen, c.stmtMark
 	c.curGen = c.genSeq
+	c.stmtMark = c.provSeq
 	c.bodyGen[owner] = c.genSeq
-	return func() { c.curGen = saved }
+	return func() { c.curGen, c.stmtMark = saved, savedMark }
 }
 
 // typedFrame records that typing checks the callback frame n (a function
@@ -490,18 +494,22 @@ func (c *checker) typedFrame(n syntax.Node) {
 	}
 }
 
-// A frameVerdict is the verdict liveUses read for a callback frame (kept:
-// typing checked it) and the body check it read it from (test builds).
+// A frameVerdict is the verdict liveUses read for a callback frame and the
+// body check it read it from (test builds).
 type frameVerdict struct {
-	kept bool
-	gen  int
+	state frameState
+	gen   int
 }
 
+func (v frameVerdict) kept() bool { return v.state != frameInvalid }
+
 // liveUses is owner's class G value uses: the walk's uses outside every
-// callback frame, and each use inside frames that typing checked, every
-// one of them, in owner's latest check (the earliest site of each row is
-// kept). A frame typing did not check (silentArgs) carries no row, so
-// nothing inside it is a use (D3; round 8 review M2).
+// callback frame, and each use inside frames none of which is invalid in
+// owner's latest check (the earliest site of each row is kept). An invalid
+// frame (silentArgs under a callee invalid for a diagnosed reason) carries
+// no row, so nothing inside it is a use (D3; round 8 review M2). A
+// provisional frame, and every frame inside it, which typing did not
+// enter, keeps its uses (provisional.go; round 9 review M1).
 func (c *checker) liveUses(owner any) map[*Func][2]useSite {
 	gs := c.guardedRefs[owner]
 	if len(gs) == 0 {
@@ -512,7 +520,7 @@ func (c *checker) liveUses(owner any) map[*Func][2]useSite {
 		out = map[*Func][2]useSite{}
 	}
 	gen := c.bodyGen[owner]
-	live := map[*guardNode]bool{}
+	live := map[*guardNode]frameState{}
 	var chain []*guardNode
 	for _, g := range gs {
 		// The frames of g that are not decided yet, innermost first.
@@ -524,19 +532,25 @@ func (c *checker) liveUses(owner any) map[*Func][2]useSite {
 			}
 			chain = append(chain, n)
 		}
-		ok := n == nil || live[n]
+		st := frameChecked
+		if n != nil {
+			st = live[n]
+		}
 		for i := len(chain) - 1; i >= 0; i-- {
 			f := chain[i]
-			typed := gen != 0 && c.frameGen[f.frame] == gen
+			// Inside a provisional or invalid frame, which typing did not
+			// enter, f keeps that frame's state.
+			if st == frameChecked {
+				st = c.frameStateAt(f.frame, gen)
+			}
 			if c.guardTrace != nil {
 				if _, seen := c.guardTrace[f.frame]; !seen {
-					c.guardTrace[f.frame] = frameVerdict{kept: typed, gen: gen}
+					c.guardTrace[f.frame] = frameVerdict{state: st, gen: gen}
 				}
 			}
-			ok = ok && typed
-			live[f] = ok
+			live[f] = st
 		}
-		if !ok {
+		if st == frameInvalid {
 			continue
 		}
 		uses := out[g.f]
@@ -984,7 +998,7 @@ func (w *refWalker) expr(x syntax.Expr) {
 			// Whether typing checks the literals and the block passed here
 			// (it does not when the callee is invalid, call.go silentArgs)
 			// is typing's verdict: each is a callback frame (inFrame), and
-			// a class G use inside it counts only when typing checked it
+			// a class G use inside it counts unless typing recorded it invalid
 			// (checker.liveUses; round 8 review M2).
 			for i, a := range x.Args {
 				if lit, ok := unparen(a).(*syntax.FuncLit); ok && sig != nil {

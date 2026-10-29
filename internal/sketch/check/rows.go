@@ -304,20 +304,25 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 	if cyclic {
 		// One silent pass records the component's instantiations, so an
 		// expanding cycle is rejected before the rows iterate (round-2 M1).
-		// It is also typing's verdict on the callback frames class G reads
+		// It is also typing's record of the callback frames class G reads
 		// (pinGroup, liveUses; round 8 review M2): each member is typed from
 		// empty rows, its own rows reset after its check as in the typing of
-		// waiting calls (resolveSelfCalls), so which literals and blocks
-		// typing checks depends neither on the members' order nor on a row
-		// still being inferred. A group member used as a value is pinned
-		// empty afterwards, so the frames keep that verdict.
+		// waiting calls (resolveSelfCalls), so the record does not depend on
+		// the members' order. It may depend on a row still being inferred:
+		// a type built from such a row is provisional (rowsOpen; catchType),
+		// and a frame typing skips under it is provisional, not invalid, so
+		// it keeps its class G uses and the pin is conservative
+		// (provisional.go; round 9 review M1). Only a frame invalid for a
+		// diagnosed reason, which holds whatever the rows, drops its uses.
 		c.silent++
+		c.rowsOpen++
 		for _, n := range scc {
 			c.checkNode(n)
 			if n.fn != nil && n.fn.Sig != nil {
 				n.fn.resetRows()
 			}
 		}
+		c.rowsOpen--
 		c.silent--
 		c.checkInstantiationCycles()
 		// The fixpoint starts from empty rows (least fixpoint): the silent
@@ -383,15 +388,18 @@ func (c *checker) endLit(l *litFrame) bool {
 // 6): a member used as a value inside its own group has the rows it
 // writes, and each row it does not write is pinned empty, as for an
 // exported function. The value uses come from the lexical walk of the
-// component's bodies (refWalker.values, class H), so they do not depend on
-// typing: a use that is not a call is a value use of both rows, and a
-// function literal, trailing block or go task that is a value is a value
-// use of each row of the members it calls that its own row would carry
-// (not written, not taken from a closed parameter type, not called on the
-// spot). A var on an initialization cycle is invalid, so its initializer
-// adds no value use (D3). So no type in the group depends on a row still
-// being inferred, call admission does not depend on the rows, and the rows
-// grow monotonically to their least fixpoint. When the body of a pinned
+// component's bodies (refWalker.values, class H): a use that is not a call
+// is a value use of both rows, and a function literal, trailing block or
+// go task that is a value is a value use of each row of the members it
+// calls that its own row would carry (not written, not taken from a closed
+// parameter type, not called on the spot). Typing decides only one thing:
+// a use inside a callback frame that the silent pass recorded invalid,
+// skipped for a diagnosed reason that holds whatever the rows, is no use
+// (liveUses); a checked or provisional frame keeps its uses
+// (provisional.go). A var on an initialization cycle is invalid, so its
+// initializer adds no value use (D3). So the pin does not depend on a row
+// still being inferred, call admission does not depend on the rows, and
+// the rows grow monotonically to their least fixpoint. When the body of a pinned
 // member needs more than the empty row, the member's declaration is S108
 // (reportGroup), never a chosen fixpoint.
 //

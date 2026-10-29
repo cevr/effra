@@ -158,16 +158,25 @@ type checker struct {
 	settleOnly bool
 	// Typing's record of the callback frames it checks (round 8 review M2):
 	// frameGen holds, for each function literal, trailing block and with
-	// block, the body check that last typed it, and bodyGen each body's
-	// latest check (beginBodyCheck). A class G use the walk finds inside a
-	// frame counts only when typing checked the frame in the body's latest
-	// check (liveUses), so the walk never decides by itself which callee is
-	// invalid. guardTrace, set only by a test, receives the verdict liveUses
-	// first read for each frame and the check it read (RefWalkProblems).
+	// block, the body check that last typed it, frameInv the body check
+	// that last skipped it for a diagnosed reason (provisional.go), and bodyGen
+	// each body's latest check (beginBodyCheck). A class G use the walk
+	// finds inside a frame counts unless the frame is invalid in the body's
+	// latest check (liveUses), so the walk never decides by itself which
+	// callee is invalid. guardTrace, set only by a test, receives the
+	// verdict liveUses first read for each frame and the check it read
+	// (RefWalkProblems).
 	frameGen       map[syntax.Node]int
+	frameInv       map[syntax.Node]int
 	bodyGen        map[any]int
 	curGen, genSeq int
 	guardTrace     map[syntax.Node]frameVerdict
+	// Provisional reads (provisional.go; round 9 review M1): rowsOpen is
+	// set while a cyclic component's rows are still being inferred,
+	// provSeq counts the reads of a provisional value, and stmtMark and
+	// callMark are provSeq at the start of the current statement and call.
+	rowsOpen                    int
+	provSeq, stmtMark, callMark int
 	// useGens, set only by a test, receives the body checks in which typing
 	// resolved each identifier (RefWalkProblems: an independent witness
 	// of which frames a check typed).

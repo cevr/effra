@@ -120,7 +120,7 @@ func (c *checker) applySelfCalls(owner any, pending map[any][]pendingSelf) []*Fu
 			continue
 		}
 		if p.guard != nil {
-			// Inside callback frames: a use only if typing checks them
+			// Inside callback frames: a use unless typing records one invalid
 			// (liveUses).
 			c.guardedRefs[owner] = append(c.guardedRefs[owner], guardedUse{f: f, site: p.site, guard: p.guard})
 			continue

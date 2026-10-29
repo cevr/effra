@@ -14,7 +14,20 @@ func (c *checker) isEntry(f *Func) bool {
 
 // call checks a call, a conversion, a builtin or the with construct. In call
 // position, with is always the construct (grammar.md, Reserved names 2).
+//
+// Afterwards, each callback frame of the call that typing did not check is
+// recorded invalid or left provisional (skipFrames), whichever route
+// skipped it.
 func (c *checker) call(x *syntax.CallExpr, hint Type) operand {
+	savedMark := c.callMark
+	c.callMark = c.provSeq
+	defer func() { c.callMark = savedMark }()
+	op := c.callOf(x, hint)
+	c.skipFrames(x)
+	return op
+}
+
+func (c *checker) callOf(x *syntax.CallExpr, hint Type) operand {
 	if id, ok := x.Fun.(*syntax.Ident); ok && id.Name == "with" {
 		return c.with(x, hint)
 	}

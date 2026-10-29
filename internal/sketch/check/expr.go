@@ -451,6 +451,7 @@ func (c *checker) ident(x *syntax.Ident) operand {
 	switch o := o.(type) {
 	case *Var:
 		o.used = true
+		c.readLocal(o)
 		if o.group != nil {
 			o.group.used = true
 		}

@@ -145,7 +145,7 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 			default:
 				bt = &Union{Variants: types}
 			}
-			v := &Var{Name: x.Bind.Name, Type: bt, Pos: x.Bind.Pos(), group: group, used: true}
+			v := c.bindLocal(&Var{Name: x.Bind.Name, Type: bt, Pos: x.Bind.Pos(), group: group, used: true})
 			c.fn.scope.insert(v.Name, v)
 		}
 		var asBinds []asBinding
@@ -186,7 +186,9 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 }
 
 // catchType resolves an arm's type. A generic error type written without
-// type arguments takes the instance its row holds.
+// type arguments takes the instance its row holds. While the rows are
+// still being inferred, a row that holds no instance yet leaves the type
+// provisional (rowWaits), not an error: nil, with no diagnostic.
 func (c *checker) catchType(te syntax.Expr, row *Row) Type {
 	t := c.typExpr0(te, c.localTypeCtx())
 	if isInvalid(t) {
@@ -197,6 +199,9 @@ func (c *checker) catchType(te syntax.Expr, row *Row) Type {
 			if en, ok := e.(*Named); ok && en.origin() == n {
 				return en
 			}
+		}
+		if c.rowWaits() {
+			return nil
 		}
 		c.errorf(te, CodeType, "generic type %s needs type arguments", n)
 		return nil

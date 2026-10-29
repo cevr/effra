@@ -77,7 +77,7 @@ func (c *checker) declareAs(name *syntax.Ident, t Type) (asBinding, bool) {
 		return asBinding{}, false
 	}
 	g := &switchGroup{}
-	c.fn.scope.insert(name.Name, &Var{Name: name.Name, Type: t, Pos: name.Pos(), group: g, used: true})
+	c.fn.scope.insert(name.Name, c.bindLocal(&Var{Name: name.Name, Type: t, Pos: name.Pos(), group: g, used: true}))
 	return asBinding{name: name, group: g}, true
 }
 

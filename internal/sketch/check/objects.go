@@ -73,6 +73,9 @@ type Var struct {
 	pkg     bool
 	group   *switchGroup // a type-switch or catch binding: used if any arm reads it
 	bindRow bool         // a capability-row binding (needs X): an entry of the frame, not a value
+	// provisional: a local whose type is unknown because it waits on a row
+	// still being inferred, not invalid (provisional.go).
+	provisional bool
 }
 
 // Const is a predeclared constant (true, false).

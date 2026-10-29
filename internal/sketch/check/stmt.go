@@ -40,7 +40,7 @@ func (c *checker) declareLocal(id *syntax.Ident, t Type) *Var {
 	if t == nil {
 		t = invalid
 	}
-	v := &Var{Name: id.Name, Type: t, Pos: id.Pos()}
+	v := c.bindLocal(&Var{Name: id.Name, Type: t, Pos: id.Pos()})
 	sc.insert(id.Name, v)
 	if isInvalid(t) {
 		v.used = true
@@ -51,6 +51,9 @@ func (c *checker) declareLocal(id *syntax.Ident, t Type) *Var {
 }
 
 func (c *checker) stmt(s syntax.Stmt) {
+	savedMark := c.stmtMark
+	c.stmtMark = c.provSeq
+	defer func() { c.stmtMark = savedMark }()
 	switch s := s.(type) {
 	case nil, *syntax.EmptyStmt:
 	case *syntax.DeclStmt:

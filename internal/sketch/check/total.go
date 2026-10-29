@@ -164,7 +164,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 					bt = unions[j].at(first)
 				}
 			}
-			v := &Var{Name: b.Name, Type: bt, Pos: b.Pos(), group: groups[j], used: true}
+			v := c.bindLocal(&Var{Name: b.Name, Type: bt, Pos: b.Pos(), group: groups[j], used: true})
 			c.fn.scope.insert(b.Name, v)
 		}
 		asGroups := c.bindAsPatterns(cl.List, n, rowOf[ci], unions, subj)
