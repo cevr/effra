@@ -433,6 +433,65 @@ func TestRoundThreeForms(t *testing.T) {
 	})
 }
 
+// malformedError parses the malformed row name and returns its error.
+func malformedError(t *testing.T, name string) (string, *Error) {
+	t.Helper()
+	i := slices.IndexFunc(sketchtest.MalformedTable, func(m sketchtest.Malformed) bool { return m.Name == name })
+	if i < 0 {
+		t.Fatalf("no malformed row %q", name)
+	}
+	src := sketchtest.MalformedTable[i].Src
+	_, err := Parse(src)
+	var e *Error
+	if !errors.As(err, &e) {
+		t.Fatalf("%s: %v is not *Error", name, err)
+	}
+	return src, e
+}
+
+// TestRoundFourForms: a type is never a value (round-3 review M1, m3).
+func TestRoundFourForms(t *testing.T) {
+	t.Run("M1 a function literal's needs clause takes no type arguments", func(t *testing.T) {
+		// No fallback to a function type: the error stands at the `[`
+		// in a call argument, a let and after a fails clause.
+		for _, name := range []string{"funclit-needs-type-args-call", "funclit-needs-type-args-let", "funclit-fails-needs-type-args"} {
+			src, e := malformedError(t, name)
+			if e.Message != "a capability name takes no type arguments" || src[e.Offset] != '[' {
+				t.Errorf("%s: %v at %q, want the capability message at the [", name, e, src[e.Offset:])
+			}
+		}
+	})
+	t.Run("m3 a bare type in value position", func(t *testing.T) {
+		for _, c := range []struct{ name, first string }{
+			{"func-type-value", "func"}, {"func-type-argument", "func"}, {"escaping-func-type-value", "escaping"},
+			{"slice-type-value", "["}, {"slice-type-argument", "["}, {"slice-type-conversion", "["},
+		} {
+			src, e := malformedError(t, c.name)
+			if e.Message != "a type is not a value; write a literal or a conversion" || !strings.HasPrefix(src[e.Offset:], c.first) {
+				t.Errorf("%s: %v at %q, want the type message at %q", c.name, e, src[e.Offset:], c.first)
+			}
+		}
+	})
+	t.Run("types stay where a type belongs", func(t *testing.T) {
+		// Type arguments, composite literals, conversions and literals.
+		for _, src := range []string{
+			"let x = Map[string, []int]{}\n",
+			"let x = Option[func() int]{}\n",
+			"let x = List[*T]{}\n",
+			"let x = xs[[]int{1}[0]]\n",
+			"let x = m[func() int { 1 }()]\n",
+			"let x = []int{1, 2}\n",
+			"let x = int64(y)\n",
+			"let f = func(x) { x }\n",
+			"func main() {\n\trun(func() needs A, B { g() })\n}\n",
+		} {
+			if _, err := Parse(src); err != nil {
+				t.Errorf("%q: %v", src, err)
+			}
+		}
+	})
+}
+
 // TestNestingLimit: every recursive construct, and every chain that
 // deepens the tree (selectors, calls, indexes, binary operators, else if),
 // charges the nesting limit, so a tree deeper than MaxNesting is S001

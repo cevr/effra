@@ -236,35 +236,30 @@ func (p *parser) parseOperand() Expr {
 		t.Rparen = p.want(RPAREN)
 		return t
 	case FUNC:
-		// A literal's own signature takes the declaration spelling,
-		// `func() needs A, B { … }`; the parenthesised `needs (A, B)` is
-		// for a function type inside a list (D1.11). Which one this is
-		// shows only at the `{`, so the literal is tried first.
-		start := p.i
-		var t *FuncType
-		literal := p.attempt(func() {
-			t = p.parseFuncType(ctxDecl)
-			if p.tok.tok != LBRACE {
-				p.errorf("not a function literal")
-			}
-		})
-		if !literal {
-			t = p.parseFuncType(ctxList)
-			if p.tok.tok != LBRACE {
-				return t
-			}
-			// A literal spelled with the list form: parse it again as a
-			// literal to report the declaration spelling's error.
-			p.backtrack(start)
-			t = p.parseFuncType(ctxDecl)
-			if p.tok.tok != LBRACE {
-				p.errorf("expected \"{\" after a function literal's signature, found %s", p.found())
-			}
+		// In value position `func` always starts a literal, whose
+		// signature takes the declaration spelling, `func() needs A, B
+		// { … }`. A type is never a value, so there is no fallback to a
+		// function type: an error inside the signature is reported where
+		// it stands, and a signature with no block is a bare type.
+		pos, end := p.tok.pos, p.tok.end
+		t := p.parseFuncType(ctxDecl)
+		if p.tok.tok != LBRACE {
+			p.errorAt(pos, int(end-pos), notAValue)
 		}
 		p.funcLitParams(t.Params)
 		return &FuncLit{Type: t, Body: p.parseBlock()}
-	case LBRACK, ESCAPING:
-		return p.parseType(ctxList)
+	case LBRACK:
+		// A slice type is a value only as the type of a composite
+		// literal: `[]int{1, 2}`. `[]int` alone, or `[]byte(s)`, is a
+		// bare type.
+		pos, end := p.tok.pos, p.tok.end
+		t := p.parseType(ctxList)
+		if p.tok.tok != LBRACE {
+			p.errorAt(pos, int(end-pos), notAValue)
+		}
+		return t
+	case ESCAPING:
+		p.errorf(notAValue)
 	case IF:
 		return p.parseIf()
 	case MATCH:
@@ -349,8 +344,20 @@ func (p *parser) parseIndexOrSlice(x Expr) Expr {
 
 // parseIndexValue parses an index or a type argument: a type that cannot
 // start an expression (`*T`, `func(T) U`) is read as a type.
+// notAValue is the message for a bare type in value position: the decided
+// Primary has no type operand (round-3 review M1, m3).
+const notAValue = "a type is not a value; write a literal or a conversion"
+
+// parseIndexValue parses one index, or one type argument of an
+// instantiation: `Map[string, []int]{}`, `Option[func() int]`. A type is
+// taken only when a `,` or `]` follows it; else the index is an expression.
 func (p *parser) parseIndexValue() Expr {
-	if p.tok.tok == MUL && p.exprLev > 0 {
+	switch p.tok.tok {
+	case MUL, LBRACK, FUNC, ESCAPING:
+	default:
+		return p.parseExpr()
+	}
+	if p.exprLev > 0 {
 		start := p.i
 		var t Expr
 		if p.attempt(func() { t = p.parseType(ctxList) }) && (p.tok.tok == COMMA || p.tok.tok == RBRACK) {
