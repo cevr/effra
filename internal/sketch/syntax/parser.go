@@ -946,9 +946,9 @@ func (p *parser) startsType() bool {
 // parseProvides parses a wire's `provides A, B`.
 func (p *parser) parseProvides() *ProvidesClause {
 	u := &ProvidesClause{Provides: p.want(PROVIDES)}
-	u.Names = append(u.Names, p.parseTypeName("provides"))
+	u.Names = append(u.Names, p.parseCapabilityName("provides"))
 	for p.got(COMMA) {
-		u.Names = append(u.Names, p.parseTypeName("provides"))
+		u.Names = append(u.Names, p.parseCapabilityName("provides"))
 	}
 	return u
 }
@@ -964,26 +964,26 @@ func (p *parser) parseNeeds(ctx typeCtx) *NeedsClause {
 		}
 		u.Lparen = p.tok.pos
 		p.next()
-		u.Names = append(u.Names, p.parseTypeName("needs"))
+		u.Names = append(u.Names, p.parseCapabilityName("needs"))
 		for p.got(COMMA) {
 			if p.tok.tok == RPAREN {
 				break
 			}
-			u.Names = append(u.Names, p.parseTypeName("needs"))
+			u.Names = append(u.Names, p.parseCapabilityName("needs"))
 		}
 		u.Rparen = p.want(RPAREN)
 		return u
 	}
-	u.Names = append(u.Names, p.parseTypeName("needs"))
+	u.Names = append(u.Names, p.parseCapabilityName("needs"))
 	switch ctx {
 	case ctxDecl:
 		for p.got(COMMA) {
-			u.Names = append(u.Names, p.parseTypeName("needs"))
+			u.Names = append(u.Names, p.parseCapabilityName("needs"))
 		}
 	case ctxMember:
 		for p.tok.tok == COMMA && p.continuesNeeds() {
 			p.next()
-			u.Names = append(u.Names, p.parseTypeName("needs"))
+			u.Names = append(u.Names, p.parseCapabilityName("needs"))
 		}
 	}
 	return u
@@ -1005,6 +1005,10 @@ func (p *parser) continuesNeeds() bool {
 	switch p.peek(i).tok {
 	case COMMA, RBRACE, SEMICOLON:
 		return true
+	case LBRACK:
+		// `B[T]` is a capability name with type arguments, refused at
+		// its `[`; `B []T` is a field of slice type.
+		return p.peek(i+1).tok != RBRACK
 	}
 	return false
 }
@@ -1215,6 +1219,24 @@ func (p *parser) parseTypeName(what string) Expr {
 	return mapType(x)
 }
 
+// parseCapabilityName parses the TypeName of a needs, provides or wire
+// key position: `name`, `pkg.name` or `go.name`, with no type arguments
+// (the decided `TypeName = identifier [ "." identifier ]`). Brackets after
+// it are S001 at the `[`, so a comma run of names ended by `:` is always
+// one wire entry's key list (Parser rule 9).
+func (p *parser) parseCapabilityName(what string) Expr {
+	p.enter()
+	defer p.leave()
+	if !p.startsTypeName() {
+		p.errorf("%s names a type; expected a type name, found %s", what, p.found())
+	}
+	x := p.parseQualifiedName()
+	if p.tok.tok == LBRACK {
+		p.errorAt(p.tok.pos, 1, "a capability name takes no type arguments")
+	}
+	return x
+}
+
 func (p *parser) parseTypeArgs(x Expr) Expr {
 	ix := &IndexExpr{X: x, Lbrack: p.want(LBRACK)}
 	if p.tok.tok == RBRACK {
@@ -1253,8 +1275,8 @@ func (p *parser) parseWireLit() *WireLit {
 
 // parseWireBody parses `{ entry, … }`. An entry binds capabilities to a
 // value (`A: x`, `A, B: x`), replaces an embedded binding (`replace A: x`)
-// or embeds a wire (`W`). Names separated by commas form one entry only
-// when a `:` ends them on the same line.
+// or embeds a wire (`W`). A comma run of names ended by `:` is one entry's
+// key list, whatever the layout (grammar.md, Parser rule 9).
 func (p *parser) parseWireBody() *WireBody {
 	b := &WireBody{Lbrace: p.want(LBRACE)}
 	saved := p.exprLev
@@ -1265,10 +1287,10 @@ func (p *parser) parseWireBody() *WireBody {
 			e.Kind, e.Replace = WireReplace, p.tok.pos
 			p.next()
 		}
-		e.Key = p.parseTypeName("a wire entry")
+		e.Key = p.parseCapabilityName("a wire entry")
 		if p.keysContinue() {
 			for p.got(COMMA) {
-				e.Keys = append(e.Keys, p.parseTypeName("a wire entry"))
+				e.Keys = append(e.Keys, p.parseCapabilityName("a wire entry"))
 				if p.tok.tok == COLON {
 					break
 				}

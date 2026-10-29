@@ -147,6 +147,17 @@ var MalformedTable = []Malformed{
 	{Name: "interpolation-line-comment", Src: "let s = \"x \\(a // c\n)\"\n", Lines: []int{1}},
 	{Name: "interpolation-multi-line-comment", Src: "let s = \"x \\(a /* c\nd */)\"\n", Lines: []int{1}},
 	{Name: "try-operand", Src: "func f(a int64) int64 fails E {\n\ta + try g()\n}\n", Lines: []int{2}},
+	// A capability name takes no type arguments (TypeName in needs,
+	// provides and wire keys).
+	{Name: "needs-type-args", Src: "func f() needs A, B[T] {}\n", Lines: []int{1}},
+	{Name: "needs-list-type-args", Src: "func f(g func() needs (A, B[T])) {}\n", Lines: []int{1}},
+	{Name: "operation-needs-type-args", Src: "type S {\n\tF() needs A, B[T],\n}\n", Lines: []int{2}},
+	{Name: "provides-type-args", Src: "let W = wire provides B[T] {\n\tB: x,\n}\n", Lines: []int{1}},
+	{Name: "wire-key-type-args", Src: "let W = wire { B[T]: x }\n", Lines: []int{1}},
+	{Name: "wire-replace-type-args", Src: "let W = wire { V, replace A[T]: y }\n", Lines: []int{1}},
+	{Name: "wire-embed-type-args", Src: "let W = wire { A: x, V[T] }\n", Lines: []int{1}},
+	{Name: "wire-second-key-type-args", Src: "let W = wire { A, B[T]: p }\n", Lines: []int{1}},
+	{Name: "wire-first-key-type-args", Src: "let W = wire { A[T], B: p }\n", Lines: []int{1}},
 	{Name: "uses", Src: "func f() uses Clock {}\n", Lines: []int{1}},
 	// Decided-grammar rules (#196, D1).
 	{Name: "mixed-members", Src: "type Card { Number string, Valid() bool }\n", Code: "S108", Lines: []int{1}},

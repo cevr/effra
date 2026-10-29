@@ -387,6 +387,52 @@ func TestRoundTwoForms(t *testing.T) {
 	})
 }
 
+// TestRoundThreeForms pins the round-2 review's parser findings.
+func TestRoundThreeForms(t *testing.T) {
+	t.Run("M1 capability names take no type arguments", func(t *testing.T) {
+		for _, name := range []string{
+			"needs-type-args", "needs-list-type-args", "operation-needs-type-args", "provides-type-args",
+			"wire-key-type-args", "wire-replace-type-args", "wire-embed-type-args",
+			"wire-second-key-type-args", "wire-first-key-type-args",
+		} {
+			i := slices.IndexFunc(sketchtest.MalformedTable, func(m sketchtest.Malformed) bool { return m.Name == name })
+			if i < 0 {
+				t.Fatalf("no malformed row %q", name)
+			}
+			src := sketchtest.MalformedTable[i].Src
+			_, err := Parse(src)
+			var e *Error
+			if !errors.As(err, &e) {
+				t.Errorf("%s: %v is not *Error", name, err)
+				continue
+			}
+			if e.Message != "a capability name takes no type arguments" || src[e.Offset] != '[' {
+				t.Errorf("%s: %v at %q, want the capability message at the [", name, e, src[e.Offset:])
+			}
+		}
+	})
+	t.Run("m1 name and paren in a type body is an operation", func(t *testing.T) {
+		// `A (int64, string)` and `A(int64, string)` are the same tokens:
+		// an operation (grammar.md, Parser rule 11).
+		f, err := Parse("type S { A (int64, string) }\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		it, ok := f.Decls[0].(*TypeDecl).Spec.(*InterfaceType)
+		if !ok || len(it.Methods) != 1 || it.Methods[0].Names[0].Name != "A" {
+			t.Fatalf("spec %+v", f.Decls[0].(*TypeDecl).Spec)
+		}
+		// A record names the tuple type instead.
+		f, err = Parse("type Pair (int64, string)\n\ntype S { X int64, A Pair }\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := f.Decls[1].(*TypeDecl).Spec.(*StructType); !ok {
+			t.Fatalf("spec %T", f.Decls[1].(*TypeDecl).Spec)
+		}
+	})
+}
+
 // TestNestingLimit: every recursive construct, and every chain that
 // deepens the tree (selectors, calls, indexes, binary operators, else if),
 // charges the nesting limit, so a tree deeper than MaxNesting is S001

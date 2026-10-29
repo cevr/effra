@@ -240,6 +240,8 @@ Status: **implemented** in `internal/sketch/syntax`. `syntax.Parse` returns one 
 8. **`Map[K, V]`.** The bare name `Map` with two type arguments is the map type: a prelude name cannot be redeclared (eighth round), so the parser need not resolve it.
 9. **Wire keys.** In a wire body, a run of type names separated by commas and ended by `:` is the key list of one entry, whatever the layout: `{ A, B: p }` binds both `A` and `B` to `p`, on one line or several. An embedded wire therefore never stands just before an entry; write `{ B: p, A }`. Entry order has no meaning. *Prior art:* Go's `case a, b:` is one comma list ended by `:`, with no layout rule.
 10. **Tuples have two or more elements.** `(x,)` is S001 in expressions, types and patterns alike, so `(x)` and `(x,)` never denote different trees.
+11. **`Name (` in a type body is an operation.** `A (int64, string)` and `A(int64, string)` are the same tokens, so layout cannot make one a field and the other an operation: both are the operation `A` with two unnamed parameters. A record with one field of tuple type names the tuple: `type Pair (int64, string)`, then `A Pair`. A field group before a tuple type, `X, Y (int64, int64)`, stays a field group (FieldDecl).
+12. **Capability names take no type arguments.** `needs`, `provides` and wire keys take exactly `TypeName`: `B[T]` there is S001 at the `[`, "a capability name takes no type arguments". With no brackets in a key, rule 9 holds with no exception.
 
 ## Old spellings
 
