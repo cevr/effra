@@ -83,17 +83,27 @@ A status in parentheses applies to the term's support: *checked* (the 2026 check
 
 **Pure function** (designed): A function whose footprint is empty. An empty capability row does not make a function pure, and a call through an unknown function value counts as impure.
 
-**Union** (checked): A closed set of struct types, written `interface{ A | B }`. It has no zero value.
+**Union** (checked): A closed set of record types, written `type Payment = Pending | Declined{ Reason string }`. A variant is a record of the package, named bare or declared inline. It has no zero value.
 
-**Variant** (checked): One struct type listed in a union. A variant value is assignable to every union that lists it.
+**Variant** (checked): One record type listed in a union, named bare or declared inline as `Name{…}`. A variant value is assignable to every union that lists it, and a record may be a variant of several unions.
 
 **Defaultable type**: A type with a valid zero value: a basic type, or a struct whose fields are all defaultable. Unions, capabilities, function types, tasks, resources and borrows are not defaultable. Outside its package, a struct with an unexported field is not defaultable either, so its only values there come from the package's exported functions.
 
 **Definite initialisation** (checked for `var x T`; the rest designed, [#197](https://github.com/cevr/ergo/issues/197)): The rule that a variable of a non-defaultable type has a value before it is used.
 
-**Type switch** (checked, with one or several subjects): `match u { case A as v: … }` over a union value, narrowing `v` to the case's variant. With several subjects, `match (a, b)`, a case is a tuple of variants, and `_` matches any variant.
+**Type switch** (checked, with one or several subjects): `match u { case A as v: … }` over a union value, narrowing `v` to the case's variant. With several subjects, `match (a, b)`, a case is a tuple pattern, and `_` matches any value. A `match` takes a subject of any type; a type test narrows only a union.
 
-**Totality**: The property of a type switch, a `catch` or a machine step that covers every alternative. A total form needs no default for its declared alternatives. The checker decides it for a type switch by a usefulness check over its case matrix, never by enumerating the product of the subjects.
+**Totality**: The property of a `match`, a `catch`, a `let` or `for` pattern, or a machine step that covers every alternative. A total form needs no default for its declared alternatives. The checker decides it for a `match` by a usefulness check over its case matrix (Maranget), never by enumerating the product of the subjects.
+
+**Pattern** (checked): The left side of a `match` case, a `catch` arm, a `let` or a `for` header: `_`, a name that binds, a constant, a type test, a record pattern `T{F: p}`, a tuple `(p, q)`, or `p as x`. A pattern mirrors the construction of the values it matches.
+
+**Irrefutable pattern** (checked): A pattern that matches every value of its type, such as a name, a tuple of names or a record pattern of the value's own type. `let` and `for` take only irrefutable patterns; a partial one belongs in a `match`.
+
+**Tuple** (checked): A structural value of two or more elements, `(a, b)`, of type `(A, B)`. It is read only through a pattern, and a function returns several values as one tuple.
+
+**Defined type** (checked): A nominal type over another, `type Celsius float64`. It keeps the operations of its base, and a value crosses between the two only by conversion, one hop at a time.
+
+**Bare record** (checked): A record with no fields, used by its name alone: `return Pending`, never `Pending{}`.
 
 **Block**: A braced statement list. As the body of `with`, `timeout.After` or a trailing block, it yields its last expression, and `return`, `break` and `continue` are errors inside it.
 
@@ -143,7 +153,7 @@ A status in parentheses applies to the term's support: *checked* (the 2026 check
 
 **Machine** (designed): A declaration `type X machine[S, E] { initial v; step f }` of a state machine over the unions `S` and `E`. Its meaning is a plan any lawful provider can run. In the earlier language (specified), a machine is a checked definition of state and event types, transition policies and state-owned behavior.
 
-**Decision** (designed): The value a machine step returns: `Enter{next}`, `Stay{next}`, `Ignore{}`, `Reject{}` or `Done{output}`. Its type is the prelude `Decision[S, O]`.
+**Decision** (designed): The value a machine step returns: `Enter{next}`, `Stay{next}`, `Ignore`, `Reject` or `Done{output}`. Its type is the prelude `Decision[S, O]`.
 
 **Actor** (designed): A machine run by `actor.Start` as one task with a bounded mailbox, behind a resource handle with `Send`, `Ask`, `State` and `Stop`. In the earlier language (specified), an actor is an owned, addressable instance of behavior with typed messages and replies and an explicit admission and concurrency policy; an effect without a message interface remains a fiber.
 

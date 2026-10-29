@@ -179,9 +179,9 @@ func run(signals queue.Queue[Signal]) needs Probe, Clock, Scheduler {
 	let b = actor.Start(Breaker{}, 16)
 	let set = tasks.Set(tasks.Restart(schedule.Exponential(1s).UpTo(5))) // bound after b
 	set.Go(func() { actor.Pump(b, signals) })                            // structured lend of b (R31)
-	let d = try b.Ask(Retry{}) catch {
+	let d = try b.Ask(Retry) catch {
 	case ProbeDown:
-		Reject{}
+		Reject
 	}
 } // set stopped, then b stopped
 ```

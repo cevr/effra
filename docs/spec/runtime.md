@@ -158,7 +158,7 @@ func step(s State, sig Signal) Decision[State, string] fails ProbeDown needs Pro
 	case (HalfOpen, Success):
 		return Enter{Closed{0}}
 	case (_, _):
-		return Ignore{}
+		return Ignore
 	}
 }
 
@@ -169,7 +169,7 @@ type Breaker machine[State, Signal] {
 ```
 
 1. **Machine.** `type X machine[S, E] { initial v; step f }` declares a state machine. `S` and `E` are unions. `initial` is a value of `S`; `step` names a function from `S` and `E` to `Decision[S, O]`, with any error and `needs` rows.
-2. **Decision.** A step returns `Enter{next}` (re-enter, even with the same variant), `Stay{next}` (keep the entry), `Ignore{}`, `Reject{}` (observable, state unchanged) or `Done{output}` (terminal).
+2. **Decision.** A step returns `Enter{next}` (re-enter, even with the same variant), `Stay{next}` (keep the entry), `Ignore`, `Reject` (observable, state unchanged) or `Done{output}` (terminal).
 3. **Totality.** The step's switch is total over `S × E` (README Gap 12).
 4. **Inspection.** `ergo inspect` draws the machine's graph from the step's cases. A helper the step calls is static in the graph only when its footprint is empty, not its row ([rows.md](rows.md#footprints)).
 5. **Protocol.** A machine is a plan that any lawful provider can run; the actor below is the standard library's provider. *Prior art:* XState machines with interpreters; Erlang `gen_statem`.

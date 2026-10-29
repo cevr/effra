@@ -11,7 +11,7 @@ A diagnostic has a position, a code and a message: `file:line:col: CODE message`
 | S001 | Source text must lex and parse: valid identifiers, terminated strings, known number suffixes, no Go form outside the language, no mixed keyed and positional literal. | [grammar](grammar.md) | `probes/nonletter-name.ergo` |
 | S101 | Every error that can escape a function must be in its declared `fails` row. | [rows: error rows](rows.md#error-rows) | `reject/undeclared-error.ergo` |
 | S102 | Every capability a body charges must be in its capability row or discharged by an enclosing `with`. | [rows: capability rows](rows.md#capability-rows) | `reject/missing-capability.ergo` |
-| S103 | Totality: a `catch` without `try` must handle every error in the caught row, and a `match` over unions must name every variant (or tuple of variants) or have `case _`. | [rows: catch](rows.md#catch), [rows: totality](rows.md#totality) | `reject/catch-not-total.ergo`, `type-switch-not-total` |
+| S103 | Totality: a `catch` without `try` must handle every error in the caught row, a `match` must name every constructor (variants, nested; `bool` constants; tuples) or have `case _`, and a `let` or `for` pattern must cover its value. | [rows: catch](rows.md#catch), [rows: totality](rows.md#totality) | `reject/catch-not-total.ergo`, `type-switch-not-total` |
 | S104 | Every name must resolve, in the role its position gives it: locals, functions, types, fields, methods, capabilities, wires and error types. | [types](types.md), [rows](rows.md) | `reject/unknown-name.ergo` |
 | S105 | A fallible expression must be tried, caught or returned; it cannot stand in a value position. | [rows: error rows](rows.md#error-rows) | `probes/composite-error.ergo` |
 | S106 | A wire provider must implement its capability, with the same signatures and no wider error row. | [rows: wire](rows.md#wire) | `probes/provider-parameter.ergo` |
@@ -69,7 +69,8 @@ The checker does not restrict `main`'s capability row; the build refuses what th
 ### S103: not total
 
 - A `catch` without `try` omits an error of the caught row (`reject/catch-not-total.ergo`, `catch-not-total`).
-- A `match` over a union names neither every variant nor `case _` (`type-switch-not-total`).
+- A `match` names neither every constructor nor `case _`: a union's variants, nested through record patterns, `bool`'s two constants, a tuple's product; constants of other types never cover ("constant patterns never cover int; add case _"). The message names one missing pattern (`type-switch-not-total`; check-v1 D-B4).
+- A `let` or `for` pattern that does not cover its value's type: "this let pattern does not match main.Pending, a value of main.Payment: a let pattern matches every value; use match" (check-v1 D-B5).
 - A multi-subject `match` leaves a tuple of variants unhandled; `_` matches any variant. Totality is decided by a usefulness check over the case matrix, never by enumerating the product (`product-not-total`). The message names one missing tuple.
 - A `match` whose proof, or the resolution of its cases in the variant index, needs more than the fixed solver budget: "too many cases to prove this match total; split it or add case _", or, when the reachability of its cases needs more, "too many cases to prove which cases of this match are reachable; split it". The checker never accepts a match it has not proved. The solver is deterministic for a given source; reordering the subjects may change whether a switch near the budget is refused, never a proved verdict ([rows: totality](rows.md#totality) 5). A case of a union that lost a variant to a reported error adds no diagnostic of its own (D3). No missing-return diagnostic follows an S103 for the same switch (D3).
 
@@ -105,7 +106,10 @@ The checker does not restrict `main`'s capability row; the build refuses what th
 | --- | --- |
 | A type, function, wire, method, field, parameter or local is declared twice in one scope; a type and a function share a name | `duplicate-function`, `probes/duplicate-field.ergo`, `duplicate-method`, `duplicate-parameter`, `probes/receiver-parameter.ergo` |
 | A plain call `f(x)` of a name that several functions share; each takes a distinct named type of the package first and is called as `x.f(…)` (196m rule 3) | checker tests (`TestSelfCallSameNamedFunctions`) |
-| A union variant is not a struct type declared in the package | `union-variant-interface` |
+| A union variant is not a record declared in the package (a basic, operation, union or defined type); an inline variant of a generic union written with other type arguments than the parameters its fields mention; a defined type over a type parameter or over itself (check-v1 D-B1) | `union-variant-interface`, `testdata/v1/B1-type-shapes.neg.ergo` |
+| A record with no fields written `Pending{}`, or a record with fields written bare (check-v1 D-B2) | `testdata/v1/B2-empty-record-bare.neg.ergo` |
+| A pattern that does not fit its subject: a type that is neither a variant of the subject's union nor its own type, a constant of another type, a float or duration constant, a tuple of the wrong arity, `T{}` (write `case T:`), a field twice, a type test on an operation-type value, a name bound twice or not by every pattern of its case, a pattern name that names a function, package or package value; a case the cases before it cover (unreachable) (check-v1 D-B3, D-B4) | `testdata/v1/B5-constant-patterns.neg.ergo`, `B6-case-domain.neg.ergo`, `B7-pattern-bindings.neg.ergo` |
+| A conversion other than numeric, `duration` and `int64`, or between a defined type and its base (check-v1 D-B7) | `testdata/v1/B10-conversions.neg.ergo` |
 | A struct contains itself by value, also through an instance of a generic struct (`type U { F Wrap[U] }`), at any depth; one report per cycle | `recursive-struct`; checker domain tests (`TestFiniteChains`) |
 | An instantiation cycle: a generic type or function instantiates itself, through any path, with an argument that grows (`type T[A] { F *T[[]A] }`, `func f[T]() { f[[]T]() }`), so its instances never end (Go's rule, `go/types` "instantiation cycle"), also through a method's receiver parameters and through any containing type, interface method signatures included; reported once, before rows are inferred | checker domain tests (`TestExpandingInstantiation`); the go/types differential test (`TestDifferentialGoTypes`, `FuzzDifferential`) |
 | An initialization cycle: a package `var`'s initializer refers to itself through vars, functions or methods (Go's initialization order, `go/types` initorder). The cycle's vars become invalid, so no capability or error diagnostic follows from them | checker domain tests (`TestRowGraphDomain`) |
@@ -143,9 +147,9 @@ The checker refuses a construct that another ticket owns, and names it, instead 
 | A wire entry whose provider is a function (a constructor entry), such as `Orders: OpenOrders` | [#37](https://github.com/cevr/ergo/issues/37), wire constructors (`wire-constructor-is-37`) |
 | A wire header, `wire provides A, B { … }` or `wire needs C, D { … }` (#217) | [#196](https://github.com/cevr/ergo/issues/196) stage b, the wire header ([rows.md](rows.md#wire) rule 8; README Gap 33; `wire-exposure-hides-entry`) |
 | A `with` over a local value or over several wires, and a wire value outside `with`, `let w = wire { … }` | 196x, extern and wire values (check-v1) |
-| A pattern after `let` or `for`: a record pattern, an `as` pattern or a literal (196p), or a tuple (196t); a tuple type or value (196t) | 196p and 196t, patterns and tuples (check-v1) |
+| A union variant from another package, `type E = Declined \| timeout.Expired` | 196b, packages (spec Q7) |
 | An `if` or `match` in value position | 196r, tail results (check-v1) |
-| A defined type, `type Celsius float64` | 196p, type declarations (check-v1) |
+| `case err:` or a record pattern in a catch arm | 196r, one catch (check-v1 stage C) |
 | The `ordered` constraint; an `escaping` function type | 196g, constraints; 196e, escaping (check-v1) |
 | A law, a `test` declaration, `assert` | 196l, laws and tests (check-v1) |
 | `import task`, `scope`, `slice` or `queue` | lower-v1, the std modules |
