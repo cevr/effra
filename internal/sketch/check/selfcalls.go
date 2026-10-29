@@ -24,12 +24,14 @@ import (
 // every call typing reaches is resolved to its function: one edge per
 // call, linear in the source.
 //
-// A receiver whose type depends on a callee's row stays unresolved there:
-// `let b = w() catch { case E: B{} }; b.m()` with w's error row inferred
-// is a catch on a call that cannot fail while w's row is empty, so b is
-// invalid. settleWaiting resolves such calls with a dependency worklist
+// A type does not depend on a row: a catch keeps its value's type even on
+// a call that cannot fail (handlers.go catch), so the reviewer's
+// `let b = w() catch { case E: B{} }; b.m()` resolves from empty rows. One
+// form still waits: an arm `case G as g` of a generic error type written
+// without type arguments takes G's instance from the caught row, so g.m()
+// resolves only once that row holds it. settleWaiting resolves such calls
 // over the bodies the waiting bodies reach, the only bodies whose rows
-// their typing reads.
+// their typing reads, in the order converge uses (worklist.go).
 //
 // Prior art: go/types records a method's use when it resolves the selector
 // (Info.Uses, LookupFieldOrMethod) and orders initialization by those
@@ -59,7 +61,6 @@ func (c *checker) resolveSelfCalls(nodes []*bodyNode, byFunc map[*Func]*bodyNode
 			if len(pending[n.owner()]) == 0 {
 				continue
 			}
-			c.selfChecks++
 			c.checkNode(n)
 			if n.fn != nil {
 				n.fn.resetRows()
@@ -135,35 +136,34 @@ func (c *checker) applySelfCalls(owner any, pending map[any][]pendingSelf) []*Fu
 }
 
 // settleWaiting resolves the calls still pending after the typing from
-// empty rows, silently, with a dependency worklist (round 7 review M1).
+// empty rows, silently, in the order converge uses (worklist.go; round 8
+// review M1).
 //
 // The worklist holds the waiting bodies and every body they reach in the
-// graph known so far, the only bodies whose rows their typing reads; each
-// joins it once, callees first (a depth-first postorder). A body is checked
-// again only when a body it references grew its rows, as in converge: so
-// an acyclic part is checked once per body, and a body no waiting body
-// reaches is never checked. A call typing resolves adds its edge at once;
-// a callee new to the worklist joins it with the bodies it reaches, and
-// the caller is checked again when the callee's rows grow. A waiting body
-// whose calls stay unresolved is checked once its callees settle and wakes
-// nobody. The rows restart empty afterwards: the reporting order is decided
-// only once every edge is known.
+// graph known so far, the only bodies whose rows their typing reads. A body
+// is checked once every pending callee it has has settled (callees first,
+// on demand), and again only when a callee's rows grow. A call typing
+// resolves adds its edge at once: a callee new to the worklist joins it with
+// the bodies it reaches, and the caller is checked again only if that
+// callee's rows grow. A waiting body whose calls stay unresolved is checked
+// once its callees settle and wakes nobody. The rows restart empty
+// afterwards: the reporting order is decided only once every edge is known.
 //
 // The bound is converge's: 2·(bodies + edges)·(D + 1) checks, where D
 // counts the distinct row elements produced so far. Past it the worklist
 // stops and the calls left stay unresolved; no known source reaches it
 // (rows that only grow fit it, as in converge, whose bound
-// TestConvergeBoundOscillation checks). c.selfChecks counts the checks and c.selfSteps the bodies and edges the
-// worklist visits, for the linear-work tests.
+// TestConvergeBoundOscillation checks). c.selfChecks counts the checks,
+// c.workNodes their syntax nodes and c.worklistSteps the bodies and edges
+// the worklist visits, for the linear-work tests.
 func (c *checker) settleWaiting(nodes []*bodyNode, byFunc map[*Func]*bodyNode, byVar map[*pkgVar]*bodyNode, pending map[any][]pendingSelf) {
 	c.linkBodies(nodes, byFunc, byVar)
 	needed := map[*bodyNode]bool{}
 	preds := map[*bodyNode][]*bodyNode{}
-	queued := map[*bodyNode]bool{}
-	var queue []*bodyNode
-	edges := 0
-	// need adds root and the bodies it reaches that are not in the
-	// worklist yet, callees first.
+	w := &worklist{member: func(n *bodyNode) bool { return needed[n] }}
+	edges, post := 0, 0
+	// need queues root and the bodies it reaches that are not in the
+	// worklist yet, each with its postorder index.
 	need := func(root *bodyNode) {
 		if needed[root] {
 			return
@@ -179,7 +179,7 @@ func (c *checker) settleWaiting(nodes []*bodyNode, byFunc map[*Func]*bodyNode, b
 			if top.i < len(top.n.edges) {
 				e := top.n.edges[top.i]
 				top.i++
-				c.selfSteps++
+				c.worklistSteps++
 				edges++
 				preds[e] = append(preds[e], top.n)
 				if !needed[e] {
@@ -190,9 +190,10 @@ func (c *checker) settleWaiting(nodes []*bodyNode, byFunc map[*Func]*bodyNode, b
 			}
 			n := top.n
 			stack = stack[:len(stack)-1]
-			c.selfSteps++
-			queued[n] = true
-			queue = append(queue, n)
+			c.worklistSteps++
+			n.post = post
+			post++
+			w.push(n)
 		}
 	}
 	for _, n := range nodes {
@@ -204,44 +205,34 @@ func (c *checker) settleWaiting(nodes []*bodyNode, byFunc map[*Func]*bodyNode, b
 	budget := func() int { return 2 * (len(needed) + edges) * (len(seen) + 1) }
 	checks := 0
 	c.silent++
-	for len(queue) > 0 && checks < budget() {
-		n := queue[0]
-		queue = queue[1:]
-		queued[n] = false
+	w.run(func(n *bodyNode) bool {
+		if checks >= budget() {
+			return false
+		}
 		checks++
 		changed := c.checkNode(n)
-		if n.fn != nil {
-			for k, v := range []*RowVar{n.fn.errVar, n.fn.useVar} {
-				if v != nil {
-					for _, id := range v.sol.idsOf(c.types) {
-						seen[[2]int32{int32(k), id}] = true
-					}
-				}
-			}
-		}
+		c.seenRows(n, seen)
 		for _, f := range c.applySelfCalls(n.owner(), pending) {
 			to := byFunc[f]
 			if to == nil {
 				continue
 			}
-			c.selfSteps++
+			c.worklistSteps++
 			edges++
 			n.edges = append(n.edges, to)
 			preds[to] = append(preds[to], n)
 			need(to)
 		}
-		if !changed {
-			continue
-		}
-		for _, p := range preds[n] {
-			if !queued[p] {
-				queued[p] = true
-				queue = append(queue, p)
+		if changed {
+			for _, p := range preds[n] {
+				w.push(p)
 			}
 		}
-	}
+		return true
+	})
 	c.silent--
 	c.selfChecks += checks
+	c.worklistSteps += w.steps
 	for n := range needed {
 		if n.fn != nil {
 			n.fn.resetRows()

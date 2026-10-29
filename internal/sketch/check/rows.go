@@ -120,6 +120,11 @@ type bodyNode struct {
 	// Tarjan state
 	index, low int
 	onStack    bool
+	// The worklist order (worklist.go): the body's syntax nodes, its
+	// postorder index, its slot in the queue (-1 when not queued) and
+	// whether it is on the current walk.
+	size, post, slot int
+	active           bool
 }
 
 // owner is the node's body: its *Func or its *pkgVar.
@@ -164,12 +169,12 @@ func (c *checker) checkBodies() {
 		if f.Decl.Body == nil || f.Sig == nil {
 			continue
 		}
-		n := &bodyNode{fn: f, index: -1}
+		n := &bodyNode{fn: f, index: -1, slot: -1, size: f.bodySize()}
 		nodes = append(nodes, n)
 		byFunc[f] = n
 	}
 	for _, v := range c.vars {
-		n := &bodyNode{v: v, index: -1}
+		n := &bodyNode{v: v, index: -1, slot: -1, size: v.bodySize()}
 		nodes = append(nodes, n)
 		byVar[v] = n
 	}
@@ -593,8 +598,10 @@ func (f *Func) resetRows() {
 }
 
 // converge joins the inferred rows of a cyclic component to their fixpoint,
-// silently, with a dependency worklist: a body is checked again only when a
-// body it references grew. Rows are finite sets that only grow (a body's
+// silently, with the worklist settling shares (worklist.go: callees first
+// on demand, the smallest body first among the roots; round 8 review M1
+// and O1): a body is checked again only when a body it references grew.
+// Rows are finite sets that only grow (a body's
 // rows are monotone in its callees' rows), so the worklist empties; no row
 // is published to another component before it has converged.
 // They are monotone because no type inside the group depends on a row still
@@ -623,21 +630,14 @@ func (c *checker) converge(scc []*bodyNode) bool {
 		in[n] = true
 	}
 	preds := map[*bodyNode][]*bodyNode{}
+	edges := 0
 	for _, n := range scc {
 		for _, e := range n.edges {
 			if in[e] {
 				preds[e] = append(preds[e], n)
+				edges++
 			}
 		}
-	}
-	queue := append([]*bodyNode(nil), scc...)
-	queued := make(map[*bodyNode]bool, len(scc))
-	for _, n := range scc {
-		queued[n] = true
-	}
-	edges := 0
-	for _, ps := range preds {
-		edges += len(ps)
 	}
 	// The bound: (bodies + edges) checks for each distinct row element
 	// the component has produced, plus one round. Only an element seen
@@ -649,41 +649,50 @@ func (c *checker) converge(scc []*bodyNode) bool {
 	if c.nodeCheck != nil {
 		check = c.nodeCheck // the synthetic oscillation test
 	}
+	w := &worklist{member: func(n *bodyNode) bool { return in[n] }}
+	for _, n := range scc {
+		w.push(n)
+	}
 	c.silent++
 	checks := 0
-	defer func() { c.convergeChecks += checks }()
-	for len(queue) > 0 {
+	settled := true
+	w.run(func(n *bodyNode) bool {
 		if checks >= budget() {
-			c.silent--
-			c.refuseRows(scc)
+			settled = false
 			return false
 		}
 		checks++
-		n := queue[0]
-		queue = queue[1:]
-		queued[n] = false
 		changed := check(n)
-		if n.fn != nil {
-			for k, v := range []*RowVar{n.fn.errVar, n.fn.useVar} {
-				if v != nil {
-					for _, id := range v.sol.idsOf(c.types) {
-						seen[[2]int32{int32(k), id}] = true
-					}
-				}
+		c.seenRows(n, seen)
+		if changed {
+			for _, p := range preds[n] {
+				w.push(p)
 			}
 		}
-		if !changed {
-			continue
-		}
-		for _, p := range preds[n] {
-			if !queued[p] {
-				queued[p] = true
-				queue = append(queue, p)
+		return true
+	})
+	c.silent--
+	c.convergeChecks += checks
+	c.worklistSteps += w.steps
+	if !settled {
+		c.refuseRows(scc)
+	}
+	return settled
+}
+
+// seenRows adds the elements of n's inferred rows (kind and interned id)
+// to seen, the distinct elements a solve has produced: its budget.
+func (c *checker) seenRows(n *bodyNode, seen map[[2]int32]bool) {
+	if n.fn == nil {
+		return
+	}
+	for k, v := range []*RowVar{n.fn.errVar, n.fn.useVar} {
+		if v != nil {
+			for _, id := range v.sol.idsOf(c.types) {
+				seen[[2]int32{int32(k), id}] = true
 			}
 		}
 	}
-	c.silent--
-	return true
 }
 
 // checkNode checks one body and reports whether its inferred rows grew.
@@ -705,7 +714,7 @@ func (c *checker) checkNode(n *bodyNode) bool {
 func tarjan(nodes []*bodyNode) [][]*bodyNode {
 	var out [][]*bodyNode
 	var stack []*bodyNode
-	index := 0
+	index, post := 0, 0
 	type frame struct {
 		n *bodyNode
 		i int
@@ -737,6 +746,8 @@ func tarjan(nodes []*bodyNode) [][]*bodyNode {
 			}
 			n := top.n
 			work = work[:len(work)-1]
+			n.post = post
+			post++
 			if len(work) > 0 && n.low < work[len(work)-1].n.low {
 				work[len(work)-1].n.low = n.low
 			}
@@ -790,7 +801,40 @@ type branch struct {
 	used  *bool
 }
 
+// bodySize counts the syntax nodes of n: the cost of one check of a body
+// (c.workNodes).
+func bodySize(n syntax.Node) int {
+	count := 0
+	syntax.Inspect(n, func(syntax.Node) bool {
+		count++
+		return true
+	})
+	return max(count, 1)
+}
+
+// bodySize is the syntax nodes of f's declaration, counted once.
+func (f *Func) bodySize() int {
+	if f.size == 0 {
+		f.size = bodySize(f.Decl)
+	}
+	return f.size
+}
+
+// bodySize is the syntax nodes of pv's initializer (its declaration when
+// the names and values do not pair), counted once.
+func (pv *pkgVar) bodySize() int {
+	if pv.size == 0 {
+		var root syntax.Node = pv.spec
+		if pv.idx < len(pv.spec.Values) && len(pv.spec.Values) == len(pv.spec.Names) {
+			root = pv.spec.Values[pv.idx]
+		}
+		pv.size = bodySize(root)
+	}
+	return pv.size
+}
+
 func (c *checker) checkFuncBody(f *Func) bool {
+	c.workNodes += f.bodySize()
 	if uncheckedParams(f.Sig.TParams) {
 		// A constraint this checker does not check yet (S109 at it): the
 		// body's operations on that parameter have no meaning here.
@@ -1003,6 +1047,7 @@ func (c *checker) checkPkgVar(pv *pkgVar) {
 	if pv.done || pv.checking {
 		return
 	}
+	c.workNodes += pv.bodySize()
 	pv.checking = true
 	defer func() { pv.checking = false }()
 	defer c.beginDeps(pv)()

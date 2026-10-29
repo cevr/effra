@@ -52,7 +52,7 @@ case OrderNotFound:
 } // any other failure of Find escapes through try
 ```
 
-1. **Arms.** `e catch { case T, U: v … }` handles failures of the fallible expression `e`. `catch` on an expression that cannot fail is an error (S108).
+1. **Arms.** `e catch { case T, U: v … }` handles failures of the fallible expression `e`. `catch` on an expression that cannot fail is an error (S108). The error is in the row, not the type: the catch expression keeps the type of rule 3, so no type depends on a row and nothing cascades from the error.
 2. Each type in an arm must be in `e`'s row (S108). A type may appear in only one arm (S108).
 3. **Value.** When `e` has a value of type `T`, each arm's value must be assignable to `T` (S108), and the catch expression has type `T`. When `e` has no value, an arm must have no value (S108). An arm's value whose own failure is not handled is S105.
 4. **Total catch (S103).** A `catch` without `try` must handle every error type in `e`'s row. *Prior art:* Rust and Gleam exhaustive `match` on an error enum; Swift propagates an error that no `catch` clause matches to the enclosing scope, and a non-throwing function must handle every error; Ergo's total catch is the same obligation stated per error type.

@@ -67,11 +67,17 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 		}
 	}
 	row := op.errs
+	// The catch's value has the caught expression's type whatever its row:
+	// a catch on an expression that cannot fail is a mistake in the row,
+	// not in the type, so the value keeps its type and nothing cascades
+	// from it. No type depends on an inferred row this way, so a call x.f(…)
+	// on the value resolves before the rows settle (selfcalls.go; round 8
+	// review M1).
+	hasValue := valid && op.mode != modeNoValue
 	if valid && row.Empty() {
 		c.errorf(x.X, CodeType, "catch on an expression that cannot fail (rows.md, Catch 1)")
 		valid = false
 	}
-	hasValue := valid && op.mode != modeNoValue
 	var valueType Type
 	if hasValue {
 		valueType = c.defaultOf(&op)

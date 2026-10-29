@@ -59,6 +59,8 @@ type Func struct {
 	// function of a valid group, which is called only as x.f(…).
 	same       []*Func
 	overloaded bool
+	// size is the declaration's syntax nodes (bodySize), once known.
+	size int
 }
 
 // Var is a variable: a parameter, a local or a package-level var.

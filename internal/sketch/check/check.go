@@ -143,9 +143,13 @@ type checker struct {
 	// (round-3 M5), and bounded by a test.
 	bodyEdges int
 	// bodyNodes counts the bodies of the body graph; selfChecks counts the
-	// body checks of resolveSelfCalls and selfSteps the bodies and edges
-	// its worklist visits (round 7 review M1: linear, bounded by a test).
-	bodyNodes, selfChecks, selfSteps int
+	// body checks of settling and worklistSteps the bodies and edges the
+	// worklists of settling and converge visit (round 8 review M1: linear).
+	bodyNodes, selfChecks, worklistSteps int
+	// workNodes counts the work of the body checks in syntax nodes: each
+	// check of a body adds the body's size (bodySize), in every pass
+	// (round 8 review M1: linear in the source, bounded by a test).
+	workNodes int
 	// settleOnly, set only by a test, is selfSettleOnly for one check.
 	settleOnly bool
 	// calleeValid, set only by a test, receives each call whose callee
@@ -201,6 +205,8 @@ type pkgVar struct {
 	// initCycle: the var is on a reported initialization cycle; its type
 	// is invalid, so no use of it cascades (D3).
 	initCycle bool
+	// size is the initializer's syntax nodes (bodySize), once known.
+	size int
 }
 
 var nextID struct {
