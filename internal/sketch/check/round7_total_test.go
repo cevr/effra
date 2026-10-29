@@ -56,7 +56,7 @@ func genericDefaultSwitch(n, k int, noSwitch bool) string {
 		b.WriteString(" {\n\tdefault:\n\t\treturn 0\n\t}\n")
 	}
 	b.WriteString("\treturn 0\n}\n")
-	return b.String()
+	return check.FromOld(b.String())
 }
 
 // TestGenericDefaultSwitchLinear: a default-only switch over n subjects of

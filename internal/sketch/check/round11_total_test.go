@@ -51,7 +51,7 @@ func rowPattern(n, d int) string {
 		fmt.Fprintf(&b, "V[func(A%d) error[Fault[int]]]", i)
 	}
 	b.WriteString("):\n\t\treturn 1\n\tdefault:\n\t\treturn 0\n\t}\n}\n")
-	return b.String()
+	return check.FromOld(b.String())
 }
 
 // TestRowPatternLinear: substituting a row pattern with a deep bound

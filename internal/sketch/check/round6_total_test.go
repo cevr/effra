@@ -29,7 +29,7 @@ func unionSwitch(variants, cases int) string {
 		fmt.Fprintf(&b, "\tcase V%d:\n\t\treturn %d\n", v, v)
 	}
 	b.WriteString("\tdefault:\n\t\treturn -1\n\t}\n}\n")
-	return b.String()
+	return check.FromOld(b.String())
 }
 
 // TestVariantResolutionLinear: resolving a type switch's cases to variants

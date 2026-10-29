@@ -10,203 +10,269 @@ import (
 )
 
 // reviewCases reproduce the round-1 review probes (round-1-findings.md) and
-// the repairs' own cases. Each source is a package main body; want is the
-// exact sequence of codes, "" for none.
+// the repairs' own cases. Each source is a decided file body (#196); want
+// is the exact sequence of codes, "" for none.
 var reviewCases = []struct {
 	finding, name, want, src string
 }{
 	{"M1", "inference-chain-through-values", "S108", ""}, // built by largeSCC; class G (round 14)
-	{"M2", "machine-initial-inferred", "S102", `type C interface{ Use() }
-type S interface{ Idle }
-type Idle struct{}
-type E interface{ Ping }
-type Ping struct{}
-type M machine[S, E] { initial initial(); step step }
-func initial() S { C.Use(); return Idle{} }
+	{"M2", "machine-initial-inferred", "S102", `type C { Use() }
+type S = Idle
+type Idle {}
+type E = Ping
+type Ping {}
+type M machine[S, E] { initial: initial(), step: step }
+func initial() S {
+	C.Use()
+	return Idle{}
+}
 func step(s S, e E) Decision[S, int] { return Ignore{} }`},
-	{"M2", "package-var-inferred", "S102", `type C interface{ Use() string }
-var v = helper()
+	{"M2", "package-var-inferred", "S102", `type C { Use() string }
+let v = helper()
 func helper() string { return C.Use() }`},
-	{"M3", "error-row-package-var", "S101", `type Fault struct{}
+	{"M3", "error-row-package-var", "S101", `type Fault {}
 func Identity(v Fault) Fault { return v }
-var _ = func() error[Fault] { return Fault{} }`},
-	{"M3", "generic-row-body-order", "S101", `type Fault[T] struct{ Value T }
+let _ = func() fails Fault { return Fault{} }`},
+	{"M3", "generic-row-body-order", "S101", `type Fault[T] { Value T }
 func Identity(v Fault[int]) Fault[int] { return v }
-func F() { _ = func() error[Fault[int]] { return Fault[int]{1} } }`},
-	{"M3", "local-error-row", "S101", `type Fault struct{}
+func F()                               { _ = func() fails Fault[int] { return Fault[int]{1} } }`},
+	{"M3", "local-error-row", "S101", `type Fault {}
 func Identity(v Fault) Fault { return v }
-func F() { _ = func() error[Fault] { return Fault{} } }`},
-	{"M4", "error-union-rethrow", "", `type A struct{}
-type B struct{}
-func Fail() error[A | B]
-func F() error[A | B] { Fail() catch e { case A, B: return e } }`},
-	{"M4", "catch-union-switch", "", `type A struct{}
-type B struct{}
-func Fail() error[A | B]
-func F() { Fail() catch e { case A, B: switch _ := e.(type) { case A: return; case B: return } } }`},
-	{"M4", "catch-union-switch-not-total", "S103", `type A struct{}
-type B struct{}
-func Fail() error[A | B]
-func F() { Fail() catch e { case A, B: switch _ := e.(type) { case A: return } } }`},
-	{"M4", "error-union-as-value", "S101", `type A struct{}
-type B struct{}
-func Fail() error[A | B]
-func F() any { Fail() catch e { case A, B: return e }; return "ok" }`},
-	{"M5", "generic-named-constraint-inferred", "S108", `type I interface { M() }
-type S struct{}
-func (S) M() {}
-type Box[T I] struct{ X T }
+func F()                     { _ = func() fails Fault { return Fault{} } }`},
+	{"M4", "error-union-rethrow", "", `type A {}
+type B {}
+extern go fixture.Fail func Fail() fails A | B
+func F() fails A | B {
+	Fail() catch {
+	case A as e, B as e:
+		return e
+	}
+}`},
+	{"M4", "catch-union-switch", "", `type A {}
+type B {}
+extern go fixture.Fail func Fail() fails A | B
+func F() {
+	Fail() catch {
+	case A as e, B as e:
+		match e {
+		case A:
+			return
+		case B:
+			return
+		}
+	}
+}`},
+	{"M4", "catch-union-switch-not-total", "S103", `type A {}
+type B {}
+extern go fixture.Fail func Fail() fails A | B
+func F() {
+	Fail() catch {
+	case A as e, B as e:
+		match e {
+		case A:
+			return
+		}
+	}
+}`},
+	{"M4", "error-union-as-value", "S101", `type A {}
+type B {}
+type V = A | B
+extern go fixture.Fail func Fail() fails A | B
+func F() V {
+	Fail() catch {
+	case A as e, B as e:
+		return e
+	}
+	return A{}
+}`},
+	{"M5", "generic-named-constraint-inferred", "S108", `type I { M() }
+type S {}
+func M(_ S) {}
+type Box[T I] { X T }
 func F() { _ = Box{1} }`},
-	{"M5", "generic-constraint-method-row", "S108", `type A struct{}
-type B struct{}
-type I interface{ M() error[A] }
-type S struct{}
-func (S) M() error[B] { return B{} }
-type Box[T I] struct{ X T }
-func F() any { return Box{S{}} }`},
-	{"M5", "generic-constraint-inferred-ok", "", `type I interface { M() }
-type S struct{}
-func (S) M() {}
-type Box[T I] struct{ X T }
-func F() any { return Box{S{}} }`},
-	{"M6", "implicit-row-in-generic-argument", "", `func Await(t Task[T, E]) (T, error[E]) { return t.Wait() }`},
-	{"M6", "bracket-row-in-generic-field", "", `type Box[T, E] struct { t Task[T, E] }
-func Open(b Box[T, E]) (T, error[E]) { return b.t.Wait() }`},
+	{"M5", "generic-constraint-method-row", "S108", `type A {}
+type B {}
+type I { M() fails A }
+type S {}
+func M(_ S) fails B { return B{} }
+type Box[T I] { X T }
+func F() { _ = Box{S{}} }`},
+	{"M5", "generic-constraint-inferred-ok", "", `type I { M() }
+type S {}
+func M(_ S) {}
+type Box[T I] { X T }
+func F() { _ = Box{S{}} }`},
+	{"M6", "implicit-row-in-generic-argument", "", `func Await[T, E](t Task[T, E]) T fails E { return t.Wait() }`},
+	{"M6", "bracket-row-in-generic-field", "", `type Box[T, E] { t Task[T, E] }
+func Open[T, E](b Box[T, E]) T fails E { return b.t.Wait() }`},
 	{"M6", "row-kind-conflict-still-reported", "S108", `func Bad(t Task[T, E], e E) T { return t.Wait() }`},
-	{"M7", "generic-recursive-value", "S108", `type Wrap[T] struct { Value T }
-type U struct{ Field Wrap[U] }
+	{"M7", "generic-recursive-value", "S108", `type Wrap[T] { Value T }
+type U { Field Wrap[U] }
 func F() U { return U{} }`},
-	{"M7", "generic-recursive-constraint", "S108", `type Wrap[T] struct { Value T }
-type U struct{ Field Wrap[U] }`},
-	{"M7", "generic-recursive-through-slice", "", `type Wrap[T] struct { Values []T }
-type U struct{ Field Wrap[U] }`},
-	{"M7", "generic-self-recursive", "S108", `type L[T] struct { next L[T] }`},
-	{"M7", "generic-growing-instance", "S108", `type L[T] struct { next L[[1]T] }`},
-	{"M7", "generic-pair-cycle", "S108", `type A[T] struct { b B[T] }
-type B[T] struct { a A[T] }`},
-	{"M9", "short-declaration-reuse", "", `func F() int { x := 1; x, y := 2, 3; return x + y }`},
-	{"M9", "short-declaration-reuse-type", "S108", `func F() int { x := 1; x, y := "s", 3; return x + y }`},
-	{"M9", "duplicate-local-unused", "S108", `func F() { x := 1; x := 2; _ = x }`},
-	{"M9", "parameter-reuse", "", `func F(x int) int { x, y := 2, 3; return x + y }`},
-	{"M9", "blank-only", "S108", `func F() { _ := 1 }`},
-	{"M9", "repeated-name", "S108", `func F() int { a, a := 1, 2; return a }`},
-	{"M9", "reuse-from-call", "", `func two() (int, string) { return 1, "s" }
-func F() string { x := 0; x, s := two(); _ = x; return s }`},
-	{"M9", "reuse-from-call-type", "S108", `func two() (string, int) { return "s", 1 }
-func F() int { x := 0; x, n := two(); return x + n }`},
-	{"M9", "reuse-is-not-a-read", "S110", `func F() int { x := 1; x, y := 2, 3; return y }`},
-	{"M9", "inner-block-shadows", "", `func F() int { x := 1; if true { x := "s"; _ = x }; return x }`},
+	{"M7", "generic-recursive-constraint", "S108", `type Wrap[T] { Value T }
+type U { Field Wrap[U] }`},
+	{"M7", "generic-recursive-through-slice", "", `type Wrap[T] { Values []T }
+type U { Field Wrap[U] }`},
+	{"M7", "generic-self-recursive", "S108", `type L[T] { next L[T] }`},
+	{"M7", "generic-growing-instance", "S108", `type L[T] { next L[[]T] }`},
+	{"M7", "generic-pair-cycle", "S108", `type A[T] { b B[T] }
+type B[T] { a A[T] }`},
+	{"M9", "duplicate-local-unused", "S108", `func F() {
+	let x = 1
+	let x = 2
+	_ = x
+}`},
+	{"M9", "inner-block-shadows", "", `func F() int {
+	let x = 1
+	if true {
+		let x2 = "s"
+		_ = x2
+	}
+	return x
+}`},
 	{"M10", "function-value-explicit", "", `func Id[T](x T) T { return x }
 func F() func(int) int { return Id[int] }`},
-	{"M10", "function-value-explicit-constraint", "S108", `type I interface{ M() }
-func Id[T I](x T) T { return x }
+	{"M10", "function-value-explicit-constraint", "S108", `type I { M() }
+func Id[T I](x T) T    { return x }
 func F() func(int) int { return Id[int] }`},
 	{"M10", "function-value-wrong-type", "S108", `func Id[T](x T) T { return x }
 func F() func(string) string { return Id[int] }`},
 	{"M10", "function-value-called", "", `func Id[T](x T) T { return x }
-func F() int { f := Id[int]; return f(3) + Id[int](4) }`},
+func F() int {
+	let f = Id[int]
+	return f(3) + Id[int](4)
+}`},
 	{"M10", "function-value-statement", "S110", `func Id[T](x T) T { return x }
 func F() { Id[int] }`},
-	{"M10", "function-value-implicit", "S108", `func Await[T](x T, t Task[T, E]) (T, error[E]) { return t.Wait() }
+	{"M10", "function-value-implicit", "S108", `func Await[T, E](x T, t Task[T, E]) T fails E { return t.Wait() }
 func F() { _ = Await[int] }`},
 	{"M11", "index-negative", "S108", `func F(xs []int) int { return xs[-1] }`},
-	{"M11", "index-out-of-bounds", "S108", `func F() int { return [1]int{7}[2] }`},
-	{"M11", "make-negative", "S108", `func F() []int { return make([]int, -1) }`},
-	{"M11", "make-capacity", "S108", `func F() []int { return make([]int, 2, 1) }`},
 	{"M11", "slice-bounds", "S108", `func F(xs []int) []int { return xs[3:1] }`},
 	{"M11", "string-index-out-of-bounds", "S108", `func F() byte { return "ab"[2] }`},
-	{"M11", "array-slice-out-of-bounds", "S108", `func F() []int { a := [2]int{1, 2}; return a[:3] }`},
 	{"M11", "string-slice-out-of-bounds", "S108", `func F() string { return "ab"[1:3] }`},
-	{"M11", "bounds-ok", "", `func F(xs []int) []int { _ = [2]int{1, 2}[1]; _ = make([]int, 1, 2); return xs[1:3] }`},
+	{"M11", "bounds-ok", "", `func F(xs []int) []int { return xs[1:3] }`},
 	{"M12", "float-rounding", "S108", `func F() int { return 1 / int(float32(16777217) - float32(16777216)) }`},
 	{"M12", "float-rounding-arithmetic", "S108", `func F() int { return 1 / int(float32(16777216) + 1 - float32(16777216)) }`},
 	{"M12", "float64-exact-enough", "", `func F() int { return 1 / int(float64(16777217) - float64(16777216)) }`},
-	{"M13", "embedded-collision-replaced", "", `type I interface{ M() }
-type S struct{}
-func (S) M() {}
-wire A { I = S{} }
-wire B { I = S{} }
-wire W { A; B; replace I = S{} }
-func F() { with(W) { I.M() } }`},
-	{"M13", "embedded-collision-inline-replaced", "", `type I interface{ M() }
-type S struct{}
-func (S) M() {}
-wire A { I = S{} }
-wire B { I = S{} }
-func F() { with(wire{ A; B; replace I = S{} }) { I.M() } }`},
-	{"M13", "embedded-collision-unresolved", "S111", `type I interface{ M() }
-type S struct{}
-func (S) M() {}
-wire A { I = S{} }
-wire B { I = S{} }
-wire W { A; B }
-func F() { with(W) { I.M() } }`},
-	{"M13", "wire-double-replace", "", `type I interface{ M() }
-type S struct{}
-func (S) M() {}
-wire Base { I = S{} }
-wire W { Base; replace I = S{}; replace I = S{} }
-func F() { with(W) { I.M() } }`},
-	{"M14", "named-wire-internal-capability", "", `type A interface { M() }
-type B interface { N() }
-type S struct{}
-func (S) M() {}
-func (S) N() {}
-func Make() B needs A { A.M(); return S{} }
-wire W { A = S{}; B = Make() }
-func F() { with(W) { B.N() } }`},
-	{"M14", "named-wire-internal-cycle", "S108", `type A interface { M() }
-type B interface { N() }
-type S struct{}
-func (S) M() {}
-func (S) N() {}
-func MakeA() A needs B { B.N(); return S{} }
-func MakeB() B needs A { A.M(); return S{} }
-wire W { A = MakeA(); B = MakeB() }
-func F() { with(W) { B.N() } }`},
-	{"M14", "named-wire-caller-capability", "S102", `type A interface { M() }
-type B interface { N() }
-type S struct{}
-func (S) N() {}
-func Make() B needs A { A.M(); return S{} }
-wire W { B = Make() }
-func F() needs A { with(W) { B.N() } }`},
-	{"M14", "named-wire-self-cycle", "S108", `type A interface { M() }
-type S struct{}
-func (S) M() {}
-func MakeA() A needs A { A.M(); return S{} }
-wire W { A = MakeA() }
-func F() { with(W) { A.M() } }`},
-	{"M14", "named-wire-three-cycle", "S108", `type A interface { M() }
-type B interface { N() }
-type C interface { O() }
-type S struct{}
-func (S) M() {}
-func (S) N() {}
-func (S) O() {}
-func MakeA() A needs C { C.O(); return S{} }
-func MakeB() B needs A { A.M(); return S{} }
-func MakeC() C needs B { B.N(); return S{} }
-wire W { A = MakeA(); B = MakeB(); C = MakeC() }
-func F() { with(W) { B.N() } }`},
-	{"M14", "named-wire-needs-embedded", "", `type A interface { M() }
-type B interface { N() }
-type S struct{}
-func (S) M() {}
-func (S) N() {}
-func Make() B needs A { A.M(); return S{} }
-wire Base { A = S{} }
-wire W { Base; B = Make() }
-func F() { with(W) { B.N() } }`},
-	{"M14", "inline-wire-stays-open", "S102", `type A interface { M() }
-type B interface { N() }
-type S struct{}
-func (S) M() {}
-func (S) N() {}
-func Make() B needs A { A.M(); return S{} }
-func F() { with(wire{ A = S{}; B = Make() }) { B.N() } }`},
+	{"M13", "embedded-collision-replaced", "", `type I { M() }
+type S {}
+func M(_ S) {}
+let A = wire { I: S{} }
+let B = wire { I: S{} }
+let W = wire { replace I: S{}, A, B }
+func F() { with W { I.M() } }`},
+	{"M13", "embedded-collision-inline-replaced", "", `type I { M() }
+type S {}
+func M(_ S) {}
+let A = wire { I: S{} }
+let B = wire { I: S{} }
+func F() { with wire { replace I: S{}, A, B } { I.M() } }`},
+	{"M13", "embedded-collision-unresolved", "S111", `type I { M() }
+type S {}
+func M(_ S) {}
+let A = wire { I: S{} }
+let B = wire { I: S{} }
+let W = wire { A, B }
+func F() { with W { I.M() } }`},
+	{"M13", "wire-double-replace", "", `type I { M() }
+type S {}
+func M(_ S) {}
+let Base = wire { I: S{} }
+let W = wire { replace I: S{}, replace I: S{}, Base }
+func F() { with W { I.M() } }`},
+	{"M14", "named-wire-internal-capability", "", `type A { M() }
+type B { N() }
+type S {}
+func M(_ S) {}
+func N(_ S) {}
+func Make() B needs A {
+	A.M()
+	return S{}
+}
+let W = wire { A: S{}, B: Make() }
+func F() { with W { B.N() } }`},
+	{"M14", "named-wire-internal-cycle", "S108", `type A { M() }
+type B { N() }
+type S {}
+func M(_ S) {}
+func N(_ S) {}
+func MakeA() A needs B {
+	B.N()
+	return S{}
+}
+func MakeB() B needs A {
+	A.M()
+	return S{}
+}
+let W = wire { A: MakeA(), B: MakeB() }
+func F() { with W { B.N() } }`},
+	{"M14", "named-wire-caller-capability", "S102", `type A { M() }
+type B { N() }
+type S {}
+func N(_ S) {}
+func Make() B needs A {
+	A.M()
+	return S{}
+}
+let W = wire { B: Make() }
+func F() needs A { with W { B.N() } }`},
+	{"M14", "named-wire-self-cycle", "S108", `type A { M() }
+type S {}
+func M(_ S) {}
+func MakeA() A needs A {
+	A.M()
+	return S{}
+}
+let W = wire { A: MakeA() }
+func F() { with W { A.M() } }`},
+	{"M14", "named-wire-three-cycle", "S108", `type A { M() }
+type B { N() }
+type C { O() }
+type S {}
+func M(_ S) {}
+func N(_ S) {}
+func O(_ S) {}
+func MakeA() A needs C {
+	C.O()
+	return S{}
+}
+func MakeB() B needs A {
+	A.M()
+	return S{}
+}
+func MakeC() C needs B {
+	B.N()
+	return S{}
+}
+let W = wire { A: MakeA(), B: MakeB(), C: MakeC() }
+func F() { with W { B.N() } }`},
+	{"M14", "named-wire-needs-embedded", "", `type A { M() }
+type B { N() }
+type S {}
+func M(_ S) {}
+func N(_ S) {}
+func Make() B needs A {
+	A.M()
+	return S{}
+}
+let Base = wire { A: S{} }
+let W = wire { B: Make(), Base }
+func F() { with W { B.N() } }`},
+	{"M14", "inline-wire-stays-open", "S102", `type A { M() }
+type B { N() }
+type S {}
+func M(_ S) {}
+func N(_ S) {}
+func Make() B needs A {
+	A.M()
+	return S{}
+}
+func F() { with wire { A: S{}, B: Make() } { B.N() } }`},
 	{"M15", "main-through-alias", "S113", `func main() {}
-func F() { run := main; run() }`},
+func F() {
+	let run = main
+	run()
+}`},
 	{"M15", "main-as-argument", "S113", `func main() {}
 func call(f func()) { f() }
 func F() { call(main) }`},
@@ -215,34 +281,44 @@ func F() func() { return main }`},
 	{"M15", "main-called-in-parens", "S113", `func main() {}
 func F() { (main)() }`},
 	{"M15", "local-main-is-ordinary", "", `func main() {}
-func F() { main := func() {}; main() }`},
-	{"M16", "with-default-hint", "", `type Box[T] struct{ X T }
-func F() Box[int] { return with(wire{}) { Box{} } }`},
-	{"M17", "map-index-field-assignment", "S108", `type S struct{ X int }
-func F(m map[int]S) { m[0].X = 1 }`},
-	{"M17", "map-index-assignment", "", `type S struct{ X int }
-func F(m map[int]S, n map[int]int) { m[0] = S{}; m[1] = S{X: 2}; n[3] += S{}.X }`},
-	{"M17", "map-index-field-increment", "S108", `type S struct{ X int }
-func F(m map[int]S) { m[2].X++ }`},
-	{"M17", "map-value-increment", "", `func F(m map[int]int) { m[0]++; m[1] += 2 }`},
-	{"M17", "slice-element-field", "", `type S struct{ X int }
+func F() {
+	let main = func() {}
+	main()
+}`},
+	{"M16", "with-default-hint", "", `type Box[T] { X T }
+func F() Box[int] { return with wire {} { Box{} } }`},
+	{"M17", "map-index-field-assignment", "S108", `type S { X int }
+func F(m Map[int, S]) { m[0].X = 1 }`},
+	{"M17", "map-index-assignment", "", `type S { X int }
+func F(m Map[int, S], n Map[int, int]) {
+	m[0] = S{}
+	m[1] = S{X: 2}
+	n[3] += S{}.X
+}`},
+	{"M17", "map-index-field-increment", "S108", `type S { X int }
+func F(m Map[int, S]) { m[2].X += 1 }`},
+	{"M17", "map-value-increment", "", `func F(m Map[int, int]) {
+	m[0] += 1
+	m[1] += 2
+}`},
+	{"M17", "slice-element-field", "", `type S { X int }
 func F(xs []S) { xs[0].X = 1 }`},
-	{"M17", "map-index-address", "S108", `type S struct{ X int }
-func G(s *S) {}
-func F(m map[int]S) { G(&m[0]) }`},
+	{"M17", "map-index-address", "S108", `type S { X int }
+func G(s *S)          {}
+func F(m Map[int, S]) { G(&m[0]) }`},
 	{"M18", "unknown-wire-cascade", "S104", `func F() { with(Missing) { Console.Println("x") } }`},
 	{"M18", "unknown-wire-cascade-in-wire", "S104", `func F() { with(wire{ Missing }) { Console.Println("x") } }`},
-	{"M18", "unknown-wire-cascade-named", "S104", `wire W { Missing }
-func F() { with(W) { Console.Println("x") } }`},
-	{"N1", "pointer-receiver-parameter", "", `type I interface{ M() }
-type S struct{}
-func (s *S) M() {}
-func Take(x I)
+	{"M18", "unknown-wire-cascade-named", "S104", `let W = wire { Missing }
+func F() { with W { Console.Println("x") } }`},
+	{"N1", "pointer-receiver-parameter", "", `type I { M() }
+type S {}
+func M(s *S) {}
+extern go fixture.Take func Take(x I)
 func F(s *S) { Take(s) }`},
-	{"N1", "pointer-receiver-value", "S108", `type I interface{ M() }
-type S struct{}
-func (s *S) M() {}
-func Take(x I)
+	{"N1", "pointer-receiver-value", "S108", `type I { M() }
+type S {}
+func M(s *S) {}
+extern go fixture.Take func Take(x I)
 func F(s S) { Take(s) }`},
 	{"N2", "complex-types", "", `func F() complex128 { return 1 }
 func G(a, b complex64) complex64 { return a*b + a/b - b }
@@ -252,43 +328,60 @@ func H(a complex128) bool { return a == a }`},
 	{"N2", "float-to-complex-value", "S108", `func F(f float64) complex128 { return complex128(f) }`},
 	{"N2", "complex-remainder", "S108", `func F(a, b complex128) complex128 { return a % b }`},
 	{"N2", "complex64-overflow", "S108", `func F() complex64 { return 1 << 200 }`},
-	{"N3", "map-duplicate-key", "S108", `func F() map[int]int { return map[int]int{1: 1, 1: 2} }`},
-	{"N3", "map-duplicate-string-key", "S108", `func F() map[string]int { return map[string]int{"a": 1, "a": 2} }`},
-	{"N3", "map-converted-key", "S108", `func F() map[int64]int { return map[int64]int{1: 1, int64(1): 2} }`},
-	{"N3", "map-distinct-keys", "", `func F(k int) map[int]int { return map[int]int{1: 1, 2: 2, k: 3, k: 4} }`},
-	{"N4", "paren-lhs", "", `func F() int { x := 1; (x) = 2; return x }`},
+	{"N3", "map-duplicate-key", "S108", `func F() Map[int, int] { return Map[int, int]{1: 1, 1: 2} }`},
+	{"N3", "map-duplicate-string-key", "S108", `func F() Map[string, int] { return Map[string, int]{"a": 1, "a": 2} }`},
+	{"N3", "map-converted-key", "S108", `func F() Map[int64, int] { return Map[int64, int]{1: 1, int64(1): 2} }`},
+	{"N3", "map-distinct-keys", "", `func F(k int) Map[int, int] { return Map[int, int]{1: 1, 2: 2, k: 3, k: 4} }`},
+	{"N4", "paren-lhs", "", `func F() int {
+	let mut x = 1
+	(x) = 2
+	return x
+}`},
 	// Cascades and accepted forms the review logged without a contract.
-	{"D3", "unknown-import-cascade", "S104", `import "missing"
+	{"D3", "unknown-import-cascade", "S104", `import missing
 func F() { missing.Call() }`},
-	{"D3", "unknown-named-import-cascade", "S104", `import m "missing/deep"
+	{"D3", "unknown-named-import-cascade", "S104", `import m missing/deep
 func F() { m.Call() }`},
-	{"D3", "go-import-cascade", "S109", `import go "fmt"
+	{"D3", "go-import-cascade", "S109", `import go fmt
 func F() { fmt.Println("x") }`},
-	{"D3", "unknown-import-type-cascade", "S104", `import "missing"
+	{"D3", "unknown-import-type-cascade", "S104", `import missing
 func F(x missing.T) {}`},
-	{"D3", "unknown-type-unused-cascade", "S104", `func F() { var x Missing }`},
+	{"D3", "unknown-type-unused-cascade", "S104", `func F() { let x Missing }`},
 	{"D3", "unknown-callee-return-cascade", "S104", `func F() int { return missing() }`},
-	{"D3", "invalid-field-cascade", "S108", `type S struct{ X int }
+	{"D3", "invalid-field-cascade", "S108", `type S { X int }
 func F() S { return S{X: "x"} }`},
-	{"D3", "switch-no-value-cascade", "S110", `type A struct{}
-type B struct{}
-type U interface { A | B }
-func F(x U) int { switch v := x.(type) { case A: return 1; case B: return 2 } }`},
+	{"D3", "switch-no-value-cascade", "S110", `type A {}
+type B {}
+type U = A | B
+func F(x U) int {
+	match x {
+	case A as v:
+		return 1
+	case B:
+		return 2
+	}
+}`},
 	{"D2", "inferred-no-value-return", "S108", `func f() {}
 func F() { return f() }`},
 	{"D2", "numeric-constraint-literal", "S108", `func Zero[T comparable](x T) T { return 0 }`},
-	{"D6", "generic-two-rows", "", `type A struct{}
-type B struct{}
-func First() error[A]
-func Second() error[B]
-func Both(f func() error[E], g func() error[E]) error[E] { try f(); return g() }
-func F() error[A | B] { return Both(First, Second) }`},
-	{"D6", "generic-two-rows-too-wide", "S101", `type A struct{}
-type B struct{}
-func First() error[A]
-func Second() error[B]
-func Both(f func() error[E], g func() error[E]) error[E] { try f(); return g() }
-func F() error[A] { return Both(First, Second) }`},
+	{"D6", "generic-two-rows", "", `type A {}
+type B {}
+extern go fixture.First func First() fails A
+extern go fixture.Second func Second() fails B
+func Both(f func() fails E, g func() fails E) fails E {
+	try f()
+	return g()
+}
+func F() fails A | B { return Both(First, Second) }`},
+	{"D6", "generic-two-rows-too-wide", "S101", `type A {}
+type B {}
+extern go fixture.First func First() fails A
+extern go fixture.Second func Second() fails B
+func Both(f func() fails E, g func() fails E) fails E {
+	try f()
+	return g()
+}
+func F() fails A { return Both(First, Second) }`},
 }
 
 func codesOf(diags []check.Diagnostic) string {
@@ -306,14 +399,33 @@ func TestReviewCases(t *testing.T) {
 			if src == "" {
 				src = largeSCC(100, true)
 			} else {
-				src = "package main\n" + src + "\n"
+				src = src + "\n"
 			}
 			_, diags := check.CheckSource(src)
-			if got := codesOf(diags); got != c.want {
+			got := codesOf(diags)
+			if stage, ok := reviewPending[c.finding+"/"+c.name]; ok {
+				if !strings.Contains(got, check.CodeOutside) {
+					t.Errorf("pending on %s, but the checker now checks it: drop it from reviewPending and expect %q; got %q\n\t%s", stage, c.want, got, describe(diags))
+				}
+				return
+			}
+			if got != c.want {
 				t.Errorf("want %q, got %q\n\t%s", c.want, got, describe(diags))
 			}
 		})
 	}
+}
+
+// reviewPending names the cases whose decided source the 196a checker
+// refuses with S109 (not checked yet), with the stage that checks them.
+// Each such case must report S109 until that stage lands; then it leaves
+// this list and its want applies again. An `as` in a catch arm with several
+// types is 196p's (rows.md, Catch 7).
+var reviewPending = map[string]string{
+	"M4/error-union-rethrow":          "196p",
+	"M4/catch-union-switch":           "196p",
+	"M4/catch-union-switch-not-total": "196p",
+	"M4/error-union-as-value":         "196p",
 }
 
 // largeSCC is the M1 probe: f0 calls f1…fn (or names them as values) and
@@ -336,7 +448,7 @@ func largeSCC(n int, values bool) string {
 		fmt.Fprintf(&b, "func f%d() { f%d() }\n", i, i-1)
 	}
 	fmt.Fprintf(&b, "func F() { f%d() }\n", n)
-	return b.String()
+	return check.FromOld(b.String())
 }
 
 // TestInferenceConverges: every function of the cycle gets the full row,
@@ -402,7 +514,7 @@ func oddCycleSwitch(n int) string {
 		}
 	}
 	b.WriteString("}\n}\n")
-	return b.String()
+	return check.FromOld(b.String())
 }
 
 // TestTotalityCost: the odd-cycle family stays clean and cheap (M8, D16).

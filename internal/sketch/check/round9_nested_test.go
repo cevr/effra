@@ -21,7 +21,9 @@ type S struct{}
 
 func (S) M(int8) {}
 
-func G[T any, P interface{ M(T) }](v T, p P) T { return v }
+type IM[T any] interface{ M(T) }
+
+func G[T comparable, P IM[T]](v T, p P) T { return v }
 `
 	cases := []struct {
 		name, body string
@@ -41,7 +43,7 @@ func G[T any, P interface{ M(T) }](v T, p P) T { return v }
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "package p\n\n" + decls + "\n" + tc.body + "\n"
-			_, diags := CheckSource(src)
+			_, diags := CheckSource(fromOld(src))
 			var ds []string
 			for _, d := range diags {
 				ds = append(ds, d.String())

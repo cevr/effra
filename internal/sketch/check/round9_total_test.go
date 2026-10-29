@@ -14,6 +14,12 @@ import (
 // V[A0]), and a switch with one case V[A(k-1)] or a case per variant, and
 // default. Each variant is a variable edge of its own parameter.
 func variableUnion(k int, oneCase, collapse bool) string {
+	return check.FromOld(variableUnionOld(k, oneCase, collapse))
+}
+
+// variableUnionOld is variableUnion in the old syntax, which collapsedCases
+// extends before the translation.
+func variableUnionOld(k int, oneCase, collapse bool) string {
 	var b strings.Builder
 	b.WriteString("package main\ntype V[T any] struct{}\n")
 	for i := range k {
@@ -85,7 +91,7 @@ func signatureUnion(n int, oneCase bool) string {
 		}
 	}
 	b.WriteString("\tdefault:\n\t\treturn 0\n\t}\n}\n")
-	return b.String()
+	return check.FromOld(b.String())
 }
 
 // manyParams writes the reviewer's round-8 M4 shape: Many[T0, …, T(n-1)]
@@ -114,7 +120,7 @@ func manyParams(n int) string {
 		b.WriteString("1")
 	}
 	b.WriteString(")\n}\n")
-	return b.String()
+	return check.FromOld(b.String())
 }
 
 // TestIndexScaling: the reviewer's round-8 index shapes resolve their
@@ -203,12 +209,12 @@ func TestIndexBudget(t *testing.T) {
 // switch with k cases naming V[A0]: each case reaches k candidates, k × k
 // steps in all.
 func collapsedCases(k int) string {
-	src := variableUnion(k, true, true)
+	src := variableUnionOld(k, true, true)
 	var cases strings.Builder
 	for i := range k {
 		fmt.Fprintf(&cases, "\tcase V[A0]:\n\t\treturn %d\n", i)
 	}
-	return strings.Replace(src, "\tcase V[A0]:\n\t\treturn 1\n", cases.String(), 1)
+	return check.FromOld(strings.Replace(src, "\tcase V[A0]:\n\t\treturn 1\n", cases.String(), 1))
 }
 
 // TestConstraintGuardLinear: the constraint guard collects the parameters

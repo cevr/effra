@@ -54,7 +54,7 @@ func TestWireChainLinear(t *testing.T) {
 			fmt.Fprintf(&b, "wire W%d { W%d }\n", i, i-1)
 		}
 		fmt.Fprintf(&b, "func F() { with(W%d) {} }\n", n-1)
-		diags, _, wire := opsOf(t, b.String())
+		diags, _, wire := opsOf(t, fromOld(b.String()))
 		if len(diags) > 0 {
 			t.Fatalf("n=%d: want acceptance, got %v", n, diags[0])
 		}
@@ -168,19 +168,21 @@ func TestCapSetPersistent(t *testing.T) {
 	}
 }
 
-// TestAnonymousStructLinear: keyed and positional anonymous struct literals
-// of n fields, each a slice literal with elided children, cost linear work
-// in the reference walk (round 17 M2: each element scanned the field list).
-func TestAnonymousStructLinear(t *testing.T) {
+// TestRecordLiteralLinear: keyed and positional record literals of n
+// fields, each a slice literal with elided children, cost linear work in
+// the reference walk (round 17 M2: each element scanned the field list).
+// Round 17 wrote an anonymous struct literal; the decided language has
+// none (#196), so the record is named.
+func TestRecordLiteralLinear(t *testing.T) {
 	for _, keyed := range []bool{true, false} {
 		counts := map[int]int{}
 		for _, n := range []int{1000, 4000, 8000} {
 			var b strings.Builder
-			b.WriteString("package p\ntype S struct{ a int }\nfunc F() { _ = struct{\n")
+			b.WriteString("package p\ntype S struct{ a int }\ntype Big struct{\n")
 			for i := range n {
 				fmt.Fprintf(&b, " f%d []S\n", i)
 			}
-			b.WriteString("}{")
+			b.WriteString("}\nfunc F() { _ = Big{")
 			for i := range n {
 				if keyed {
 					fmt.Fprintf(&b, "f%d: ", i)
@@ -188,19 +190,20 @@ func TestAnonymousStructLinear(t *testing.T) {
 				b.WriteString("[]S{{a: 1}, {a: 2}}, ")
 			}
 			b.WriteString("} }\n")
-			diags, walk, _ := opsOf(t, b.String())
+			diags, walk, _ := opsOf(t, fromOld(b.String()))
 			if len(diags) > 0 {
 				t.Fatalf("keyed=%v n=%d: want acceptance, got %v", keyed, n, diags[0])
 			}
 			counts[n] = walk
 		}
-		linear(t, fmt.Sprintf("anonymous struct (keyed=%v)", keyed), counts, 12)
+		linear(t, fmt.Sprintf("record literal (keyed=%v)", keyed), counts, 12)
 	}
 }
 
 // TestMissingLiteralType: a struct field's composite literal writes its
-// type, keyed or positional, as in Go; the elements and keys of a slice,
-// array or map literal may elide it (round 17 C1).
+// type, keyed or positional, as in Go; the elements and keys of a slice or
+// map literal may elide it (round 17 C1; the decided language has no fixed
+// arrays, #196).
 func TestMissingLiteralType(t *testing.T) {
 	const decls = "package p\ntype S struct{ a int }\ntype Wrap[T any] struct{ value T }\n" +
 		"type Long struct{ alpha int; beta int; gamma int; delta int }\n"
@@ -212,16 +215,16 @@ func TestMissingLiteralType(t *testing.T) {
 		{"_ = Wrap[S]{value: {\na: 1}}", "missing type in composite literal; write S{…}"},
 	} {
 		src := decls + "func F() {\n" + tc.body + "\n}\n"
-		_, diags := CheckSource(src)
+		_, diags := CheckSource(fromOld(src))
 		if len(diags) != 1 || diags[0].Code != CodeType || diags[0].Message != tc.want {
 			t.Errorf("%s: want one S108 %q, got %v", tc.body, tc.want, diags)
 		}
 	}
 	for _, ok := range []string{
-		"_ = []S{{a: 1}}", "_ = [1]S{{a: 1}}", "_ = map[S]S{{a: 1}: {a: 2}}",
+		"_ = []S{{a: 1}}", "_ = map[S]S{{a: 1}: {a: 2}}",
 		"_ = Wrap[S]{value: S{a: 1}}", "_ = Wrap[[]S]{value: []S{{a: 1}}}",
 	} {
-		if _, diags := CheckSource(decls + "func F() {\n" + ok + "\n}\n"); len(diags) > 0 {
+		if _, diags := CheckSource(fromOld(decls + "func F() {\n" + ok + "\n}\n")); len(diags) > 0 {
 			t.Errorf("%s: want acceptance, got %v", ok, diags)
 		}
 	}

@@ -75,7 +75,7 @@ func matrixSwitch(sizes []int, rows [][]int, order []int) string {
 		}
 	}
 	b.WriteString("\t}\n\treturn 0\n}\n")
-	return b.String()
+	return check.FromOld(b.String())
 }
 
 // verdict classifies a switch's totality outcome.
@@ -123,7 +123,7 @@ func TestBodyGraphScale(t *testing.T) {
 		for i := 0; i < n; i++ {
 			fmt.Fprintf(&b, "type R%d struct{}\nfunc (R%d) M() { R%d{}.M() }\n", i, i, i)
 		}
-		edges, diags := check.BodyGraphEdges(b.String())
+		edges, diags := check.BodyGraphEdges(check.FromOld(b.String()))
 		if len(diags) != 0 || edges < 0 || edges > n {
 			t.Errorf("%d self-calling methods: %d edges (want at most %d), %s", n, edges, n, describe(diags))
 		}
@@ -132,16 +132,16 @@ func TestBodyGraphScale(t *testing.T) {
 		for i := 0; i < n; i++ {
 			fmt.Fprintf(&b, "type R%d struct{}\nfunc (R%d) M() { f%d() }\nfunc f%d() { R%d{}.M(); f%d() }\n", i, i, i, i, i, (i+1)%n)
 		}
-		edges, diags = check.BodyGraphEdges(b.String())
+		edges, diags = check.BodyGraphEdges(check.FromOld(b.String()))
 		if len(diags) != 0 || edges < 0 || edges > 2*n {
 			t.Errorf("%d methods and a ring of functions: %d edges (want at most %d), %s", n, edges, 2*n, describe(diags))
 		}
 		b.Reset()
 		b.WriteString("package main\n")
 		for i := 0; i < n; i++ {
-			fmt.Fprintf(&b, "type R%d struct{}\nvar v%d = R%d{}.M\nfunc (R%d) M() { _ = v%d }\n", i, i, i, i, i)
+			fmt.Fprintf(&b, "type R%d struct{}\nvar v%d = func() { R%d{}.M() }\nfunc (R%d) M() { _ = v%d }\n", i, i, i, i, i)
 		}
-		edges, diags = check.BodyGraphEdges(b.String())
+		edges, diags = check.BodyGraphEdges(check.FromOld(b.String()))
 		cycles := 0
 		for _, d := range diags {
 			if d.Code == "S108" && strings.Contains(d.Message, "initialization cycle") {
@@ -163,34 +163,34 @@ func TestBodyGraphScale(t *testing.T) {
 // receiver's parameters by position (D6; round-3 M3).
 func TestKindsFromMethods(t *testing.T) {
 	cases := []struct{ name, want, src string }{
-		{"method-error-row", "", `type Job[E] struct{}
-func (Job[E]) Run() error[E] {}`},
-		{"method-capability-row", "", `type Job[R] struct{}
-func (Job[R]) Run() needs R {}`},
-		{"method-renamed-receiver", "", `type Job[E] struct{}
-func (Job[F]) Run() error[F] {}`},
-		{"pointer-receiver", "", `type Job[E] struct{}
-func (j *Job[E]) Run() error[E] {}`},
-		{"method-and-body-agree", "", `type Job[R] struct{ f func() needs R }
-func (Job[R]) Run() needs R {}`},
-		{"recursive-head-through-method", "", `type Job[E] struct{ next []Job[E] }
-func (j Job[E]) Next() Job[E] { return j }
-func (Job[E]) Run() error[E] {}`},
-		{"mutual-heads-through-method", "", `type A[E] struct{ b []B[E] }
-type B[E] struct{ a []A[E] }
-func (B[E]) Run() error[E] {}`},
-		{"method-parameter-type", "", `type Box[T] struct{}
-func (Box[T]) Put(x T) {}`},
-		{"two-row-method", "", `type A[E, F] struct{}
-func (A[E, F]) Run() error[E | F] {}`},
-		{"body-type-method-row", "S108", `type Job[E] struct{ v E }
-func (Job[E]) Run() error[E] {}`},
-		{"explicit-error", "", `type Job[E error] struct{}
-func (Job[E]) Run() error[E] {}`},
+		{"method-error-row", "", `type Job[E] {}
+func Run[E](_ Job[E]) fails E {}`},
+		{"method-capability-row", "", `type Job[R] {}
+func Run[R](_ Job[R]) needs R {}`},
+		{"method-renamed-receiver", "", `type Job[E] {}
+func Run[F](_ Job[F]) fails F {}`},
+		{"pointer-receiver", "", `type Job[E] {}
+func Run[E](j *Job[E]) fails E {}`},
+		{"method-and-body-agree", "", `type Job[R] { f func() needs R }
+func Run[R](_ Job[R]) needs R {}`},
+		{"recursive-head-through-method", "", `type Job[E] { next []Job[E] }
+func Next[E](j Job[E]) Job[E] { return j }
+func Run[E](_ Job[E]) fails E {}`},
+		{"mutual-heads-through-method", "", `type A[E] { b []B[E] }
+type B[E] { a []A[E] }
+func Run[E](_ B[E]) fails E {}`},
+		{"method-parameter-type", "", `type Box[T] {}
+func Put[T](_ Box[T], x T) {}`},
+		{"two-row-method", "", `type A[E, F] {}
+func Run[E, F](_ A[E, F]) fails E | F {}`},
+		{"body-type-method-row", "S108", `type Job[E] { v E }
+func Run[E](_ Job[E]) fails E {}`},
+		{"explicit-error", "", `type Job[E error] {}
+func Run[E](_ Job[E]) fails E {}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, diags := check.CheckSource("package main\n" + tc.src + "\n")
+			_, diags := check.CheckSource(tc.src + "\n")
 			if got := codes(diags); got != tc.want {
 				t.Errorf("want %q, got %s", tc.want, describe(diags))
 			}
@@ -211,7 +211,7 @@ func TestInvalidUnionCases(t *testing.T) {
 		`switch _, _ := d.(type), c.(type) { case (A, B): return A{} }`,
 	} {
 		src := "package main\ntype A struct{}\ntype B struct{}\ntype Choice interface{ Missing }\ntype Full interface{ A | B }\nfunc F(c Choice, d Full) A {" + sw + "}\n"
-		_, diags := check.CheckSource(src)
+		_, diags := check.CheckSource(check.FromOld(src))
 		if len(diags) != 1 || diags[0].Code != "S104" {
 			t.Errorf("%s: want only the unknown-name S104, got %s", sw, describe(diags))
 		}

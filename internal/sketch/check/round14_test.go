@@ -64,17 +64,27 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 	}
 	if errors {
 		emit("type Bang struct{}")
+		// A bodiless function is extern go in the decided syntax; the old
+		// directive //ef:go is the translator's spelling of it.
+		emit("//ef:go fixture.mark")
 		emit("func mark() error[Bang]")
 		emit("type Box[T any] interface{ M(T) }")
+		emit("//ef:go fixture.BoxOf")
 		emit("func BoxOf[T any](x T) Box[T]")
+		emit("//ef:go fixture.Choose")
 		emit("func Choose[T any](x T, y T) error[Bang]")
-		emit("func Run[T any, E error](x T, y T, callback func() error[E]) error[E]")
+		// E first: the decided list [T, E error] would make T an error row.
+		emit("//ef:go fixture.Run")
+		emit("func Run[E error, T any](x T, y T, callback func() error[E]) error[E]")
 	} else {
 		emit("type Cap interface{ M() }")
 		emit("type Box[T any] interface{ M(T) }")
+		emit("//ef:go fixture.BoxOf")
 		emit("func BoxOf[T any](x T) Box[T]")
+		emit("//ef:go fixture.Choose")
 		emit("func Choose[T any](x T, y T) needs Cap")
 		emit("func Same[T any](x T, y T) {}")
+		emit("//ef:go fixture.Run")
 		emit("func Run[T any](x T, y T, callback func() needs R) needs R")
 	}
 	// Which members are used as values, and which of those write rows.
@@ -248,7 +258,16 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 		}
 		emit("}")
 	}
-	g.src = b.String()
+	// The checker reads the translation, whose lines differ: each
+	// member's declaration line is read again there.
+	g.src = fromOld(b.String())
+	for i, l := range strings.Split(g.src, "\n") {
+		for k := range n {
+			if strings.HasPrefix(l, fmt.Sprintf("func f%d(", k)) {
+				declLine[k] = i + 1
+			}
+		}
+	}
 	// A member marked as a value may get no value use: it is then an
 	// ordinary member, inferred or written.
 	pinned := make([]bool, n)

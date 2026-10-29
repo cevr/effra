@@ -40,7 +40,7 @@ func deepBound(n, d int) string {
 		b.WriteString("V[int]")
 	}
 	b.WriteString("):\n\t\treturn 1\n\tdefault:\n\t\treturn 0\n\t}\n}\n")
-	return b.String()
+	return check.FromOld(b.String())
 }
 
 // TestDeepBoundLinear: a bound type argument's identity is interned once

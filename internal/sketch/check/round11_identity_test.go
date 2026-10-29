@@ -236,32 +236,32 @@ func collectTypes(c *checker) []Type {
 	return out
 }
 
-const identitySource = `package main
-
-type Fault struct{}
-type Other struct{}
-type G[T any] struct{ v T }
-type Pair[A any, B any] struct {
-	a A
-	b B
+// identitySource is decided source (#196). The decided language has no
+// anonymous struct or interface types, fixed arrays or channels, so the
+// permuted-field, permuted-method and channel-direction parameters (c, d
+// and the arrays of e) are gone; the fixtures cover named types.
+const identitySource = `type Fault {}
+type Other {}
+type G[T] { v T }
+type Pair[A, B] {
+	a A,
+	b B,
 }
-type Box[T any] struct{ f func(T) error[Fault | Other] }
-type Shape interface{ V[int] | V[string] }
-type V[T any] struct{}
-type Store interface{ Get(k string) (int, error[Fault]) }
-type Log interface{ Put(s string) }
+type Box[T] { f func(T) fails Fault | Other }
+type Shape = V[int] | V[string]
+type V[T] {}
+type Store { Get(k string) int fails Fault }
+type Log { Put(s string) }
 
-func a(x G[int], y G[string], z G[int], p Pair[int, G[int]], q Pair[G[int], int]) {}
-func b(f func(int) error[Fault | Other], g func(int) error[Other | Fault], h func(int) error[Fault]) {}
-func c(s struct{ X int; Y string }, t struct{ X int; Y string }, u struct{ Y string; X int }) {}
-func d(i interface{ M(); N(int) }, j interface{ N(int); M() }, k interface{ M() }) {}
-func e(m map[string][]G[int], n map[string][]G[int], o [3]chan<- int, p [3]chan int, q <-chan int) {}
-func f(w Box[int], v Box[int], u Box[string]) {}
+func a(x G[int], y G[string], z G[int], p Pair[int, G[int]], q Pair[G[int], int])                 {}
+func b(f func(int) fails Fault | Other, g func(int) fails Other | Fault, h func(int) fails Fault) {}
+func e(m Map[string, []G[int]], n Map[string, []G[int]])                                          {}
+func f(w Box[int], v Box[int], u Box[string])                                                     {}
 func g(x Shape) int {
-	switch x.(type) {
+	match x {
 	case V[int]:
 		return 1
-	default:
+	case _:
 		return 0
 	}
 }
@@ -337,7 +337,9 @@ func genericInferred(seed uint64) string {
 	rng := rand.New(rand.NewPCG(seed, seed^0x9e37))
 	var b strings.Builder
 	b.WriteString("package main\ntype Bang struct{}\ntype Fault[T any] struct{ V T }\ntype Cap interface{ M() }\n")
-	b.WriteString("func fail() error[Bang]\nfunc work() needs Cap\nfunc mark[T any]() error[Fault[T]]\n")
+	// The bodiless functions are extern go in the decided syntax; //ef:go
+	// is the translator's old spelling of it.
+	b.WriteString("//ef:go fixture.fail\nfunc fail() error[Bang]\n//ef:go fixture.work\nfunc work() needs Cap\n//ef:go fixture.mark\nfunc mark[T any]() error[Fault[T]]\n")
 	types := []string{"int", "string", "Bang", "[]int"}
 	for i := range 6 {
 		ty := types[rng.IntN(len(types))]
@@ -360,7 +362,7 @@ func genericInferred(seed uint64) string {
 			fmt.Fprintf(&b, "func S%d() needs Cap { g := work; run%d(g) }\n", i, i)
 		}
 	}
-	return b.String()
+	return fromOld(b.String())
 }
 
 // TestIdentityGenericInferred: the generic-callee family is accepted, and

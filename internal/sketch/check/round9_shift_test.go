@@ -36,7 +36,7 @@ func Two[T any](a T, b T) T { return a }
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "package p\n\n" + decls + "\n" + tc.body + "\n"
-			_, diags := CheckSource(src)
+			_, diags := CheckSource(fromOld(src))
 			var ds []string
 			for _, d := range diags {
 				ds = append(ds, d.String())

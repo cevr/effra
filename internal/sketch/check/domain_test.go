@@ -41,10 +41,12 @@ func checkWithin(t *testing.T, src string, d time.Duration) (*check.Package, []c
 
 // TestRowGraphDomain: random reference graphs over four kinds of body:
 // functions and package vars holding function literals (inferred rows),
-// methods (closed rows; two method names over many receivers, so the body
-// graph's by-name method edges over-approximate) and exported functions
-// (closed rows). A body refers to another by
-// a call or by a bare reference (_ = f), and may call C.M itself. The
+// self functions (196m: two names over many first-parameter types, called
+// as R{}.m(), which reaches the one function of R; inferred rows, like any
+// unexported function) and exported functions (closed rows). A body refers
+// to another by a call or by a bare reference (_ = f; never to a self
+// function, which has no method value), and may call C.M itself. The
+// generator writes the old syntax and checks its translation (fromOld). The
 // oracle is independent of the checker:
 //   - the initialization graph is every reference; a var in a cyclic
 //     strongly connected component of it is on an initialization cycle:
@@ -97,7 +99,9 @@ func TestRowGraphDomain(t *testing.T) {
 				if kind[j] == kExported || rng.Intn(4) != 0 {
 					continue
 				}
-				edges[i] = append(edges[i], edge{to: j, call: rng.Intn(4) != 0})
+				// A method is always called: the decided language has no
+				// method values (196m).
+				edges[i] = append(edges[i], edge{to: j, call: rng.Intn(4) != 0 || kind[j] == kMethod})
 			}
 		}
 		name := func(j int) string {
@@ -156,7 +160,7 @@ func TestRowGraphDomain(t *testing.T) {
 			}
 			b.WriteString("}\n")
 		}
-		src := b.String()
+		src := check.FromOld(b.String())
 
 		// The initialization graph's components (Tarjan over every edge).
 		comp := make([]int, n)
@@ -225,8 +229,8 @@ func TestRowGraphDomain(t *testing.T) {
 		}
 
 		// Class G: the checker's components are those of the body graph,
-		// whose edges reach inferred bodies only (methods and exported
-		// functions spell their rows). A function used as a value (_ = f)
+		// whose edges reach inferred bodies only (exported functions spell
+		// their rows). A function used as a value (_ = f)
 		// inside its own component has its rows pinned empty; when its body
 		// still needs C, that is one S108 at its declaration. A var on
 		// an initialization cycle is invalid: no value use follows from its
@@ -234,7 +238,7 @@ func TestRowGraphDomain(t *testing.T) {
 		bcomp := bodyComponents(n, func(i int) []int {
 			var out []int
 			for _, e := range edges[i] {
-				if kind[e.to] == kFunc || kind[e.to] == kVar {
+				if kind[e.to] != kExported {
 					out = append(out, e.to)
 				}
 			}
@@ -251,7 +255,7 @@ func TestRowGraphDomain(t *testing.T) {
 
 		// Inferred rows: least fixpoint over calls to unpoisoned inferred bodies;
 		// a pinned row stays empty, and grew records that its body needs C.
-		inferred := func(j int) bool { return kind[j] == kFunc || kind[j] == kVar }
+		inferred := func(j int) bool { return kind[j] != kExported }
 		hasC := make([]bool, n)
 		grew := make([]bool, n)
 		for changed := true; changed; {
@@ -389,31 +393,43 @@ func bodyComponents(n int, succ func(int) []int) []int {
 // reports S108 and terminates (round-2 M1; go/types mono.go).
 var expandingCases = []struct{ name, src string }{
 	{"self-slice", `func f[T](x T) { f([]T{x}) }`},
-	{"self-row", `type Fault[T] struct{ Value T }
-func Mark() error[Fault[int]]
-func f[T](x T) { try f([]T{x}); return Fault[T]{x} }`},
-	{"self-row-map", `type Fault[T] struct{ Value T }
-func f[T](x T) error[Fault[T]] { try f(map[int]T{0: x}); return Fault[T]{x} }`},
-	{"mutual", `type Fault[T] struct{ Value T }
-func Mark() error[Fault[int]]
-func f[T](x T) { try g([]T{x}); return Fault[T]{x} }
-func g[T](x T) { try f([1]T{x}) }`},
+	{"self-row", `type Fault[T] { Value T }
+extern go fixture.Mark func Mark() fails Fault[int]
+func f[T](x T) {
+	try f([]T{x})
+	return Fault[T]{x}
+}`},
+	{"self-row-map", `type Fault[T] { Value T }
+func f[T](x T) fails Fault[T] {
+	try f(Map[int, T]{0: x})
+	return Fault[T]{x}
+}`},
+	{"mutual", `type Fault[T] { Value T }
+extern go fixture.Mark func Mark() fails Fault[int]
+func f[T](x T) {
+	try g([]T{x})
+	return Fault[T]{x}
+}
+func g[T](x T) { try f([]T{x}) }`},
 	{"three", `func f[T](x T) { g(x) }
 func g[T](x T) { h([]T{x}) }
 func h[T](x T) { f(x) }`},
-	{"explicit", `func f[T](x T) { var y []T; f[[]T](y) }`},
-	{"through-type", `type Box[T] struct{ V T }
+	{"explicit", `func f[T](x T) {
+	let y []T
+	f[[]T](y)
+}`},
+	{"through-type", `type Box[T] { V T }
 func f[T](x T) { f(Box[T]{x}) }`},
-	{"type-field", `type L[T] struct { next []L[[1]T] }`},
-	{"type-by-value", `type L[T] struct { next L[[1]T] }`},
-	{"type-mutual", `type A[T] struct { b []B[[]T] }
-type B[T] struct { a []A[T] }`},
+	{"type-field", `type L[T] { next []L[[]T] }`},
+	{"type-by-value", `type L[T] { next L[[]T] }`},
+	{"type-mutual", `type A[T] { b []B[[]T] }
+type B[T] { a []A[T] }`},
 }
 
 func TestExpandingInstantiation(t *testing.T) {
 	for _, c := range expandingCases {
 		t.Run(c.name, func(t *testing.T) {
-			_, diags := checkWithin(t, "package main\n"+c.src+"\n", 2*time.Second)
+			_, diags := checkWithin(t, ""+c.src+"\n", 2*time.Second)
 			if len(diags) != 1 || diags[0].Code != "S108" || !strings.Contains(diags[0].Message, "instantiation cycle") {
 				t.Fatalf("want one instantiation-cycle S108, got %s", describe(diags))
 			}
@@ -427,14 +443,17 @@ func TestFiniteInstantiation(t *testing.T) {
 	for _, src := range []string{
 		`func f[T](x T) { f(x) }`,
 		`func f[T](x T) { f([]int{1}) }`,
-		`type Fault[T] struct{ Value T }
-func f[T](x T) error[Fault[T]] { try f(x); return Fault[T]{x} }`,
+		`type Fault[T] { Value T }
+func f[T](x T) fails Fault[T] {
+	try f(x)
+	return Fault[T]{x}
+}`,
 		`func f[T](x T) { g(x) }
 func g[T](x T) { f(x) }`,
-		`type L[T] struct { next []L[T] }`,
-		`type L[T] struct { next []L[int] }`,
+		`type L[T] { next []L[T] }`,
+		`type L[T] { next []L[int] }`,
 	} {
-		_, diags := checkWithin(t, "package main\n"+src+"\n", 2*time.Second)
+		_, diags := checkWithin(t, ""+src+"\n", 2*time.Second)
 		if len(diags) != 0 {
 			t.Fatalf("%s: want no diagnostic, got %s", src, describe(diags))
 		}
@@ -486,7 +505,7 @@ func cycleSwitch(n int, order []int) string {
 		}
 	}
 	b.WriteString("}\n}\n")
-	return b.String()
+	return check.FromOld(b.String())
 }
 
 func columnOrders(n int, rng *rand.Rand) map[string][]int {
@@ -619,7 +638,7 @@ func cnfSwitch(rng *rand.Rand, n, m int) (string, [][]int) {
 		b.WriteString("case (" + text + "): return 1\n")
 	}
 	b.WriteString("}\nreturn 0\n}\n")
-	return b.String(), rows
+	return check.FromOld(b.String()), rows
 }
 
 // cnfTotal decides by enumeration whether the rows cover every assignment.
@@ -681,7 +700,7 @@ func TestTotalityEmptySubject(t *testing.T) {
 		`switch _, _ := d.(type), c.(type) { case (A, _): return A{} }`,
 	} {
 		src := "package main\ntype A struct{}\ntype B struct{}\ntype Choice interface{A00}\ntype Full interface{A | B}\nfunc F(c Choice, d Full) A {" + sw + "}\n"
-		_, diags := checkWithin(t, src, 2*time.Second)
+		_, diags := checkWithin(t, check.FromOld(src), 2*time.Second)
 		if len(diags) != 1 || diags[0].Code != "S104" {
 			t.Errorf("%s: want only the unknown-name S104, got %s", sw, describe(diags))
 		}
@@ -728,71 +747,75 @@ func TestTotalityBudget(t *testing.T) {
 // ---------------------------------------------------------------- D6 kinds and constraints
 
 var kindCases = []struct{ name, want, src string }{
-	{"self-recursive-row", "", `type List[T, E] struct { Value T; Tail []List[T, E]; Run func() error[E] }`},
-	{"self-recursive-row-first", "", `type List[E, T] struct { Tail []List[E, T]; Value T; Run func() error[E] }`},
-	{"self-recursive-explicit", "", `type List[T any, E error] struct { Value T; Tail []List[T, E]; Run func() error[E] }`},
-	{"mutually-recursive-row", "", `type Box[T, E] struct { Next []Other[T, E]; Run func() error[E] }
-type Other[T, E] struct { Next []Box[T, E] }`},
-	{"mutual-row-declared-later", "", `type Other[T, E] struct { Next []Box[T, E] }
-type Box[T, E] struct { Next []Other[T, E]; Run func() error[E] }`},
-	{"three-cycle-row", "", `type A[E] struct { b []B[E] }
-type B[E] struct { c []C[E] }
-type C[E] struct { a []A[E]; run func() error[E] }`},
-	{"recursive-capability-row", "", `type Svc interface{ Ping() }
-type Job[R] struct { next []Job[R]; run func() needs R }
+	{"self-recursive-row", "", `type List[T, E] { Value T, Tail []List[T, E], Run func() fails E }`},
+	{"self-recursive-row-first", "", `type List[E, T] { Tail []List[E, T], Value T, Run func() fails E }`},
+	// The explicit form lists E first: an unconstrained T before E error
+	// would take E's constraint in the decided list.
+	{"self-recursive-explicit", "", `type List[E error, T] { Value T, Tail []List[E, T], Run func() fails E }`},
+	{"mutually-recursive-row", "", `type Box[T, E] { Next []Other[T, E], Run func() fails E }
+type Other[T, E] { Next []Box[T, E] }`},
+	{"mutual-row-declared-later", "", `type Other[T, E] { Next []Box[T, E] }
+type Box[T, E] { Next []Other[T, E], Run func() fails E }`},
+	{"three-cycle-row", "", `type A[E] { b []B[E] }
+type B[E] { c []C[E] }
+type C[E] { a []A[E], run func() fails E }`},
+	{"recursive-capability-row", "", `type Svc { Ping() }
+type Job[R] { next []Job[R], run func() needs R }
 func Run(j Job[Svc]) {}`},
-	{"recursive-conflict", "S108", `type L[E] struct { next []L[E]; run func() error[E]; v E }`},
-	{"function-of-recursive", "", `type List[T, E] struct { Tail []List[T, E]; Run func() error[E] }
-func Head(l List[T, E]) error[E] { return l.Run() }`},
-	{"dependent-constraint-literal", "", `type I[T] interface { M(T) }
-type S struct{}
-func (S) M(x int) {}
-type Box[T any, V I[T]] struct{ X T; Y V }
+	{"recursive-conflict", "S108", `type L[E] { next []L[E], run func() fails E, v E }`},
+	{"function-of-recursive", "", `type List[T, E] { Tail []List[T, E], Run func() fails E }
+func Head[T, E](l List[T, E]) fails E { return l.Run() }`},
+	{"dependent-constraint-literal", "", `type I[T] { M(T) }
+type S {}
+func M(_ S, x int) {}
+type Box[T comparable, V I[T]] { X T, Y V }
 func F() { _ = Box{1, S{}} }`},
-	{"dependent-constraint-explicit", "", `type I[T] interface { M(T) }
-type S struct{}
-func (S) M(x int) {}
-type Box[T any, V I[T]] struct{ X T; Y V }
+	{"dependent-constraint-explicit", "", `type I[T] { M(T) }
+type S {}
+func M(_ S, x int) {}
+type Box[T comparable, V I[T]] { X T, Y V }
 func F() { _ = Box[int, S]{1, S{}} }`},
 	// T is bound only by a constant and V's constraint mentions it: Go
 	// infers T through the constraint, the subset refuses (D6 rule 3 as
-	// amended in round 8); the typed and explicit forms are valid.
-	{"dependent-constraint-call", "S108", `type I[T] interface { M(T) }
-type S struct{}
-func (S) M(x int) {}
-func Use[T any, V I[T]](x T, v V) {}
+	// amended in round 8); the typed and explicit forms are valid. T is
+	// comparable, not any, which the decided language does not spell
+	// before a constrained parameter (#196).
+	{"dependent-constraint-call", "S108", `type I[T] { M(T) }
+type S {}
+func M(_ S, x int) {}
+func Use[T comparable, V I[T]](x T, v V) {}
 func F() { Use(1, S{}) }`},
-	{"dependent-constraint-call-typed", "", `type I[T] interface { M(T) }
-type S struct{}
-func (S) M(x int) {}
-func Use[T any, V I[T]](x T, v V) {}
+	{"dependent-constraint-call-typed", "", `type I[T] { M(T) }
+type S {}
+func M(_ S, x int) {}
+func Use[T comparable, V I[T]](x T, v V) {}
 func F(n int) { Use(n, S{}) }`},
-	{"dependent-constraint-call-explicit", "", `type I[T] interface { M(T) }
-type S struct{}
-func (S) M(x int) {}
-func Use[T any, V I[T]](x T, v V) {}
+	{"dependent-constraint-call-explicit", "", `type I[T] { M(T) }
+type S {}
+func M(_ S, x int) {}
+func Use[T comparable, V I[T]](x T, v V) {}
 func F() { Use[int](1, S{}) }`},
-	{"dependent-constraint-value", "", `type I[T] interface { M(T) }
-type S struct{}
-func (S) M(x int) {}
-func Use[T any, V I[T]](x T, v V) {}
+	{"dependent-constraint-value", "", `type I[T] { M(T) }
+type S {}
+func M(_ S, x int) {}
+func Use[T comparable, V I[T]](x T, v V) {}
 func F() func(int, S) { return Use[int, S] }`},
-	{"dependent-constraint-unsatisfied", "S108", `type I[T] interface { M(T) }
-type S struct{}
-func (S) M(x int) {}
-type Box[T any, V I[T]] struct{ X T; Y V }
+	{"dependent-constraint-unsatisfied", "S108", `type I[T] { M(T) }
+type S {}
+func M(_ S, x int) {}
+type Box[T comparable, V I[T]] { X T, Y V }
 func F() { _ = Box{"s", S{}} }`},
-	{"dependent-constraint-call-unsatisfied", "S108", `type I[T] interface { M(T) }
-type S struct{}
-func (S) M(x int) {}
-func Use[T any, V I[T]](x T, v V) {}
+	{"dependent-constraint-call-unsatisfied", "S108", `type I[T] { M(T) }
+type S {}
+func M(_ S, x int) {}
+func Use[T comparable, V I[T]](x T, v V) {}
 func F() { Use("s", S{}) }`},
 }
 
 func TestKindAndConstraintDomain(t *testing.T) {
 	for _, c := range kindCases {
 		t.Run(c.name, func(t *testing.T) {
-			_, diags := check.CheckSource("package main\n" + c.src + "\n")
+			_, diags := check.CheckSource("" + c.src + "\n")
 			if got := codesOf(diags); got != c.want {
 				t.Fatalf("want %q, got %s", c.want, describe(diags))
 			}
@@ -802,50 +825,41 @@ func TestKindAndConstraintDomain(t *testing.T) {
 
 // ---------------------------------------------------------------- D2/D5
 
+// The chains are written in the decided syntax (#196).
 func structChain(n int) string {
 	var b strings.Builder
-	b.WriteString("package main\n")
 	for i := 0; i < n; i++ {
-		fmt.Fprintf(&b, "type T%d struct { Next T%d }\n", i, i+1)
+		fmt.Fprintf(&b, "type T%d { Next T%d }\n", i, i+1)
 	}
-	fmt.Fprintf(&b, "type T%d struct{}\n", n)
+	fmt.Fprintf(&b, "type T%d {}\n", n)
 	return b.String()
 }
 
 func genericChain(n int) string {
 	var b strings.Builder
-	b.WriteString("package main\ntype W[T] struct { V T }\n")
+	b.WriteString("type W[T] { V T }\n")
 	for i := 0; i < n; i++ {
-		fmt.Fprintf(&b, "type T%d struct { Next W[T%d] }\n", i, i+1)
+		fmt.Fprintf(&b, "type T%d { Next W[T%d] }\n", i, i+1)
 	}
-	fmt.Fprintf(&b, "type T%d struct{}\n", n)
-	return b.String()
-}
-
-func arrayChain(n int) string {
-	var b strings.Builder
-	b.WriteString("package main\n")
-	for i := 0; i < n; i++ {
-		fmt.Fprintf(&b, "type T%d struct { Next [2]T%d }\n", i, i+1)
-	}
-	fmt.Fprintf(&b, "type T%d struct{}\n", n)
+	fmt.Fprintf(&b, "type T%d {}\n", n)
 	return b.String()
 }
 
 // TestFiniteChains: deep finite type chains are legal at any depth, and
-// closing the chain is S108 once (round-2 M5: no depth cutoff).
+// closing the chain is S108 once (round-2 M5: no depth cutoff). The
+// array chain is gone with fixed arrays (#196).
 func TestFiniteChains(t *testing.T) {
 	for _, gen := range []struct {
 		name string
 		f    func(int) string
-	}{{"struct", structChain}, {"generic", genericChain}, {"array", arrayChain}} {
+	}{{"struct", structChain}, {"generic", genericChain}} {
 		for _, n := range []int{1, 10, 300, 2000} {
 			src := gen.f(n)
 			_, diags := checkWithin(t, src, 10*time.Second)
 			if len(diags) != 0 {
 				t.Fatalf("%s n=%d: want no diagnostic, got %s", gen.name, n, describe(diags))
 			}
-			closed := strings.Replace(src, fmt.Sprintf("type T%d struct{}", n), fmt.Sprintf("type T%d struct{ Back T0 }", n), 1)
+			closed := strings.Replace(src, fmt.Sprintf("type T%d {}", n), fmt.Sprintf("type T%d { Back T0 }", n), 1)
 			_, diags = checkWithin(t, closed, 10*time.Second)
 			if codesOf(diags) != "S108" {
 				t.Fatalf("%s n=%d closed: want one S108, got %s", gen.name, n, describe(diags))
@@ -855,28 +869,22 @@ func TestFiniteChains(t *testing.T) {
 }
 
 var valueCases = []struct{ name, want, src string }{
-	// Map keys of interface type compare by dynamic type and value.
-	{"interface-keys-distinct-types", "", `func F() map[any]int { return map[any]int{int(1): 1, int64(1): 2} }`},
-	{"interface-keys-untyped-default", "S108", `func F() map[any]int { return map[any]int{1: 1, int(1): 2} }`},
-	{"interface-keys-string-int", "", `func F() map[any]int { return map[any]int{"1": 1, 1: 2} }`},
-	{"interface-keys-equal-strings", "S108", `func F() map[any]int { return map[any]int{"a": 1, "a": 2} }`},
-	{"int64-keys-equal", "S108", `func F() map[int64]int { return map[int64]int{1: 1, int64(1): 2} }`},
+	// Map keys compare by value. (The cases of interface keys, which
+	// compare by dynamic type, went with the any type, #196.)
+	{"int64-keys-equal", "S108", `func F() Map[int64, int] { return Map[int64, int]{1: 1, int64(1): 2} }`},
 	// Typed integer constants index when representable as int.
 	{"typed-index-int64", "", `func F(xs []int) int { return xs[int64(0)] }`},
 	{"typed-index-uint8", "", `func F(xs []int) int { return xs[uint8(1)] }`},
 	{"typed-index-negative", "S108", `func F(xs []int) int { return xs[int64(-1)] }`},
 	{"typed-index-too-large", "S108", `func F(xs []int) int { return xs[uint64(18446744073709551615)] }`},
 	{"typed-slice-bound", "", `func F(xs []int) []int { return xs[int32(1):uint(2)] }`},
-	{"typed-make", "", `func F() []int { return make([]int, int8(2), uint16(3)) }`},
-	{"typed-make-order", "S108", `func F() []int { return make([]int, int8(3), uint16(2)) }`},
-	{"array-index-typed", "S108", `func F() int { return [2]int{1, 2}[int64(2)] }`},
 	{"string-slice-implicit-high", "S108", `func F() string { return "ab"[3:] }`},
 }
 
 func TestValueDomain(t *testing.T) {
 	for _, c := range valueCases {
 		t.Run(c.name, func(t *testing.T) {
-			_, diags := check.CheckSource("package main\n" + c.src + "\n")
+			_, diags := check.CheckSource("" + c.src + "\n")
 			if got := codesOf(diags); got != c.want {
 				t.Fatalf("want %q, got %s", c.want, describe(diags))
 			}
@@ -899,11 +907,19 @@ func F() func(int) int { return (Id[int]) }`,
 func Apply(f func(int) int) int { return f(1) }
 func F() int { return Apply(Id[int]) + Apply((Id[int])) }`,
 		`func Id[T](x T) T { return x }
-func F() int { f := Id[int]; g := (Id[string]); _ = g; return f(1) }`,
+func F() int {
+	let f = Id[int]
+	let g = (Id[string])
+	_ = g
+	return f(1)
+}`,
 		`func Pair[A, B](a A, b B) A { return a }
-func F() func(int, string) int { var f func(int, string) int = Pair[int, string]; return f }`,
+func F() func(int, string) int {
+	let f func(int, string) int = Pair[int, string]
+	return f
+}`,
 	} {
-		full := "package main\n" + src + "\n"
+		full := "" + src + "\n"
 		pkg, diags := check.CheckSource(full)
 		if len(diags) != 0 {
 			t.Fatalf("%s: %s", src, describe(diags))
@@ -964,14 +980,16 @@ func hasTypeParam(t check.Type) bool {
 	return false
 }
 
-// ---------------------------------------------------------------- D3 := targets
+// ---------------------------------------------------------------- D3 let targets
 
-// TestDefineTargetsDomain: every left side of := over an existing x, new
-// names and blanks gives the Go verdict with one diagnostic at most: a
-// repeated name is one S108, no name new is one S108, and no false S110
-// follows from either (round-2 M9).
-func TestDefineTargetsDomain(t *testing.T) {
-	atoms := []string{"x", "y", "z", "_"}
+// TestLetTargetsDomain: every sequence of up to three `let` declarations in
+// one block over the names x, y and the blank gives one S108 for each
+// declaration of a name already declared in the block, and no S110 follows
+// from it: each name is read once after the declarations (round-2 M9).
+// Round 2 covered the left sides of :=, which the decided language removed
+// (#196); a binding of several names is a tuple's (196t).
+func TestLetTargetsDomain(t *testing.T) {
+	atoms := []string{"x", "y", "_"}
 	var lists [][]string
 	var build func(prefix []string)
 	build = func(prefix []string) {
@@ -986,39 +1004,31 @@ func TestDefineTargetsDomain(t *testing.T) {
 		}
 	}
 	build(nil)
-	for _, lhs := range lists {
+	for _, names := range lists {
+		var b strings.Builder
+		b.WriteString("func F() {\n")
 		seen := map[string]bool{}
-		repeated, fresh := false, false
-		for _, a := range lhs {
+		var want []string
+		for i, a := range names {
+			fmt.Fprintf(&b, "\tlet %s = %d\n", a, i+1)
 			if a == "_" {
 				continue
 			}
 			if seen[a] {
-				repeated = true
+				want = append(want, "S108")
 			}
 			seen[a] = true
-			if a != "x" {
-				fresh = true
+		}
+		for _, a := range []string{"x", "y"} {
+			if seen[a] {
+				fmt.Fprintf(&b, "\t_ = %s\n", a)
 			}
 		}
-		rhs := make([]string, len(lhs))
-		for i := range rhs {
-			rhs[i] = fmt.Sprint(i + 1)
-		}
-		var reads []string
-		for _, a := range []string{"x", "y", "z"} {
-			if a == "x" || seen[a] {
-				reads = append(reads, "_ = "+a)
-			}
-		}
-		src := fmt.Sprintf("package main\nfunc F() { x := 0; %s := %s; %s }\n", strings.Join(lhs, ", "), strings.Join(rhs, ", "), strings.Join(reads, "; "))
+		b.WriteString("}\n")
+		src := b.String()
 		_, diags := check.CheckSource(src)
-		want := ""
-		if repeated || !fresh {
-			want = "S108"
-		}
-		if got := codesOf(diags); got != want {
-			t.Errorf("%s: want %q, got %s", src, want, describe(diags))
+		if got := codesOf(diags); got != strings.Join(want, " ") {
+			t.Errorf("%s: want %q, got %s", src, strings.Join(want, " "), describe(diags))
 		}
 	}
 }

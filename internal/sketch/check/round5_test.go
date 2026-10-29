@@ -11,41 +11,52 @@ import (
 
 // TestInstantiationCycleSignatures: a method's signature instantiates its
 // receiver's generic type like its body does. A growing instantiation in a
-// parameter, a result, a bodiless declaration, an interface-typed parameter
+// parameter, a result, a bodiless (extern) declaration, an interface-typed parameter
 // or a constraint, through renamed receiver parameters or across two
 // receiver types, is an instantiation cycle (S108), as go/types reports
 // (round-4 M1). The non-growing control stays clean.
 func TestInstantiationCycleSignatures(t *testing.T) {
+	// src is the Go text go/types reads; the checker reads its translation
+	// (fromOld), or decided where the decided spelling has no Go text: a
+	// bodiless declaration is extern go (#196).
 	cases := []struct {
 		name, src string
 		cycle     bool
+		decided   string
 	}{
 		{"parameter", `type R[P any] struct{}
-func (R[P]) M(x R[[]P]) {}`, true},
+func (R[P]) M(x R[[]P]) {}`, true, ""},
 		{"result-bodiless", `type R[P any] struct{}
-func (R[P]) M() R[[]P]`, true},
+func (R[P]) M() R[[]P]`, true, `type R[P] {}
+extern go fixture.M func M[P](_ R[P]) R[[]P]
+`},
 		{"interface-parameter", `type R[P any] struct{}
-func (R[P]) M(x interface{ F(R[[]P]) }) {}`, true},
+type I[P any] interface{ F(R[[]P]) }
+func (R[P]) M(x I[P]) {}`, true, ""},
 		{"renamed-receiver", `type R[P any] struct{}
-func (R[Q]) M(x R[[]Q]) {}`, true},
+func (R[Q]) M(x R[[]Q]) {}`, true, ""},
 		{"cross-receiver", `type R[P any] struct{}
 type S[Q any] struct{}
 func (R[P]) M(x S[[]P]) {}
-func (S[Q]) N(x R[Q]) {}`, true},
+func (S[Q]) N(x R[Q]) {}`, true, ""},
 		{"function-signature-and-method-body", `type R[P any] struct{}
 func F[T any](x R[[]T]) {}
-func (R[P]) M() { var r R[P]; _ = r; F[P](R[[]P]{}) }`, true},
+func (R[P]) M() { var r R[P]; _ = r; F[P](R[[]P]{}) }`, true, ""},
 		{"nongrowing-control", `type R[P any] struct{}
-func (R[P]) M(x R[P]) {}`, false},
+func (R[P]) M(x R[P]) {}`, false, ""},
 		{"nongrowing-cross-control", `type R[P any] struct{}
 type S[Q any] struct{}
 func (R[P]) M(x S[P]) {}
-func (S[Q]) N(x R[Q]) {}`, false},
+func (S[Q]) N(x R[Q]) {}`, false, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "package p\n\n" + tc.src + "\n"
-			_, diags := CheckSource(src)
+			decided := tc.decided
+			if decided == "" {
+				decided = fromOld(src)
+			}
+			_, diags := CheckSource(decided)
 			var ds []string
 			for _, d := range diags {
 				ds = append(ds, d.String())

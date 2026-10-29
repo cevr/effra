@@ -12,7 +12,9 @@ import (
 // its untyped sub-expressions (parentheses, unary and binary operands,
 // constant-producing builtin calls) carry the converted type; a comparison
 // keeps its operands' own types and a shift converts only its left operand.
-// The oracle compares every expression go/types records.
+// The oracle compares every expression go/types records. The decided
+// language has no any type and no fixed arrays (#196), so the cases that
+// assigned to one are gone.
 func TestContextualInfo(t *testing.T) {
 	const decls = `func Id[T any](x T) T { return x }
 
@@ -39,9 +41,7 @@ func Take(v int8) {}
 		`func F() { Take(min(1, 2)) }`,
 		`func F() int8 { return 1 + (2) }`,
 		`func F() { var v int8 = -(1 + 2); _ = v }`,
-		`func F() { var v any = 1 + 2; _ = v }`,
 		`func F() { v := 1 + 'a'; _ = v }`,
-		`func F() { var a [2]int; _ = a }`,
 		`func F(n int8) int8 { return n + 1 }`,
 		`func F(n int8) bool { return n < 1 + 2 }`,
 		`func F(n uint) int { return int(1) << n }`,

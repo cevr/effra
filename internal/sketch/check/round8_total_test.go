@@ -60,14 +60,15 @@ func sharedTuple(n int, noSwitch bool) string {
 		b.WriteString("):\n\t\treturn 1\n\tdefault:\n\t\treturn 0\n\t}\n")
 	}
 	b.WriteString("\treturn 0\n}\n")
-	return b.String()
+	return check.FromOld(b.String())
 }
 
 // sharedCases writes one subject whose n variants share one origin, and a
 // switch with a case for each variant and default. The variants are
 // V[Ai] of a plain union (the reviewer's TestR7ReviewSharedOrigin), V[B,
 // Ai] of an instance U[B] of a generic union, or V[func() Ai], whose type
-// arguments are signatures.
+// arguments are signatures. Both generators write the old syntax and return
+// its decided translation (fromOld).
 func sharedCases(n int, shape string, noSwitch bool) string {
 	var b strings.Builder
 	b.WriteString("package main\n")
@@ -111,13 +112,16 @@ func sharedCases(n int, shape string, noSwitch bool) string {
 		b.WriteString("\tdefault:\n\t\treturn -1\n\t}\n")
 	}
 	b.WriteString("\treturn 0\n}\n")
-	return b.String()
+	return check.FromOld(b.String())
 }
 
 // TestVariantIdentity: the variant index resolves a case to the variant
 // identical to it, through type arguments bound by an instance, nested
 // constructors and signatures, and names every other case "not a variant"
-// (rows.md, Totality 1 and 5).
+// (rows.md, Totality 1 and 5). The declarations and each body are
+// one old program, checked as its decided translation (fromOld): translated
+// apart, a body would read the declared one-letter types as implicit type
+// parameters.
 func TestVariantIdentity(t *testing.T) {
 	const decls = `type A struct{}
 type B struct{}
@@ -164,7 +168,7 @@ type S interface{ V[func() A] | V[func(A) []B] | V[map[A][]B] }
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, d := check.CheckSource("package main\n" + decls + tc.body + "\n")
+			_, d := check.CheckSource(check.FromOld("package main\n" + decls + tc.body + "\n"))
 			got := describe(d)
 			switch {
 			case tc.want == "" && len(d) > 0:

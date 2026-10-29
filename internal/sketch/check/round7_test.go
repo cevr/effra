@@ -10,11 +10,13 @@ import (
 //   - untyped constants of one parameter combine across arguments, as
 //     go/types maxUntyped does, so Two(1, 'a') infers int32 in either
 //     order (M2): returning it as int is S108, as int32 is valid;
-//   - directed-channel refinement (M1), inference through method
-//     constraints (M3) and generic functions as arguments (M4) are outside
+//   - inference through method constraints (M3) and generic functions as
+//     arguments (M4) are outside
 //     the subset: go/types accepts each call, Ergo refuses it with the one
 //     diagnostic "cannot infer T; write the type arguments, e.g. Fn[int](…)"
-//     at the call (D3), and the explicit forms stay valid.
+//     at the call (D3), and the explicit forms stay valid. The decided
+//     language has no channels (#196), so the directed-channel cases (M1)
+//     are gone.
 func TestInferenceSubset(t *testing.T) {
 	const decls = `func Two[T any](a T, b T) T { return a }
 
@@ -34,9 +36,11 @@ func (S) M(int) {}
 
 type I[T any] interface{ M(T) }
 
-func Use[T any, P interface{ M(T) }](x P) {}
+type IM[T any] interface{ M(T) }
 
-func UseN[T any, P I[T]](x P) {}
+func Use[T comparable, P IM[T]](x P) {}
+
+func UseN[T comparable, P I[T]](x P) {}
 `
 	type verdict int
 	const (
@@ -54,11 +58,6 @@ func UseN[T any, P I[T]](x P) {}
 		{"untyped-rune-int-as-int", `func F() int { return Two('a', 1) }`, invalid},
 		{"untyped-explicit-int", `func F() int { return Two[int](1, 'a') }`, valid},
 		{"untyped-mismatched-kinds", `func F() { _ = Two(1, "a") }`, invalid},
-		{"channel-send-last", `func F(a chan int, b chan<- int) { _ = Two(a, b) }`, refused},
-		{"channel-receive-last", `func F(a chan int, b <-chan int) { _ = Two(a, b) }`, refused},
-		{"channel-send-first", `func F(a chan int, b chan<- int) { _ = Two(b, a) }`, valid},
-		{"channel-receive-first", `func F(a chan int, b <-chan int) { _ = Two(b, a) }`, valid},
-		{"channel-explicit", `func F(a chan int, b chan<- int) { _ = Two[chan<- int](a, b) }`, valid},
 		{"method-constraint", `func F(x S) { Use(x) }`, refused},
 		{"method-constraint-named", `func F(x S) { UseN(x) }`, refused},
 		{"method-constraint-explicit", `func F(x S) { Use[int](x) }`, valid},
@@ -75,7 +74,7 @@ func UseN[T any, P I[T]](x P) {}
 			if goValid := len(g) == 0; goValid != (tc.want != invalid) {
 				t.Fatalf("go/types disagrees with the case: %q", g)
 			}
-			_, diags := CheckSource(src)
+			_, diags := CheckSource(fromOld(src))
 			var ds []string
 			for _, d := range diags {
 				ds = append(ds, d.String())

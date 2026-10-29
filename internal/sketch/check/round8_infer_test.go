@@ -26,15 +26,19 @@ func (R) M(int) {}
 
 type I[T any] interface{ M(T) }
 
-func G[T any, P interface{ M(T) }](v T, p P) {}
+type IM[T any] interface{ M(T) }
 
-func GN[T any, P I[T]](v T, p P) {}
+func G[T comparable, P IM[T]](v T, p P) {}
+
+func GN[T comparable, P I[T]](v T, p P) {}
 
 type Q struct{}
 
 func (Q) Get() int8 { return 0 }
 
-func GR[T any, P interface{ Get() T }](v T, p P) {}
+type IG[T any] interface{ Get() T }
+
+func GR[T comparable, P IG[T]](v T, p P) {}
 
 func Apply[T any](f func(T) T, x T) T { return f(x) }
 
@@ -72,7 +76,7 @@ func Rev[T any](x T, f func(T) T) T { return f(x) }
 			if goValid := len(g) == 0; goValid != (tc.want != invalid) {
 				t.Fatalf("go/types disagrees with the case: %q", g)
 			}
-			_, diags := CheckSource(src)
+			_, diags := CheckSource(fromOld(src))
 			var ds []string
 			for _, d := range diags {
 				ds = append(ds, d.String())

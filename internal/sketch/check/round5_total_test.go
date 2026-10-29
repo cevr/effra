@@ -252,7 +252,7 @@ func permuteRows(rows [][]int, order []int) [][]int {
 }
 
 func withDefault(src string) string {
-	return strings.Replace(src, "\t}\n\treturn 0\n}\n", "\tdefault:\n\t\treturn 0\n\t}\n\treturn 0\n}\n", 1)
+	return strings.Replace(src, "\t}\n\treturn 0\n}\n", "\tcase _:\n\t\treturn 0\n\t}\n\treturn 0\n}\n", 1)
 }
 
 func twos(n int) []int {

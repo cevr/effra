@@ -22,15 +22,18 @@ func TestRowVariableWitnesses(t *testing.T) {
 		t.Fatalf("want the 44 witnesses and controls of rounds 12 to 16, found %v", files)
 	}
 	for _, file := range files {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, diags := check.CheckSource(string(data))
-		want, have := expected(string(data)), got(diags)
-		if strings.Join(want, " ") != strings.Join(have, " ") {
-			t.Errorf("%s: want %v, got %v\n\t%s", filepath.Base(file), want, have, describe(diags))
-		}
+		t.Run(filepath.Base(file), func(t *testing.T) {
+			skipPending(t, file)
+			data, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, diags := check.CheckSource(string(data))
+			want, have := expected(string(data)), got(diags)
+			if strings.Join(want, " ") != strings.Join(have, " ") {
+				t.Errorf("want %v, got %v\n\t%s", want, have, describe(diags))
+			}
+		})
 	}
 }
 
@@ -51,7 +54,7 @@ func wideSignature(n, m int) string {
 	for i := range n {
 		fmt.Fprintf(&b, "func f%d() { _ = Box{wide} }\n", i)
 	}
-	return b.String()
+	return check.FromOld(b.String())
 }
 
 // TestFinalSignatureShared: the signature of a function whose row is
@@ -78,17 +81,20 @@ func TestFinalSignatureShared(t *testing.T) {
 }
 
 // shuffledInterface writes the round-11 review's M3 family: a union
-// variant V[interface{ m methods in a shuffled order }], and a switch that
-// builds the union's variant index.
+// variant V[I], I an operation type of m methods in a shuffled order, and a
+// switch that builds the union's variant index. The review's variant was
+// an interface literal, which the decided language removed (#196): the
+// named type keeps the shape, and the literal's path is check-v1's to
+// delete (ruling C).
 func shuffledInterface(m int) string {
 	var b strings.Builder
-	b.WriteString("package main\ntype V[T any] struct{}\ntype U interface{ V[interface{ ")
+	b.WriteString("package main\ntype V[T any] struct{}\ntype I interface{ ")
 	rng := rand.New(rand.NewPCG(1, 2))
 	for _, i := range rng.Perm(m) {
 		fmt.Fprintf(&b, "M%d(); ", i)
 	}
-	b.WriteString("}] | V[int] }\nfunc F(x U) int {\n\tswitch x.(type) {\n\tcase V[int]:\n\t\treturn 1\n\tdefault:\n\t\treturn 0\n\t}\n}\n")
-	return b.String()
+	b.WriteString("}\ntype U interface{ V[I] | V[int] }\nfunc F(x U) int {\n\tswitch x.(type) {\n\tcase V[int]:\n\t\treturn 1\n\tdefault:\n\t\treturn 0\n\t}\n}\n")
+	return check.FromOld(b.String())
 }
 
 // TestInterfaceIndexNoSort: an interface literal's methods are sorted once,

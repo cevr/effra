@@ -24,7 +24,8 @@ func meterOf(t *testing.T, src string) ([]Diagnostic, *wireMeter) {
 	return c.sorted(), c.wires
 }
 
-// wireFamily writes one generated wire program of size n.
+// wireFamily writes one generated wire program of size n, in the decided
+// syntax (fromOld).
 func wireFamily(shape string, n int) string {
 	var b strings.Builder
 	b.WriteString("package p\ntype P struct{}\nfunc (P) M() {}\n")
@@ -83,7 +84,7 @@ func wireFamily(shape string, n int) string {
 			fmt.Fprintf(&b, "wire W%d {}\n", i)
 		}
 		b.WriteString("func F() { with(wire{ C0 = P{} }) { C0.M() } }\n")
-		return b.String()
+		return fromOld(b.String())
 	case "inline fan-in": // an inline wire embeds n one-entry wires and replaces one
 		for i := range n {
 			fmt.Fprintf(&b, "wire X%d {\n\tC%d = P{}\n}\n", i, i)
@@ -93,7 +94,7 @@ func wireFamily(shape string, n int) string {
 			fmt.Fprintf(&b, "\t\tX%d\n", i)
 		}
 		b.WriteString("\t\treplace C0 = P{}\n\t}) { C0.M() }\n}\n")
-		return b.String()
+		return fromOld(b.String())
 	case "multi-key": // one entry binds n capabilities to one provider (round 20)
 		b.WriteString("wire W {\n\t")
 		for i := range n {
@@ -110,12 +111,12 @@ func wireFamily(shape string, n int) string {
 			b.WriteString("\t\tEmpty\n")
 		}
 		b.WriteString("\t}) {}\n}\n")
-		return b.String()
+		return fromOld(b.String())
 	default:
 		panic(shape)
 	}
 	fmt.Fprintf(&b, "func F() { with(%s) { C0.M() } }\n", last)
-	return b.String()
+	return fromOld(b.String())
 }
 
 // TestWireBudget: on every embedding shape, the wire pass's repeatable
@@ -167,17 +168,17 @@ func TestWireBudget(t *testing.T) {
 // duplicate (D3). A wire whose own body passes the budget gets the S111 at
 // its name.
 func TestWireBudgetRefusal(t *testing.T) {
-	src := wireFamily("disjoint", 512) + "wire Dup {\n\tA3\n\tA2\n}\nfunc G() { with(Dup) { C0.M() } }\n"
+	src := wireFamily("disjoint", 512) + "let Dup = wire {\n\tA3,\n\tA2,\n}\nfunc G() { with Dup { C0.M() } }\n"
 	diags, m := meterOf(t, src)
 	if len(diags) != 1 || diags[0].Message != wireBudgetMessage || !m.out {
 		t.Fatalf("want one budget S111, got %v", diags)
 	}
 	line := strings.Split(src, "\n")[diags[0].Line-1]
-	if !strings.HasPrefix(line, "wire ") {
+	if !strings.HasPrefix(line, "let ") {
 		t.Errorf("the budget S111 is at %q, want a wire's name", line)
 	}
 	// Under the budget the same duplicate is found.
-	diags, _ = meterOf(t, wireFamily("disjoint", 4)+"wire Dup {\n\tA3\n\tA2\n}\n")
+	diags, _ = meterOf(t, wireFamily("disjoint", 4)+"let Dup = wire {\n\tA3,\n\tA2,\n}\n")
 	if len(diags) == 0 || diags[0].Code != CodeDuplicateCap || diags[0].Message == wireBudgetMessage {
 		t.Errorf("want the duplicate S111 under the budget, got %v", diags)
 	}
@@ -187,18 +188,18 @@ var usesKeyword = regexp.MustCompile(`\buses\b`)
 
 // TestWireBudgetHeadroom: every fixture, witness, prototype fixture,
 // corpus file and example uses under 10% of its wire budget, so the
-// budget refuses only sources far from the ones written so far.
+// budget refuses only sources far from the ones written so far. The
+// prototype fixtures and the corpus are their decided translations (#196).
 func TestWireBudgetHeadroom(t *testing.T) {
 	var files []string
 	for _, pattern := range []string{
 		"testdata/fixtures/*/*.ergo",
 		"testdata/classf/*.ergo",
 		"testdata/totality/*.ergo",
-		"../../../prototypes/sketch9/testdata/*.sketch",
-		"../../../prototypes/sketch9/testdata/*/*.sketch",
-		"../syntax/testdata/corpus/*/*.sketch",
-		"../syntax/testdata/corpus/*/*/*.sketch",
-		"../syntax/testdata/corpus/*/*/*/*.sketch",
+		"../proto/testdata/*.ergo",
+		"../proto/testdata/*/*.ergo",
+		"../syntax/testdata/corpus/*/*.ergo",
+		"../syntax/testdata/corpus/*/*/*.ergo",
 		"../../../examples/*/*/*.ergo",
 		"../../../docs/research/ef-migrate/*.ergo",
 	} {

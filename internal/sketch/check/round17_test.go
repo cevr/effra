@@ -8,20 +8,19 @@ import (
 )
 
 // keyedForms are composite literals whose keys name the package var h%[1]d
-// (round 16 M1): map keys, elided nested literals, maps of structs, structs
-// as keys and anonymous structs. The structs have a field named h0, which
-// is a field name, never a reference to the var h0.
+// (round 16 M1): map keys, elided nested literals, maps of structs and
+// structs as keys. The structs have a field named h0, which is a field
+// name, never a reference to the var h0. The decided language has no fixed
+// arrays and no anonymous structs (#196), so their two forms are gone.
 var keyedForms = []string{
 	"m := map[KT]int{h%[1]d: 1}; return len(m)",
 	"m := []map[KT]int{{h%[1]d: 1}}; return len(m)",
 	"m := map[KT]S{h%[1]d: {h0: 1}}; return len(m)",
 	"m := map[S]int{{h0: 1, K: h%[1]d}: 2}; return len(m)",
-	"m := [2]map[KT]int{1: {h%[1]d: 1}}; return len(m)",
 	"m := map[KT]map[KT]int{h%[1]d: {h%[2]d: 1}}; return len(m)",
 	"m := []S{{K: h%[1]d}}; return len(m)",
 	"m := map[KT][]S{h%[1]d: {{h0: 1, K: h%[2]d}}}; return len(m)",
 	"m := S{h0: 1, K: h%[1]d}; return m.h0",
-	"m := []struct{ h0 KT }{{h0: h%[1]d}}; return len(m)",
 }
 
 // keyedLiterals generates a source in which bodies refer to package vars
@@ -35,8 +34,8 @@ func keyedLiterals(seed uint64) string {
 	decls := []string{
 		"type Bang struct{}",
 		"type Key[T any] struct{}",
-		"func KeyOf[T any](x T) Key[T]",
-		"func mark() error[Bang]",
+		"//ef:go fixture.KeyOf\nfunc KeyOf[T any](x T) Key[T]",
+		"//ef:go fixture.mark\nfunc mark() error[Bang]",
 		"type S struct{ h0 int; K KT }",
 	}
 	for i := range n {
@@ -47,7 +46,7 @@ func keyedLiterals(seed uint64) string {
 	}
 	r.Shuffle(len(decls), func(i, j int) { decls[i], decls[j] = decls[j], decls[i] })
 	src := "package p\n" + strings.Join(decls, "\n") + "\n"
-	return strings.ReplaceAll(src, "KT", "Key[func() error[Bang]]")
+	return fromOld(strings.ReplaceAll(src, "KT", "Key[func() error[Bang]]"))
 }
 
 // TestClassGMessage: the class G S108 names the value use, or the literal
@@ -55,22 +54,25 @@ func keyedLiterals(seed uint64) string {
 // 16 m2).
 func TestClassGMessage(t *testing.T) {
 	for _, tc := range []struct{ src, at, want string }{
+		// Decided sources (#196): the bodiless functions are extern go, and
+		// keep is generic, since there is no any type; each line moves
+		// up by the package clause.
 		{
-			src: "package p\ntype Bang struct{}\nfunc mark() error[Bang]\nfunc keep(f any)\n" +
+			src: "type Bang {}\nextern go fixture.mark func mark() fails Bang\nextern go fixture.keep func keep[T](f T)\n" +
 				"func walk(n int) { try mark(); keep(func() { try walk(n) }) }\n",
 			at:   "func() { try walk",
-			want: "walk is used as a value through the function literal at 5:%d inside its own recursive group; write its error row: func walk(…) error[…]",
+			want: "walk is used as a value through the function literal at 4:%d inside its own recursive group; write its error row: func walk(…) error[…]",
 		},
 		{
-			src:  "package p\ntype Bang struct{}\nfunc mark() error[Bang]\nfunc walk() { try mark(); g := walk; _ = g }\n",
+			src:  "type Bang {}\nextern go fixture.mark func mark() fails Bang\nfunc walk() { try mark(); let g = walk; _ = g }\n",
 			at:   "walk; _",
-			want: "walk is used as a value at 4:%d inside its own recursive group; write its error row: func walk() error[…]",
+			want: "walk is used as a value at 3:%d inside its own recursive group; write its error row: func walk() error[…]",
 		},
 		{
-			src: "package p\ntype Cap interface{ M() }\nfunc run(n int) { Cap.M() }\n" +
+			src: "type Cap { M() }\nfunc run(n int) { Cap.M() }\n" +
 				"func walk(n int) { Cap.M(); run(n) { walk(n) } }\n",
 			at:   "{ walk(n) }",
-			want: "walk is used as a value through the trailing block at 4:%d inside its own recursive group; write its capability row: func walk(…) needs …",
+			want: "walk is used as a value through the trailing block at 3:%d inside its own recursive group; write its capability row: func walk(…) needs …",
 		},
 	} {
 		line := tc.src[strings.LastIndex(tc.src[:strings.Index(tc.src, tc.at)], "\n")+1:]

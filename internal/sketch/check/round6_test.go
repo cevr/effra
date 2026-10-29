@@ -10,15 +10,15 @@ import (
 // unifies with the variant its argument names, and the variant's type
 // arguments bind; a conflicting later argument is S108.
 func TestInferenceUnions(t *testing.T) {
-	const decls = `type Some[T any] struct{ V T }
+	const decls = `type Some[T] { V T }
 
-type None struct{}
+type None {}
 
-type Opt[T any] interface{ Some[T] | None }
+type Opt[T] = Some[T] | None
 
-func Get[T any](o Opt[T], d T) T { return d }
+func Get[T](o Opt[T], d T) T { return d }
 
-func Pair[T any](o Opt[T], p Opt[T]) {}
+func Pair[T](o Opt[T], p Opt[T]) {}
 `
 	cases := []struct {
 		name, body string
@@ -30,11 +30,11 @@ func Pair[T any](o Opt[T], p Opt[T]) {}
 		{"two-variants-agree", `func G() { Pair(Some[int]{V: 1}, Some[int]{V: 2}) }`, true},
 		{"two-variants-conflict", `func G() { Pair(Some[int]{V: 1}, Some[string]{V: "a"}) }`, false},
 		{"not-a-variant", `func G() int { return Get(Some2{}, 2) }
-type Some2 struct{}`, false},
+type Some2 {}`, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			src := "package p\n\n" + decls + "\n" + tc.body + "\n"
+			src := decls + "\n" + tc.body + "\n"
 			_, diags := CheckSource(src)
 			var ds []string
 			for _, d := range diags {
@@ -53,7 +53,9 @@ type Some2 struct{}`, false},
 // interface, a concrete type or a pointer with the method. A typed argument
 // that conflicts with what an earlier argument inferred is S108 in either
 // order, unless every type argument is written. go/types is the oracle for
-// each verdict.
+// each verdict, on the Go text; the checker reads its translation. The
+// decided language has no anonymous interfaces (#196), so the cases that
+// tested one are gone and the others name their interfaces.
 func TestInferenceInterfaces(t *testing.T) {
 	const decls = `type S struct{}
 
@@ -78,11 +80,18 @@ type E interface{ M() }
 
 type F interface{ M() }
 
+type EN interface {
+	M()
+	N()
+}
+
+type A[T any] interface{ M() T }
+
 type R struct{}
 
 func (R) M() {}
 
-func FnI[T any](x interface{ M() T }) T { return x.M() }
+func FnI[T any](x A[T]) T { return x.M() }
 
 func FnN[T any](x I[T]) T { return x.M() }
 
@@ -94,10 +103,6 @@ func FnS[T any](a []T, b T) {}
 		name, body string
 		accept     bool
 	}{
-		{"wider-anonymous", `func G(x interface {
-	M() int
-	N()
-}) int { return FnI(x) }`, true},
 		{"wider-named", `func G(x W) int { return FnI(x) }`, true},
 		{"named-plain", `func G(x J) int { return FnI(x) }`, true},
 		{"concrete", `func G() int { return FnI(S{}) }`, true},
@@ -108,14 +113,9 @@ func FnS[T any](a []T, b T) {}
 		{"conflict-interface-then-struct", `func G(x E, y R) { _ = Two(x, y) }`, false},
 		{"conflict-struct-then-interface", `func G(x E, y R) { _ = Two(y, x) }`, false},
 		{"explicit-interface-control", `func G(x E, y R) { _ = Two[E](x, y) }`, true},
-		{"explicit-interface-control-reversed", `func G(x E, y R) { _ = Two[interface{ M() }](y, x) }`, true},
-		{"named-and-anonymous-interfaces", `func G(x E, y interface{ M() }) { _ = Two(x, y) }`, true},
-		{"anonymous-and-named-interfaces", `func G(x E, y interface{ M() }) { _ = Two(y, x) }`, true},
+		{"explicit-interface-control-reversed", `func G(x E, y R) { _ = Two[E](y, x) }`, true},
 		{"two-named-interfaces", `func G(x E, y F) { _ = Two(x, y) }`, false},
-		{"narrower-and-wider-interfaces", `func G(x E, y interface {
-	M()
-	N()
-}) { _ = Two(x, y) }`, false},
+		{"narrower-and-wider-interfaces", `func G(x E, y EN) { _ = Two(x, y) }`, false},
 		{"same-named-twice", `func G(x J, y J) { _ = Two(x, y) }`, true},
 		{"slice-conflict", `func G(a []int, b string) { FnS(a, b) }`, false},
 		{"slice-match", `func G(a []int, b int) { FnS(a, b) }`, true},
@@ -128,7 +128,7 @@ func FnS[T any](a []T, b T) {}
 			if (len(g) == 0) != tc.accept {
 				t.Fatalf("go/types disagrees with the case (accept = %v): %q", tc.accept, g)
 			}
-			_, diags := CheckSource(src)
+			_, diags := CheckSource(fromOld(src))
 			var ds []string
 			for _, d := range diags {
 				ds = append(ds, d.String())

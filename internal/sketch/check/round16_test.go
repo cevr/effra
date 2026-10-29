@@ -9,18 +9,19 @@ import (
 	"testing"
 )
 
-// classHSources are the fixtures, the witnesses, the sketch corpora and
-// sources of the generators: the domain of the class H properties.
+// classHSources are the fixtures, the witnesses, the translated prototype
+// fixtures and corpus (#196; the frozen old .sketch copies no longer
+// parse) and sources of the generators: the domain of the class H
+// properties.
 func classHSources(t *testing.T) map[string]string {
 	out := map[string]string{}
 	for _, pattern := range []string{
 		"testdata/fixtures/*/*.ergo",
 		"testdata/classf/*.ergo",
-		"../../../prototypes/sketch9/testdata/*.sketch",
-		"../../../prototypes/sketch9/testdata/*/*.sketch",
-		"../syntax/testdata/corpus/*/*.sketch",
-		"../syntax/testdata/corpus/*/*/*.sketch",
-		"../syntax/testdata/corpus/*/*/*/*.sketch",
+		"../proto/testdata/*.ergo",
+		"../proto/testdata/*/*.ergo",
+		"../syntax/testdata/corpus/*/*.ergo",
+		"../syntax/testdata/corpus/*/*/*.ergo",
 	} {
 		files, _ := filepath.Glob(pattern)
 		for _, f := range files {

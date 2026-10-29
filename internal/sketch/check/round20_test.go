@@ -224,7 +224,7 @@ func TestWireContractInline(t *testing.T) {
 			}
 		}
 	}
-	if strings.Count(wireFamily("inline embeddings", 3), "\t\tEmpty\n") != 3 {
+	if strings.Count(wireFamily("inline embeddings", 3), "\t\tEmpty,\n") != 3 {
 		t.Fatal("the family does not write one embedding per line")
 	}
 }
@@ -300,12 +300,12 @@ func TestWireBudgetOrder(t *testing.T) {
 	}
 }
 
-// TestWireBudgetGroups: two declarations of one name (`var _`) form one
+// TestWireBudgetGroups: two declarations of one name (`let _`) form one
 // inline wire group, refused or kept as a whole, so their order does not
 // choose which of them is refused.
 func TestWireBudgetGroups(t *testing.T) {
 	src := wireFamily("wide fan-in", 6) +
-		"var _ = with(wire{ X0\n X1\n X2 }) { 1 }\nvar _ = with(wire{ X3\n X4\n X5 }) { 2 }\n"
+		"let _ = with wire {\n\tX0,\n\tX1,\n\tX2,\n} { 1 }\nlet _ = with wire {\n\tX3,\n\tX4,\n\tX5,\n} { 2 }\n"
 	full, c := checkLimited(t, src, nil)
 	if len(full) > 0 {
 		t.Fatalf("want acceptance, got %v", full)
