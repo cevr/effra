@@ -75,6 +75,12 @@ let W = wire {
 	Store: Mem{V: "one"},
 	Store: Mem{V: "two"},
 }`, 6, "main.Store has a second entry in this wire, entry 2; the first is entry 1", CodeDuplicateCap},
+	// Round-4 review m1: a capability written twice in one entry names
+	// its two keys, not "entry 1; the first is entry 1".
+	{"one capability listed twice in one entry", `type Store { Get() string }
+type Mem { V string }
+func Get(m Mem) string { return m.V }
+let W = wire { Store, Store: Mem{V: "x"} }`, 4, "main.Store is listed twice in entry 1, as its keys 1 and 2, and a wire binds a capability once", CodeDuplicateCap},
 	// A removed built-in's type argument is no second mistake (m8).
 	{"new(int) is one S104", `func b() {
 	let n = new(int)

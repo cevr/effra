@@ -741,6 +741,9 @@ func (c *checker) finishBody(s *bodySum, body *syntax.WireBody, m *wireMeter) bo
 			op(m, "own probe", singlePass, 1)
 			if first, dup := ownAt[key]; dup {
 				msg := fmt.Sprintf("%s has a second entry in this wire, entry %d; the first is entry %d, and a wire binds a capability once (rows.md, Wire 1)", t, i+1, first.entry)
+				if first.entry == i+1 {
+					msg = fmt.Sprintf("%s is listed twice in entry %d, as its keys %d and %d, and a wire binds a capability once (rows.md, Wire 1)", t, i+1, first.key, at)
+				}
 				s.findings = append(s.findings, wireFinding{k, CodeDuplicateCap, msg})
 				return true
 			}
