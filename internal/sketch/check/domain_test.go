@@ -360,6 +360,7 @@ func TestRowGraphDomain(t *testing.T) {
 	if hidden < 500 {
 		t.Fatalf("only %d calls on a receiver whose type is not written; the generator misses typed self-call edges", hidden)
 	}
+	t.Logf("%d initialization-cycle trials, %d class G trials, %d shadowing statements, %d calls on a hidden receiver", cycles, groups, shadowed, hidden)
 }
 
 // bodyComponents numbers the strongly connected components of the graph
