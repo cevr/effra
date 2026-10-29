@@ -128,8 +128,8 @@ type Wire struct {
 	// wire budget (wiresum.go): it gets the budget S111.
 	budget bool
 	pkg    *Package
-	// Entries are the wire's entries in source order, made when its body is
-	// checked (Info: With.Entries).
+	// Entries are the wire's own entries as written, in source order, made
+	// when its body is checked; With.Entries holds the resolved bindings.
 	Entries []*WireEntry
 }
 

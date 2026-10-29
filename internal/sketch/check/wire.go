@@ -279,7 +279,7 @@ func (c *checker) wireEntry(e *syntax.WireEntry) ([]Type, *WireEntry) {
 			caps = append(caps, t)
 		}
 	}
-	entry := &WireEntry{Caps: caps, Provider: e.Value}
+	entry := &WireEntry{Caps: caps, Provider: e.Value, Replace: e.Replace.IsValid()}
 	if c.isConstructor(e.Value) {
 		c.errorf(e.Value, CodeOutside, "a constructor entry is #37's (wire constructors); write a provider value, not a function")
 		return caps, entry

@@ -256,17 +256,32 @@ type With struct {
 	// Wires are the named wires bound, in nesting order; an inline wire
 	// value's entries are stage E's (196x).
 	Wires []*Wire
-	// Entries are the entries of Wires, in nesting and source order: each
-	// maps capabilities to a provider expression or names an embedded
-	// wire, whose own Entries hold its providers.
-	Entries []*WireEntry
 	// Discharged are the capability types the site binds, by name.
 	Discharged []Type
+	// Entries holds, for a with of a named wire, exactly one entry per
+	// capability: Entries[i] is the provider entry that binds
+	// Discharged[i] once replace and embedding are resolved (rows.md,
+	// Wire 7). An entry of several capabilities appears at each of its
+	// capabilities; its conversion for Discharged[i] is the one at that
+	// capability's index in its Caps. Empty for an inline wire value
+	// (stage E, 196x).
+	Entries []*WireEntry
+	// Overridden are the provider entries a replace overrode, each with the
+	// entry that replaced it, outermost replace first, so a replaced
+	// provider stays traceable; none of them is built.
+	Overridden []Override
 }
 
-// WireEntry is one entry of a named wire: a provider for capabilities, or
-// an embedded wire.
+// Override is a provider entry a replace overrode (With.Overridden).
+type Override struct {
+	Entry, By *WireEntry
+}
+
+// WireEntry is one entry of a named wire, as written: a provider for
+// capabilities, or an embedded wire.
 type WireEntry struct {
+	// Replace marks a `replace Cap: provider` entry.
+	Replace bool
 	// Caps are the capabilities the entry provides, in key order; none for
 	// an embedding.
 	Caps []Type
@@ -398,14 +413,78 @@ func (c *checker) finishInfo() {
 			c.pkg.Info.Types[x] = r
 		}
 	}
-	// A with's entries are its named wires' entries, final once every
-	// wire body is checked.
+	// A with's bindings, final once every wire body is checked: the entry
+	// that binds each discharged capability, and what a replace overrode.
+	wires := map[*Wire]*wireBinding{}
 	for _, w := range c.pkg.Info.Withs {
-		w.Entries = nil
-		for _, wire := range w.Wires {
-			w.Entries = append(w.Entries, wire.Entries...)
+		w.Entries, w.Overridden = nil, nil
+		if len(w.Wires) != 1 {
+			continue
+		}
+		b := wires[w.Wires[0]]
+		if b == nil {
+			b = c.bindingOf(w.Wires[0])
+			wires[w.Wires[0]] = b
+		}
+		for _, d := range w.Discharged {
+			w.Entries = append(w.Entries, b.bound[c.types.id(d)])
+		}
+		w.Overridden = b.overridden
+	}
+}
+
+// wireBinding is a named wire's resolved bindings (rows.md, Wire 7): the
+// provider entry for each capability, keyed by its interned id, and
+// the entries a replace overrode.
+type wireBinding struct {
+	bound      map[int32]*WireEntry
+	overridden []Override
+}
+
+// bindingOf resolves w's bindings in one walk of its embedding graph,
+// depth first, a wire's own entries before its embeddings', each wire
+// once (a shared node is one build). The first entry the walk meets for a
+// capability is the outermost on its path, so it binds (an own entry wins
+// over an embedded one, which in a clean package it replaces); a later
+// entry for the capability is overridden by the nearest entry for it on
+// the path above. The walk reads each wire and entry once, so the work and
+// the result are linear in the wires w reaches; a with of the same wire
+// reuses it (finishInfo). Embedding cycles are S108, so a wire already
+// visited adds nothing.
+func (c *checker) bindingOf(root *Wire) *wireBinding {
+	b := &wireBinding{bound: map[int32]*WireEntry{}}
+	visited := map[*Wire]bool{}
+	above := map[int32][]*WireEntry{} // the entries for each capability on the path
+	var walk func(w *Wire)
+	walk = func(w *Wire) {
+		if visited[w] {
+			return
+		}
+		visited[w] = true
+		var pushed []int32
+		for _, e := range w.Entries {
+			for _, cap := range e.Caps {
+				k := c.types.id(cap)
+				if stack := above[k]; len(stack) > 0 {
+					b.overridden = append(b.overridden, Override{Entry: e, By: stack[len(stack)-1]})
+				} else if b.bound[k] == nil {
+					b.bound[k] = e
+				}
+				above[k] = append(above[k], e)
+				pushed = append(pushed, k)
+			}
+		}
+		for _, e := range w.Entries {
+			if e.Embedded != nil {
+				walk(e.Embedded)
+			}
+		}
+		for _, k := range pushed {
+			above[k] = above[k][:len(above[k])-1]
 		}
 	}
+	walk(root)
+	return b
 }
 
 // finalType is t with every row variable in a function type's rows

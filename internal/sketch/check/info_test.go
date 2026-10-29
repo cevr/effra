@@ -343,14 +343,33 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 			}
 		}
 	}
-	// Each with of a named wire holds the wire's entries.
+	// Each with of a named wire holds one provider entry per discharged
+	// capability, an entry that lists that capability; each override names
+	// two provider entries of one capability.
 	for x, w := range info.Withs {
-		n := 0
-		for _, wire := range w.Wires {
-			n += len(wire.Entries)
+		if len(w.Wires) == 0 {
+			continue // an inline wire value: stage E (196x)
 		}
-		if len(w.Entries) != n {
-			at(x, fmt.Sprintf("a with of %d wire entries with %d Entries", n, len(w.Entries)))
+		if len(w.Entries) != len(w.Discharged) {
+			at(x, fmt.Sprintf("a with of %d capabilities with %d Entries", len(w.Discharged), len(w.Entries)))
+			continue
+		}
+		for i, d := range w.Discharged {
+			e := w.Entries[i]
+			lists := false
+			if e != nil {
+				for _, cap := range e.Caps {
+					lists = lists || typeString(cap) == typeString(d)
+				}
+			}
+			if !lists || e.Provider == nil {
+				at(x, "a with whose entry for "+typeString(d)+" does not provide it")
+			}
+		}
+		for _, o := range w.Overridden {
+			if o.Entry == nil || o.By == nil || o.Entry.Provider == nil || o.By.Provider == nil {
+				at(x, "a with with an incomplete override")
+			}
 		}
 	}
 	sort.Strings(gaps)
