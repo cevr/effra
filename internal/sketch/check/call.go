@@ -26,7 +26,7 @@ func (c *checker) call(x *syntax.CallExpr, hint Type) operand {
 			return bad(x)
 		}
 	}
-	if sel, ok := unparen(x.Fun).(*syntax.SelectorExpr); ok {
+	if sel := calledSelector(x.Fun); sel != nil {
 		c.callee = sel
 	}
 	fun := c.expr(x.Fun, nil)
@@ -71,6 +71,18 @@ func (c *checker) call(x *syntax.CallExpr, hint Type) operand {
 	c.needValue(&fun)
 	c.silentArgs(x)
 	return bad(x)
+}
+
+// calledSelector is the selector x.f a call's callee names, written bare,
+// x.f(…), or with type arguments, x.f[T](…): there x.f is called, so it
+// reaches a package function on x's type (196m rule 4; round 7 review O1).
+func calledSelector(fun syntax.Expr) *syntax.SelectorExpr {
+	x := unparen(fun)
+	if ix, ok := x.(*syntax.IndexExpr); ok {
+		x = unparen(ix.X)
+	}
+	sel, _ := x.(*syntax.SelectorExpr)
+	return sel
 }
 
 // silentArgs checks the arguments of a call whose callee is invalid, so

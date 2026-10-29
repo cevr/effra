@@ -501,8 +501,8 @@ func (w *refWalker) callee(fun syntax.Expr) {
 // called, so its rows are value uses only through a frame that carries
 // them as a value (callSite).
 func (w *refWalker) selfCallee(fun syntax.Expr) {
-	sel, ok := unparen(fun).(*syntax.SelectorExpr)
-	if !ok {
+	sel := calledSelector(fun)
+	if sel == nil {
 		return
 	}
 	first, ok := w.c.pkg.Scope.names[sel.Sel.Name].(*Func)

@@ -1545,11 +1545,9 @@ func (c *checker) selfOwner(f *Func) (*Named, []syntax.Expr, bool) {
 	if _, isIface := n.underlying().(*Interface); isIface {
 		return nil, nil, false
 	}
-	if s := asStruct(n); s != nil {
-		if fld, _ := s.field(f.Name); fld != nil {
-			return nil, nil, false
-		}
-	}
+	// A field of the same name does not stop f: x.f selects the field
+	// first, and f stays in the type's operation set, so it satisfies an
+	// interface method f (types.md, Structs 1; round 7 review O2).
 	if len(args) != len(n.TParams) || !c.selfArgsOK(d, args) {
 		return nil, nil, false
 	}
