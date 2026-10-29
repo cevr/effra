@@ -31,33 +31,36 @@ var decidedFamilies = []string{
 	"assignment", "break and continue",
 	"function literal", "untyped parameter",
 	"interpolation", "float literal",
+	"core forms", "doc comments",
 }
 
-// TestDecidedNodes: the checker reads the trees the decided parser builds
-// (#196). Each row names its family; every family has a row, and every
-// row's verdict holds: never a panic, never silently accepted, never a
-// cascade beside an S109.
-func TestDecidedNodes(t *testing.T) {
-	cases := []struct {
-		family string
-		name   string
-		src    string
-		want   []string // "code:line", sorted as the checker reports them
-	}{
-		{"import path", "an unquoted import path", `
+// A decidedCase is one row of TestDecidedNodes: its family, its name, its
+// source and its verdict, each "code:line", sorted as the checker reports
+// them.
+type decidedCase struct {
+	family string
+	name   string
+	src    string
+	want   []string
+}
+
+// decidedCases are the rows of TestDecidedNodes; TestDecidedNodeInventory
+// reads the trees they parse to.
+var decidedCases = []decidedCase{
+	{"import path", "an unquoted import path", `
 import timeout
 func f() timeout.Expired { return timeout.Expired{} }
 func main() {}
 `, nil},
-		{"import go", "a Go import is #202's", `
+	{"import go", "a Go import is #202's", `
 import go strings
 func main() {}
 `, []string{"S109:2"}},
-		{"import std", "an import of a std module lower-v1 brings", `
+	{"import std", "an import of a std module lower-v1 brings", `
 import task
 func main() { task.Go() { 1 } }
 `, []string{"S109:2"}},
-		{"import std", "a std import adds no cascade", `
+	{"import std", "a std import adds no cascade", `
 import task
 type Bang {}
 func a() { task.Go() { b() }; return Bang{} }
@@ -65,7 +68,7 @@ func b() { return a() }
 func F() fails Bang { return b() }
 func main() {}
 `, []string{"S109:2"}},
-		{"let", "let names a value", `
+	{"let", "let names a value", `
 func f() int64 {
 	let x int64 = 1
 	let y = x + 1
@@ -73,7 +76,7 @@ func f() int64 {
 }
 func main() {}
 `, nil},
-		{"let mut", "let mut is assigned", `
+	{"let mut", "let mut is assigned", `
 func f() int64 {
 	let mut x int64 = 1
 	x += 2
@@ -81,14 +84,14 @@ func f() int64 {
 }
 func main() {}
 `, nil},
-		{"let without value", "let with a type and no value takes the zero value", `
+	{"let without value", "let with a type and no value takes the zero value", `
 func f() int64 {
 	let x int64
 	return x
 }
 func main() {}
 `, nil},
-		{"let pattern", "a record pattern after let is 196p's", `
+	{"let pattern", "a record pattern after let is 196p's", `
 type P { X int, Y int }
 func f(p P) int {
 	let P{X: x, Y: y} = p
@@ -96,24 +99,24 @@ func f(p P) int {
 }
 func main() {}
 `, []string{"S109:4"}},
-		{"let tuple pattern", "a tuple pattern after let is 196t's, and its value is checked", `
+	{"let tuple pattern", "a tuple pattern after let is 196t's, and its value is checked", `
 func f() int {
 	let (a, b) = (1, undefinedName)
 	return a + b
 }
 func main() {}
 `, []string{"S109:3", "S104:3"}},
-		{"package let pattern", "a package-level record pattern is 196p's", `
+	{"package let pattern", "a package-level record pattern is 196p's", `
 type P { X int, Y int }
 let P{X: a, Y: b} = P{X: 1, Y: "no"}
 func f() int { return a + b }
 func main() {}
 `, []string{"S109:3"}},
-		{"package let tuple pattern", "a package-level tuple pattern is never accepted unchecked", `
+	{"package let tuple pattern", "a package-level tuple pattern is never accepted unchecked", `
 let (a, b) = (1, undefinedName)
 func main() {}
 `, []string{"S109:2"}},
-		{"wire declaration", "let W = wire", `
+	{"wire declaration", "let W = wire", `
 type Clock { Now() int64 }
 type Fixed { t int64 }
 func Now(f Fixed) int64 { return f.t }
@@ -121,7 +124,7 @@ let W = wire { Clock: Fixed{t: 1} }
 func f() int64 { return with W { Clock.Now() } }
 func main() {}
 `, nil},
-		{"wire header", "a named wire's provides and needs", `
+	{"wire header", "a named wire's provides and needs", `
 type Clock { Now() int64 }
 type Log { Write(s string) }
 type Fixed { t int64 }
@@ -129,7 +132,7 @@ func Now(f Fixed) int64 { return f.t }
 let W = wire provides Clock needs Log { Clock: Fixed{t: 1} }
 func main() {}
 `, []string{"S109:6", "S109:6"}},
-		{"wire value", "a wire value outside with is 196x's, with no cascade at its use", `
+	{"wire value", "a wire value outside with is 196x's, with no cascade at its use", `
 type Clock { Now() int64 }
 type Fixed { t int64 }
 func Now(f Fixed) int64 { return f.t }
@@ -139,14 +142,14 @@ func f() int64 {
 }
 func main() {}
 `, []string{"S109:6"}},
-		{"inline wire header", "an inline wire's provides", `
+	{"inline wire header", "an inline wire's provides", `
 type Clock { Now() int64 }
 type Fixed { t int64 }
 func Now(f Fixed) int64 { return f.t }
 func f() int64 { return with wire provides Clock { Clock: Fixed{t: 1} } { Clock.Now() } }
 func main() {}
 `, []string{"S109:5"}},
-		{"wire entries", "an entry of two keys, an embedding and a replace", `
+	{"wire entries", "an entry of two keys, an embedding and a replace", `
 type Clock { Now() int64 }
 type Timer { Now() int64 }
 type Fixed { t int64 }
@@ -156,7 +159,7 @@ let W = wire { replace Clock: Fixed{t: 2}, Base }
 func f() int64 { return with W { Clock.Now() + Timer.Now() } }
 func main() {}
 `, nil},
-		{"with", "with W { … } discharges W's capabilities", `
+	{"with", "with W { … } discharges W's capabilities", `
 type Log { Write(s string) }
 type Quiet {}
 func Write(q Quiet, s string) {}
@@ -164,7 +167,7 @@ let W = wire { Log: Quiet{} }
 func f() { with W { Log.Write("x") } }
 func main() {}
 `, nil},
-		{"with parentheses", "with (W)", `
+	{"with parentheses", "with (W)", `
 type Log { Write(s string) }
 type Quiet {}
 func Write(q Quiet, s string) {}
@@ -172,7 +175,7 @@ let W = wire { Log: Quiet{} }
 func f() { with (W) { Log.Write("x") } }
 func main() {}
 `, nil},
-		{"with several wires", "with A, B is 196x's", `
+	{"with several wires", "with A, B is 196x's", `
 type Log { Write(s string) }
 type Quiet {}
 func Write(q Quiet, s string) {}
@@ -181,25 +184,25 @@ let B = wire { Log: Quiet{} }
 func f() { with A, B { Log.Write("x") } }
 func main() {}
 `, []string{"S109:7"}},
-		{"record type", "a record and an empty record", `
+	{"record type", "a record and an empty record", `
 type P { X int, Y int }
 type E {}
 func f() P { _ = E{}; return P{X: 1, Y: 2} }
 func main() {}
 `, nil},
-		{"operation type", "an operation type as a capability", `
+	{"operation type", "an operation type as a capability", `
 type Log { Write(s string) }
 func f() needs Log { Log.Write("x") }
 func main() {}
 `, nil},
-		{"law", "a law in an operation type", `
+	{"law", "a law in an operation type", `
 type Monoid {
 	Combine(a int, b int) int,
 	law Assoc(a int, b int, c int) { assert true },
 }
 func main() {}
 `, []string{"S109:4"}},
-		{"union", "a union of declared records", `
+	{"union", "a union of declared records", `
 type A {}
 type B {}
 type U = A | B
@@ -213,11 +216,11 @@ func f(u U) int {
 }
 func main() {}
 `, nil},
-		{"variant in place", "a variant declared in a union", `
+	{"variant in place", "a variant declared in a union", `
 type U = Paid{ ID string } | Pending{}
 func main() {}
 `, []string{"S109:2", "S109:2"}},
-		{"machine", "a machine type", `
+	{"machine", "a machine type", `
 type Closed {}
 type Open {}
 type State = Closed | Open
@@ -237,22 +240,22 @@ type Breaker machine[State, Signal] {
 }
 func main() {}
 `, nil},
-		{"defined type", "a defined type is 196p's; its uses do not cascade", `
+	{"defined type", "a defined type is 196p's; its uses do not cascade", `
 type Celsius float64
 type Name string
 func f(n int) Name { return "\(n)" }
 func g() Celsius { return Celsius(1.5) }
 func main() {}
 `, []string{"S109:2", "S109:3"}},
-		{"type parameters", "bracket kinds by position", `
+	{"type parameters", "bracket kinds by position", `
 func pass[A, E, R](f func() A fails E needs R) A fails E needs R { return try f() }
 func main() {}
 `, nil},
-		{"type parameters", "a bracket parameter of two kinds", `
+	{"type parameters", "a bracket parameter of two kinds", `
 func k[E](a E) fails E { return }
 func main() {}
 `, []string{"S108:2"}},
-		{"ordered constraint", "ordered is 196g's; its body does not cascade", `
+	{"ordered constraint", "ordered is 196g's; its body does not cascade", `
 func max[T ordered](a T, b T) T {
 	if a > b {
 		return a
@@ -262,7 +265,7 @@ func max[T ordered](a T, b T) T {
 func f() int { return max(1, 2) }
 func main() {}
 `, []string{"S109:2"}},
-		{"fails and needs", "a written row", `
+	{"fails and needs", "a written row", `
 type Bang {}
 type Log { Write(s string) }
 func f() int fails Bang needs Log {
@@ -271,68 +274,68 @@ func f() int fails Bang needs Log {
 }
 func main() {}
 `, nil},
-		{"escaping", "an escaping function type is 196e's", `
+	{"escaping", "an escaping function type is 196e's", `
 func f(g escaping func(int) int) int { return g(1) }
 func main() {}
 `, []string{"S109:2"}},
-		{"tuple type", "a tuple result type is 196t's", `
+	{"tuple type", "a tuple result type is 196t's", `
 func pair() (int, string) { return pair() }
 func main() {}
 `, []string{"S109:2"}},
-		{"tuple value", "a tuple value is 196t's", `
+	{"tuple value", "a tuple value is 196t's", `
 func f() { _ = (1, "a") }
 func main() {}
 `, []string{"S109:2"}},
-		{"Map type", "append and delete are library calls", `
+	{"Map type", "append and delete are library calls", `
 func f(m Map[string, int64], xs []int64) []int64 {
 	m.Delete("a")
 	return xs.Append(1).Append(2)
 }
 func main() {}
 `, nil},
-		{"Map type", "append checks its elements", `
+	{"Map type", "append checks its elements", `
 func f(xs []int64) []int64 { return xs.Append("a") }
 func main() {}
 `, []string{"S108:2"}},
-		{"Map type", "delete checks its key", `
+	{"Map type", "delete checks its key", `
 func f(m Map[string, int64]) { m.Delete(1) }
 func main() {}
 `, []string{"S108:2"}},
-		{"Map type", "append is only called", `
+	{"Map type", "append is only called", `
 func f(xs []int64) { let g = xs.Append }
 func main() {}
 `, []string{"S104:2"}},
-		{"first-parameter function", "x.f(a) reaches f on x's type", `
+	{"first-parameter function", "x.f(a) reaches f on x's type", `
 type Door { open bool }
 func knock(d Door, n int) bool { return d.open }
 func f(d Door) bool { return d.knock(1) }
 func main() {}
 `, nil},
-		{"extern", "an extern go binding", `
+	{"extern", "an extern go binding", `
 extern go example.com/door.Fail func fail() int
 func f() int { return fail() }
 func main() {}
 `, nil},
-		{"test", "test declaration", `
+	{"test", "test declaration", `
 test Adds {
 	assert 1 + 1 == 2
 }
 func main() {}
 `, []string{"S109:2"}},
-		{"assert", "assert in a body", `
+	{"assert", "assert in a body", `
 func f() {
 	assert true
 }
 func main() {}
 `, []string{"S109:3"}},
-		{"if value", "an if in value position is 196r's", `
+	{"if value", "an if in value position is 196r's", `
 func f(c bool) int {
 	let x = if c { 1 } else { 2 }
 	return x
 }
 func main() {}
 `, []string{"S109:3"}},
-		{"match value", "a match in value position is 196r's", `
+	{"match value", "a match in value position is 196r's", `
 func f(n int) int {
 	let x = match n {
 	case 1: 10
@@ -342,7 +345,7 @@ func f(n int) int {
 }
 func main() {}
 `, []string{"S109:3"}},
-		{"value match", "a match over literal patterns", `
+	{"value match", "a match over literal patterns", `
 func f(n int) int {
 	match n {
 	case 1:
@@ -353,7 +356,7 @@ func f(n int) int {
 }
 func main() {}
 `, nil},
-		{"type match", "as binds the variant", `
+	{"type match", "as binds the variant", `
 type A { X int }
 type B {}
 type U = A | B
@@ -367,7 +370,7 @@ func f(u U) int {
 }
 func main() {}
 `, nil},
-		{"as pattern", "as under _ binds the subject", `
+	{"as pattern", "as under _ binds the subject", `
 type A {}
 type B {}
 type U = A | B
@@ -382,7 +385,7 @@ func f(u U) int {
 }
 func main() {}
 `, nil},
-		{"as pattern", "an unread as binding", `
+	{"as pattern", "an unread as binding", `
 type A {}
 type B {}
 type U = A | B
@@ -396,7 +399,7 @@ func f(u U) int {
 }
 func main() {}
 `, []string{"S110:7"}},
-		{"tuple subject", "as in a tuple case", `
+	{"tuple subject", "as in a tuple case", `
 type A { X int }
 type B {}
 type U = A | B
@@ -410,7 +413,7 @@ func f(u U, v U) int {
 }
 func main() {}
 `, nil},
-		{"record pattern", "record pattern", `
+	{"record pattern", "record pattern", `
 type A { X int }
 type B {}
 type U = A | B
@@ -424,7 +427,7 @@ func f(u U) int {
 }
 func main() {}
 `, []string{"S109:7"}},
-		{"nested as pattern", "as in a case of several patterns", `
+	{"nested as pattern", "as in a case of several patterns", `
 type A {}
 type B {}
 type U = A | B
@@ -436,7 +439,7 @@ func f(u U) int {
 }
 func main() {}
 `, []string{"S109:7", "S109:7"}},
-		{"catch arm", "catch arm with as", `
+	{"catch arm", "catch arm with as", `
 type NotFound { ID string }
 type Gone {}
 func load() int fails NotFound | Gone { return 1 }
@@ -451,7 +454,7 @@ func f() string {
 }
 func main() {}
 `, nil},
-		{"catch-all binding", "a catch-all binding", `
+	{"catch-all binding", "a catch-all binding", `
 type Gone {}
 func load() int fails Gone { return 1 }
 func f() int {
@@ -462,7 +465,7 @@ func f() int {
 }
 func main() {}
 `, []string{"S109:6"}},
-		{"for in", "element and index bindings", `
+	{"for in", "element and index bindings", `
 func f(xs []int64, m Map[string, int64]) int64 {
 	let mut s int64 = 0
 	for x in xs {
@@ -478,7 +481,7 @@ func f(xs []int64, m Map[string, int64]) int64 {
 }
 func main() {}
 `, nil},
-		{"for pattern", "a record pattern after for is 196p's; its body is still checked", `
+	{"for pattern", "a record pattern after for is 196p's; its body is still checked", `
 type P { X int, Y int }
 func f(ps []P) int {
 	let mut s = 0
@@ -489,7 +492,7 @@ func f(ps []P) int {
 }
 func main() {}
 `, []string{"S109:5", "S104:6"}},
-		{"for tuple pattern", "a tuple pattern after for is 196t's", `
+	{"for tuple pattern", "a tuple pattern after for is 196t's", `
 func f(xs []int) int {
 	let mut s = 0
 	for (a, b) in xs {
@@ -499,7 +502,7 @@ func f(xs []int) int {
 }
 func main() {}
 `, []string{"S109:4"}},
-		{"counting range", "counting range", `
+	{"counting range", "counting range", `
 func sum(n int64) int64 {
 	let mut s int64 = 0
 	for i in 0..n {
@@ -509,7 +512,7 @@ func sum(n int64) int64 {
 }
 func main() {}
 `, nil},
-		{"counting range", "a range's bounds are integers", `
+	{"counting range", "a range's bounds are integers", `
 func f() {
 	for i in "a".."b" {
 		let _ = i
@@ -517,13 +520,13 @@ func f() {
 }
 func main() {}
 `, []string{"S108:3"}},
-		{"range value", "range value", `
+	{"range value", "range value", `
 func f() {
 	let r = 1..2
 }
 func main() {}
 `, []string{"S109:3"}},
-		{"for condition", "for with a condition and for alone", `
+	{"for condition", "for with a condition and for alone", `
 func f() int {
 	let mut n = 0
 	for n < 3 {
@@ -535,7 +538,7 @@ func f() int {
 }
 func main() {}
 `, nil},
-		{"assignment", "= and op=", `
+	{"assignment", "= and op=", `
 func f() int {
 	let mut n = 1
 	n = 2
@@ -544,7 +547,7 @@ func f() int {
 }
 func main() {}
 `, nil},
-		{"break and continue", "break and continue in a loop", `
+	{"break and continue", "break and continue in a loop", `
 func f(xs []int) int {
 	let mut s = 0
 	for x in xs {
@@ -560,34 +563,34 @@ func f(xs []int) int {
 }
 func main() {}
 `, nil},
-		{"function literal", "a typed function literal", `
+	{"function literal", "a typed function literal", `
 func f() int {
 	let g = func(a int, b int) int { return a + b }
 	return g(1, 2)
 }
 func main() {}
 `, nil},
-		{"untyped parameter", "an untyped function literal parameter is #214's", `
+	{"untyped parameter", "an untyped function literal parameter is #214's", `
 func f() { _ = func(x) {} }
 func main() {}
 `, []string{"S109:2"}},
-		{"interpolation", "interpolation is a string", `
+	{"interpolation", "interpolation is a string", `
 func label(n int, ok bool) string { return "n = \(n), ok = \(ok), \("s"), \(7)" }
 func main() {}
 `, nil},
-		{"interpolation", "interpolation reads each value", `
+	{"interpolation", "interpolation reads each value", `
 type Bang {}
 func g() int fails Bang { return 1 }
 func label() string { return "g = \(g())" }
 func main() {}
 `, []string{"S105:4"}},
-		{"interpolation", "interpolation through try", `
+	{"interpolation", "interpolation through try", `
 type Bang {}
 func g() int fails Bang { return 1 }
 func label() string fails Bang { return "g = \(try g())" }
 func main() {}
 `, nil},
-		{"float literal", "a float literal is an untyped float constant", `
+	{"float literal", "a float literal is an untyped float constant", `
 func f() float64 {
 	let x float64 = 1.5
 	let y = 2.5e-1 + 1
@@ -595,17 +598,154 @@ func f() float64 {
 }
 func main() {}
 `, nil},
-		{"float literal", "a float constant an integer cannot hold", `
+	{"float literal", "a float constant an integer cannot hold", `
 func f() int { return 1.5 }
 func main() {}
 `, []string{"S108:2"}},
+	// Round 7 review T2: the node types and fields the inventory
+	// (TestDecidedNodeInventory) found no row building.
+	{"fails and needs", "try passes a failure on", `
+type Bang {}
+func g() int fails Bang { return 1 }
+func f() int fails Bang {
+	let n = try g()
+	return n + 1
+}
+func main() {}
+`, nil},
+	{"core forms", "the expressions and statements Go shares", `
+type P { X int, Y int }
+func g(p *P) int { return p.X }
+func f(xs []int, m Map[string, int]) int {
+	let mut p = P{X: 1, Y: 2}
+	p.X = -(g(&p) + 1)
+	let ys = xs[1:2:3]
+	let zs = xs[:1]
+	let n = ys[0] + m["a"] + len(zs)
+	if n > 0 && !(n == 3) {
+		return n
+	} else if n < 0 {
+		return 0
 	}
+	for x in xs {
+		if x > 1 {
+			break
+		}
+		continue
+	}
+	g(&p)
+	return len(ys)
+}
+func main() {}
+`, nil},
+	{"doc comments", "a doc comment on each declaration that keeps one", `
+// The timeout module.
+import timeout
+
+// Clock reads the time.
+type Clock {
+	// Now is the time.
+	Now() int64,
+}
+
+// Fixed is a clock.
+type Fixed {
+	// t is the time.
+	t int64,
+}
+
+// Now reads f.
+func Now(f Fixed) int64 { return f.t }
+
+// fail is Go's.
+extern go example.com/door.Fail func fail() int
+
+// W provides Clock.
+let W = wire {
+	// The fixed clock.
+	Clock: Fixed{t: 1},
+}
+
+// n is one.
+let n = 1
+
+// f reads W.
+func f() int64 { return with W { Clock.Now() } + int64(n) + int64(fail()) }
+func g() timeout.Expired { return timeout.Expired{} }
+func main() {}
+`, nil},
+	{"import path", "an import alias", `
+import t timeout
+func f() t.Expired { return t.Expired{} }
+func main() {}
+`, nil},
+	{"test", "a documented test with parameters", `
+// Adds holds for every x.
+test Adds(x int) {
+	assert x + 0 == x
+}
+func main() {}
+`, []string{"S109:3"}},
+	{"type parameters", "a generic record type", `
+type Box[T] { V T }
+func f(b Box[int]) int { return b.V }
+func main() {}
+`, nil},
+	{"variant in place", "a generic variant declared in place", `
+type Opt[T] = Some[T]{ V T } | None{}
+func main() {}
+`, []string{"S109:2", "S109:2"}},
+	{"inline wire header", "an inline wire's provides and needs", `
+type Clock { Now() int64 }
+type Log { Write(s string) }
+type Fixed { t int64 }
+func Now(f Fixed) int64 { return f.t }
+func f() int64 needs Log { return with wire provides Clock needs Log { Clock: Fixed{t: 1} } { Clock.Now() } }
+func main() {}
+`, []string{"S109:6", "S109:6"}},
+	{"law", "a documented law", `
+type Monoid {
+	Combine(a int, b int) int,
+	// Assoc groups either way.
+	law Assoc(a int, b int, c int) { assert true },
+}
+func main() {}
+`, []string{"S109:5"}},
+	{"machine", "a machine type with documented entries", `
+type Closed {}
+type Open {}
+type State = Closed | Open
+type Trip {}
+type Signal = Trip
+func step(s State, sig Signal) Decision[State, string] {
+	match s {
+	case Closed:
+		return Enter{Open{}}
+	case Open:
+		return Done{"open"}
+	}
+}
+type Breaker machine[State, Signal] {
+	// The breaker starts closed.
+	initial: Closed{},
+	// step decides each signal.
+	step:    step,
+}
+func main() {}
+`, nil},
+}
+
+// TestDecidedNodes: the checker reads the trees the decided parser builds
+// (#196). Each row names its family; every family has a row, and every
+// row's verdict holds: never a panic, never silently accepted, never a
+// cascade beside an S109.
+func TestDecidedNodes(t *testing.T) {
 	covered := map[string]bool{}
 	known := map[string]bool{}
 	for _, f := range decidedFamilies {
 		known[f] = true
 	}
-	for _, tc := range cases {
+	for _, tc := range decidedCases {
 		if !known[tc.family] {
 			t.Errorf("row %q names the family %q, which decidedFamilies does not list", tc.name, tc.family)
 		}
