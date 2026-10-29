@@ -219,6 +219,10 @@ func TestRules(t *testing.T) {
 			"type Point {\n\tX int,\n\tY int,\n}\n\nfunc use(i int) {}\n\nfunc g(p Point, q Point) {\n\tif p == (Point{1, 2}) {\n\t\tuse(1)\n\t} else if p == q {\n\t\tuse(2)\n\t}\n\tif (p == Point{1, 2}) {\n\t\tuse(3)\n\t}\n}\n"},
 		{"map literal in a header", "package p\n\nfunc use(s string) {}\n\nfunc f() {\n\tfor k := range map[string]int{\"b\": 2} {\n\t\tuse(k)\n\t}\n\tif len(map[string]int{}) > 0 {\n\t}\n}\n",
 			"func use(s string) {}\n\nfunc f() {\n\tfor k, _ in (Map[string, int]{\"b\": 2}) {\n\t\tuse(k)\n\t}\n\tif len(Map[string, int]{}) > 0 {\n\t}\n}\n"},
+		// Merge round: an any constraint on a generic type is dropped,
+		// with no note (`[T any]` is written `[T]`).
+		{"any constraint on a type", "package p\n\ntype Box[T any] interface{ M(T) }\n\ntype Pair[A any, B any] struct {\n\tX A\n\tY B\n}\n",
+			"type Box[T] { M(T) }\n\ntype Pair[A, B] {\n\tX A,\n\tY B,\n}\n"},
 		// Round-4 review O1: a wire written as a composite literal keeps
 		// its parentheses in the with header.
 		{"with a literal wire", "package p\n\nfunc f() {\n\twith(Cfg{Port: 1}) {\n\t\tuse(1)\n\t}\n\twith(Live, Cfg{}) {\n\t\tuse(2)\n\t}\n\twith(Cfg{}, run)\n}\n",

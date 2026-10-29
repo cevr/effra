@@ -830,7 +830,10 @@ func (t *translator) typeParams(l *oldsyntax.FieldList) {
 	}
 	for _, f := range l.List {
 		if id, ok := f.Type.(*oldsyntax.Ident); ok && id.Name == "any" {
+			// `[T any]` is written `[T]`: the constraint is a
+			// constraint, not `any` as a type.
 			t.replace(f.Names[len(f.Names)-1].End(), id.End(), "")
+			t.skip(id)
 		}
 		if s, ok := f.Type.(*oldsyntax.SelectorExpr); ok && t.text(s) == "cmp.Ordered" {
 			t.replace(s.Pos(), s.End(), "ordered")
