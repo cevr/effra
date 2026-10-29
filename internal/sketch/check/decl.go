@@ -672,7 +672,7 @@ func (c *checker) typExpr0(x syntax.Expr, ctx *typeCtx) Type {
 		c.errorf(x, CodeType, "a record, an operation type or a union is a declared type: write type T { … }")
 		return invalid
 	case *syntax.ErrorRow:
-		c.errorf(x, CodeType, "a error row appears only after fails in a signature")
+		c.errorf(x, CodeType, "an error row appears only after fails in a signature")
 		return invalid
 	case *syntax.TupleExpr:
 		c.outside(x, "a tuple type (196t, tuples)")
