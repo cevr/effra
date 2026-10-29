@@ -283,7 +283,7 @@ Agents read the same checked model as the compiler, through the CLI today and th
 
 ```console
 $ ergo diagnostics pay.ergo
-pay.ergo:19:9: error S102: this call requires checkout.Gateway, which is not in the capability row of function pay and no with provides it
+pay.ergo:19:9: error S102: this call requires main.Gateway, which is not in the capability row of function pay and no with provides it
 ```
 
 `ergo inspect` will answer the same questions as JSON when it returns on the new front end ([#203](https://github.com/cevr/ergo/issues/203)). Designed output:
