@@ -9,6 +9,7 @@
 package migrate196
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -30,28 +31,166 @@ type Note struct {
 func (n Note) String() string { return fmt.Sprintf("%d: %s", n.Line, n.Text) }
 
 // Translate rewrites one old-syntax source into the decided syntax. The
-// error is non-nil when src does not parse as old syntax, or when the
-// rewritten text does not parse (a translator bug, reported with the
-// text). With notes the output still holds the noted old forms and may not
-// parse; then out is the edited text before formatting.
+// error is non-nil only when src does not parse as old syntax. The
+// translator reads its own output back: a statement whose translation does
+// not parse becomes a note, never an error (guard). With notes the output
+// still holds the noted old forms and may not parse; then out is the
+// edited text before formatting.
 func Translate(src string) (out string, notes []Note, err error) {
-	file, err := oldsyntax.Parse(src)
+	t, err := newTranslator(src)
 	if err != nil {
 		return "", nil, err
 	}
-	t := &translator{src: src, file: file, parent: map[oldsyntax.Node]oldsyntax.Node{}, imports: map[string]bool{}}
 	t.run()
 	t.addImports()
-	text := t.apply()
-	sort.SliceStable(t.notes, func(i, j int) bool { return t.notes[i].Line < t.notes[j].Line })
-	formatted, ferr := format.Source(text)
-	if ferr != nil {
-		if len(t.notes) > 0 {
-			return text, t.notes, nil
-		}
-		return text, nil, fmt.Errorf("translation does not parse: %v", ferr)
+	out, notes = t.finish()
+	return out, notes, nil
+}
+
+func newTranslator(src string) (*translator, error) {
+	file, err := oldsyntax.Parse(src)
+	if err != nil {
+		return nil, err
 	}
-	return formatted, t.notes, nil
+	return &translator{src: src, file: file, parent: map[oldsyntax.Node]oldsyntax.Node{}, imports: map[string]bool{}}, nil
+}
+
+// finish applies the edits, guards the result and formats it.
+func (t *translator) finish() (string, []Note) {
+	text := t.apply()
+	if len(t.notes) == 0 {
+		text = t.guard(text)
+	}
+	formatted, ferr := format.Source(text)
+	if ferr != nil && len(t.notes) == 0 {
+		t.notes = append(t.notes, Note{Line: 1, Text: fmt.Sprintf("the translation cannot be formatted (%v); finish it by hand", ferr)})
+	}
+	sort.SliceStable(t.notes, func(i, j int) bool { return t.notes[i].Line < t.notes[j].Line })
+	if len(t.notes) > 0 && ferr != nil {
+		return text, t.notes
+	}
+	return formatted, t.notes
+}
+
+// guard parses the translation as decided syntax (round-3 review, m1: the
+// translator never prints text it cannot read back). Where it does not
+// parse, the innermost statement or declaration that holds the failure
+// and that no rewrite crosses is written as a comment holding its old
+// text, with a note at its line; then the rest is parsed again.
+func (t *translator) guard(text string) string {
+	units := t.units()
+	for range len(units) + 1 {
+		_, err := syntax.Parse(text)
+		var e *syntax.Error
+		if err == nil || !errors.As(err, &e) {
+			return text
+		}
+		at := t.origin(e.Offset)
+		// An error at a line break ("found newline") belongs to the text
+		// before it.
+		for at > 0 && at < len(t.src) && strings.ContainsRune(" \t\r\n", rune(t.src[at])) {
+			at--
+		}
+		u := t.unitAt(units, at)
+		if u == nil {
+			t.note(oldsyntax.Pos(at), "the translation does not parse here (%s); finish it by hand", e.Message)
+			return text
+		}
+		t.note(u.Pos(), "the translation of this %s does not parse (%s); its old text is left in a comment: finish it by hand", strings.TrimPrefix(kindOf(u), "the "), e.Message)
+		t.textOf(u.Pos(), u.End()) // the rewrites inside it are dropped
+		t.replace(u.Pos(), u.End(), t.commented(u))
+		text = t.apply()
+	}
+	return text
+}
+
+// units are the nodes the guard can leave by hand: the statements of a
+// block or a case, and the file's declarations.
+func (t *translator) units() []oldsyntax.Node {
+	var units []oldsyntax.Node
+	for _, d := range t.file.Decls {
+		units = append(units, d)
+	}
+	oldsyntax.Inspect(t.file, func(n oldsyntax.Node) bool {
+		switch n := n.(type) {
+		case *oldsyntax.BlockStmt:
+			units = append(units, nodesOf(n.List)...)
+		case *oldsyntax.CaseClause:
+			units = append(units, nodesOf(n.Body)...)
+		case *oldsyntax.CommClause:
+			units = append(units, nodesOf(n.Body)...)
+		}
+		return true
+	})
+	return units
+}
+
+// unitAt is the smallest unit that holds the source offset at and that no
+// edit crosses, or nil.
+func (t *translator) unitAt(units []oldsyntax.Node, at int) oldsyntax.Node {
+	var best oldsyntax.Node
+	for _, u := range units {
+		s, e := int(u.Pos()), int(u.End())
+		if at < s || at >= e && at != s {
+			continue
+		}
+		if best != nil && e-s >= int(best.End()-best.Pos()) {
+			continue
+		}
+		crossed := false
+		for _, ed := range t.edits {
+			if ed.start < s && ed.end > s || ed.start < e && ed.end > e {
+				crossed = true
+				break
+			}
+		}
+		if !crossed {
+			best = u
+		}
+	}
+	return best
+}
+
+// origin maps an offset of the applied text back to the source: a place
+// inside a rewrite maps to the start of the rewritten span. The edits are
+// in the order apply left them.
+func (t *translator) origin(off int) int {
+	last, out := 0, 0
+	for _, e := range t.edits {
+		if e.start < last {
+			continue // an overlapping edit apply left out
+		}
+		if n := e.start - last; off < out+n {
+			return last + off - out
+		} else {
+			out += n
+		}
+		if off < out+len(e.text) {
+			return e.start
+		}
+		out += len(e.text)
+		last = e.end
+	}
+	return min(last+off-out, len(t.src))
+}
+
+// commented is the old text of u as line comments, after a line that
+// names the hand edit.
+func (t *translator) commented(u oldsyntax.Node) string {
+	indent := t.indentOf(u.Pos())
+	var b strings.Builder
+	b.WriteString("// migrate196: finish by hand; the old text:")
+	for _, line := range strings.Split(t.text(u), "\n") {
+		b.WriteString("\n" + indent + "// " + strings.TrimPrefix(line, indent))
+	}
+	rest := t.src[u.End():]
+	if i := strings.IndexByte(rest, '\n'); i >= 0 {
+		rest = rest[:i]
+	}
+	if rest = strings.TrimSpace(rest); rest != "" && !strings.HasPrefix(rest, "//") {
+		b.WriteString("\n" + indent)
+	}
+	return b.String()
 }
 
 type edit struct {
@@ -243,7 +382,7 @@ func kindOf(n oldsyntax.Node) string {
 		}
 		b.WriteRune(unicode.ToLower(r))
 	}
-	return "the " + strings.NewReplacer(" stmt", " statement", " expr", " expression", " decl", " declaration", " lit", " literal").Replace(b.String())
+	return "the" + strings.NewReplacer(" stmt", " statement", " expr", " expression", " decl", " declaration", " lit", " literal").Replace(" "+b.String())
 }
 
 func (t *translator) decl(d oldsyntax.Decl) {
@@ -884,9 +1023,20 @@ func (t *translator) node(n oldsyntax.Node) {
 	case *oldsyntax.FuncType:
 		t.results(n)
 	case *oldsyntax.MapType:
+		// Go parses `map[K]V{…}` in a control clause header; the decided
+		// `Map[K, V]{…}` is a type name there, so the literal needs
+		// parentheses (round-3 review, m1).
+		lit, isLit := t.parent[n].(*oldsyntax.CompositeLit)
+		paren := isLit && lit.Type == n && t.inHeader(lit)
+		if paren {
+			t.insert(lit.Pos(), "(")
+		}
 		t.replace(n.Map, n.Key.Pos(), "Map[")
 		t.replace(n.Key.End(), n.Value.Pos(), ", ")
 		t.insert(n.Value.End(), "]")
+		if paren {
+			t.insert(lit.End(), ")")
+		}
 	case *oldsyntax.StructType:
 		if _, isDecl := t.parent[n].(*oldsyntax.TypeDecl); !isDecl {
 			t.note(n.Pos(), "an anonymous struct: declare a named record type")
@@ -2062,7 +2212,7 @@ func (t *translator) switchStmt(s *oldsyntax.SwitchStmt) {
 				if tag != "" {
 					op, cp := groupingText(x, conds[j], oldsyntax.EQL.Precedence())
 					conds[j] = tag + " == " + op + conds[j] + cp
-				} else if len(c.List) > 1 {
+				} else if len(c.List) > 1 || bareLiteral(x) {
 					op, cp := groupingText(x, conds[j], oldsyntax.LOR.Precedence())
 					conds[j] = op + conds[j] + cp
 				}
@@ -2079,12 +2229,76 @@ func (t *translator) switchStmt(s *oldsyntax.SwitchStmt) {
 
 // groupingText is grouping for a translated operand: a translation that
 // starts with try (a try moved to the expression's start) covers the
-// whole operand, so it is parenthesised too.
+// whole operand, so it is parenthesised too. So is an operand with a bare
+// composite literal, which an if header does not parse (D1.8, as in Go).
 func groupingText(x oldsyntax.Expr, text string, prec int) (string, string) {
-	if strings.HasPrefix(text, "try ") {
+	if strings.HasPrefix(text, "try ") || bareLiteral(x) {
 		return "(", ")"
 	}
 	return grouping(x, prec)
+}
+
+// inHeader reports whether x stands bare in a control clause header: the
+// condition of an if or for, the operand of a range or the tag of a
+// switch, outside parentheses, brackets and braces.
+func (t *translator) inHeader(x oldsyntax.Node) bool {
+	for c := x; ; {
+		switch p := t.parent[c].(type) {
+		case nil, *oldsyntax.ParenExpr, *oldsyntax.FuncLit, *oldsyntax.CompositeLit, *oldsyntax.KeyValueExpr:
+			return false
+		case *oldsyntax.CallExpr:
+			if c != p.Fun {
+				return false
+			}
+		case *oldsyntax.IndexExpr:
+			if c != p.X {
+				return false
+			}
+		case *oldsyntax.SliceExpr:
+			if c != p.X {
+				return false
+			}
+		case *oldsyntax.IfStmt:
+			return c == p.Cond
+		case *oldsyntax.ForStmt:
+			return c == p.Cond
+		case *oldsyntax.RangeStmt:
+			return c == p.X
+		case *oldsyntax.SwitchStmt:
+			return c == p.Tag
+		case oldsyntax.Stmt, oldsyntax.Decl:
+			return false
+		default:
+			c = p
+		}
+	}
+}
+
+// bareLiteral reports whether x holds a composite literal outside
+// parentheses, brackets and braces: in a control clause header it would
+// end the header (round-3 review, m1).
+func bareLiteral(x oldsyntax.Node) bool {
+	found := false
+	oldsyntax.Inspect(x, func(n oldsyntax.Node) bool {
+		if found {
+			return false
+		}
+		switch n := n.(type) {
+		case *oldsyntax.CompositeLit:
+			found = true
+		case *oldsyntax.ParenExpr, *oldsyntax.FuncLit:
+		case *oldsyntax.CallExpr:
+			found = bareLiteral(n.Fun)
+		case *oldsyntax.IndexExpr:
+			found = bareLiteral(n.X)
+		case *oldsyntax.SliceExpr:
+			found = bareLiteral(n.X)
+		default:
+			return true
+		}
+		return false
+	})
+	return found
 }
 
 // casesCall reports whether a case expression of clauses holds a call.

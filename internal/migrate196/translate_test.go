@@ -213,6 +213,16 @@ func TestRules(t *testing.T) {
 			"func use(i int) {}\n\nfunc g(t int, c bool) {\n\tlet x = 1\n\tif c {\n\t\tlet x2 = 2\n\t\tfor i in 0..x2 {\n\t\t\tuse(i)\n\t\t}\n\t\tif t == x2 {\n\t\t\tuse(1)\n\t\t} else if t == x2+1 {\n\t\t\tuse(2)\n\t\t}\n\t}\n\tuse(x)\n}\n"},
 		{"renamed receiver", "package p\n\nfunc (in Box) M() int {\n\treturn in.N\n}\n",
 			"func M(in2 Box) int {\n\treturn in2.N\n}\n"},
+		// Round-3 review m1: a composite literal moved into an if header
+		// is parenthesised (D1.8, as in Go).
+		{"case composite literals", "package p\n\ntype Point struct {\n\tX int\n\tY int\n}\n\nfunc use(i int) {}\n\nfunc g(p Point, q Point) {\n\tswitch p {\n\tcase Point{1, 2}:\n\t\tuse(1)\n\tcase q:\n\t\tuse(2)\n\t}\n\tswitch {\n\tcase p == Point{1, 2}:\n\t\tuse(3)\n\t}\n}\n",
+			"type Point {\n\tX int,\n\tY int,\n}\n\nfunc use(i int) {}\n\nfunc g(p Point, q Point) {\n\tif p == (Point{1, 2}) {\n\t\tuse(1)\n\t} else if p == q {\n\t\tuse(2)\n\t}\n\tif (p == Point{1, 2}) {\n\t\tuse(3)\n\t}\n}\n"},
+		{"map literal in a header", "package p\n\nfunc use(s string) {}\n\nfunc f() {\n\tfor k := range map[string]int{\"b\": 2} {\n\t\tuse(k)\n\t}\n\tif len(map[string]int{}) > 0 {\n\t}\n}\n",
+			"func use(s string) {}\n\nfunc f() {\n\tfor k, _ in (Map[string, int]{\"b\": 2}) {\n\t\tuse(k)\n\t}\n\tif len(Map[string, int]{}) > 0 {\n\t}\n}\n"},
+		// Round-3 answer O2: a Map follows the slice rule, so Go's
+		// key-only range keeps two bindings and the value-only range has one.
+		{"map range forms", "package p\n\nfunc use(s string) {}\n\nfunc useI(i int) {}\n\nfunc f(m map[string]int) {\n\tfor k := range m {\n\t\tuse(k)\n\t}\n\tfor _, v := range m {\n\t\tuseI(v)\n\t}\n\tfor k, v := range m {\n\t\tuse(k)\n\t\tuseI(v)\n\t}\n}\n",
+			"func use(s string) {}\n\nfunc useI(i int) {}\n\nfunc f(m Map[string, int]) {\n\tfor k, _ in m {\n\t\tuse(k)\n\t}\n\tfor v in m {\n\t\tuseI(v)\n\t}\n\tfor k, v in m {\n\t\tuse(k)\n\t\tuseI(v)\n\t}\n}\n"},
 		{"test", "package p\n\nfunc TestAdd() needs testing.T {\n\tT.Equal(1+1, 2)\n\tT.True(ok())\n}\n",
 			"test Add {\n\tassert 1+1 == 2\n\tassert ok()\n}\n"},
 		{"keyword names", "package p\n\nfunc f(in int64) int64 {\n\tmatch := in\n\treturn match\n}\n",
@@ -360,5 +370,33 @@ func TestOverlapNote(t *testing.T) {
 	want := "two rewrites overlap at 3:8 (the switch statement and a shadow rename); finish this by hand"
 	if len(tr.notes) != 1 || tr.notes[0].Text != want || tr.notes[0].Line != 3 {
 		t.Fatalf("notes %v, want %q", tr.notes, want)
+	}
+}
+
+// TestGuard (round-3 review, m1): a rewrite whose output does not parse
+// becomes a note on its statement, never an error (exit 2) and never
+// printed text. The statement keeps its old text in a comment, and the
+// rest of the file is translated and checked.
+func TestGuard(t *testing.T) {
+	src := "package p\n\nfunc f() {\n\tx := 1\n\tuse(x)\n\tswitch x {\n\tcase 1:\n\t\tuse(2)\n\t}\n}\n\nfunc use(i int) {}\n"
+	tr, err := newTranslator(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.run()
+	tr.addImports()
+	// A forced bad rewrite: the call loses its closing parenthesis.
+	at := strings.Index(src, "use(x)")
+	tr.replace(oldsyntax.Pos(at), oldsyntax.Pos(at+6), "use(x")
+	out, notes := tr.finish()
+	want := "func f() {\n\tlet x = 1\n\t// migrate196: finish by hand; the old text:\n\t// use(x)\n\tmatch x {\n\tcase 1:\n\t\tuse(2)\n\t}\n}\n\nfunc use(i int) {}\n"
+	if out != want {
+		t.Errorf("output:\n%s\nwant:\n%s", out, want)
+	}
+	if len(notes) != 1 || notes[0].Line != 5 || !strings.HasPrefix(notes[0].Text, "the translation of this expression statement does not parse (") {
+		t.Errorf("notes %v", notes)
+	}
+	if _, err := syntax.Parse(out); err != nil {
+		t.Errorf("guarded output does not parse: %v", err)
 	}
 }
