@@ -52,7 +52,7 @@ func (c *checker) declareLocal(id *syntax.Ident, t Type) *Var {
 
 func (c *checker) stmt(s syntax.Stmt) {
 	savedMark := c.stmtMark
-	c.stmtMark = c.provSeq
+	c.stmtMark = c.undiagSeq
 	defer func() { c.stmtMark = savedMark }()
 	switch s := s.(type) {
 	case nil, *syntax.EmptyStmt:

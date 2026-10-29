@@ -285,8 +285,8 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 			c.group[n.fn] = true
 		}
 	}
-	c.groupValue, c.grew = map[*Func][2]groupSite{}, map[*Func][2]bool{}
-	defer func() { c.group, c.groupValue, c.grew = nil, nil, nil }()
+	c.groupValue, c.grew, c.pinKept = map[*Func][2]groupSite{}, map[*Func][2]bool{}, map[any][]guardedUse{}
+	defer func() { c.group, c.groupValue, c.grew, c.pinKept = nil, nil, nil, nil }()
 	cyclic := len(scc) > 1
 	if !cyclic {
 		for _, e := range scc[0].edges {
@@ -392,11 +392,12 @@ func (c *checker) endLit(l *litFrame) bool {
 // is a value use of both rows, and a function literal, trailing block or
 // go task that is a value is a value use of each row of the members it
 // calls that its own row would carry (not written, not taken from a closed
-// parameter type, not called on the spot). Typing decides only one thing:
-// a use inside a callback frame that the silent pass recorded invalid,
-// skipped for a diagnosed reason that holds whatever the rows, is no use
-// (liveUses); a checked or provisional frame keeps its uses
-// (provisional.go). A var on an initialization cycle is invalid, so its
+// parameter type, not called on the spot). Typing decides only which frames drop their uses:
+// a use inside a callback frame that the silent pass recorded
+// invalid-diagnosed, skipped for a reason that holds whatever the rows,
+// is no use (liveUses); a checked or provisional frame keeps its uses
+// (provisional.go), and reportGroup drops the uses the reporting pass
+// finds invalid-diagnosed (reportedUses). A var on an initialization cycle is invalid, so its
 // initializer adds no value use (D3). So the pin does not depend on a row
 // still being inferred, call admission does not depend on the rows, and
 // the rows grow monotonically to their least fixpoint. When the body of a pinned
@@ -409,39 +410,11 @@ func (c *checker) endLit(l *litFrame) bool {
 // require every signature. Each refuses the circular case instead of
 // choosing a fixpoint.
 func (c *checker) pinGroup(scc []*bodyNode) {
-	for _, n := range scc {
-		site := groupSite{file: n.file()}
-		var owner any = n.fn
-		if n.v != nil {
-			if n.v.initCycle {
-				continue
-			}
-			owner = n.v
-			site.key, site.anchor = "var "+n.v.obj.Name, n.v.obj.Pos
-			if n.v.spec != nil {
-				site.anchor = n.v.spec.Pos()
-			}
-		} else {
-			site.key, site.anchor = "func "+funcKey(n.fn), n.fn.Decl.Pos()
-		}
-		for f, kinds := range c.liveUses(owner) {
-			if !c.group[f] {
-				continue
-			}
-			uses := c.groupValue[f]
-			for k, u := range kinds {
-				if !u.ok {
-					continue
-				}
-				s := site
-				s.useSite = u
-				if !uses[k].ok || s.before(uses[k]) {
-					uses[k] = s
-				}
-			}
-			c.groupValue[f] = uses
-		}
-	}
+	c.groupSites(scc, c.groupValue, func(owner any) map[*Func][2]useSite {
+		uses, kept := c.liveUses(owner)
+		c.pinKept[owner] = kept
+		return uses
+	})
 	var pin []*RowVar
 	for _, n := range scc {
 		if n.fn == nil {
@@ -457,6 +430,45 @@ func (c *checker) pinGroup(scc []*bodyNode) {
 	if len(pin) > 0 {
 		c.types.final(pin)
 		c.newSolutions()
+	}
+}
+
+// groupSites adds to sites, for each member of the component, the least
+// class G use of each row (groupSite.before) among the uses usesOf gives
+// for each body of scc. A var on an initialization cycle adds none (D3).
+func (c *checker) groupSites(scc []*bodyNode, sites map[*Func][2]groupSite, usesOf func(owner any) map[*Func][2]useSite) {
+	for _, n := range scc {
+		site := groupSite{file: n.file()}
+		var owner any = n.fn
+		if n.v != nil {
+			if n.v.initCycle {
+				continue
+			}
+			owner = n.v
+			site.key, site.anchor = "var "+n.v.obj.Name, n.v.obj.Pos
+			if n.v.spec != nil {
+				site.anchor = n.v.spec.Pos()
+			}
+		} else {
+			site.key, site.anchor = "func "+funcKey(n.fn), n.fn.Decl.Pos()
+		}
+		for f, kinds := range usesOf(owner) {
+			if !c.group[f] {
+				continue
+			}
+			uses := sites[f]
+			for k, u := range kinds {
+				if !u.ok {
+					continue
+				}
+				s := site
+				s.useSite = u
+				if !uses[k].ok || s.before(uses[k]) {
+					uses[k] = s
+				}
+			}
+			sites[f] = uses
+		}
 	}
 }
 
@@ -504,7 +516,12 @@ func (c *checker) groupRef(f *Func) bool {
 			l.refs = append(l.refs, f)
 		}
 	}
-	return c.refused(f)
+	if c.refused(f) {
+		// An undiagnosed value: its S108 is decided last (reportGroup).
+		c.readUndiagnosed()
+		return true
+	}
+	return false
 }
 
 // exceeded returns which of f's pinned rows (errors, capabilities) its body
@@ -529,19 +546,38 @@ func (c *checker) refused(f *Func) bool {
 // declarations (round 16). The message names the value use (groupSite),
 // or the literal, trailing block or go task that caused it, and the row to
 // write (round 17 m2).
+//
+// The uses are the pin's, filtered by the reporting pass (reportedUses;
+// round 10 ruling): a use whose frame the reporting pass skipped as
+// invalid-diagnosed is dropped, since that frame already has its own
+// diagnostic and a refusal never cascades. A member with no use left on an
+// exceeded row has no S108 for it, and none at all when no exceeded row
+// keeps a use. Its references stay invalid, so nothing cascades from the
+// pinned row either.
 func (c *checker) reportGroup(scc []*bodyNode) {
+	var sites map[*Func][2]groupSite
 	for _, n := range scc {
 		f := n.fn
 		if f == nil || !c.refused(f) {
 			continue
 		}
+		if sites == nil {
+			sites = map[*Func][2]groupSite{}
+			c.groupSites(scc, sites, c.reportedUses)
+		}
 		ex := c.exceeded(f)
+		for k := range ex {
+			ex[k] = ex[k] && sites[f][k].ok
+		}
+		if !ex[0] && !ex[1] {
+			continue
+		}
 		params := "()"
 		if ps := f.Decl.Type.Params; ps != nil && len(ps.List) > 0 {
 			params = "(…)"
 		}
 		var row string
-		site := c.groupValue[f][0]
+		site := sites[f][0]
 		switch {
 		case ex[0] && ex[1]:
 			row = fmt.Sprintf("write its error row and capability row: func %s%s error[…] needs …", f.Name, params)
@@ -549,7 +585,7 @@ func (c *checker) reportGroup(scc []*bodyNode) {
 			row = fmt.Sprintf("write its error row: func %s%s error[…]", f.Name, params)
 		default:
 			row = fmt.Sprintf("write its capability row: func %s%s needs …", f.Name, params)
-			site = c.groupValue[f][1]
+			site = sites[f][1]
 		}
 		line, col := site.file.syntax.Position(site.at)
 		use := fmt.Sprintf("at %d:%d", line, col)

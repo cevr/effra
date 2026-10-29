@@ -16,11 +16,11 @@ func (c *checker) isEntry(f *Func) bool {
 // position, with is always the construct (grammar.md, Reserved names 2).
 //
 // Afterwards, each callback frame of the call that typing did not check is
-// recorded invalid or left provisional (skipFrames), whichever route
-// skipped it.
+// recorded invalid-diagnosed or refused-by-class-G, or left provisional
+// (skipFrames), whichever route skipped it.
 func (c *checker) call(x *syntax.CallExpr, hint Type) operand {
 	savedMark := c.callMark
-	c.callMark = c.provSeq
+	c.callMark = c.undiagSeq
 	defer func() { c.callMark = savedMark }()
 	op := c.callOf(x, hint)
 	c.skipFrames(x)

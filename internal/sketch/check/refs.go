@@ -64,10 +64,12 @@ import (
 // literal, trailing block and with block it checks (typedFrame) and each
 // one it skips for a diagnosed reason (skipFrames). The walk keeps the
 // uses it finds inside such a frame apart (guardedUse), and class G drops
-// them only when an enclosing frame is invalid in the component's silent
-// pass, which types each member from empty rows (liveUses; round 8 review
-// M2); a frame skipped under a value that waits on a row is provisional
-// and keeps them (provisional.go; round 9 review M1). So no callee is judged invalid by its
+// them from the pin only when an enclosing frame is invalid-diagnosed in
+// the component's silent pass, which types each member from empty rows
+// (liveUses; round 8 review M2); a frame skipped under a value that waits
+// on a row is provisional and keeps them (provisional.go; round 9 review
+// M1). The S108 then drops the uses whose frame the reporting pass finds
+// invalid-diagnosed (reportedUses; round 10 ruling). So no callee is judged invalid by its
 // spelling, wherever the invalid value flows. Prior art: go/types records
 // each expression's type and mode once (Info.Types) and every later pass
 // reads that record; for a call whose callee is invalid it only uses the
@@ -476,12 +478,12 @@ func (w *refWalker) inFrame(n syntax.Node, walk func()) {
 // until the returned function runs belong to this check (typedFrame).
 func (c *checker) beginBodyCheck(owner any) func() {
 	if c.bodyGen == nil {
-		c.bodyGen, c.frameGen, c.frameInv = map[any]int{}, map[syntax.Node]int{}, map[syntax.Node]int{}
+		c.bodyGen, c.frameGen, c.frameInv, c.frameRef = map[any]int{}, map[syntax.Node]int{}, map[syntax.Node]int{}, map[syntax.Node]int{}
 	}
 	c.genSeq++
 	saved, savedMark := c.curGen, c.stmtMark
 	c.curGen = c.genSeq
-	c.stmtMark = c.provSeq
+	c.stmtMark = c.undiagSeq
 	c.bodyGen[owner] = c.genSeq
 	return func() { c.curGen, c.stmtMark = saved, savedMark }
 }
@@ -503,56 +505,47 @@ type frameVerdict struct {
 
 func (v frameVerdict) kept() bool { return v.state != frameInvalid }
 
-// liveUses is owner's class G value uses: the walk's uses outside every
-// callback frame, and each use inside frames none of which is invalid in
-// owner's latest check (the earliest site of each row is kept). An invalid
-// frame (silentArgs under a callee invalid for a diagnosed reason) carries
-// no row, so nothing inside it is a use (D3; round 8 review M2). A
-// provisional frame, and every frame inside it, which typing did not
-// enter, keeps its uses (provisional.go; round 9 review M1).
-func (c *checker) liveUses(owner any) map[*Func][2]useSite {
-	gs := c.guardedRefs[owner]
+// liveUses is owner's class G value uses for the pin: the walk's uses
+// outside every callback frame, and each use inside frames none of which
+// is invalid-diagnosed in owner's latest check, which is the component's
+// silent pass (the earliest site of each row is kept). An invalid frame
+// (a callee invalid for a diagnosed reason) carries no row, so nothing
+// inside it is a use (D3; round 8 review M2). A provisional frame, and
+// every frame inside it, which typing did not enter, keeps its uses
+// (provisional.go; round 9 review M1). kept is the guarded uses counted.
+func (c *checker) liveUses(owner any) (uses map[*Func][2]useSite, kept []guardedUse) {
+	return c.usesIn(owner, c.guardedRefs[owner], c.guardTrace)
+}
+
+// reportedUses is owner's class G value uses after the reporting pass: the
+// walk's uses outside every callback frame, and each use the pin counted
+// whose frame is not invalid-diagnosed in the reporting pass, which types
+// the bodies on the converged rows (round 10 ruling). A use in a frame
+// refused by class G stays, so a class G refusal is never dropped.
+func (c *checker) reportedUses(owner any) map[*Func][2]useSite {
+	uses, _ := c.usesIn(owner, c.pinKept[owner], nil)
+	return uses
+}
+
+// usesIn is owner's uses outside every callback frame and the uses of gs
+// whose frame is not invalid-diagnosed in owner's latest check, with the
+// guarded uses it kept.
+func (c *checker) usesIn(owner any, gs []guardedUse, trace map[syntax.Node]frameVerdict) (map[*Func][2]useSite, []guardedUse) {
 	if len(gs) == 0 {
-		return c.valueRefs[owner]
+		return c.valueRefs[owner], nil
 	}
 	out := maps.Clone(c.valueRefs[owner])
 	if out == nil {
 		out = map[*Func][2]useSite{}
 	}
 	gen := c.bodyGen[owner]
-	live := map[*guardNode]frameState{}
-	var chain []*guardNode
+	memo := map[*guardNode]frameState{}
+	var kept []guardedUse
 	for _, g := range gs {
-		// The frames of g that are not decided yet, innermost first.
-		chain = chain[:0]
-		n := g.guard
-		for ; n != nil; n = n.up {
-			if _, ok := live[n]; ok {
-				break
-			}
-			chain = append(chain, n)
-		}
-		st := frameChecked
-		if n != nil {
-			st = live[n]
-		}
-		for i := len(chain) - 1; i >= 0; i-- {
-			f := chain[i]
-			// Inside a provisional or invalid frame, which typing did not
-			// enter, f keeps that frame's state.
-			if st == frameChecked {
-				st = c.frameStateAt(f.frame, gen)
-			}
-			if c.guardTrace != nil {
-				if _, seen := c.guardTrace[f.frame]; !seen {
-					c.guardTrace[f.frame] = frameVerdict{state: st, gen: gen}
-				}
-			}
-			live[f] = st
-		}
-		if st == frameInvalid {
+		if c.chainState(g.guard, gen, memo, trace) == frameInvalid {
 			continue
 		}
+		kept = append(kept, g)
 		uses := out[g.f]
 		for k := range uses {
 			if g.site[k].ok && (!uses[k].ok || g.site[k].at < uses[k].at) {
@@ -561,7 +554,7 @@ func (c *checker) liveUses(owner any) map[*Func][2]useSite {
 		}
 		out[g.f] = uses
 	}
-	return out
+	return out, kept
 }
 
 // callSite is where a call at the current point of the walk uses each row
@@ -998,7 +991,7 @@ func (w *refWalker) expr(x syntax.Expr) {
 			// Whether typing checks the literals and the block passed here
 			// (it does not when the callee is invalid, call.go silentArgs)
 			// is typing's verdict: each is a callback frame (inFrame), and
-			// a class G use inside it counts unless typing recorded it invalid
+			// a class G use inside it counts unless typing recorded it invalid-diagnosed
 			// (checker.liveUses; round 8 review M2).
 			for i, a := range x.Args {
 				if lit, ok := unparen(a).(*syntax.FuncLit); ok && sig != nil {

@@ -151,7 +151,11 @@ func RefWalkProblems(src string) []string {
 // dropped that the reporting pass checked is reported, and so is a frame
 // the pin kept that the reporting pass left unchecked, except a frame of a
 // call class G refuses (refusedCallFrames: by design such a call checks
-// nothing of its own, and the S108 is at the refused member).
+// nothing of its own, and the S108 is at the refused member), and except a
+// frame the pin kept as provisional that the reporting pass recorded
+// invalid-diagnosed: reportGroup drops its use (round 10 ruling). The
+// reason is checked too: a frame of a call that names a refused member is
+// never recorded invalid-diagnosed by the reporting pass.
 func frameProblems(c *checker, w *refWalker, root syntax.Node) []string {
 	var out []string
 	nested := make(map[syntax.Node]bool, len(w.cbFrames))
@@ -160,10 +164,42 @@ func frameProblems(c *checker, w *refWalker, root syntax.Node) []string {
 	}
 	refusedCall := refusedCallFrames(c, w, root)
 	final := c.bodyGen[w.owner]
+	// The reporting pass's state of each frame: a frame inside one typing
+	// did not enter takes that frame's state (as chainState).
+	parent := map[syntax.Node]syntax.Node{}
+	for _, f := range w.cbFrames {
+		for _, g := range w.cbFrames {
+			if g == f || g.Pos() > f.Pos() || f.End() > g.End() {
+				continue
+			}
+			if p, ok := parent[f]; !ok || g.Pos() >= p.Pos() && g.End() <= p.End() {
+				parent[f] = g
+			}
+		}
+	}
+	finalStates := map[syntax.Node]frameState{}
+	var finalState func(f syntax.Node) frameState
+	finalState = func(f syntax.Node) frameState {
+		if st, ok := finalStates[f]; ok {
+			return st
+		}
+		st := frameChecked
+		if p, ok := parent[f]; ok {
+			st = finalState(p)
+		}
+		if st == frameChecked {
+			st = c.frameStateAt(f, final)
+		}
+		finalStates[f] = st
+		return st
+	}
 	for _, f := range w.cbFrames {
 		v, pinned := c.guardTrace[f]
 		if !pinned {
-			v = frameVerdict{state: c.frameStateAt(f, final), gen: final}
+			v = frameVerdict{state: finalState(f), gen: final}
+		}
+		if refusedCall[f] && finalState(f) == frameInvalid {
+			out = append(out, fmt.Sprintf("%T at %d: the reporting pass recorded the callback frame invalid-diagnosed, and its call names a member class G refuses", f, f.Pos()))
 		}
 		// The witness: the body checks in which typing resolved an
 		// identifier directly in the frame. known: the frame holds an
@@ -197,8 +233,8 @@ func frameProblems(c *checker, w *refWalker, root syntax.Node) []string {
 			out = append(out, fmt.Sprintf("%T at %d: the walk drops the callback frame, and typing checked it", f, f.Pos()))
 		case v.state == frameChecked && !typed:
 			out = append(out, fmt.Sprintf("%T at %d: typing left the callback frame unchecked, and the walk kept its uses", f, f.Pos()))
-		case v.state == frameProvisional && typed:
-			out = append(out, fmt.Sprintf("%T at %d: typing recorded the callback frame provisional, and checked it", f, f.Pos()))
+		case v.state != frameChecked && typed:
+			out = append(out, fmt.Sprintf("%T at %d: typing recorded the callback frame %s, and checked it", f, f.Pos(), v.state))
 		}
 		if !pinned || v.gen == final {
 			continue
@@ -207,8 +243,12 @@ func frameProblems(c *checker, w *refWalker, root syntax.Node) []string {
 		switch {
 		case !v.kept() && reported:
 			out = append(out, fmt.Sprintf("%T at %d: the pin dropped the callback frame (%s), and the reporting pass checked it", f, f.Pos(), v.state))
-		case v.kept() && !reported && !refusedCall[f]:
-			out = append(out, fmt.Sprintf("%T at %d: the pin kept the callback frame (%s), and the reporting pass left it unchecked", f, f.Pos(), v.state))
+		case !v.kept() || reported || refusedCall[f]:
+		case v.state == frameProvisional && finalState(f) == frameInvalid:
+			// The one newly consistent pair (round 10 ruling): the use is
+			// dropped from the S108 (reportGroup).
+		default:
+			out = append(out, fmt.Sprintf("%T at %d: the pin kept the callback frame (%s), and the reporting pass left it unchecked (%s)", f, f.Pos(), v.state, finalState(f)))
 		}
 	}
 	return out

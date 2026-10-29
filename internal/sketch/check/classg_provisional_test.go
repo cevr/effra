@@ -96,6 +96,30 @@ var provisionalRows = []struct {
 			"func w() { try load(); walk() }\nfunc main() {}\n",
 		want: []string{"11:10 S104 unknown name nope"},
 	},
+	// The row never holds the arm's instance (v7): the pin keeps the use
+	// in the provisional frame, the reporting pass finds the frame
+	// invalid-diagnosed (the arm's own error), and reportGroup drops the
+	// use, so only the arm's error is reported (round 10 ruling).
+	{
+		name: "v7: the row never holds the arm's instance",
+		src: "type Cap { M() }\ntype G[T] {}\ntype H[T] {}\nfunc load() fails G[int] { return G[int]{} }\n" +
+			"func keep[T, F](g H[T], f F) {}\n" +
+			"func walk() {\n\tCap.M()\n\tw() catch {\n\tcase G[int]:\n\tcase H as h:\n\t\th.keep(func() { walk() })\n\t}\n}\n" +
+			"func w() { try load(); walk() }\nfunc main() {}\n",
+		want: []string{"10:7 S108 generic type main.H needs type arguments"},
+	},
+	// The same with a use of walk that stays: the S108 names that use.
+	{
+		name: "v7 with a value use that stays",
+		src: "type Cap { M() }\ntype G[T] {}\ntype H[T] {}\nfunc load() fails G[int] { return G[int]{} }\n" +
+			"func keep[T, F](g H[T], f F) {}\n" +
+			"func walk() {\n\tCap.M()\n\tw() catch {\n\tcase G[int]:\n\tcase H as h:\n\t\th.keep(func() { walk() })\n\t}\n\tlet k = walk\n\t_ = k\n}\n" +
+			"func w() { try load(); walk() }\nfunc main() {}\n",
+		want: []string{
+			"6:6 S108 walk is used as a value at 13:10 inside its own recursive group; write its capability row: func walk() needs …",
+			"10:7 S108 generic type main.H needs type arguments",
+		},
+	},
 }
 
 func TestClassGProvisionalFrame(t *testing.T) {
