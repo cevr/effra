@@ -142,6 +142,12 @@ type checker struct {
 	// bodyEdges counts the edges of the body graph: linear in the source
 	// (round-3 M5), and bounded by a test.
 	bodyEdges int
+	// bodyNodes counts the bodies of the body graph; selfChecks counts the
+	// body checks of resolveSelfCalls and selfSteps the bodies and edges
+	// its worklist visits (round 7 review M1: linear, bounded by a test).
+	bodyNodes, selfChecks, selfSteps int
+	// settleOnly, set only by a test, is selfSettleOnly for one check.
+	settleOnly bool
 	// variantOps counts the variant-index work that resolves type-switch
 	// cases: a constructor inserted, a node visited, a type argument
 	// compared, a wildcard candidate checked. Linear in the source

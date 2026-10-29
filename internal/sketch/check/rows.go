@@ -192,6 +192,7 @@ func (c *checker) checkBodies() {
 		}
 		c.walkOps += w.ops
 	}
+	c.bodyNodes = len(nodes)
 	c.resolveSelfCalls(nodes, byFunc, byVar, pending)
 	c.discoverInit()
 	c.bodyEdges = c.linkBodies(nodes, byFunc, byVar)

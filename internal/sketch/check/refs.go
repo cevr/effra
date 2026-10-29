@@ -76,6 +76,11 @@ type refWalker struct {
 	// typing (selfCallee), in walk order, with the value-use sites their
 	// frames give a called function (callSite).
 	pending []pendingSelf
+	// retired holds the calls x.f(…) whose receiver x names nothing in
+	// scope: typing reports it S104 whatever the rows, so the call waits for
+	// nothing and takes no edge (selfCallee; RefWalkProblems checks that
+	// the reporting pass resolves none of them).
+	retired []*syntax.SelectorExpr
 	// Test builds only (refTrace set): the resolution of each walked
 	// identifier (a package object or nil), the identifiers in type
 	// and wire positions (not value references), the composite-literal
@@ -493,14 +498,20 @@ func (w *refWalker) selfCallee(fun syntax.Expr) {
 	if !ok {
 		return
 	}
-	if id, ok := sel.X.(*syntax.Ident); ok && !w.local(id.Name) {
-		if _, isPkg := w.c.typeObject(id.Name, w.c.cur).(*PkgName); isPkg {
-			return
-		}
-	}
 	first, ok := w.c.pkg.Scope.names[sel.Sel.Name].(*Func)
 	if !ok || first.owner == nil {
 		return
+	}
+	if id, ok := sel.X.(*syntax.Ident); ok && !w.local(id.Name) {
+		switch w.c.typeObject(id.Name, w.c.cur).(type) {
+		case *PkgName:
+			return
+		case nil:
+			// x names nothing: an S104 whatever the rows, a terminal
+			// resolution that waits for no body (round 7 review M1).
+			w.retired = append(w.retired, sel)
+			return
+		}
 	}
 	t := w.staticType(sel.X)
 	if t == nil {

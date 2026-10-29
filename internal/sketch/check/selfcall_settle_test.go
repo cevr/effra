@@ -9,9 +9,9 @@ import (
 
 // TestSelfCallSettleRounds: a call x.f(…) that typing from empty rows does
 // not resolve (a receiver whose type depends on a row) is resolved by the
-// settling rounds, which type each body with its callees' rows joined in
-// the order of the graph known so far. With the first typing skipped, the
-// settling rounds alone resolve every case to the same verdict, and every
+// dependency worklist of settleWaiting, which types each waiting body once
+// the bodies it reaches have settled. With the first typing skipped, the
+// worklist alone resolves every case to the same verdict, and every
 // call the reporting pass resolves was resolved before the bodies were
 // ordered (RefWalkProblems).
 func TestSelfCallSettleRounds(t *testing.T) {

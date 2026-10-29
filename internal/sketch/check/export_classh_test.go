@@ -86,6 +86,11 @@ func RefWalkProblems(src string) []string {
 		return nil
 	}
 	for _, wk := range walks {
+		for _, x := range wk.w.retired {
+			if fn, ok := c.selfFinal[x]; ok {
+				out = append(out, fmt.Sprintf("%s at %d: the walk retired the call (its receiver names nothing), typing resolves %s", exprText(x), x.Pos(), depName(fn)))
+			}
+		}
 		syntax.Inspect(wk.root, func(n syntax.Node) bool {
 			if !wk.w.visited[n] {
 				out = append(out, fmt.Sprintf("%T at %d: not visited by the reference walk", n, n.Pos()))
