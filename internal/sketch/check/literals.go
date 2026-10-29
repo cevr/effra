@@ -271,13 +271,21 @@ func floatForm(x syntax.Expr, other Type) (string, bool) {
 	return lit.Value, false
 }
 
-// signedLit is x's basic literal and its sign ("-", "+" or ""), in
-// parentheses or not: the forms unary folds into one literal.
+// signedLit is x's basic literal under any signs and parentheses, with the
+// net sign ("-" or ""): -1e3 and -(-1e3) are a float literal of value
+// -1000 and 1000.
 func signedLit(x syntax.Expr) (*syntax.BasicLit, string, bool) {
-	x = unparen(x)
 	sign := ""
-	if u, ok := x.(*syntax.UnaryExpr); ok && (u.Op == syntax.SUB || u.Op == syntax.ADD) {
-		sign, x = u.Op.String(), unparen(u.X)
+	for {
+		x = unparen(x)
+		u, ok := x.(*syntax.UnaryExpr)
+		if !ok || u.Op != syntax.SUB && u.Op != syntax.ADD {
+			break
+		}
+		if u.Op == syntax.SUB {
+			sign = map[string]string{"": "-", "-": ""}[sign]
+		}
+		x = u.X
 	}
 	lit, ok := x.(*syntax.BasicLit)
 	return lit, sign, ok
@@ -297,7 +305,7 @@ func literalMismatch(x syntax.Expr, t Type) string {
 	case lit.Kind == syntax.FLOAT && isInteger(t):
 		fix := "write an integer literal"
 		if iv := constant.ToInt(constant.MakeFromLiteral(lit.Value, token.FLOAT, 0)); iv.Kind() == constant.Int {
-			fix = "write " + strings.TrimPrefix(sign, "+") + iv.ExactString()
+			fix = "write " + sign + iv.ExactString()
 		}
 		return "a float literal takes only a float type, not " + t.String() + "; " + fix
 	case lit.Kind == syntax.RUNE && !isInteger(t):

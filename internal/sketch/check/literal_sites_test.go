@@ -219,6 +219,9 @@ func f() int8 {
 	{"1: a signed float literal is not an int", `func f() int64 {
 	return -1e3
 }`, 2, "a float literal takes only a float type, not int64; write -1000"},
+	{"1: a float literal under two signs is not an int", `func f() int {
+	return -(-16777217.0)
+}`, 2, "a float literal takes only a float type, not int; write 16777217"},
 	{"D-A3: a conversion's literal takes int", `func f() uint64 {
 	return uint64(18446744073709551615)
 }`, 2, "the constant 18446744073709551615 overflows int, the type a conversion's literal takes; write it where uint64 is expected: let x uint64 = 18446744073709551615"},
