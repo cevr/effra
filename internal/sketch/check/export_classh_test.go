@@ -47,6 +47,7 @@ func RefWalkProblems(src string) []string {
 	var waited []*syntax.SelectorExpr
 	var pre map[*syntax.SelectorExpr]*Func
 	c.selfFinal = map[*syntax.SelectorExpr]*Func{}
+	c.calleeValid = map[*syntax.CallExpr]bool{}
 	selfTrace = func(cc *checker, pending []*syntax.SelectorExpr, resolved map[*syntax.SelectorExpr]*Func) {
 		if cc == c {
 			waited, pre = pending, resolved
@@ -86,6 +87,11 @@ func RefWalkProblems(src string) []string {
 		return nil
 	}
 	for _, wk := range walks {
+		for _, x := range wk.w.invalidCalls {
+			if c.calleeValid[x] {
+				out = append(out, fmt.Sprintf("%s at %d: the walk took the callee as invalid, typing checked it as valid", exprText(x.Fun), x.Pos()))
+			}
+		}
 		for _, x := range wk.w.retired {
 			if fn, ok := c.selfFinal[x]; ok {
 				out = append(out, fmt.Sprintf("%s at %d: the walk retired the call (its receiver names nothing), typing resolves %s", exprText(x), x.Pos(), depName(fn)))

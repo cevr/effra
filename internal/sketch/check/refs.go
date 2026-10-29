@@ -90,6 +90,9 @@ type refWalker struct {
 	nameIdents map[*syntax.Ident]bool
 	undecided  map[*syntax.Ident]bool
 	visited    map[syntax.Node]bool
+	// invalidCalls holds the calls whose callee the walk found invalid
+	// (invalidValue); recorded only in test builds.
+	invalidCalls []*syntax.CallExpr
 }
 
 // A useSite is where a body first uses a row of a function as a value: a
@@ -211,6 +214,10 @@ func (c *checker) newRefWalker() *refWalker {
 type localBinding struct {
 	rt  Type
 	sig *Signature
+	// invalid marks a local whose initializer typing finds invalid
+	// whatever the rows (invalidValue): a call of it checks none of its
+	// literals.
+	invalid bool
 }
 
 // receiverType is the type of f's receiver, as its declaration resolved
@@ -572,21 +579,69 @@ func (w *refWalker) calleeSig(fun syntax.Expr) *Signature {
 	return nil
 }
 
-// brokenCallee reports whether a call's callee is pkg.F of a package the
-// checker refused at its import (PkgName.broken): typing checks none of
-// the call's function literals or its block (call.go silentArgs).
-func (w *refWalker) brokenCallee(fun syntax.Expr) bool {
-	sel, ok := unparen(fun).(*syntax.SelectorExpr)
-	if !ok {
-		return false
+// invalidValue reports whether typing gives e an invalid type whatever the
+// rows, as the declarations decide it before any body is typed: a name
+// that resolves to nothing, pkg.F of a package refused at its import
+// (PkgName.broken) or a name the package does not export, a local whose
+// initializer is such a value (localBinding.invalid), a parameter, field,
+// package var or call result whose declared type is invalid, or a
+// selection or call on such a value. A call whose callee is invalid is
+// checked by silentArgs, which checks none of its function literals and
+// not its block, so they carry no row (round 7 review M2: the provenance
+// follows the value through its bindings, not the callee's spelling).
+// RefWalkProblems checks that typing finds every such callee invalid.
+func (w *refWalker) invalidValue(e syntax.Expr) bool {
+	switch e := unparen(e).(type) {
+	case *syntax.Ident:
+		if b := w.lookupLocal(e.Name); b != nil {
+			return b.invalid || invalidType(b.rt)
+		}
+		if w.tparams[e.Name] {
+			return false
+		}
+		switch o := w.c.typeObject(e.Name, w.c.cur).(type) {
+		case nil:
+			return e.Name != "_"
+		case *Var:
+			return invalidType(o.Type)
+		}
+	case *syntax.SelectorExpr:
+		if id, ok := e.X.(*syntax.Ident); ok && !w.local(id.Name) {
+			if pn, ok := w.c.typeObject(id.Name, w.c.cur).(*PkgName); ok {
+				if pn.broken || !isExported(e.Sel.Name) {
+					return true
+				}
+				_, declared := pn.Pkg.Scope.names[e.Sel.Name]
+				return !declared
+			}
+		}
+		if w.invalidValue(e.X) {
+			return true
+		}
+		t := w.staticType(e.X)
+		if p, ok := t.(*Pointer); ok {
+			t = p.Elem
+		}
+		if n, ok := t.(*Named); ok {
+			if s := asStruct(n); s != nil {
+				if fld, _ := s.field(e.Sel.Name); fld != nil {
+					return invalidType(fld.Type)
+				}
+			}
+		}
+	case *syntax.CallExpr:
+		if w.invalidValue(e.Fun) {
+			return true
+		}
+		if sig := w.calleeSig(e.Fun); sig != nil && len(sig.TParams) == 0 && len(sig.Results) == 1 {
+			return invalidType(sig.Results[0])
+		}
 	}
-	id, ok := sel.X.(*syntax.Ident)
-	if !ok || w.local(id.Name) {
-		return false
-	}
-	pn, ok := w.c.typeObject(id.Name, w.c.cur).(*PkgName)
-	return ok && pn.broken
+	return false
 }
+
+// invalidType reports whether t is known and invalid (nil is unknown).
+func invalidType(t Type) bool { return t != nil && isInvalid(t) }
 
 // declaredSig is the signature of a declared function that is not generic
 // in a way the call must infer: a function, not a method.
@@ -601,6 +656,9 @@ func declaredSig(o Object) *Signature {
 // signature of the declared function it aliases, or a composite literal's
 // written type.
 func (w *refWalker) initBinding(e syntax.Expr) *localBinding {
+	if w.invalidValue(e) {
+		return &localBinding{invalid: true}
+	}
 	switch e := unparen(e).(type) {
 	case *syntax.Ident:
 		if b := w.lookupLocal(e.Name); b != nil {
@@ -817,11 +875,16 @@ func (w *refWalker) expr(x syntax.Expr) {
 			w.selfCallee(x.Fun)
 			sig := w.calleeSig(x.Fun)
 			spread := x.Ellipsis.IsValid()
-			// A callee of a package refused at its import (S109: a std
-			// module lower-v1 brings) is not checked, nor are the literals
-			// and block passed to it (silentArgs): they carry no row, so no
-			// class G use follows from them (D3; round 6 review m3).
-			broken := w.brokenCallee(x.Fun)
+			// A callee typing finds invalid (a std module lower-v1 brings,
+			// refused at its import with S109; an unknown name; either
+			// through a binding) is not checked, nor are the literals and
+			// block passed to it (silentArgs): they carry no row, so no
+			// class G use follows from them (D3; round 6 review m3, round
+			// 7 review M2).
+			broken := w.invalidValue(x.Fun)
+			if broken && w.visited != nil {
+				w.invalidCalls = append(w.invalidCalls, x)
+			}
 			for i, a := range x.Args {
 				if lit, ok := unparen(a).(*syntax.FuncLit); ok && broken {
 					w.argRows[lit] = [2]bool{true, true}

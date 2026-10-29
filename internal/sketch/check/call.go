@@ -30,6 +30,14 @@ func (c *checker) call(x *syntax.CallExpr, hint Type) operand {
 		c.callee = sel
 	}
 	fun := c.expr(x.Fun, nil)
+	if fun.mode == modeValue && isInvalid(fun.typ) {
+		// A value whose type is invalid was reported where the type was
+		// (D3): the call is checked as one of an invalid callee.
+		fun = bad(x.Fun)
+	}
+	if c.calleeValid != nil && fun.mode != modeInvalid {
+		c.calleeValid[x] = true
+	}
 	switch fun.mode {
 	case modeInvalid:
 		c.silentArgs(x)

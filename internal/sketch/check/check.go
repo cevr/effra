@@ -148,6 +148,9 @@ type checker struct {
 	bodyNodes, selfChecks, selfSteps int
 	// settleOnly, set only by a test, is selfSettleOnly for one check.
 	settleOnly bool
+	// calleeValid, set only by a test, receives each call whose callee
+	// typing found valid (RefWalkProblems: the walk's invalid callees).
+	calleeValid map[*syntax.CallExpr]bool
 	// variantOps counts the variant-index work that resolves type-switch
 	// cases: a constructor inserted, a node visited, a type argument
 	// compared, a wildcard candidate checked. Linear in the source
