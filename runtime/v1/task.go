@@ -151,15 +151,17 @@ func (s *Scope) release() {
 	}
 }
 
-// OnExit is scope.OnExit() { body }: it registers body on the frame, once
-// per call, as Go's defer does. body is the lowered block, a closure, so it
-// reads its variables when it runs (Exit actions 4). It runs masked when
-// the frame ends, on every path. The block is a frame of its own for the
-// tasks it starts and the exit actions it registers, nested ones included:
-// they end when the block ends (Tasks rule 8). A defect in it joins the
-// frame's exit as a release defect, with its stack, and the frame's other
-// reasons stay. Registering on a frame that has returned is a defect.
-func (s *Scope) OnExit(body func()) {
+// OnExit is scope.OnExit() { body } in the frame whose scope is s, the
+// hidden frame argument (docs/spec/stdlib.md, Hidden arguments): it
+// registers body on the frame, once per call, as Go's defer does. body is
+// the lowered block, a closure, so it reads its variables when it runs
+// (Exit actions 4). It runs masked when the frame ends, on every path. The
+// block is a frame of its own for the tasks it starts and the exit actions
+// it registers, nested ones included: they end when the block ends (Tasks
+// rule 8). A defect in it joins the frame's exit as a release defect, with
+// its stack, and the frame's other reasons stay. Registering on a frame
+// that has returned is a defect.
+func OnExit(s *Scope, body func()) {
 	s = s.current()
 	if s.ended {
 		panic("scope.OnExit: the frame that would run this exit action has returned")
@@ -208,16 +210,26 @@ type Task[T any] struct {
 	drained bool     // its owner stopped it when the owner ended
 }
 
-// Go is task.Go() { body }: it starts body as a child of the frame's task,
-// on its own goroutine, and returns at once (parse-v1 ruling 5: the block
-// runs later). The frame owns the task (in an exit action, the action's
-// frame does). span is the task's Ergo identity, the block's definition
-// and source site, which a defect chain names (G2). The child starts
+// Site is the Ergo identity of a call, the called declaration and the
+// call's source position, such as "task.Go at main.ergo:12:10". The
+// lowering passes it as a hidden argument to a Go body that names a task
+// or a span by it (docs/spec/stdlib.md, Hidden arguments; G2, #230). No
+// Ergo type lowers to Site, so its Go type alone marks the argument.
+type Site string
+
+// Go is task.Go() { body } in the frame whose scope is s: it starts body as
+// a child of the frame's task, on its own goroutine, and returns at once
+// (parse-v1 ruling 5: the block runs later). s and span are the hidden
+// frame and site arguments; the block receives the child's task as its own
+// hidden argument (docs/spec/stdlib.md, Hidden arguments). The frame owns
+// the task (in an exit action, the action's frame does). span is the
+// task's Ergo identity, the block's definition and source site, which a
+// defect chain names (G2). The child starts
 // interruptible, except inside an exit action, where rt shields it from
 // the ambient stop so the cleanup completes. If the owner ends without
 // consuming the task, it stops and drains it. Starting a task on a frame
 // that has returned is a defect (law R9): its owner could never drain it.
-func Go[T any](s *Scope, span string, body func(*rt.Task) (T, error)) *Task[T] {
+func Go[T any](s *Scope, span Site, body func(*rt.Task) (T, error)) *Task[T] {
 	s = s.current()
 	if s.ended {
 		panic("task.Go: the frame that would own this task has returned (law R9)")
@@ -227,7 +239,7 @@ func Go[T any](s *Scope, span string, body func(*rt.Task) (T, error)) *Task[T] {
 	// transfer moves and a consumption removes.
 	holder := rt.NewScope(s.s.Task())
 	t := &Task[T]{task: s.s.Task(), owner: s}
-	t.h = rt.Go(&holder, span, func(ct *rt.Task) (T, error) { return guarded(ct, body) })
+	t.h = rt.Go(&holder, string(span), func(ct *rt.Task) (T, error) { return guarded(ct, body) })
 	t.reg = &entry{task: t}
 	s.push(t.reg)
 	return t

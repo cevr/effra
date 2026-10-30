@@ -204,7 +204,7 @@ func TestPollerEnds(t *testing.T) {
 			q = New[int](16)
 			producer := Go(s, "producer at poller.ergo:52:17", func(pt *rt.Task) (struct{}, error) {
 				frameNoRow(pt, func(ps *Scope) {
-					ps.OnExit(func() { q.Close() })
+					OnExit(ps, func() { q.Close() })
 					for i := 0; ; i++ {
 						if err := q.Push(pt, i); err != nil {
 							return // closed: the producer ends

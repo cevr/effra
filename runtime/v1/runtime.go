@@ -14,9 +14,11 @@
 // task.go, queue.go and data.go, over runtime/rt; exit.go is the exit
 // vocabulary they share and the entry, Main, which records a defect with
 // its stack at a task or frame boundary. Their contract is
-// docs/spec/runtime.md (Tasks, Exit actions, Queues). The lowering copies
-// them into a module when it lowers the std signatures that bind them
-// (lower-v1 stage 3b); until then SourceFiles names this file alone.
+// docs/spec/runtime.md (Tasks, Exit actions, Queues). The std signatures
+// in internal/sketch/std bind them (docs/spec/stdlib.md, v1 packages and
+// Hidden arguments). The lowering of those calls (check-v1 stage D) copies
+// this package and runtime/rt into a module; until then SourceFiles names
+// this file alone.
 //
 // Prior art: Gleam's prelude.mjs and ReScript's runtime modules ship the
 // small host-language support that generated code calls; Borgo emits Go

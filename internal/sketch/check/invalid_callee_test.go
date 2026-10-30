@@ -192,7 +192,7 @@ func TestInvalidCalleeDomain(t *testing.T) {
 					if r.local != "" {
 						local = r.local + "\n\t"
 					}
-					src := "import task\n" + r.decls +
+					src := "import go task\n" + r.decls +
 						"func a(" + r.params + ") {\n\t" + local + strings.ReplaceAll(cb.cb, "@", r.callee) + "\n\treturn Bang\n}\n" +
 						"func b() { return a(" + r.args + ") }\n" +
 						"type Bang {}\nfunc F() fails Bang { return b() }\nfunc main() {}\n"

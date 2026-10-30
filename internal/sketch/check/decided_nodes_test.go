@@ -56,12 +56,12 @@ func main() {}
 import go strings
 func main() {}
 `, []string{"S109:2"}},
-	{"import std", "an import of a std module lower-v1 brings", `
+	{"import std", "an import of a std module", `
 import task
 func main() { task.Go() { 1 } }
-`, []string{"S109:2"}},
-	{"import std", "a std import adds no cascade", `
-import task
+`, nil},
+	{"import go", "a refused import adds no cascade", `
+import go task
 type Bang {}
 func a() { task.Go() { b() }; return Bang }
 func b() { return a() }
