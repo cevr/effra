@@ -11,10 +11,10 @@ import (
 // Queue is queue.Queue[T], the body of the std package queue
 // (docs/spec/runtime.md, Queues): a FIFO of T between tasks with a fixed
 // capacity. Push, Pop and Values take the caller's task as a hidden first
-// argument, which the lowering passes (gap 1 ruling, stage 3b): so
-// *Queue[T] is a value of the operations interface the lowering emits for
-// queue.Queue[T], Push(t, v) fails Closed, Pop(t) T fails Closed,
-// Values(t) Seq[T] and Close(). The contract:
+// argument, which the lowering passes (gap 1 ruling; docs/spec/stdlib.md,
+// Hidden arguments): so *Queue[T] is a value of the operations interface
+// the lowering emits for queue.Queue[T], Push(t, v) fails Closed, Pop(t) T
+// fails Closed, Values(t) Seq[T] and Close(). The contract:
 //
 //   - New(capacity) makes an open, empty queue. capacity is how many values
 //     it holds that no Pop has taken yet; 0 makes every Push wait for the

@@ -1,0 +1,26 @@
+// Package queue is a first-in-first-out list of values between tasks
+// (docs/spec/runtime.md, Queues; #207). The Go bodies are runtime/v1's New
+// and the methods of its Queue; the caller's task, a hidden argument of
+// Push and Pop, is docs/spec/stdlib.md's Hidden arguments.
+
+// Closed is the failure of Push on a closed queue and of Pop on a closed,
+// empty one. A closed queue is a normal end of the protocol, not a stop.
+type Closed {}
+
+// Queue is a queue of T with a fixed capacity.
+type Queue[T] {
+	// Push adds v at the back, waiting while the queue is full. It fails
+	// with Closed when the queue is closed, or closes while it waits.
+	Push(v T) fails Closed,
+	// Pop takes the value at the front, waiting while the queue is open and
+	// empty. It fails with Closed when the queue is closed and empty.
+	Pop() T fails Closed,
+	// Close ends admission. It does nothing on a closed queue, never waits
+	// and never fails; the values in the queue stay for Pop.
+	Close(),
+}
+
+// New makes an open, empty queue that holds up to capacity values no Pop
+// has taken yet; 0 makes each Push wait for its Pop. A negative capacity
+// is a defect.
+extern go ergo.local/prototype/runtime/v1.New func New[T](capacity int) Queue[T]

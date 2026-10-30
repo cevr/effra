@@ -7,6 +7,3 @@
 # the line goes when the stage lands. Removed forms are never quarantined:
 # their fixtures are rewritten or deleted. check-v1 empties this file.
 fixtures/spec/types-laws.ergo	196l	laws inside operation types (196l) are S109 until check-v1
-fixtures/positive/go-task-wait.ergo	lower-v1	imports task, a std module lower-v1 brings (round 6 review m3)
-classf/go-statement.ergo	lower-v1	imports task, a std module lower-v1 brings (round 6 review m3)
-classf/go-value.ergo	lower-v1	imports task, a std module lower-v1 brings (round 6 review m3)

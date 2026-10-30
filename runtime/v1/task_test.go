@@ -134,7 +134,7 @@ func TestWaitRaisesDefect(t *testing.T) {
 		return frame(root, func(s *Scope) error {
 			c := Go(s, "child at x.ergo:3:2", func(ct *rt.Task) (int, error) {
 				return frameValue(ct, func(s *Scope) (int, error) {
-					s.OnExit(func() { cleaned.Store(true) })
+					OnExit(s, func() { cleaned.Store(true) })
 					return explode(), nil
 				})
 			})
@@ -210,7 +210,7 @@ func TestWaitInterrupted(t *testing.T) {
 		return frame(root, func(s *Scope) error {
 			c := Go(s, "child", func(ct *rt.Task) (int, error) {
 				return frameValue(ct, func(s *Scope) (int, error) {
-					s.OnExit(func() {
+					OnExit(s, func() {
 						time.Sleep(5 * time.Millisecond)
 						cleaned.Store(true)
 					})
@@ -249,7 +249,7 @@ func TestStop(t *testing.T) {
 		return frame(root, func(s *Scope) error {
 			c := Go(s, "child", func(ct *rt.Task) (int, error) {
 				return frameValue(ct, func(s *Scope) (int, error) {
-					s.OnExit(func() {
+					OnExit(s, func() {
 						time.Sleep(5 * time.Millisecond)
 						cleaned.Store(true)
 					})
@@ -292,10 +292,10 @@ func TestFrameReleaseOrder(t *testing.T) {
 	started := make(chan struct{})
 	err := runMain(func(root *rt.Task) error {
 		err := frame(root, func(s *Scope) error {
-			s.OnExit(func() { r.add("A") })
+			OnExit(s, func() { r.add("A") })
 			Go(s, "T", func(ct *rt.Task) (int, error) {
 				return frameValue(ct, func(s *Scope) (int, error) {
-					s.OnExit(func() {
+					OnExit(s, func() {
 						time.Sleep(5 * time.Millisecond)
 						r.add("T")
 					})
@@ -305,9 +305,9 @@ func TestFrameReleaseOrder(t *testing.T) {
 				})
 			})
 			for i := range 3 {
-				s.OnExit(func() { r.add(fmt.Sprint(i)) })
+				OnExit(s, func() { r.add(fmt.Sprint(i)) })
 			}
-			s.OnExit(func() { r.add("B") })
+			OnExit(s, func() { r.add("B") })
 			<-started
 			return nil
 		})
@@ -328,7 +328,7 @@ func TestExitActionReadsAtRun(t *testing.T) {
 	var got int
 	frameNoRow(rt.Root("main"), func(s *Scope) {
 		x := 1
-		s.OnExit(func() { got = x })
+		OnExit(s, func() { got = x })
 		x = 2
 		_ = x
 	})
@@ -345,7 +345,7 @@ func TestExitActionMasked(t *testing.T) {
 	var stoppedInside, slept atomic.Bool
 	err := runMain(func(root *rt.Task) error {
 		return frame(root, func(s *Scope) error {
-			s.OnExit(func() {
+			OnExit(s, func() {
 				stoppedInside.Store(root.Stopped())
 				slept.Store(rt.Sleep(root, rt.Live{}, 5*time.Millisecond) == nil)
 			})
@@ -370,7 +370,7 @@ func TestExitCauses(t *testing.T) {
 		var err error
 		p := recovered(func() {
 			err = frame(rt.Root("main"), func(s *Scope) error {
-				s.OnExit(func() { explode() })
+				OnExit(s, func() { explode() })
 				return bad{"body"}
 			})
 		})
@@ -386,7 +386,7 @@ func TestExitCauses(t *testing.T) {
 	t.Run("body defect and action defect", func(t *testing.T) {
 		p := recovered(func() {
 			frameNoRow(rt.Root("main"), func(s *Scope) {
-				s.OnExit(func() { panic("in the action") })
+				OnExit(s, func() { panic("in the action") })
 				explode()
 			})
 		})
@@ -410,7 +410,7 @@ func TestExitCauses(t *testing.T) {
 	t.Run("lone failure", func(t *testing.T) {
 		var ran bool
 		err := frame(rt.Root("main"), func(s *Scope) error {
-			s.OnExit(func() { ran = true })
+			OnExit(s, func() { ran = true })
 			return bad{"lone"}
 		})
 		if err != (bad{"lone"}) || !ran {
@@ -421,7 +421,7 @@ func TestExitCauses(t *testing.T) {
 		p := recovered(func() {
 			frameNoRow(rt.Root("main"), func(s *Scope) {
 				c := Go(s, "child", func(*rt.Task) (int, error) { return explode(), nil })
-				s.OnExit(func() { _, _ = c.Wait() })
+				OnExit(s, func() { _, _ = c.Wait() })
 			})
 		})
 		x, ok := p.(*exit)
@@ -564,8 +564,8 @@ func TestTaskReturn(t *testing.T) {
 		var r recorder
 		err := runMain(func(root *rt.Task) error {
 			return frame(root, func(s *Scope) error {
-				s.OnExit(func() { r.add("earlier") })
-				s.OnExit(func() {
+				OnExit(s, func() { r.add("earlier") })
+				OnExit(s, func() {
 					start(root, s, func(ct *rt.Task) (int, error) {
 						defer r.add("child-ended")
 						_ = rt.Sleep(ct, rt.Live{}, time.Hour)
@@ -684,7 +684,7 @@ func TestGoInExitAction(t *testing.T) {
 		var v int
 		err := runMain(func(root *rt.Task) error {
 			return frame(root, func(s *Scope) error {
-				s.OnExit(func() {
+				OnExit(s, func() {
 					v, _ = Go(s, "cleanup", func(*rt.Task) (int, error) { ran = true; return 1, nil }).Wait()
 				})
 				return nil
@@ -698,8 +698,8 @@ func TestGoInExitAction(t *testing.T) {
 		var r recorder
 		err := runMain(func(root *rt.Task) error {
 			return frame(root, func(s *Scope) error {
-				s.OnExit(func() { r.add("earlier action") })
-				s.OnExit(func() {
+				OnExit(s, func() { r.add("earlier action") })
+				OnExit(s, func() {
 					started := make(chan struct{})
 					Go(s, "cleanup", func(ct *rt.Task) (int, error) {
 						defer r.add("child ended")
@@ -724,10 +724,10 @@ func TestGoInExitAction(t *testing.T) {
 		var r recorder
 		err := runMain(func(root *rt.Task) error {
 			return frame(root, func(s *Scope) error {
-				s.OnExit(func() { r.add("earlier action") })
-				s.OnExit(func() {
+				OnExit(s, func() { r.add("earlier action") })
+				OnExit(s, func() {
 					r.add("outer")
-					s.OnExit(func() { r.add("inner") })
+					OnExit(s, func() { r.add("inner") })
 				})
 				return nil
 			})
@@ -739,7 +739,7 @@ func TestGoInExitAction(t *testing.T) {
 	t.Run("a defect in its task joins the frame's exit", func(t *testing.T) {
 		err := runMain(func(root *rt.Task) error {
 			return frame(root, func(s *Scope) error {
-				s.OnExit(func() {
+				OnExit(s, func() {
 					_, _ = Go(s, "cleanup", func(*rt.Task) (int, error) { return explode(), nil }).Wait()
 				})
 				return nil
@@ -758,8 +758,8 @@ func TestGoInExitAction(t *testing.T) {
 		v := 0
 		err := runMain(func(root *rt.Task) error {
 			return frame(root, func(s *Scope) error {
-				s.OnExit(func() {
-					s.OnExit(func() {
+				OnExit(s, func() {
+					OnExit(s, func() {
 						v, _ = Go(s, "inner", func(*rt.Task) (int, error) { return 1, nil }).Wait()
 					})
 				})
@@ -774,9 +774,9 @@ func TestGoInExitAction(t *testing.T) {
 		var r recorder
 		err := runMain(func(root *rt.Task) error {
 			return frame(root, func(s *Scope) error {
-				s.OnExit(func() { r.add("earlier") })
-				s.OnExit(func() {
-					s.OnExit(func() {
+				OnExit(s, func() { r.add("earlier") })
+				OnExit(s, func() {
+					OnExit(s, func() {
 						started := make(chan struct{})
 						Go(s, "inner", func(ct *rt.Task) (int, error) {
 							defer r.add("inner-child-ended")
@@ -839,7 +839,7 @@ func TestNoTaskOutlivesItsFrame(t *testing.T) {
 			defer live.Add(-1)
 			rng := rand.New(rand.NewPCG(seed, uint64(depth)))
 			return frameValue(ct, func(s *Scope) (int, error) {
-				s.OnExit(func() {})
+				OnExit(s, func() {})
 				n := 0
 				if depth < 3 {
 					n = rng.IntN(4)
@@ -847,7 +847,7 @@ func TestNoTaskOutlivesItsFrame(t *testing.T) {
 				kids := make([]*Task[int], n)
 				for i := range kids {
 					kidSeed := rng.Uint64()
-					kids[i] = Go(s, fmt.Sprintf("d%d.%d", depth, i), func(t *rt.Task) (int, error) { return tree(t, depth+1, kidSeed) })
+					kids[i] = Go(s, Site(fmt.Sprintf("d%d.%d", depth, i)), func(t *rt.Task) (int, error) { return tree(t, depth+1, kidSeed) })
 				}
 				for _, k := range kids {
 					switch rng.IntN(4) {

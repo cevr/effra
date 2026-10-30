@@ -88,17 +88,17 @@ func TestTracedReleasesMatchUntraced(t *testing.T) {
 		panics   int // panic events marked InRelease
 	}{
 		{"normal: an exit action and an unconsumed task", func(t *rt.Task, s *Scope) error {
-			s.OnExit(func() {})
+			OnExit(s, func() {})
 			Go(s, "child at r.ergo:2:3", func(ct *rt.Task) (int, error) { sleepUntilStopped(ct); return 0, nil })
 			return nil
 		}, 2, 0},
 		{"failing: an exit action panics", func(t *rt.Task, s *Scope) error {
-			s.OnExit(func() { panic("release broke") })
+			OnExit(s, func() { panic("release broke") })
 			return bad{"body"}
 		}, 1, 1},
 		{"nested: an exit action with its own action and task", func(t *rt.Task, s *Scope) error {
-			s.OnExit(func() {
-				s.OnExit(func() { panic("inner broke") })
+			OnExit(s, func() {
+				OnExit(s, func() { panic("inner broke") })
 				Go(s, "inner child at r.ergo:5:5", func(ct *rt.Task) (int, error) { sleepUntilStopped(ct); return 0, nil })
 			})
 			return nil
@@ -147,7 +147,7 @@ func TestTracedReleaseUnwindsOnlyItsCalls(t *testing.T) {
 		outer = t.TraceCall("Outer.Op", "r.ergo:1:1")
 		_, err := guarded(t, func(t *rt.Task) (struct{}, error) {
 			return struct{}{}, frame(t, func(s *Scope) error {
-				s.OnExit(func() {
+				OnExit(s, func() {
 					inner = t.TraceCall("Inner.Op", "r.ergo:3:5")
 					panic("release broke")
 				})
@@ -183,8 +183,8 @@ func TestReleaseDefectEventOrder(t *testing.T) {
 	rec := &events{}
 	root := rt.TracedRoot("traced", rec)
 	err := runFrame(root, func(t *rt.Task, s *Scope) error {
-		s.OnExit(func() {
-			s.OnExit(func() {})
+		OnExit(s, func() {
+			OnExit(s, func() {})
 			panic("outer broke")
 		})
 		return nil
