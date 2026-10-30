@@ -258,16 +258,28 @@ func (w *refWalker) bindAs(name string, b *localBinding) {
 	w.scopes[len(w.scopes)-1][name] = b
 }
 
-// bindPatterns binds the names that the `as` patterns of a case or catch
-// arm bind (196p): reads of them in the arm are locals.
-func (w *refWalker) bindPatterns(list []syntax.Expr) {
-	for _, p := range list {
-		syntax.Inspect(p, func(n syntax.Node) bool {
-			if a, ok := n.(*syntax.AsPattern); ok && a.Name.Name != "_" {
-				w.bind(a.Name.Name)
-			}
-			return true
-		})
+// catchPattern walks one pattern of a catch arm and binds every name typing
+// binds there that could hide a package object, valid or not (stage C
+// round 6 fuzz): a record pattern T{F: p} binds the names of its field
+// patterns, as a match pattern does, and `as x` binds x. Any other part is
+// a type position. A lone `case err:` binds the rest, but only a name that
+// names nothing in scope is the rest (catchAll), so it hides no package
+// object and the walk need not bind it.
+func (w *refWalker) catchPattern(p syntax.Expr) {
+	core, name := asParts(p)
+	if name != nil {
+		w.visit(p)
+	}
+	if lit, ok := core.(*syntax.CompositeLit); ok {
+		w.pattern(lit)
+	} else {
+		w.typ(core)
+	}
+	if name != nil {
+		w.visit(name)
+		if name.Name != "_" {
+			w.bind(name.Name)
+		}
 	}
 }
 
@@ -965,9 +977,8 @@ func (w *refWalker) expr(x syntax.Expr) {
 			w.visit(arm)
 			w.push()
 			for _, t := range arm.Types {
-				w.typ(t)
+				w.catchPattern(t)
 			}
-			w.bindPatterns(arm.Types)
 			w.list(arm.Body)
 			w.pop()
 		}

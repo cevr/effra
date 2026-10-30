@@ -163,6 +163,8 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 		// One binding set per pattern of the arm: every pattern binds the
 		// same names with one type (rule 6 of the pattern language, D-B3).
 		var lists [][]patBinding
+		// The names of the arm's skipped patterns (catchItem.placeholders).
+		var placeholders []*syntax.Ident
 		// The `case err:` binding of the rest, with its row value type.
 		var restName *syntax.Ident
 		var restType Type
@@ -172,6 +174,7 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 				c.errorf(it.te, CodeType, "this arm is unreachable: the case err: or case _ before it handles every failure (rows.md, Catch 2)")
 			}
 			if it.skip {
+				placeholders = append(placeholders, it.placeholders...)
 				continue
 			}
 			if it.rest {
@@ -210,6 +213,11 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 						p.Var = v
 					}
 				}
+			}
+		}
+		for _, id := range placeholders {
+			if _, bound := c.fn.scope.names[id.Name]; !bound {
+				c.declareAs(id, invalid) // no type: no S110, no cascade
 			}
 		}
 		c.catchArm(arm, valueType, wantValue && hasValue)
@@ -282,6 +290,10 @@ type catchItem struct {
 	row    solverRow     // its matrix row; nil after a reported pattern
 	whole  bool          // a type test: it covers t
 	binds  []patBinding  // its names, `as` included
+	// placeholders: the names a skipped pattern writes, bound in its arm
+	// with no type so a read there resolves to them, as the reference
+	// walk does, and adds no diagnostic (D3; stage C round 6 fuzz).
+	placeholders []*syntax.Ident
 }
 
 func (c *checker) newCatchSpace(x *syntax.CatchExpr) *catchSpace {
@@ -306,6 +318,12 @@ func (cs *catchSpace) resolve(arm *syntax.CatchArm, te syntax.Expr, row *Row, op
 		if len(arm.Types) > 1 || name != nil {
 			c.errorf(te, CodeType, "case %s: handles the rest of the row and stands alone in its arm (rows.md, Catch 2)", id.Name)
 			it.skip = true
+			if id.Name != "_" {
+				it.placeholders = append(it.placeholders, id)
+			}
+			if name != nil && name.Name != "_" {
+				it.placeholders = append(it.placeholders, name)
+			}
 			return it, false
 		}
 		it.rest, it.restID = true, id

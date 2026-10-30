@@ -1,0 +1,2 @@
+go test fuzz v1
+string("type Order{}\nfunc e(){(0)catch{case a as e:Order{e}}}")
