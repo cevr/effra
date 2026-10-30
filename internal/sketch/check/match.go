@@ -590,7 +590,7 @@ func (c *checker) isPatternType(name string) bool {
 // before it cover is S108 (unreachable); the match is total, by the
 // usefulness solver over the case matrix, or has `case _` (S103; rows.md,
 // Totality 2 and 5); each binding is read in its arm (S110).
-func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr, clauses []*syntax.CaseClause) {
+func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr, clauses []*syntax.CaseClause, body func([]syntax.Stmt)) {
 	done := c.openScope()
 	defer done()
 	n := len(subjects)
@@ -710,7 +710,7 @@ func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr
 		}
 		inner := c.openScope()
 		arm := c.declareArm(bindsOf[ci])
-		c.stmtList(cl.Body, false)
+		body(cl.Body)
 		c.unusedBindings(arm)
 		inner()
 	}

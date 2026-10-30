@@ -54,13 +54,13 @@ This directory is the normative specification of the Go-shaped Ergo language: Ef
 | Functions whose first parameter is a local record (no receivers, 196m) | Checked as ordinary functions | [types](types.md#methods) |
 | Single-subject `match` on a union | Checked, total or with `case _` (S103; Gap 3); runs | [rows](rows.md#totality) |
 | Multi-subject `match (a, b)` | Checked, total by a usefulness check (Gap 12); build refused | [rows](rows.md#totality) |
-| `if`/`else`, `else if` | Checked; runs | [grammar](grammar.md#statements) |
+| `if`/`else`, `else if`; `if` and `match` as expressions, function tails (196r) | Checked; runs (check-v1 stage C, D-C1, D-C2) | [grammar](grammar.md#statements) |
 | `let` definitions | Checked; runs | [grammar](grammar.md#statements) |
 | Operators `==` (on `string`, `int64`, `bool`) and `+` | Checked; runs | [types](types.md#operators) |
 | Other operators, `&&`, `\|\|`, `==` on `duration` | Checked with Go's operand rules (Gaps 10, 26); build refused | [types](types.md#operators) |
 | `fails` rows and `try` | Checked; runs | [rows](rows.md#error-rows) |
 | `catch` without `try` (total) and `try … catch` (partial) | Checked; runs | [rows](rows.md#catch) |
-| `case E as e:` bindings, statements in arms | Statements in arms and `as` bindings checked (Gap 11; check-v1 stage B); `case err:` S109 until stage C (196r) | [rows](rows.md#catch) |
+| `case E as e:` bindings, statements in arms | Statements in arms and `as` bindings checked (Gap 11; check-v1 stage B); `case err:`, `case _`, record patterns and a whole-expression `try` checked and lowered (check-v1 stage C, 196r, D-C3) | [rows](rows.md#catch) |
 | `needs` rows | Checked, inferred for unexported functions and literals; runs | [rows](rows.md#capability-rows) |
 | Footprints and purity | Designed, not yet implemented ([#203](https://github.com/cevr/ergo/issues/203)) | [rows](rows.md#footprints) |
 | Named wires `let W = wire { … }` with provider literals | Checked: closed wires (Gap 6), S111 for a repeated entry (Gap 28); runs | [rows](rows.md#wire) |

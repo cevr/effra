@@ -1,0 +1,15 @@
+// Seventh round, item 4: `break` and `continue` inside a `match` act on the
+// enclosing `for`.
+func first(xs []int) int {
+	let mut found = 0
+	for x in xs {
+		match x {
+		case 0:
+			continue
+		case _:
+			found = x
+			break
+		}
+	}
+	found
+}

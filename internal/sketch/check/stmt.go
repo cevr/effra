@@ -89,21 +89,9 @@ func (c *checker) stmt(s syntax.Stmt) {
 		}
 		done()
 	case *syntax.SwitchStmt:
-		if s.Init != nil || s.Tag == nil {
-			c.undecided(s, "a match with an init statement or no subject")
-			return
-		}
-		c.matchStmt(s, s.Switch, []syntax.Expr{s.Tag}, s.Clauses)
+		c.switchHeader(s, c.armStmts)
 	case *syntax.TypeSwitchStmt:
-		if s.Init != nil || s.Binds != nil || s.Define.IsValid() {
-			c.undecided(s, "a match header with an init statement or a binding")
-			return
-		}
-		subjects := make([]syntax.Expr, len(s.Subjects))
-		for i, g := range s.Subjects {
-			subjects[i] = g.X
-		}
-		c.matchStmt(s, s.Switch, subjects, s.Clauses)
+		c.typeSwitchHeader(s, c.armStmts)
 	case *syntax.ForStmt:
 		c.forStmt(s)
 	case *syntax.RangeStmt:
@@ -113,6 +101,34 @@ func (c *checker) stmt(s syntax.Stmt) {
 	default:
 		c.undecided(s, "")
 	}
+}
+
+// armStmts checks a statement match's arm.
+func (c *checker) armStmts(list []syntax.Stmt) { c.stmtList(list, false) }
+
+// switchHeader checks a match on literal patterns with body checking each
+// arm; false when its header is not decided syntax (reported).
+func (c *checker) switchHeader(s *syntax.SwitchStmt, body func([]syntax.Stmt)) bool {
+	if s.Init != nil || s.Tag == nil {
+		c.undecided(s, "a match with an init statement or no subject")
+		return false
+	}
+	c.matchStmt(s, s.Switch, []syntax.Expr{s.Tag}, s.Clauses, body)
+	return true
+}
+
+// typeSwitchHeader checks any other match, one subject per tuple element.
+func (c *checker) typeSwitchHeader(s *syntax.TypeSwitchStmt, body func([]syntax.Stmt)) bool {
+	if s.Init != nil || s.Binds != nil || s.Define.IsValid() {
+		c.undecided(s, "a match header with an init statement or a binding")
+		return false
+	}
+	subjects := make([]syntax.Expr, len(s.Subjects))
+	for i, g := range s.Subjects {
+		subjects[i] = g.X
+	}
+	c.matchStmt(s, s.Switch, subjects, s.Clauses, body)
+	return true
 }
 
 func (c *checker) block(b *syntax.BlockStmt) {

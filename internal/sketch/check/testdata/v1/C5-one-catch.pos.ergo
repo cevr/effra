@@ -1,0 +1,38 @@
+// One catch form (seventh round, item 3; ninth round): arms are match arms;
+// `case T as e:` binds the caught failure narrowed to T, and `case err:`
+// binds the rest of the failure. A partial catch under `try` lets the rest
+// escape.
+type NotFound { ID string }
+type Declined { Reason string }
+type Order { ID string }
+
+func Fetch(id string) Order fails NotFound | Declined {
+	if id == "" {
+		return NotFound{ID: id}
+	}
+	Order{ID: id}
+}
+
+func Describe(id string) string fails Declined {
+	let order = Fetch(id) catch {
+	case NotFound as e:
+		Order{ID: e.ID}
+	case err:
+		return err
+	}
+	order.ID
+}
+
+func Total(id string) string {
+	Describe(id) catch {
+	case Declined{Reason: r}:
+		r
+	}
+}
+
+func Partial(id string) Order fails Declined {
+	try Fetch(id) catch {
+	case NotFound:
+		Order{ID: "none"}
+	}
+}

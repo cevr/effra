@@ -42,6 +42,16 @@ type funcCtx struct {
 	env        string // the current environment pointer; "" in a function with none
 	directives bool
 	loops      []*loopCtx
+	// tries counts the try expressions being lowered: inside one, every
+	// fallible value propagates (196r: try covers the expression to its
+	// right).
+	tries int
+	// owner is the Ergo name of the source declaration being lowered (a
+	// function, a package let, a wire), the Func of its call identities
+	// (#230); a function literal inherits it.
+	owner string
+	// lastPos is the position of the last //line directive written.
+	lastPos syntax.Pos
 }
 
 func newFuncCtx(l *lowerer, scope *namer, directives bool) *funcCtx {
@@ -59,6 +69,7 @@ func (fc *funcCtx) at(n syntax.Node) {
 	fc.site = n
 	if fc.directives && n != nil && n.Pos().IsValid() {
 		fc.out.WriteString(fc.l.directive(n.Pos()))
+		fc.lastPos = n.Pos()
 	}
 }
 
@@ -69,15 +80,7 @@ func (fc *funcCtx) temp(base string) string { return fc.scope.alloc(base) }
 // checked program never reaches, and a fallible body with no value returns
 // nil.
 func (fc *funcCtx) body(list []syntax.Stmt) {
-	if len(list) > 0 {
-		if last, ok := list[len(list)-1].(*syntax.ExprStmt); ok && fc.l.info.Tails[last] != nil {
-			fc.stmts(list[:len(list)-1])
-			fc.at(last)
-			fc.retExpr(last.X)
-			return
-		}
-	}
-	if fc.stmts(list) {
+	if fc.yieldList(list, dest{kind: destReturn}) {
 		return
 	}
 	switch {
@@ -125,16 +128,16 @@ func (fc *funcCtx) stmt(s syntax.Stmt) bool {
 		fc.line("}")
 		return t
 	case *syntax.IfStmt:
-		return fc.ifStmt(s)
+		return fc.ifYield(s, dest{})
 	case *syntax.ForStmt:
 		return fc.forStmt(s)
 	case *syntax.BranchStmt:
 		fc.branch(s)
 		return true
 	case *syntax.TypeSwitchStmt:
-		return fc.typeMatch(s)
+		return fc.typeMatch(s, dest{})
 	case *syntax.SwitchStmt:
-		return fc.valueMatch(s)
+		return fc.valueMatch(s, dest{})
 	case *syntax.RangeStmt:
 		refuse(s, "for … in is lowered after check-v1 stage D (one for, the Map rule and Range)")
 	case *syntax.AssertStmt:
@@ -150,10 +153,11 @@ func (fc *funcCtx) stmt(s syntax.Stmt) bool {
 func (fc *funcCtx) let(d *syntax.VarDecl) {
 	for _, spec := range d.Specs {
 		if spec.Pattern != nil || len(spec.Names) != 1 || len(spec.Values) > 1 {
-			refuse(d, "a let with a pattern or several names is lowered after check-v1 stage B (196p, 196t)")
+			fc.letPattern(spec)
+			continue
 		}
 		id := spec.Names[0]
-		if p := fc.l.info.Patterns[id]; p != nil && p.Kind == check.PatTypeTest {
+		if p := fc.l.info.Patterns[id]; p != nil && p.Kind != check.PatBind {
 			// A known single name remains in Names in the frozen syntax,
 			// but has no binder. The checker proved this test irrefutable.
 			fc.discard(spec.Values[0])
@@ -428,7 +432,7 @@ func (fc *funcCtx) discard(x syntax.Expr) {
 		}
 	}
 	if call, ok := x.(*syntax.CallExpr); ok {
-		if c := fc.l.info.Calls[call]; c != nil && c.Kind != check.CallWith && c.Kind != check.CallConversion && c.Kind != check.CallLen {
+		if c := fc.l.info.Calls[call]; c != nil && c.Kind != check.CallWith && c.Kind != check.CallConversion && c.Kind != check.CallLen && !(fc.tries > 0 && fc.fallibleExpr(call)) {
 			if text := fc.callStmt(call); text != "" {
 				fc.line(text)
 			}
@@ -437,42 +441,14 @@ func (fc *funcCtx) discard(x syntax.Expr) {
 	}
 	o := fc.expr(x)
 	if o.err != "" {
-		ice(x, "an untried fallible expression in a statement")
+		if fc.tries == 0 {
+			ice(x, "an untried fallible expression in a statement")
+		}
+		fc.propagate(o.err)
 	}
 	if o.val != "" {
 		fc.line("_ = " + o.val)
 	}
-}
-
-// ifStmt lowers if/else. A condition that needs statements of its own is
-// evaluated in the else branch of the previous condition, never before it.
-func (fc *funcCtx) ifStmt(s *syntax.IfStmt) bool {
-	if s.Init != nil {
-		refuse(s, "an if with an init statement is not produced by the decided parser")
-	}
-	cond := fc.value(s.Cond)
-	fc.line("if " + cond + " {")
-	then := fc.block(s.Body.List)
-	switch e := s.Else.(type) {
-	case nil:
-		fc.line("}")
-		return false
-	case *syntax.BlockStmt:
-		fc.line("} else {")
-		els := fc.block(e.List)
-		fc.line("}")
-		return then && els
-	case *syntax.IfStmt:
-		fc.line("} else {")
-		fc.depth++
-		fc.at(e)
-		els := fc.ifStmt(e)
-		fc.depth--
-		fc.line("}")
-		return then && els
-	}
-	refuse(s.Else, "this else branch is not produced by the decided parser")
-	return false
 }
 
 // forStmt lowers a conditional loop. The condition is evaluated at the top
@@ -578,18 +554,22 @@ func (fc *funcCtx) leaveSwitch() {
 // typeMatch lowers a match on one subject with type patterns to a Go type
 // switch. The checker proved it total (Info contract 3), so it has no
 // default arm unless it writes case _.
-func (fc *funcCtx) typeMatch(s *syntax.TypeSwitchStmt) bool {
+func (fc *funcCtx) typeMatch(s *syntax.TypeSwitchStmt, d dest) bool {
 	m := fc.l.info.Matches[s]
 	if m == nil {
 		ice(s, "a match with no Matches entry")
 	}
-	if s.Init != nil || len(s.Subjects) != 1 || len(s.Binds) > 0 {
-		refuse(s, "a match on several subjects or with a binding is lowered after check-v1 stage B (196p, 196t)")
+	if s.Init != nil || len(s.Binds) > 0 {
+		refuse(s, "a match with an init statement or a header binding is not produced by the decided parser")
+	}
+	if !fc.simpleTypeMatch(s) {
+		subjects := make([]syntax.Expr, len(s.Subjects))
+		for i, g := range s.Subjects {
+			subjects[i] = g.X
+		}
+		return fc.patternMatch(s, subjects, s.Clauses, d)
 	}
 	subject := fc.value(s.Subjects[0].X)
-	if !fc.isInterface(fc.typeOf(s.Subjects[0].X)) {
-		refuse(s.Subjects[0], "a type match on a value that is not a union or an operation type is lowered after check-v1 stage B (196p)")
-	}
 	type arm struct {
 		types []string
 		as    *check.Var
@@ -659,8 +639,16 @@ func (fc *funcCtx) typeMatch(s *syntax.TypeSwitchStmt) bool {
 		} else if bind {
 			fc.line("_ = " + narrowed)
 		}
-		terminates = fc.stmts(a.body) && terminates
+		terminates = fc.yieldList(a.body, d) && terminates
 		fc.depth--
+	}
+	if !hasDefault && d.needsDefault(terminates) {
+		hasDefault = true
+		fc.line("default:")
+		if bind {
+			fc.line("\t_ = " + narrowed)
+		}
+		fc.noCase(s)
 	}
 	fc.leaveSwitch()
 	fc.line("}")
@@ -669,7 +657,7 @@ func (fc *funcCtx) typeMatch(s *syntax.TypeSwitchStmt) bool {
 
 // valueMatch lowers a match on constant patterns to a Go expression switch,
 // or a match with no subject to an if chain.
-func (fc *funcCtx) valueMatch(s *syntax.SwitchStmt) bool {
+func (fc *funcCtx) valueMatch(s *syntax.SwitchStmt, d dest) bool {
 	if fc.l.info.Matches[s] == nil {
 		ice(s, "a value match with no Matches entry")
 	}
@@ -677,7 +665,7 @@ func (fc *funcCtx) valueMatch(s *syntax.SwitchStmt) bool {
 		refuse(s, "a match with an init statement is not produced by the decided parser")
 	}
 	if s.Tag == nil {
-		refuse(s, "a match with no subject is lowered after check-v1 stage C")
+		ice(s, "a match with no subject; the checker refuses it as undecided syntax")
 	}
 	tag := fc.value(s.Tag)
 	fc.line("switch " + tag + " {")
@@ -712,7 +700,14 @@ func (fc *funcCtx) valueMatch(s *syntax.SwitchStmt) bool {
 		} else {
 			fc.line("case " + strings.Join(values, ", ") + ":")
 		}
-		terminates = fc.block(cl.Body) && terminates
+		fc.depth++
+		terminates = fc.yieldList(cl.Body, d) && terminates
+		fc.depth--
+	}
+	if !hasDefault && d.needsDefault(terminates) {
+		hasDefault = true
+		fc.line("default:")
+		fc.noCase(s)
 	}
 	fc.leaveSwitch()
 	fc.line("}")
@@ -744,10 +739,16 @@ func caseKey(t check.Type, v constant.Value) string {
 // isInterface reports a type that lowers to a Go interface: a union or an
 // operation type.
 func (fc *funcCtx) isInterface(t check.Type) bool {
+	if _, row := t.(*check.Union); row {
+		return true // a row value, a Go error
+	}
 	n, ok := t.(*check.Named)
 	if !ok {
 		return false
 	}
 	td := fc.l.typeDecl(n.Obj, fc.site)
+	if td.kind == kindDefined {
+		return fc.isInterface(td.defined)
+	}
 	return td.kind == kindUnion || td.kind == kindOps
 }

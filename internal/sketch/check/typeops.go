@@ -197,6 +197,16 @@ func (c *checker) assignable(v, t Type) (bool, string) {
 	}
 	if u := asUnion(t); u != nil {
 		if _, isNamed := t.(*Named); isNamed {
+			if rv, isRow := v.(*Union); isRow {
+				// A row value goes into a declared union that lists each of
+				// its error types (D-C3, ConvRow).
+				for _, e := range rv.Variants {
+					if !c.hasVariant(u, e) {
+						return false, fmt.Sprintf("%s is not a variant of %s", e, t)
+					}
+				}
+				return true, ""
+			}
 			for _, variant := range u.Variants {
 				if c.identical(variant, v) {
 					return true, ""
@@ -487,6 +497,16 @@ func defaultableSeen(t Type, seen map[Type]bool) bool {
 			}
 		}
 		return true
+	}
+	return false
+}
+
+// hasVariant reports whether the union u lists v.
+func (c *checker) hasVariant(u *Union, v Type) bool {
+	for _, variant := range u.Variants {
+		if c.identical(variant, v) {
+			return true
+		}
 	}
 	return false
 }

@@ -6,6 +6,13 @@ Entries describe user-visible changes and are true at the commit that carries th
 
 ### Breaking changes
 
+- The checker enforces stage C of the v1 checker, and every form it admits runs under `ergo run` ([#196](https://github.com/cevr/ergo/issues/196), 196r; check-v1):
+  - A body yields its last expression: a function, an `if` or `match` arm, a `catch` arm and a trailing block; `return e` leaves early and means the same. A fallible tail's failure escapes, as `return f()` does. A body that needs a value and ends in a statement is S107 at its closing brace.
+  - `if` and `match` are expressions: `let s = if c { 1 } else { 2 }`, `1 + match p { … }`, an argument, a tail. With an expected type every branch takes it; without one the branches have the first branch's type and never join into a union. A value `if` without `else` is S108. A branch that ends in `return`, `break` or `continue` joins any type.
+  - One `catch`: arms are match arms over the failure. `case Declined{Reason: r}:` handles a type only when it matches every value of it; `case err:` binds the row value of the failures the earlier arms leave, which can be returned, matched or assigned to a declared union that lists each of them; `case _` handles the rest. An arm after `case err:` or `case _` is S108.
+  - `try` covers the whole expression to its right: `try a() + b()` propagates both failures.
+  - `break` and `continue` inside a `match` act on the enclosing `for`; outside a `for` they are S108.
+  - The lowering now runs every stage B form: record, nested, constant, tuple, `as` and several-subject patterns, `let` destructuring, tuples and defined types. A total match whose value Go needs has a default arm that panics with a named defect, never a zero value. Each call that can fail or uses a capability keeps its Ergo identity in the program's call table, `ergoCalls` (#230).
 - The checker enforces stage B of the v1 checker ([#196](https://github.com/cevr/ergo/issues/196), 196p and 196t; check-v1):
   - A record with no fields is written bare: `return Pending`, `Runner.Each(f)`. `Pending{}` is S108 "a record with no fields is written bare: Pending", and a bare name of a record with fields is S108.
   - A type's members decide its kind. A union's variants are records of the package, named bare or declared inline (`type Payment = Pending | Declined{ Reason string }`); an inline variant of a generic union takes the union's parameters its fields mention. A variant from another package is S109 naming 196b. `type Celsius float64` defines a nominal type.

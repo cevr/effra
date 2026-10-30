@@ -61,9 +61,20 @@ func (tc *typeCtx) goType(t check.Type) string {
 		}
 		ice(tc.site, "the type parameter %s appears outside its declaration", t.Name)
 	case *check.Tuple:
-		refuse(tc.site, "a tuple is lowered after check-v1 stage B (196t)")
+		// A tuple is structural (196t): an unnamed Go struct, identical
+		// wherever its element types are, and comparable when they are.
+		fields := make([]string, len(t.Types))
+		for i, e := range t.Types {
+			fields[i] = tupleField(i) + " " + tc.goType(e)
+		}
+		return "struct{ " + strings.Join(fields, "; ") + " }"
 	case *check.Union:
-		refuse(tc.site, "an inline union is lowered after check-v1 stage B (196p)")
+		// The row value of `case err:` (D-C3) is a Go error holding one of
+		// its error types.
+		if tc.l.isErrorValue(t) {
+			return "error"
+		}
+		ice(tc.site, "the anonymous union %s is not a row value; the checker builds no other", t)
 	case *check.Interface:
 		refuse(tc.site, "the type %s is lowered after check-v1 stage E (no any, constraints)", t)
 	}
@@ -198,6 +209,15 @@ func isInteger(t check.Type) bool {
 // (types.md, Error types 2). The checker's ErrorTypes of the type's
 // package, and of this package, decide it.
 func (l *lowerer) isErrorValue(t check.Type) bool {
+	if u, row := t.(*check.Union); row {
+		// A row value (D-C3): every variant is an error type.
+		for _, v := range u.Variants {
+			if !l.isErrorValue(v) {
+				return false
+			}
+		}
+		return len(u.Variants) > 0
+	}
 	n, ok := t.(*check.Named)
 	if !ok {
 		return false

@@ -1,0 +1,13 @@
+// 196r rule 3: a function with a result whose body's last statement has no
+// value on some path is S107, at the body's closing brace.
+func add(a, b int) int {
+	for a < b {
+		return a
+	}
+} // want S107
+
+func pick(b bool) int {
+	if b {
+		1
+	}
+} // want S107

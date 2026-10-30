@@ -92,6 +92,13 @@ func (c *checker) handled(op *operand) {
 	if op.invalid() || !op.fallible() {
 		return
 	}
+	if c.fn != nil && c.fn.t != nil && c.fn.t.tries > 0 {
+		// Under try, the failure escapes as try's own does.
+		c.escape(op.expr, op.errs)
+		op.errs = nil
+		c.fn.t.tried = true
+		return
+	}
 	c.errorf(op.expr, CodeUnhandled, "the failure %s of this expression is not handled: use try, catch or return (rows.md, Error rows 3)", rowText(op.errs))
 	op.errs = nil
 }
@@ -276,7 +283,7 @@ func (c *checker) expr0(x syntax.Expr, hint Type) operand {
 	case *syntax.InterpolatedString:
 		return c.interpolated(x)
 	case *syntax.IfStmt, *syntax.SwitchStmt, *syntax.TypeSwitchStmt:
-		return c.notYet(x)
+		return c.branches(x, hint)
 	case *syntax.AsPattern, *syntax.VariantSpec:
 		return c.undecided(x, "a pattern or a variant in value position")
 	}
@@ -326,8 +333,6 @@ func decidedNoun(n syntax.Node) string {
 		if n.Op == syntax.DOTDOT {
 			return "a range outside a for header (196 one for)"
 		}
-	case *syntax.IfStmt, *syntax.SwitchStmt, *syntax.TypeSwitchStmt:
-		return "an if or match in value position (196r, tail results)"
 	}
 	return "this form"
 }

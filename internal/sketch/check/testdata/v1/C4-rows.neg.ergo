@@ -1,0 +1,22 @@
+// An undeclared failure escapes (S101), a charged service is not in the row
+// (S102), and a fallible expression is neither tried, caught nor returned
+// (S105).
+type NotFound { ID string }
+
+type Orders {
+	Find(id string) string fails NotFound,
+}
+
+func Lookup(id string) string needs Orders {
+	let name = try Orders.Find(id) // want S101
+	name
+}
+
+func Peek(id string) string fails NotFound {
+	try Orders.Find(id) // want S102
+}
+
+func Look(id string) string fails NotFound needs Orders {
+	let name = Orders.Find(id) // want S105
+	name
+}

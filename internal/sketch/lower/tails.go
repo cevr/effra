@@ -1,0 +1,172 @@
+package lower
+
+import (
+	"strconv"
+
+	"ergo.local/prototype/internal/sketch/syntax"
+)
+
+// Tail results (196r; check-v1 D-C1 and D-C2). A body yields its last
+// statement, and a final if, match or bare block yields through its
+// branches (Info.Tails). One walk writes every such body toward a
+// destination: the frame's return, a Go variable that holds the value of an
+// if or match in an expression, or plain statements. A branch that ends in
+// return, break or continue writes that statement and yields nothing.
+
+type destKind int
+
+const (
+	// destStmt writes the list as statements: the value is not used.
+	destStmt destKind = iota
+	// destReturn returns the value from the frame: a function body's tail
+	// (retExpr), or a trailing block's when block is set (retTail).
+	destReturn
+	// destAssign assigns the value to the Go variable name.
+	destAssign
+)
+
+// dest is where a body's last value goes.
+type dest struct {
+	kind  destKind
+	block bool
+	name  string
+}
+
+// yieldList writes a statement list whose last statement yields to d and
+// reports whether its Go form terminates.
+func (fc *funcCtx) yieldList(list []syntax.Stmt, d dest) bool {
+	if d.kind == destStmt || len(list) == 0 {
+		return fc.stmts(list)
+	}
+	fc.stmts(list[:len(list)-1])
+	return fc.yieldStmt(list[len(list)-1], d)
+}
+
+// yieldStmt writes the last statement of a body toward d.
+func (fc *funcCtx) yieldStmt(s syntax.Stmt, d dest) bool {
+	switch s := s.(type) {
+	case *syntax.ExprStmt:
+		fc.at(s)
+		switch {
+		case d.kind == destReturn && d.block:
+			fc.retTail(s.X)
+			return true
+		case d.kind == destReturn:
+			fc.retExpr(s.X)
+			return true
+		}
+		if _, tail := fc.l.info.Tails[s]; !tail {
+			fc.discard(s.X)
+			return false
+		}
+		fc.line(d.name + " = " + fc.assigned(s.X))
+		return false
+	case *syntax.IfStmt:
+		fc.at(s)
+		return fc.ifYield(s, d)
+	case *syntax.TypeSwitchStmt:
+		fc.at(s)
+		return fc.typeMatch(s, d)
+	case *syntax.SwitchStmt:
+		fc.at(s)
+		return fc.valueMatch(s, d)
+	case *syntax.BlockStmt:
+		fc.at(s)
+		fc.line("{")
+		fc.depth++
+		t := fc.yieldList(s.List, d)
+		fc.depth--
+		fc.line("}")
+		return t
+	}
+	return fc.stmt(s)
+}
+
+// ifYield lowers if/else with each branch yielding to d. A condition that
+// needs statements of its own is evaluated in the else branch of the
+// previous condition, never before it.
+func (fc *funcCtx) ifYield(s *syntax.IfStmt, d dest) bool {
+	if s.Init != nil {
+		refuse(s, "an if with an init statement is not produced by the decided parser")
+	}
+	cond := fc.value(s.Cond)
+	fc.line("if " + cond + " {")
+	fc.depth++
+	then := fc.yieldList(s.Body.List, d)
+	fc.depth--
+	switch e := s.Else.(type) {
+	case nil:
+		fc.line("}")
+		return false
+	case *syntax.BlockStmt:
+		fc.line("} else {")
+		fc.depth++
+		els := fc.yieldList(e.List, d)
+		fc.depth--
+		fc.line("}")
+		return then && els
+	case *syntax.IfStmt:
+		fc.line("} else {")
+		fc.depth++
+		fc.at(e)
+		els := fc.ifYield(e, d)
+		fc.depth--
+		fc.line("}")
+		return then && els
+	}
+	refuse(s.Else, "this else branch is not produced by the decided parser")
+	return false
+}
+
+// branchExpr lowers an if or match in value position: a Go variable of the
+// checked type, assigned by every branch that yields (D-C2). A branch that
+// leaves (return, break, continue) assigns nothing.
+func (fc *funcCtx) branchExpr(x syntax.Expr) operand {
+	s := x.(syntax.Stmt)
+	if fc.noValue(x) {
+		fc.yieldStmt(s, dest{})
+		return operand{}
+	}
+	v := fc.temp("v")
+	fc.line("var " + v + " " + fc.goType(fc.typeOf(x)))
+	fc.yieldStmt(s, dest{kind: destAssign, name: v})
+	return operand{val: v}
+}
+
+// noCase writes the default arm Go needs after a match the checker proved
+// total: it panics with a named defect, never yields a zero value (check-v1
+// ruling, 2026-10-30). Only a value Go can hold and Ergo cannot write, such
+// as a nil interface, reaches it.
+func (fc *funcCtx) noCase(n syntax.Node) {
+	line, col := fc.l.file.Position(n.Pos())
+	fc.line("\tpanic(" + strconv.Quote("ergo: defect: no case of the match at "+strconv.Itoa(line)+":"+strconv.Itoa(col)+" matched") + ")")
+}
+
+// blockBody writes a trailing block's body as its literal's frame: the block
+// yields its last statement (Info.Tails).
+func (fc *funcCtx) blockBody(list []syntax.Stmt) {
+	if fc.yieldList(list, dest{kind: destReturn, block: true}) {
+		return
+	}
+	if fc.frame.result != nil {
+		fc.line("panic(\"ergo: unreachable: the block's end\")")
+		return
+	}
+	fc.line("return nil")
+}
+
+// needsDefault reports whether a total match without case _ gets the
+// defect default (noCase): when its value is returned, so Go sees the
+// function end; and when its value is assigned and some arm yields one, so
+// no path keeps a zero value. A statement match needs none: nothing is
+// hidden, and Go would report the code after an all-returning match
+// unreachable.
+func (d dest) needsDefault(allTerminate bool) bool {
+	switch d.kind {
+	case destReturn:
+		return true
+	case destAssign:
+		return !allTerminate
+	}
+	return false
+}

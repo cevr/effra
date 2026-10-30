@@ -28,6 +28,9 @@ const (
 	kindRecord typeKind = iota + 1
 	kindOps
 	kindUnion
+	// kindDefined is `type N T` (D-B7): Go's `type N T`, with T's fields
+	// when T is a record.
+	kindDefined
 )
 
 // typeDecl is a lowered type declaration.
@@ -40,12 +43,17 @@ type typeDecl struct {
 	fields    []*check.Field
 	fieldName map[string]string
 	ops       []*check.Method
+	defined   check.Type // kindDefined: T, the type N is defined over
 	variants  []*check.TypeName
 	marker    string
 	errorType bool
 	library   bool
 	emitted   bool
 	queued    bool // a library type queued for emission
+	// refused is the refusal that ended the reading of the type's
+	// structure; every later use raises it again, so a half-read type is
+	// never used, even when the first reading ran under quiet.
+	refused *refusal
 }
 
 // funcDecl is a lowered function declaration.
@@ -153,13 +161,27 @@ func (l *lowerer) typeName(tn *check.TypeName) string {
 // typeDecl is the lowered declaration of tn, its structure read from the
 // declaring package's Info: a record's fields and an operation type's
 // operations are Defs of its declaring names, a union's variants its
-// checked underlying type. It queues nothing (useType).
+// checked underlying type. It queues nothing (useType). A refusal while it
+// reads the structure is kept on the declaration and raised at every later
+// use, at its own site: the naming pass reads types under quiet, and the
+// lowering must still report that refusal, not a name the pass missed.
 func (l *lowerer) typeDecl(tn *check.TypeName, site syntax.Node) *typeDecl {
 	l.typeName(tn)
 	td := l.types[tn]
+	if td.refused != nil {
+		panic(*td.refused)
+	}
 	if td.kind != 0 {
 		return td
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			if ref, ok := r.(refusal); ok {
+				td.refused = &ref
+			}
+			panic(r)
+		}
+	}()
 	named, ok := tn.Type.(*check.Named)
 	if !ok || tn.Decl == nil || tn.Pkg == nil || tn.Pkg.Info == nil {
 		refuse(site, "the type %s is not a declared record, operation type or union, which lowering supports so far", tn.Name)
@@ -232,7 +254,17 @@ func (l *lowerer) typeDecl(tn *check.TypeName, site syntax.Node) *typeDecl {
 	case *syntax.MachineType:
 		refuse(site, "machine plan values are lowered in lower-v1 stage 4 (spec D5)")
 	default:
-		refuse(site, "a defined type over another type is lowered after check-v1 stage B")
+		def := named.Defined()
+		if def == nil {
+			ice(site, "the type %s has no shape the lowering knows", tn.Name)
+		}
+		td.kind, td.defined = kindDefined, def
+		if base, ok := def.(*check.Named); ok {
+			// Go's `type N T` keeps T's fields, by their Go names.
+			if bd := l.typeDecl(base.Obj, site); bd.fieldName != nil {
+				td.fields, td.fieldName = bd.fields, bd.fieldName
+			}
+		}
 	}
 	return td
 }
@@ -317,6 +349,8 @@ func (l *lowerer) emitType(td *typeDecl) {
 			b.WriteString("func (" + l.recvType(vd) + ") " + td.marker + "() {}\n")
 		}
 		b.WriteString("\n")
+	case kindDefined:
+		b.WriteString("type " + td.name + tparams + " " + tc.goType(td.defined) + "\n\n")
 	}
 }
 
@@ -530,6 +564,10 @@ func (l *lowerer) emitFuncBody(fd *funcDecl) {
 	scope := newNamer(l.names)
 	site := syntax.Node(f.Decl.Name)
 	fc := newFuncCtx(l, scope, directives)
+	fc.owner = f.Name
+	if fd.method != nil {
+		fc.owner = fd.method.tn.Name + "." + f.Name
+	}
 	var head strings.Builder
 	var params []*check.Var
 	if f.Decl.Type != nil && f.Decl.Type.Params != nil {
@@ -650,6 +688,7 @@ func (l *lowerer) packageLet(d *syntax.VarDecl) {
 			ice(spec.Names[0], "the let %s has no Defs entry", spec.Names[0].Name)
 		}
 		fc := newFuncCtx(l, newNamer(l.names), true)
+		fc.owner = v.Name
 		fc.frame = &frame{result: v.Type}
 		fc.depth = 1
 		goType := fc.goType(v.Type)

@@ -30,6 +30,11 @@ type target struct {
 	// entry being checked uses, for the wire's entry-cycle check (M14).
 	internal *capSet
 	charged  *Row
+	// tries counts the try expressions being checked in this body: inside
+	// one, every fallible value propagates (196r sixth round: try covers
+	// the whole expression to its right); tried records that one did.
+	tries int
+	tried bool
 }
 
 func (t *target) row(declared, inferred *Row) *Row {

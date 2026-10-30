@@ -2,6 +2,8 @@ package lower
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"ergo.local/prototype/internal/sketch/check"
@@ -45,6 +47,7 @@ func (fc *funcCtx) call(x *syntax.CallExpr) operand {
 		refuse(x, "the prelude dot call %s is lowered after check-v1 stage D (D-D6) and lower-v1 stage 3", c.Name)
 	}
 	text, result, fallible := fc.callText(x, c)
+	defer fc.identify(x, c)()
 	switch {
 	case result && fallible:
 		v, e := fc.temp("v"), fc.temp("err")
@@ -82,6 +85,7 @@ func (fc *funcCtx) callStmt(x *syntax.CallExpr) string {
 	if fallible && len(rowElems(c.Fails)) > 0 {
 		ice(x, "an untried fallible call in a statement")
 	}
+	fc.identify(x, c) // the caller writes text next, the statement's last line
 	return text
 }
 
@@ -473,6 +477,7 @@ func (l *lowerer) emitWire(w *check.Wire, name string, site syntax.Node) {
 		b.needs = l.providerNeeds(b.entry.Provider)
 	}
 	fc := newFuncCtx(l, newNamer(l.names), true)
+	fc.owner = w.Name
 	fc.frame = &frame{}
 	fc.depth = 1
 	fc.env = fc.scope.alloc("env")
@@ -689,4 +694,128 @@ func mentionsTypeParam(t check.Type) bool {
 func isString(t check.Type) bool {
 	b, ok := t.(*check.Basic)
 	return ok && b.Kind == check.String
+}
+
+// Call identities (#230). A call that can fail or that uses a capability
+// keeps its Ergo identity: the source declaration that makes it, the
+// function or operation it calls and its position. The program lists them
+// in its call table, ergoCalls, and the Go line that makes the call stands
+// directly after the //line directive of its own position, so a Go stack
+// and the table name one site. Only user code has identities: library
+// bodies carry no directives.
+
+// identify records x's identity when it has one and writes the directive
+// of its position, unless the current directive already names it. The Go
+// call line comes next. The function it returns writes the directive that
+// was current before, so the rest of the statement maps back to it; call
+// it after the call line.
+func (fc *funcCtx) identify(x *syntax.CallExpr, c *check.Call) func() {
+	none := func() {}
+	if !fc.directives || !x.Pos().IsValid() {
+		return none
+	}
+	if len(rowElems(c.Fails)) == 0 && len(rowElems(c.Needs)) == 0 && c.Kind != check.CallProviderOp {
+		return none
+	}
+	fc.l.recordCall(x, fc.owner, fc.callee(x, c))
+	if x.Pos() == fc.lastPos {
+		return none
+	}
+	prev, site := fc.lastPos, fc.site
+	fc.at(x)
+	return func() {
+		if prev.IsValid() {
+			fc.out.WriteString(fc.l.directive(prev))
+			fc.lastPos = prev
+		}
+		fc.site = site
+	}
+}
+
+// callee is the Ergo name of what x calls: a function, qualified by its
+// package outside the user's and the prelude, a same-named function by its
+// receiver's type, an operation by its operations or capability type, and
+// a function value by the name it is called through.
+func (fc *funcCtx) callee(x *syntax.CallExpr, c *check.Call) string {
+	typeName := func(t check.Type) string {
+		if p, ok := t.(*check.Pointer); ok {
+			t = p.Elem
+		}
+		if n, ok := t.(*check.Named); ok {
+			return n.Obj.Name
+		}
+		return t.String()
+	}
+	switch c.Kind {
+	case check.CallFunc:
+		if c.Recv != nil {
+			return typeName(fc.typeOf(c.Recv)) + "." + c.Func.Name
+		}
+		if p := c.Func.Pkg; p != nil && p != fc.l.pkg && p.Path != "prelude" {
+			return p.Path + "." + c.Func.Name
+		}
+		return c.Func.Name
+	case check.CallOp:
+		return typeName(fc.typeOf(c.Recv)) + "." + c.Op.Name
+	case check.CallProviderOp:
+		if sel, ok := unparen(x.Fun).(*syntax.SelectorExpr); ok {
+			return typeName(fc.typeOf(sel.X)) + "." + c.Op.Name
+		}
+	case check.CallFuncValue:
+		switch f := unparen(x.Fun).(type) {
+		case *syntax.Ident:
+			return f.Name
+		case *syntax.SelectorExpr:
+			return f.Sel.Name
+		}
+		return "a function value"
+	}
+	return "a call"
+}
+
+// callIdent is one entry of the call table.
+type callIdent struct {
+	offset       int
+	fn, callee   string
+	line, column int
+}
+
+// recordCall adds x's identity to the call table once: a body lowered
+// again (an instance) does not repeat it.
+func (l *lowerer) recordCall(x *syntax.CallExpr, owner, callee string) {
+	if l.callSeen[x] {
+		return
+	}
+	if l.callSeen == nil {
+		l.callSeen = map[*syntax.CallExpr]bool{}
+	}
+	l.callSeen[x] = true
+	line, column := l.file.Position(x.Pos())
+	l.calls = append(l.calls, callIdent{offset: int(x.Pos()), fn: owner, callee: callee, line: line, column: column})
+}
+
+// callTable is the Go declaration of the call table and its entry type, in
+// source order, or "" when the program has no identified call. The entry
+// type is generated in the program, so the identity needs no runtime
+// change: Func is the source declaration that makes the call, Callee what
+// it calls, and File, Line and Column its position, which the //line
+// directive before the call also names.
+func (l *lowerer) callTable() string {
+	if len(l.calls) == 0 {
+		return ""
+	}
+	sort.SliceStable(l.calls, func(i, j int) bool { return l.calls[i].offset < l.calls[j].offset })
+	entry := l.pkgName(pkgKey{"call", nil}, "ergoCall")
+	table := l.pkgName(pkgKey{"calls", nil}, "ergoCalls")
+	var b strings.Builder
+	b.WriteString("// " + entry + " is the Ergo identity of one lowered call that can fail or uses a capability (#230).\n")
+	b.WriteString("type " + entry + " struct {\n\tFunc, Callee string\n\tFile         string\n\tLine, Column int\n}\n\n")
+	b.WriteString("// " + table + " lists the identity of each such call of the program, in source order.\n")
+	b.WriteString("var " + table + " = [...]" + entry + "{\n")
+	file := strconv.Quote(l.src)
+	for _, c := range l.calls {
+		fmt.Fprintf(&b, "\t{Func: %s, Callee: %s, File: %s, Line: %d, Column: %d},\n", strconv.Quote(c.fn), strconv.Quote(c.callee), file, c.line, c.column)
+	}
+	b.WriteString("}\n\n")
+	return b.String()
 }

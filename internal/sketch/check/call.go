@@ -835,6 +835,15 @@ func (c *checker) yieldingBlock(at syntax.Node, list []syntax.Stmt, results []Ty
 		}
 		return NoValue
 	}
+	if b, ok := at.(*syntax.BlockStmt); ok && known && len(results) == 1 && isBranching(list[len(list)-1]) {
+		// A final if, match or block yields the block's value (D-C2).
+		k := &sink{want: results[0], pass: pass, what: "the block's value"}
+		k.missing = func(end syntax.Pos) {
+			c.errorAt(end, end+1, CodeType, "this branch must end with an expression of type %s; a block yields its last expression", results[0])
+		}
+		c.yieldList(list, k, b.Rbrace)
+		return results[0]
+	}
 	last, isExpr := list[len(list)-1].(*syntax.ExprStmt)
 	if !isExpr {
 		c.stmtList(list, false)

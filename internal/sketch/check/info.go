@@ -626,6 +626,8 @@ func (c *checker) conversionOf(from, t Type) (Conversion, bool) {
 		return Conversion{}, false
 	}
 	switch {
+	case isRowValue(from) && isUnion(t):
+		return Conversion{Kind: ConvRow, From: from, To: t}, true
 	case isUnion(t) && !isUnion(from):
 		return Conversion{Kind: ConvVariant, From: from, To: t}, true
 	case asInterface(t) != nil && asInterface(from) == nil:
@@ -642,5 +644,12 @@ func (c *checker) conversionOf(from, t Type) (Conversion, bool) {
 
 func isUnion(t Type) bool {
 	_, ok := under0(t).(*Union)
+	return ok
+}
+
+// isRowValue reports the type of a `case err:` binding, an anonymous union
+// of error types (D-C3).
+func isRowValue(t Type) bool {
+	_, ok := t.(*Union)
 	return ok
 }

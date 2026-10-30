@@ -92,7 +92,7 @@ func (fc *funcCtx) emits(x syntax.Expr) bool {
 		switch n := n.(type) {
 		case *syntax.FuncLit:
 			return false
-		case *syntax.TryExpr, *syntax.CatchExpr:
+		case *syntax.TryExpr, *syntax.CatchExpr, *syntax.IfStmt, *syntax.SwitchStmt, *syntax.TypeSwitchStmt:
 			found = true
 		case *syntax.CallExpr:
 			if c := fc.l.info.Calls[n]; c == nil || (c.Kind != check.CallConversion && c.Kind != check.CallLen) {
@@ -153,7 +153,10 @@ func (fc *funcCtx) isConst(x syntax.Expr) bool {
 func (fc *funcCtx) value(x syntax.Expr) string {
 	o := fc.expr(x)
 	if o.err != "" {
-		ice(x, "an untried fallible expression in a value position")
+		if fc.tries == 0 {
+			ice(x, "an untried fallible expression in a value position")
+		}
+		fc.propagate(o.err)
 	}
 	return o.val
 }
@@ -183,7 +186,9 @@ func (fc *funcCtx) convert(conv check.Conversion, val string, site syntax.Node) 
 	case check.ConvOperations:
 		return fc.l.operations(conv, val, site)
 	case check.ConvRow:
-		refuse(site, "a row value converted to a union is lowered after check-v1 stage B (196p)")
+		// The row value holds one of the union's error variants, which
+		// implement its sealed interface (D-C3).
+		return val + ".(" + fc.goType(conv.To) + ")"
 	}
 	ice(site, "an unknown implicit conversion")
 	return ""
@@ -226,12 +231,19 @@ func (fc *funcCtx) expr(x syntax.Expr) operand {
 		return fc.catch(x, false)
 	case *syntax.FuncLit:
 		return operand{val: fc.funcLit(x.Type, x.Body.List, x)}
+	case *syntax.IfStmt, *syntax.SwitchStmt, *syntax.TypeSwitchStmt:
+		return fc.branchExpr(x)
 	case *syntax.InterpolatedString:
 		refuse(x, "an interpolated string is lowered after check-v1 stage E (interpolation)")
 	case *syntax.WireLit:
 		refuse(x, "an inline wire value is lowered after check-v1 stage E (196x)")
 	case *syntax.TupleExpr:
-		refuse(x, "a tuple is lowered after check-v1 stage B (196t)")
+		vals := fc.operands(x.Elts, true)
+		parts := make([]string, len(vals))
+		for i, v := range vals {
+			parts[i] = tupleField(i) + ": " + v
+		}
+		return operand{val: fc.goType(fc.typeOf(x)) + "{" + strings.Join(parts, ", ") + "}"}
 	case *syntax.MachineType:
 		refuse(x, "machine plan values are lowered in lower-v1 stage 4 (spec D5)")
 	}
@@ -375,7 +387,7 @@ func (fc *funcCtx) composite(x *syntax.CompositeLit, t check.Type) string {
 	switch u := t.(type) {
 	case *check.Named:
 		td := fc.l.typeDecl(u.Obj, x)
-		if td.kind != kindRecord {
+		if td.kind != kindRecord && (td.kind != kindDefined || td.fieldName == nil) {
 			refuse(x, "a literal of %s is not a record literal", t)
 		}
 		var keys []string
@@ -504,16 +516,23 @@ func (fc *funcCtx) try(x *syntax.TryExpr) operand {
 	if c, ok := unparen(x.X).(*syntax.CatchExpr); ok {
 		return fc.catch(c, true)
 	}
+	fc.tries++
 	o := fc.expr(x.X)
-	if o.err == "" {
-		ice(x, "try on an expression that cannot fail")
+	fc.tries--
+	if o.err != "" {
+		fc.propagate(o.err)
 	}
-	fc.line("if " + o.err + " != nil {")
+	return operand{val: o.val}
+}
+
+// propagate leaves the frame with err when it is not nil (rows.md, Error
+// rows 7).
+func (fc *funcCtx) propagate(err string) {
+	fc.line("if " + err + " != nil {")
 	fc.depth++
-	fc.fail(o.err)
+	fc.fail(err)
 	fc.depth--
 	fc.line("}")
-	return operand{val: o.val}
 }
 
 // catch lowers e catch { arms } to a type switch on e's error (rows.md,
@@ -539,6 +558,10 @@ func (fc *funcCtx) catch(x *syntax.CatchExpr, partial bool) operand {
 	if m.Result != nil {
 		result = fc.temp("v")
 		fc.line("var " + result + " " + fc.goType(m.Result))
+	}
+	if !fc.simpleCatch(x) {
+		fc.patternCatch(x, m, o, result, partial)
+		return operand{val: result}
 	}
 	type arm struct {
 		types []string
@@ -632,6 +655,10 @@ func (fc *funcCtx) arm(a *syntax.CatchArm, result string) {
 	if len(list) == 0 {
 		return
 	}
+	if result != "" {
+		fc.yieldList(list, dest{kind: destAssign, name: result})
+		return
+	}
 	last, isExpr := list[len(list)-1].(*syntax.ExprStmt)
 	if !isExpr {
 		fc.stmts(list)
@@ -658,7 +685,7 @@ func (fc *funcCtx) funcLit(ft *syntax.FuncType, list []syntax.Stmt, n syntax.Nod
 	if len(sig.Results) > 1 {
 		refuse(n, "a literal with several results is a tuple, lowered after check-v1 stage B (196t)")
 	}
-	inner := &funcCtx{typeCtx: fc.typeCtx, out: &strings.Builder{}, scope: fc.scope, locals: fc.locals, directives: fc.directives}
+	inner := &funcCtx{typeCtx: fc.typeCtx, out: &strings.Builder{}, scope: fc.scope, locals: fc.locals, directives: fc.directives, owner: fc.owner}
 	inner.env = fc.scope.alloc("env")
 	parts := []string{inner.env + " *" + fc.l.env()}
 	var params []*check.Var
@@ -686,18 +713,13 @@ func (fc *funcCtx) funcLit(ft *syntax.FuncType, list []syntax.Stmt, n syntax.Nod
 	}
 	inner.frame = &frame{result: result, fallible: true}
 	inner.depth = fc.depth + 1
-	// A trailing block yields its last expression (Info.Tails).
-	if ft == nil && len(list) > 0 {
-		if last, ok := list[len(list)-1].(*syntax.ExprStmt); ok {
-			if _, tail := fc.l.info.Tails[last]; tail {
-				inner.stmts(list[:len(list)-1])
-				inner.at(last)
-				inner.retTail(last.X)
-				return "func(" + strings.Join(parts, ", ") + ")" + fc.resultList(result, true) + " {\n" + inner.out.String() + strings.Repeat("\t", fc.depth) + "}"
-			}
-		}
+	// A trailing block yields its last statement (Info.Tails); a function
+	// literal's body is a function body.
+	if ft == nil {
+		inner.blockBody(list)
+	} else {
+		inner.body(list)
 	}
-	inner.body(list)
 	return "func(" + strings.Join(parts, ", ") + ")" + fc.resultList(result, true) + " {\n" + inner.out.String() + strings.Repeat("\t", fc.depth) + "}"
 }
 
@@ -719,4 +741,97 @@ func (fc *funcCtx) retTail(x syntax.Expr) {
 		return
 	}
 	fc.line("return " + fc.assigned(x) + ", nil")
+}
+
+// simpleCatch reports a catch a Go type switch on the error lowers: arms of
+// type tests and a single `T as e`.
+func (fc *funcCtx) simpleCatch(x *syntax.CatchExpr) bool {
+	for _, a := range x.Arms {
+		for _, te := range a.Types {
+			p := fc.l.info.Patterns[te]
+			if p == nil {
+				return false
+			}
+			switch p.Kind {
+			case check.PatTypeTest:
+			case check.PatAs:
+				if len(a.Types) != 1 || len(p.Elems) != 1 || p.Elems[0].Kind != check.PatTypeTest || p.Var == nil {
+					return false
+				}
+			default:
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// patternCatch lowers a catch with record patterns, `case err:` or `case _`
+// (D-C3) to an expressionless Go switch over the error, as patternMatch does
+// for a match: the subject is the row value of the caught row, a Go error. A
+// `case err:` arm binds that error (its row value); what no arm handles
+// leaves the frame under try, and is a re-panicked defect otherwise
+// (rows.md, Catch 6).
+func (fc *funcCtx) patternCatch(x *syntax.CatchExpr, m *check.Match, o operand, result string, partial bool) {
+	row := &check.Union{Variants: m.Subjects}
+	fc.line("if " + o.err + " != nil {")
+	fc.depth++
+	fc.line("switch {")
+	fc.enterSwitch()
+	hasDefault := false
+	for _, a := range x.Arms {
+		var conds []string
+		var binds [][]patBind
+		always := false
+		for _, te := range a.Types {
+			p := fc.l.info.Patterns[te]
+			if p == nil {
+				ice(te, "a catch arm with no Patterns entry")
+			}
+			var tests []string
+			var b []patBind
+			fc.pattern(p, o.err, row, te, &tests, &b)
+			cond := strings.Join(tests, " && ")
+			if cond == "" {
+				always, cond = true, "true"
+			}
+			conds = append(conds, cond)
+			binds = append(binds, b)
+		}
+		if always {
+			hasDefault = true
+			fc.line("default:")
+		} else {
+			parts := make([]string, len(conds))
+			for i, c := range conds {
+				parts[i] = c
+				if len(conds) > 1 {
+					parts[i] = "(" + c + ")"
+				}
+			}
+			fc.line("case " + strings.Join(parts, " || ") + ":")
+		}
+		fc.depth++
+		fc.bindArm(conds, binds)
+		fc.arm(a, result)
+		fc.depth--
+	}
+	if !hasDefault {
+		fc.line("default:")
+		fc.depth++
+		if partial {
+			fc.fail(o.err)
+		} else {
+			fc.line("panic(" + o.err + ")")
+		}
+		fc.depth--
+	}
+	fc.leaveSwitch()
+	fc.line("}")
+	fc.depth--
+	if result != "" && o.val != "" {
+		fc.line("} else {")
+		fc.line("\t" + result + " = " + o.val)
+	}
+	fc.line("}")
 }
