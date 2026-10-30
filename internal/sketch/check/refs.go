@@ -1012,6 +1012,14 @@ func (w *refWalker) expr(x syntax.Expr) {
 		}
 		w.exprs(x.Exprs)
 	case *syntax.BasicLit:
+	case *syntax.IfStmt:
+		// An if or match in value position (D-C2) holds value references
+		// as its statement form does.
+		w.stmt(x)
+	case *syntax.SwitchStmt:
+		w.stmt(x)
+	case *syntax.TypeSwitchStmt:
+		w.stmt(x)
 	default:
 		// A type in a value position (a conversion's type, an array or
 		// map type, a function type): no value reference.

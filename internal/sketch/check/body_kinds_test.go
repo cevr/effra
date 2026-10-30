@@ -1,6 +1,7 @@
 package check_test
 
 import (
+	"strings"
 	"testing"
 
 	"ergo.local/prototype/internal/sketch/check"
@@ -47,5 +48,28 @@ func TestEveryBodyKindYields(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// An if or match in value position holds value references (D-C2): the
+// reference walk visits them as typing does, so a row inferred through one
+// reaches its caller whatever the declaration order. The first source is
+// the FuzzCheck input of stage C round 2 (merged head).
+func TestBranchExpressionsAreReferences(t *testing.T) {
+	for _, src := range []string{
+		"func A(){0%match A{case 0:\"\"}%match 0{case 0:0}}",
+		"type E {}\nfunc h(b bool) int { 1 + if b { try g() } else { 2 } }\nfunc g() int { base() }\nfunc base() int fails E { E }\n",
+		"type E {}\nfunc h() int { 1 + match try g() { case 1: 2; case _: 3 } }\nfunc g() int { base() }\nfunc base() int fails E { E }\n",
+	} {
+		if p := check.RefWalkProblems(src); len(p) > 0 {
+			t.Errorf("%q: reference walk: %s", src, strings.Join(p, "; "))
+		}
+		if p := check.OrderProblems(src, 2); len(p) > 0 {
+			t.Errorf("%q: declaration order: %s", src, p[0])
+		}
+	}
+	const src = "type E {}\nfunc h() int { 1 + match try g() { case 1: 2; case _: 3 } }\nfunc g() int { base() }\nfunc base() int fails E { E }\nfunc F() int { h() }\n"
+	if got, d := codeLines(src); got != "S101:5" {
+		t.Fatalf("want [S101:5]: h's inferred row reaches F; got %s", describe(d))
 	}
 }
