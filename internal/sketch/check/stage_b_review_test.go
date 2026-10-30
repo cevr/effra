@@ -16,33 +16,43 @@ func TestRefusedPatternNameBinds(t *testing.T) {
 		{"len", ""},
 		{"timeout", `import timeout`},
 		{"shared", `let shared = 1`},
+		{"Done", `type Done { N int }`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := fmt.Sprintf("%s\ntype R { Value string }\nfunc F(r R) string { match r { case R{Value: %s}: return %s } }\n", tc.decl, tc.name, tc.name)
 			_, d := check.CheckSource(src)
-			if len(d) != 1 || d[0].Code != check.CodeType || !strings.Contains(d[0].Message, tc.name+" already names") {
+			want := tc.name + " already names"
+			if tc.name == "Done" {
+				want = "Done does not match"
+			}
+			if len(d) != 1 || d[0].Code != check.CodeType || !strings.Contains(d[0].Message, want) {
 				t.Fatalf("want one refused-name diagnostic, got %s", describe(d))
 			}
 		})
 	}
 }
 
-// A single name has the same meaning as it has inside a tuple or record
-// pattern: a known constant or type tests, and an unknown name binds.
+// A let follows the binder rule (D-D2): package functions and values may
+// be reused. Known types still test, and prelude names stay protected.
 func TestSingleNameLetPattern(t *testing.T) {
 	for _, tc := range []struct{ name, src, code string }{
-		{"constant", `func F() { let true = false }`, check.CodeNotTotal},
+		{"constant", `func F() { let true = false }`, check.CodeType},
 		{"variant", `type State = Pending{} | Done{}
 func F(s State) { let Pending = s }`, check.CodeNotTotal},
 		{"own-record", `type R { N int }
 func F(r R) { let R = r }`, ""},
 		{"function", `func helper() int { return 1 }
-func F() { let helper = 1; _ = helper }`, check.CodeType},
+func F() { let helper = 1; _ = helper }`, ""},
 		{"package-value", `let shared = 1
-func F() { let shared = 1; _ = shared }`, check.CodeType},
+func F() { let shared = 1; _ = shared }`, ""},
 		{"builtin", `func F() { let len = 1; _ = len }`, check.CodeType},
 		{"package", `import timeout
-func F() { let timeout = 1; _ = timeout }`, check.CodeType},
+func G() fails timeout.Expired {}
+func F() { let timeout = 1; _ = timeout }`, ""},
+		{"nested-function-binding", `type R { N int }
+func helper() int { return 1 }
+func F(r R) int { let R{N: helper} = r; return helper }`, ""},
+		{"prelude-function", `func F() { let Sleep = 1; _ = Sleep }`, check.CodeType},
 		{"explicit-function-binding", `func helper() int { return 1 }
 func F() { let _ as helper = func() {}; helper() }`, ""},
 		{"explicit-type-binding", `type R { N int }
@@ -60,6 +70,13 @@ func F() int { let _ as R = 1; return R }`, ""},
 				t.Fatalf("want one %s, got %s", tc.code, describe(d))
 			}
 		})
+	}
+}
+
+func TestRefusedLetTypeNameBinds(t *testing.T) {
+	_, d := check.CheckSource("type Done { N int }\nfunc F() int { let Done = 3; return Done + 1 }\n")
+	if len(d) != 1 || d[0].Code != check.CodeType || !strings.Contains(d[0].Message, "does not match") {
+		t.Fatalf("want only the refused type-test diagnostic, got %s", describe(d))
 	}
 }
 

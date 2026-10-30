@@ -84,6 +84,7 @@ func patternNames(p syntax.Expr, isType func(string) bool) []*syntax.Ident {
 // (invalid after an error in the pattern), for the caller to declare.
 func (c *checker) irrefutable(p syntax.Expr, t Type, what string, own map[*syntax.Ident]bool) []patBinding {
 	r := c.newPatResolver()
+	r.bindings = true
 	r.own = own
 	r.begin()
 	if isInvalid(t) {
@@ -112,7 +113,11 @@ func (c *checker) irrefutable(p syntax.Expr, t Type, what string, own map[*synta
 		case !ok:
 			c.errorf(p, CodeNotTotal, "too many cases to prove this %s pattern irrefutable; split it (rows.md, Totality 6)", what)
 		case missing:
-			c.errorf(p, CodeNotTotal, "this %s pattern does not match %s, a value of %s: a %s pattern matches every value; use match (rows.md, Totality 6)", what, r.sp.witnessText(w, col), t, what)
+			code := CodeNotTotal
+			if _, single := p.(*syntax.Ident); single && what == "let" && res.info != nil && res.info.Kind == PatConst {
+				code = CodeType // a bare prelude constant cannot bind (D-D2)
+			}
+			c.errorf(p, code, "this %s pattern does not match %s, a value of %s: a %s pattern matches every value; use match (rows.md, Totality 6)", what, r.sp.witnessText(w, col), t, what)
 		}
 	}
 	if r.bad {

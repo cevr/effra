@@ -1,6 +1,7 @@
 package check
 
 import (
+	"ergo.local/prototype/internal/sketch/std"
 	"ergo.local/prototype/internal/sketch/syntax"
 )
 
@@ -211,10 +212,10 @@ func (c *checker) varDecl(d *syntax.VarDecl) {
 		if p == nil && len(spec.Names) == 1 {
 			n := spec.Names[0]
 			switch o := c.lookup(n.Name).(type) {
-			case *Const, *TypeName, *capBinding, *Func, *Builtin, *PkgName:
+			case *Const, *TypeName, *capBinding, *Builtin:
 				p = n
-			case *Var:
-				if o.pkg {
+			case *Func:
+				if o.Pkg != nil && o.Pkg.Path == std.PreludePath {
 					p = n
 				}
 			}

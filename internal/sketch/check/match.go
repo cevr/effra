@@ -7,6 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"ergo.local/prototype/internal/sketch/std"
 	"ergo.local/prototype/internal/sketch/syntax"
 )
 
@@ -80,13 +81,14 @@ type resolved struct {
 // test is charged to resolve (variantindex.go), against the solvers'
 // budget.
 type patResolver struct {
-	c       *checker
-	sp      *patSpace
-	info    []colInfo
-	resolve *lookupSteps
-	binds   []patBinding    // of the current item
-	bound   map[string]bool // the names binds holds
-	bad     bool            // the current item has a reported error
+	c        *checker
+	sp       *patSpace
+	info     []colInfo
+	resolve  *lookupSteps
+	binds    []patBinding    // of the current item
+	bound    map[string]bool // the names binds holds
+	bad      bool            // the current item has a reported error
+	bindings bool            // let/for: D-D2 permits binding over package objects
 	// own holds the binding names of a package-level let's pattern, which
 	// the package scope already declares: they bind, not refer.
 	own map[*syntax.Ident]bool
@@ -267,6 +269,9 @@ func (r *patResolver) pattern0(e syntax.Expr, t Type, col int) resolved {
 		case *TypeName, *capBinding:
 			return r.typeTest(x, t, col)
 		case *Func, *Builtin, *PkgName:
+			if r.bindings && reusableBinderName(o) {
+				break
+			}
 			c.errorf(x, CodeType, "a pattern name binds; %s already names %s: compare with if, or choose another name (rows.md, Totality 1)", x.Name, objectNoun(o))
 			if p, ok := o.(*PkgName); ok {
 				p.used = true // The refused occurrence must not add an unused import.
@@ -274,7 +279,7 @@ func (r *patResolver) pattern0(e syntax.Expr, t Type, col int) resolved {
 			r.bind(x, invalid, &Pattern{Kind: PatBind}, false)
 			return r.fail(nil, t)
 		case *Var:
-			if o.pkg {
+			if o.pkg && !r.bindings {
 				c.errorf(x, CodeType, "a pattern name binds; %s already names a package value: compare with if, or choose another name (rows.md, Totality 1)", x.Name)
 				r.bind(x, invalid, &Pattern{Kind: PatBind}, false)
 				return r.fail(nil, t)
@@ -307,6 +312,18 @@ func (r *patResolver) pattern0(e syntax.Expr, t Type, col int) resolved {
 	return r.fail(nil, t)
 }
 
+// reusableBinderName is D-D2's package-name exception. Prelude names are
+// protected; match and catch never use this exception.
+func reusableBinderName(o Object) bool {
+	switch o := o.(type) {
+	case *Func:
+		return o.Pkg != nil && o.Pkg.Path != std.PreludePath
+	case *PkgName:
+		return true
+	}
+	return false
+}
+
 // objectNoun names a package object a pattern name may not bind over.
 func objectNoun(o Object) string {
 	switch o.(type) {
@@ -326,6 +343,14 @@ func objectNoun(o Object) string {
 func (r *patResolver) typeTest(e syntax.Expr, t Type, col int) resolved {
 	ctor, vt, ok := r.head(e, t, col)
 	if !ok {
+		// This refused bare type name is still local to its pattern's
+		// scope. Later uses read an invalid placeholder, not the type.
+		if ix, indexed := e.(*syntax.IndexExpr); indexed {
+			e = ix.X
+		}
+		if id, ok := e.(*syntax.Ident); ok {
+			r.bind(id, invalid, &Pattern{Kind: PatBind}, false)
+		}
 		return r.fail(nil, t)
 	}
 	info := &Pattern{Kind: PatTypeTest, Type: vt}

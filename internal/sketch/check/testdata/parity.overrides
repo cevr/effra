@@ -16,7 +16,7 @@ probes/main-call.ergo S113
 probes/main-parameter.ergo S113
 probes/marker-field.ergo clean
 probes/marker-method.ergo clean
-probes/named-wire-shadow.ergo S108
+probes/named-wire-shadow.ergo clean
 probes/operators.ergo clean
 probes/predeclared-error.ergo S108
 probes/predeclared-local.ergo S108
