@@ -381,12 +381,20 @@ func (l *lowerer) emitType(td *typeDecl) {
 	case kindUnion:
 		l.unionMarker(td)
 		b.WriteString("type " + td.name + tparams + " interface{ " + td.marker + "() }\n\n")
+		// Two instances of one generic record, V[A] | V[B], share the
+		// generic type's one marker method: Go declares methods on V, not
+		// on its instances. The checker admits only the listed instances.
+		marked := map[*typeDecl]bool{}
 		for _, v := range td.variants {
 			vd := l.useType(l.typeDecl(v, site))
 			if vd.kind != kindRecord {
 				refuse(site, "the variant %s of %s is not a record", v.Name, td.tn.Name)
 			}
 			l.emitType(vd)
+			if marked[vd] {
+				continue
+			}
+			marked[vd] = true
 			b.WriteString("func (" + l.recvType(vd) + ") " + td.marker + "() {}\n")
 		}
 		b.WriteString("\n")

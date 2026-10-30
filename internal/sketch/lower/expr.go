@@ -560,6 +560,10 @@ func (fc *funcCtx) catch(x *syntax.CatchExpr, partial bool) operand {
 	if m.Result != nil {
 		result = fc.temp("v")
 		fc.line("var " + result + " " + fc.goType(m.Result))
+	} else if o.val != "" {
+		// The catch's value is discarded (D-C1), so the caught value is
+		// too; its failure is not (stage C round 3 review M1).
+		fc.line("_ = " + o.val)
 	}
 	if !fc.simpleCatch(x) {
 		fc.patternCatch(x, m, o, result, partial)
