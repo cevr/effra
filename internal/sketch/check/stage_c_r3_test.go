@@ -105,6 +105,7 @@ func TestRedundantTryOverTotalCatch(t *testing.T) {
 		{"inner-propagates", "func f() int fails F { try h(k()) catch { case E: 1 } }", ""},
 		{"partial-record", "type R { B bool }\nfunc r() int fails R { 1 }\nfunc f() int fails R { try r() catch { case R{B: true}: 1 } }", ""},
 		{"invalid-catch-no-cascade", "func f() int { try g() catch { case F: 1 } }", "S108:7"},
+		{"beside-unreachable-arm", "func f() int { try g() catch { case E: 1; case E: 2 } }", "S108:7 S108:7"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := decls + tc.src + "\n"

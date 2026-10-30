@@ -39,14 +39,14 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 		}()
 	}
 	if ce, ok := unparen(x.X).(*syntax.CatchExpr); ok {
-		diags, openMark := len(c.diags), c.openRowSeq
-		op := c.catch(ce, hint, use != useDiscard, true)
+		openMark := c.openRowSeq
+		op, valid := c.catchValid(ce, hint, use != useDiscard, true)
 		op.expr = ce
 		c.recordDown(x.X, ce, op)
 		if op.invalid() {
 			return op
 		}
-		if op.errs.Empty() && (t == nil || !t.tried) && len(c.diags) == diags && c.openRowSeq == openMark {
+		if valid && op.errs.Empty() && (t == nil || !t.tried) && c.openRowSeq == openMark {
 			// The catch handles the whole row and nothing inside it
 			// propagates: try has nothing to pass on (review O3).
 			c.errorf(x, CodeType, "try over a catch that handles every failure: nothing is left to propagate; drop the try (rows.md, Error rows 6)")
@@ -91,9 +91,16 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 // statements: when the catch's value is used, the arm's last statement
 // yields it, and return in an arm leaves the function (rows.md, Catch 7).
 func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool) operand {
+	op, _ := c.catchValid(x, hint, wantValue, partial)
+	return op
+}
+
+// catchValid is catch, and whether the catch is valid: its rest row (a
+// partial catch's errs) is then exact.
+func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial bool) (operand, bool) {
 	if x.Bind != nil {
 		c.undecided(x.Bind, "a catch binding before the arms")
-		return bad(x)
+		return bad(x), false
 	}
 	openMark := c.openRowSeq
 	// A catch whose value is discarded discards its caught expression's
@@ -221,9 +228,9 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 	}
 	if !valid {
 		if hasValue {
-			return operand{mode: modeValue, typ: valueType}
+			return operand{mode: modeValue, typ: valueType}, false
 		}
-		return bad(x)
+		return bad(x), false
 	}
 	rest := row.without(c.types, cs.covered(row))
 	if !partial && !rest.Empty() {
@@ -241,7 +248,7 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 	if partial {
 		res.errs = rest
 	}
-	return res
+	return res, true
 }
 
 // catchSpace is the one pattern space of a catch (D-C3): a subject column
