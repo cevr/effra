@@ -226,6 +226,7 @@ func (c *checker) checkBodies() {
 	// component (methods add no edge); the reporting pass recorded them.
 	c.checkInstantiationCycles()
 	c.checkInitCycles()
+	c.recordInitOrder()
 }
 
 // discoverInit finds the package's initialization cycles before any body

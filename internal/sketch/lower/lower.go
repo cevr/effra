@@ -77,6 +77,8 @@ func ValidatePath(path string) error {
 		return fmt.Errorf("source path %q is not valid UTF-8, so a //line directive cannot name it", path)
 	case strings.ContainsFunc(path, func(r rune) bool { return unicode.IsControl(r) || r == 0xFEFF }):
 		return fmt.Errorf("source path %q contains a control character, so a //line directive cannot name it", path)
+	case strings.Contains(path, "*/"):
+		return fmt.Errorf("source path %q contains */, so an inline /*line*/ directive cannot name it", path)
 	case !filepath.IsAbs(path) || filepath.Clean(path) != path:
 		return fmt.Errorf("source path %q is not absolute and clean", path)
 	}
@@ -92,4 +94,12 @@ func Directive(path string, line, column int) string {
 		return fmt.Sprintf("//line %s:%d:%d\n", path, line, column)
 	}
 	return fmt.Sprintf("//line %s:%d\n", path, line)
+}
+
+// InlineDirective is the inline /*line*/ directive that maps the character
+// after it to line and column of path, wherever it stands in a Go line
+// (cmd/compile, Compiler directives). The path must satisfy ValidatePath,
+// which refuses a path that holds */.
+func InlineDirective(path string, line, column int) string {
+	return fmt.Sprintf("/*line %s:%d:%d*/", path, line, column)
 }

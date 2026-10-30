@@ -73,6 +73,20 @@ func (fc *funcCtx) at(n syntax.Node) {
 	}
 }
 
+// atSite prefixes val, the Go text of an operation that can raise a
+// defect (an index or slice out of range, a division by zero, a negative
+// shift count, a nil dereference), with the inline /*line*/ directive of
+// pos, the operation's .ergo position. The defect then names that line
+// exactly, on whatever Go line go/format puts the operation (stage C
+// round 2 review m3).
+func (fc *funcCtx) atSite(pos syntax.Pos, val string) string {
+	if !fc.directives || !pos.IsValid() {
+		return val
+	}
+	line, column := fc.l.file.Position(pos)
+	return InlineDirective(fc.l.src, line, column) + val
+}
+
 func (fc *funcCtx) temp(base string) string { return fc.scope.alloc(base) }
 
 // body writes a function body and closes it so Go sees every path end: a

@@ -612,6 +612,9 @@ func (l *lowerer) emitFuncBody(fd *funcDecl) {
 	if fd.method != nil {
 		fc.owner = fd.method.tn.Name + "." + f.Name
 	}
+	if directives {
+		l.recordDecl(fc.owner, f.Decl)
+	}
 	var head strings.Builder
 	var params []*check.Var
 	if f.Decl.Type != nil && f.Decl.Type.Params != nil {
@@ -719,9 +722,11 @@ func (l *lowerer) directive(pos syntax.Pos) string {
 	return Directive(l.src, line, column)
 }
 
-// packageLet lowers a package-level let to a Go package variable. Its
-// initializer runs in Go's package initialization, which orders variables by
-// their references (types.md, Methods 7).
+// packageLet lowers a package-level let to a Go package variable. A
+// constant initializer stays the variable's Go initializer, which cannot
+// fail; any other runs in initFunc, in Info.InitOrder, inside the program's
+// root task, so a defect in it is reported with its Ergo frames as any
+// other defect is (stage C round 2 review m1).
 func (l *lowerer) packageLet(d *syntax.VarDecl) {
 	for _, spec := range d.Specs {
 		switch {
@@ -730,11 +735,11 @@ func (l *lowerer) packageLet(d *syntax.VarDecl) {
 			if len(spec.Values) == 1 {
 				x = spec.Values[0]
 			}
-			l.packageVar(spec.Names[0], x)
+			l.packageVar(spec, spec.Names[0], x)
 		case spec.Pattern == nil && len(spec.Names) == len(spec.Values):
 			// `let a, b = x, y`: one Go variable per name.
 			for i, id := range spec.Names {
-				l.packageVar(id, spec.Values[i])
+				l.packageVar(spec, id, spec.Values[i])
 			}
 		case len(spec.Values) == 1:
 			l.packagePattern(spec)
@@ -744,16 +749,61 @@ func (l *lowerer) packageLet(d *syntax.VarDecl) {
 	}
 }
 
+// addInit records the Go code of the package initializer x for initFunc:
+// after the //line directive of at, a block of its own that runs stmts and
+// then assigns.
+func (l *lowerer) addInit(x syntax.Expr, at syntax.Pos, stmts string, assigns []string) {
+	var b strings.Builder
+	b.WriteString(l.directive(at))
+	b.WriteString("\t{\n" + stmts)
+	for _, a := range assigns {
+		b.WriteString("\t\t" + a + "\n")
+	}
+	b.WriteString("\t}\n")
+	if l.inits == nil {
+		l.inits = map[syntax.Expr]string{}
+	}
+	l.inits[x] = b.String()
+}
+
+// hasInits reports whether initFunc runs any initializer.
+func (l *lowerer) hasInits() bool {
+	for _, in := range l.info.InitOrder {
+		if _, ok := l.inits[in.Value]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// initFunc is the Go function that runs the package-level initializers in
+// Info.InitOrder (Go's initialization order: a let after every let it
+// refers to, directly or through functions, else in declaration order), or
+// "" when there is none. The entry calls it first inside v1.Main.
+func (l *lowerer) initFunc() string {
+	if !l.hasInits() {
+		return ""
+	}
+	name := l.pkgName(pkgKey{"init", nil}, "ergoInit")
+	var b strings.Builder
+	b.WriteString("// " + name + " runs the package-level lets in Go's initialization order,\n// inside the program's root task.\nfunc " + name + "() {\n")
+	for _, in := range l.info.InitOrder {
+		b.WriteString(l.inits[in.Value])
+	}
+	b.WriteString("}\n\n")
+	return b.String()
+}
+
 // packageVar lowers one name of a package-level let, with its initializer
 // x (nil for none). A name the checker gave no object, `_`, keeps its
 // initializer's evaluation.
-func (l *lowerer) packageVar(id *syntax.Ident, x syntax.Expr) {
+func (l *lowerer) packageVar(spec *syntax.VarSpec, id *syntax.Ident, x syntax.Expr) {
 	v, ok := l.info.Defs[id].(*check.Var)
 	if !ok && (id.Name != "_" || x == nil) {
 		ice(id, "the let %s has no Defs entry", id.Name)
 	}
 	fc := newFuncCtx(l, newNamer(l.names), true)
-	fc.depth = 1
+	fc.depth = 2
 	name, goType := "_", ""
 	if ok {
 		fc.owner = v.Name
@@ -764,30 +814,34 @@ func (l *lowerer) packageVar(id *syntax.Ident, x syntax.Expr) {
 		fc.frame = &frame{result: fc.typeOf(x)}
 		goType = fc.goType(fc.typeOf(x))
 	}
-	l.user.WriteString(l.directive(id.Pos()))
+	l.recordDecl(fc.owner, spec)
 	if x == nil {
+		l.user.WriteString(l.directive(id.Pos()))
 		l.user.WriteString("var " + name + " " + goType + "\n\n")
 		return
 	}
 	val := fc.assigned(x)
-	if fc.out.Len() == 0 {
+	if _, constant := l.info.Values[x]; constant && fc.out.Len() == 0 {
+		l.user.WriteString(l.directive(id.Pos()))
 		l.user.WriteString("var " + name + " " + goType + " = " + val + "\n\n")
 		return
 	}
-	l.user.WriteString("var " + name + " = func() " + goType + " {\n" + fc.out.String() + "\treturn " + val + "\n}()\n\n")
+	if name != "_" {
+		l.user.WriteString(l.directive(id.Pos()))
+		l.user.WriteString("var " + name + " " + goType + "\n\n")
+	}
+	l.addInit(x, id.Pos(), fc.out.String(), []string{name + " = " + val})
 }
 
 // packagePattern lowers a package-level let that destructures one value
 // (D-B5; 196t): `let P = e`, whose pattern the checker proved irrefutable,
-// or `let q, r = e` over a tuple. The initializer is evaluated once, into a
-// Go variable of its own, and each binding is a Go package variable read
-// from it, so Go's initialization order, which follows references, runs
-// the initializer before any binding and every binding before its readers
-// (types.md, Methods 7).
+// or `let q, r = e` over a tuple. Its initializer, in initFunc, evaluates
+// the value once into a Go local and assigns each binding, a Go package
+// variable, from it.
 func (l *lowerer) packagePattern(spec *syntax.VarSpec) {
 	x := spec.Values[0]
 	fc := newFuncCtx(l, newNamer(l.names), true)
-	fc.depth = 1
+	fc.depth = 2
 	t := fc.typeOf(x)
 	if c, ok := l.info.Implicit[x]; ok && spec.Pattern != nil {
 		t = c.To
@@ -800,7 +854,7 @@ func (l *lowerer) packagePattern(spec *syntax.VarSpec) {
 		fc.owner = vs[0].Name
 	}
 	fc.frame = &frame{result: t}
-	goType := fc.goType(t)
+	l.recordDecl(fc.owner, spec)
 	at := spec.Pos()
 	if len(spec.Names) > 0 {
 		at = spec.Names[0].Pos()
@@ -812,12 +866,6 @@ func (l *lowerer) packagePattern(spec *syntax.VarSpec) {
 		val = fc.value(x)
 	}
 	init := l.pkgName(pkgKey{"letinit", spec}, "ergoLet")
-	l.user.WriteString(l.directive(at))
-	if fc.out.Len() == 0 {
-		l.user.WriteString("var " + init + " " + goType + " = " + val + "\n\n")
-	} else {
-		l.user.WriteString("var " + init + " = func() " + goType + " {\n" + fc.out.String() + "\treturn " + val + "\n}()\n\n")
-	}
 	var binds []patBind
 	if spec.Pattern != nil {
 		p := l.info.Patterns[spec.Pattern]
@@ -837,13 +885,22 @@ func (l *lowerer) packagePattern(spec *syntax.VarSpec) {
 			}
 		}
 	}
+	assigns := []string{init + " := " + val}
+	if len(binds) == 0 {
+		assigns = append(assigns, "_ = "+init)
+	}
+	if len(binds) > 0 {
+		l.user.WriteString(l.directive(at))
+	}
 	for _, b := range binds {
 		name, ok := l.vars[b.v]
 		if !ok {
 			ice(spec, "the let binding %s has no Go name", b.v.Name)
 		}
-		l.user.WriteString("var " + name + " " + fc.goType(b.v.Type) + " = " + b.val + "\n\n")
+		l.user.WriteString("var " + name + " " + fc.goType(b.v.Type) + "\n\n")
+		assigns = append(assigns, name+" = "+b.val)
 	}
+	l.addInit(x, at, fc.out.String(), assigns)
 }
 
 // patternVars lists the variables a pattern binds, in order.

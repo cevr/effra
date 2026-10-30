@@ -1,6 +1,7 @@
 package check_test
 
 import (
+	"strings"
 	"testing"
 
 	"ergo.local/prototype/internal/sketch/check"
@@ -111,5 +112,33 @@ func TestRedundantTryOverTotalCatch(t *testing.T) {
 				t.Fatalf("want [%s], got %s", tc.want, describe(d))
 			}
 		})
+	}
+}
+
+// m1 (contract): Info.InitOrder lists every package-level initializer in
+// Go's initialization order: a let after every let its initializer
+// reaches, through functions and dot calls too, otherwise in declaration
+// order; a let that binds several names is one initializer.
+func TestInitOrderFollowsReferences(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{"let total = sum()\nfunc sum() int { base + extra }\nlet extra = twice(base)\nfunc twice(n int) int { n * 2 }\nlet base = 5\nlet (q, r) = (total / 3, total % 3)\nfunc main() {}\n", "base extra total q,r"},
+		{"let a = 1\nlet b = 2\nlet c = 3\nfunc main() {}\n", "a b c"},
+		{"let late = early.Get()\ntype Box { N int }\nfunc Get(b Box) int { b.N + seed }\nlet early = Box{N: 1}\nlet seed = 2\nfunc main() {}\n", "early seed late"},
+	} {
+		pkg, d := check.CheckSource(tc.src)
+		if len(d) != 0 {
+			t.Fatalf("%q: %s", tc.src, describe(d))
+		}
+		var got []string
+		for _, in := range pkg.Info.InitOrder {
+			var names []string
+			for _, v := range in.Vars {
+				names = append(names, v.Name)
+			}
+			got = append(got, strings.Join(names, ","))
+		}
+		if strings.Join(got, " ") != tc.want {
+			t.Errorf("%q: InitOrder %v, want %s", tc.src, got, tc.want)
+		}
 	}
 }

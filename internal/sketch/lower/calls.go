@@ -457,6 +457,9 @@ func (l *lowerer) emitWire(w *check.Wire, name string, site syntax.Node) {
 	}
 	fc := newFuncCtx(l, newNamer(l.names), true)
 	fc.owner = w.Name
+	if w.Decl != nil {
+		l.recordDecl(w.Name, w.Decl)
+	}
 	fc.frame = &frame{}
 	fc.depth = 1
 	fc.env = fc.scope.alloc("env")
@@ -771,32 +774,65 @@ func (l *lowerer) recordCall(x *syntax.CallExpr, owner, callee string) {
 	l.calls = append(l.calls, callIdent{offset: int(x.Pos()), fn: owner, callee: callee, line: line, column: column})
 }
 
-// callTable is the Go declaration of the call table and its entry type, in
-// source order, and the init function that registers it with the runtime,
-// or "" when the program has no identified call. Func is the source
-// declaration that makes the call, Callee what it calls, and File, Line and
-// Column its position, which the //line directive before the call also
-// names. The entry type is an alias of the struct v1.RegisterCalls takes;
-// registered, the table names the Ergo call sites of a defect in its report
-// (runtime.md, Exit causes), so it is linked into every program that has
-// one. It is written after the entry, so it may name the runtime package.
-func (l *lowerer) callTable() string {
-	if len(l.calls) == 0 {
-		return ""
+// declIdent is one entry of the declaration table: a source declaration's
+// name (the Func of its calls) and its first and last lines.
+type declIdent struct {
+	offset    int
+	name      string
+	line, end int
+}
+
+// recordDecl adds the source declaration n, named name, to the
+// declaration table once.
+func (l *lowerer) recordDecl(name string, n syntax.Node) {
+	if l.declSeen[n] {
+		return
 	}
+	if l.declSeen == nil {
+		l.declSeen = map[syntax.Node]bool{}
+	}
+	l.declSeen[n] = true
+	line, _ := l.file.Position(n.Pos())
+	end, _ := l.file.Position(n.End())
+	l.decls = append(l.decls, declIdent{offset: int(n.Pos()), name: name, line: line, end: end})
+}
+
+// callTable is the Go declaration of the program's source map and the init
+// function that registers it with the runtime (v1.RegisterCalls), written
+// for every program, its tables empty or not (stage C round 2 review m1):
+// the declaration table, each source declaration's name and lines, and the
+// call table, in source order. A call's Func is the source declaration that
+// makes it, Callee what it calls, and File, Line and Column its position,
+// which the //line directive before the call also names. The entry types
+// are aliases of the structs v1.RegisterCalls takes; registered, the tables
+// name the Ergo frames of a defect in its report and no Go frame
+// (runtime.md, Exit causes). It is written after the entry, so it may name
+// the runtime package.
+func (l *lowerer) callTable() string {
+	sort.SliceStable(l.decls, func(i, j int) bool { return l.decls[i].offset < l.decls[j].offset })
 	sort.SliceStable(l.calls, func(i, j int) bool { return l.calls[i].offset < l.calls[j].offset })
+	declEntry := l.pkgName(pkgKey{"decl", nil}, "ergoDecl")
+	declTable := l.pkgName(pkgKey{"decls", nil}, "ergoDecls")
 	entry := l.pkgName(pkgKey{"call", nil}, "ergoCall")
 	table := l.pkgName(pkgKey{"calls", nil}, "ergoCalls")
+	file := strconv.Quote(l.src)
 	var b strings.Builder
+	b.WriteString("// " + declEntry + " is one source declaration and its lines (#230).\n")
+	b.WriteString("type " + declEntry + " = struct {\n\tName      string\n\tFile      string\n\tLine, End int\n}\n\n")
+	b.WriteString("// " + declTable + " lists the program's source declarations, in source order.\n")
+	b.WriteString("var " + declTable + " = [...]" + declEntry + "{\n")
+	for _, d := range l.decls {
+		fmt.Fprintf(&b, "\t{Name: %s, File: %s, Line: %d, End: %d},\n", strconv.Quote(d.name), file, d.line, d.end)
+	}
+	b.WriteString("}\n\n")
 	b.WriteString("// " + entry + " is the Ergo identity of one lowered call (#230).\n")
 	b.WriteString("type " + entry + " = struct {\n\tFunc, Callee string\n\tFile         string\n\tLine, Column int\n}\n\n")
 	b.WriteString("// " + table + " lists the identity of each call of the program, in source order.\n")
 	b.WriteString("var " + table + " = [...]" + entry + "{\n")
-	file := strconv.Quote(l.src)
 	for _, c := range l.calls {
 		fmt.Fprintf(&b, "\t{Func: %s, Callee: %s, File: %s, Line: %d, Column: %d},\n", strconv.Quote(c.fn), strconv.Quote(c.callee), file, c.line, c.column)
 	}
 	b.WriteString("}\n\n")
-	b.WriteString("func init() {\n\t" + l.rt() + ".RegisterCalls(" + table + "[:])\n}\n\n")
+	b.WriteString("func init() {\n\t" + l.rt() + ".RegisterCalls(" + declTable + "[:], " + table + "[:])\n}\n\n")
 	return b.String()
 }

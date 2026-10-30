@@ -127,6 +127,20 @@ type Info struct {
 	Loops map[*syntax.RangeStmt]*Loop
 	// Withs is every with site.
 	Withs map[*syntax.CallExpr]*With
+	// InitOrder is every package-level let with an initializer, in Go's
+	// initialization order (go/types Info.InitOrder): a let comes after
+	// every let its initializer refers to, directly or through functions,
+	// and otherwise in declaration order. The lowering runs them in this
+	// order inside the program's root task (stage C round 2 review m1).
+	InitOrder []*Initializer
+}
+
+// Initializer is one package-level initializer: Vars are the names it
+// binds (several for a let with a pattern or `let q, r = e`; a name `_`
+// is a Var with no Defs entry) and Value its initializer expression.
+type Initializer struct {
+	Vars  []*Var
+	Value syntax.Expr
 }
 
 func newInfo() *Info {

@@ -21,7 +21,8 @@ import (
 //     reserves it;
 //  2. the generated package entities: the runtime and time imports, the
 //     environment type, the shared empty environment, the pattern test
-//     helper and the call table with its entry type (calls.go, #230);
+//     helper, the call and declaration tables with their entry types
+//     (calls.go, #230) and the package initializer (decls.go, initFunc);
 //  3. every type and function of every library package the program reaches
 //     (the prelude and imported std packages, by path), used or not;
 //  4. the operations adapters of every operations conversion, and the text
@@ -45,6 +46,9 @@ func (l *lowerer) nameAll() {
 	l.pkgName(pkgKey{"is", nil}, "ergoIs")
 	l.pkgName(pkgKey{"call", nil}, "ergoCall")
 	l.pkgName(pkgKey{"calls", nil}, "ergoCalls")
+	l.pkgName(pkgKey{"decl", nil}, "ergoDecl")
+	l.pkgName(pkgKey{"decls", nil}, "ergoDecls")
+	l.pkgName(pkgKey{"init", nil}, "ergoInit")
 	libs := l.libraryPackages()
 	for _, p := range libs {
 		for _, tn := range p.Types {
