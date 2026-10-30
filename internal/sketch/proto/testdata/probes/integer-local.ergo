@@ -1,6 +1,6 @@
 // out: 1
 type Fault {}
-func unused() fails Fault { return Fault }
+func unused() fails Fault { return Fault{} }
 func f(n int64) int64     { return n }
 func main() needs Console {
 	let n = 1

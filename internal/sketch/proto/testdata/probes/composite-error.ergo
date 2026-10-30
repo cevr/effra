@@ -1,7 +1,7 @@
 // want S105
 type Fault {}
 type Box { Value string }
-func fail() string fails Fault { return Fault }
+func fail() string fails Fault { return Fault{} }
 func main() needs Console {
 	let b = Box{Value: fail()}
 	Console.Println("\(b.Value)")

@@ -503,8 +503,9 @@ func TestTotalityDeterminism(t *testing.T) {
 }
 
 // TestDefaultSwitchLinear: a switch over n subjects whose only arm is
-// default needs no proof: both solvers count zero steps, and the bytes
-// the whole check allocates grow linearly with n, counted by the runtime,
+// default proves its usefulness with work linear in n, including the
+// initial columns. The bytes the whole check allocates also grow linearly,
+// counted by the runtime,
 // not timed (round-4 M4; D16 as amended in round 5: nothing before the
 // counters is superlinear). Round 4's column canonicalization ran here,
 // quadratic in n.

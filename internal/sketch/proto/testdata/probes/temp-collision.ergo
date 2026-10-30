@@ -1,6 +1,6 @@
 // want S110
 type Fault {}
-func unused() fails Fault { return Fault }
+func unused() fails Fault { return Fault{} }
 func main() needs Console {
 	let v_1 = "visible"
 	v_1

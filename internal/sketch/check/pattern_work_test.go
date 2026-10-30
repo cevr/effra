@@ -10,7 +10,7 @@ import (
 )
 
 // TestMatchArmsLinear counts all work at the source boundary, including
-// pattern construction and irrefutable let proofs. The wide matrices can
+// pattern construction and irrefutable let proofs. The square matrices can
 // exhaust their proof budget; they must stop within a constant per source
 // cell and never admit an unproved match. Rect keeps 100 rows as width
 // grows; wide grows both dimensions. No host-clock assertion is used.

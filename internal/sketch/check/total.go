@@ -26,11 +26,11 @@ import (
 // decided parser builds every match from `match` (#196).
 const matchLen = syntax.Pos(len("match"))
 
-// totalityBudget bounds the steps of each of a match's two solvers, one for
-// its cases' reachability and one for its totality (D16 as amended in rounds 3
-// and 5). A step is one residual matrix the solver splits, weighted by its
-// number of rows, or one row scanned when a case specializes or joins the
-// matrix, so the bound holds all the superlinear work to a fixed amount.
+// totalityBudget is the minimum budget of each match's two solvers, one
+// for reachability and one for totality. solverFor scales it by the matrix
+// dimensions. Steps count row cells and columns scanned during construction,
+// specialization, subsumption and memo-key construction; sorting identities
+// is charged before it runs. D16 bounds every superlinear proof pass.
 // Deciding totality over several subjects is NP-complete in the worst case
 // (a case row can encode a clause, so totality encodes unsatisfiability;
 // Maranget 2007, Sekar et al.), so no exact checker is linear on every
@@ -41,7 +41,7 @@ const matchLen = syntax.Pos(len("match"))
 // near the budget is refused, never a proved verdict. Every match over at
 // most 6 subjects of at most 3 variants stays far below it (at most 3^6 =
 // 729 residual matrices; TestTotalityPermutations holds the odd cycles of
-// 31 subjects under an eighth of it).
+// 31 subjects under an eighth of their cell-weighted budget).
 //
 // Prior art: rustc's pattern_complexity_limit, GHC's -fmax-pmcheck-models.
 const totalityBudget = 200_000
@@ -101,7 +101,7 @@ type column struct {
 //     row a later case subsumes (rowSet.addRow);
 //   - one pass that splits a complete column into every constructor's
 //     residual (so a union of n variants matched by n arms costs O(n));
-//   - a step budget (totalityBudget).
+//   - a source-weighted step budget (solverFor).
 type matrixSolver struct {
 	*patSpace
 	memo   map[string]missingResult

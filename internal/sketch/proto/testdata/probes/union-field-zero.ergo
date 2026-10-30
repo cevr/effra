@@ -1,6 +1,6 @@
 // want S108
 type Fault {}
-func unused() fails Fault { return Fault }
+func unused() fails Fault { return Fault{} }
 type A { Value string }
 type B {}
 type Sum = A | B

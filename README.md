@@ -196,7 +196,7 @@ func step(s State, sig Signal) Decision[State, string] fails ProbeDown needs Pro
 	case (HalfOpen, Success):
 		return Enter{Closed{0}}
 	case (_, _):
-		return Ignore
+		return Ignore{}
 	}
 }
 
