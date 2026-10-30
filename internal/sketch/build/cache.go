@@ -25,8 +25,8 @@ import (
 type Cache struct{ Root string }
 
 // privateLifetime is how long a private root stays after its process last
-// built in it. A later private build removes older ones; a process that
-// builds again after that emits its module again.
+// took it. A sweep, which every Module call runs, removes an older root only
+// when no live process holds its lease (lease.go).
 const privateLifetime = 24 * time.Hour
 
 // DefaultRoot is $XDG_CACHE_HOME/ergo when XDG_CACHE_HOME is absolute,
@@ -110,6 +110,7 @@ func (c Cache) Module(in Input, emit Emitter) (Module, error) {
 	if !filepath.IsAbs(c.Root) {
 		return Module{}, fmt.Errorf("build: cache root %q is not absolute", c.Root)
 	}
+	defer c.sweep(time.Now())
 	if processScoped(in.Compiler) {
 		private, err := c.private(in.Compiler)
 		if err != nil {
@@ -123,27 +124,18 @@ func (c Cache) Module(in Input, emit Emitter) (Module, error) {
 }
 
 // private is the private root of the process whose identity is compiler.
-// It makes the root, marks it as just used, and removes the private roots
-// no process has built in for privateLifetime; a failed removal is left for
-// a later build.
+// The process takes the root's lease, which it holds until it exits, so the
+// root stays through every build and link of the process (lease.go), and
+// marks the root as just used.
 func (c Cache) private(compiler string) (Cache, error) {
 	sum := sha256.Sum256([]byte(compiler))
-	parent := filepath.Join(c.Root, "private")
-	own := filepath.Join(parent, hex.EncodeToString(sum[:16]))
-	if err := os.MkdirAll(own, 0o755); err != nil {
+	own := filepath.Join(c.Root, "private", hex.EncodeToString(sum[:16]))
+	if err := holdLease(own); err != nil {
 		return Cache{}, err
 	}
 	now := time.Now()
 	if err := os.Chtimes(own, now, now); err != nil {
 		return Cache{}, err
-	}
-	if list, err := os.ReadDir(parent); err == nil {
-		for _, e := range list {
-			path := filepath.Join(parent, e.Name())
-			if info, err := os.Lstat(path); err == nil && path != own && now.Sub(info.ModTime()) > privateLifetime {
-				_ = os.RemoveAll(path)
-			}
-		}
 	}
 	return Cache{Root: own}, nil
 }

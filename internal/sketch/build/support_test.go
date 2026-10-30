@@ -44,6 +44,9 @@ func helperMain(mode string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	if mode == "lease" {
+		return leaseHelper()
+	}
 	if mode == "identity" {
 		identity, err := CompilerIdentity()
 		if err != nil {
