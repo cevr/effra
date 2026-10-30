@@ -107,21 +107,12 @@ func settle(err *error, e error) {
 
 // guarded runs body as the body of task t and returns every exit as an
 // error: a panic is recovered here, before rt's own boundary sees it, so a
-// fresh defect keeps its stack and a carried exit merges flat. It is the
-// task's boundary, so it holds the task scope, which owns the Tasks that
-// moved out of their frames and drains them when the body ends.
+// fresh defect keeps its stack and a carried exit merges flat.
 func guarded[T any](t *rt.Task, body func(*rt.Task) (T, error)) (v T, err error) {
-	ts := &Scope{s: rt.NewScope(t)}
-	ts.root = ts
-	ctx := t.WithValue(taskScopeKey{}, ts)
 	defer func() {
 		if p := recover(); p != nil {
-			err = capture(t, p)
-		}
-		ctx.End()
-		if err = ts.end(err); err != nil {
 			var zero T
-			v = zero
+			v, err = zero, capture(t, p)
 		}
 	}()
 	return body(t)

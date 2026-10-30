@@ -42,7 +42,7 @@ Language v1 ([#196](https://github.com/cevr/ergo/issues/196)) has four small std
 
 | Package | Operations | Contract | Go body |
 | --- | --- | --- | --- |
-| `task` | `task.Go() { … }` yields a `Task[T, E]`; the prelude's `Task` has `Wait() T fails E` and `Stop()` | [runtime.md, Tasks](runtime.md#tasks) rules 7 to 12 | `Go`, `Task`; `Task.Move`, which only the lowering calls (task.go) |
+| `task` | `task.Go() { … }` yields a `Task[T, E]`; the prelude's `Task` has `Wait() T fails E` and `Stop()` | [runtime.md, Tasks](runtime.md#tasks) rules 7 to 12 | `Go`, `Task`; `Task.Move(dest)`, the return of a Task, which only the lowering calls (task.go) |
 | `scope` | `scope.OnExit() { … }` | [runtime.md, Exit actions](runtime.md#exit-actions) | `Scope.OnExit` (task.go) |
 | `queue` | `queue.New[T](capacity)`, `Push` (fails `queue.Closed`), `Pop` (fails `queue.Closed`), `Values` (a `Seq[T]`), `Close`; the failure `Closed` | [runtime.md, Queues](runtime.md#queues) | `New`, `Queue`, `Closed` (queue.go) |
 | `slice` | `slice.WithCapacity[T](n)` | below | `WithCapacity` (data.go) |
