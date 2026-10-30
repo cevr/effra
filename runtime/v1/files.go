@@ -55,6 +55,10 @@ var hiddenOrder = []Hidden{Frame, CallSite, CallerTask}
 // package, or, for an operation of a type that a std extern returns, the
 // method of that name on the Go type the extern's body returns.
 type Body struct {
+	// TypeParams are the Go type parameters of a function, or of the
+	// method's receiver type, in order. An Ergo row parameter has none
+	// (docs/spec/stdlib.md, Types 2). Nil for a function type parameter.
+	TypeParams []TypeParam
 	// Hidden are the leading hidden parameters, in hiddenOrder.
 	Hidden []Hidden
 	// Params are the parameters after them, one per Ergo parameter, in
@@ -63,6 +67,12 @@ type Body struct {
 	// Results are the Go result types, as written: the Ergo value results,
 	// then error when the Ergo signature has an error row.
 	Results []string
+}
+
+// TypeParam is one Go type parameter of a body: its name and its
+// constraint as written (any, comparable).
+type TypeParam struct {
+	Name, Constraint string
 }
 
 // Param is one Go parameter that stands for an Ergo parameter.
@@ -90,16 +100,51 @@ func BodyOf(name string) (Body, error) {
 // sourceDecls parses Source once per process.
 var sourceDecls = sync.OnceValues(func() (goDecls, error) { return parseDecls(Source) })
 
-// goDecl is one exported function or method of a parsed package, with the
-// local name its file gives runtime/rt.
+// goDecl is one exported function, method or type of a parsed package,
+// with the local name its file gives runtime/rt.
 type goDecl struct {
-	fn *ast.FuncDecl
-	rt string
+	fn  *ast.FuncDecl
+	typ *ast.TypeSpec
+	rt  string
 }
 
-// goDecls are the exported functions and methods of a package's non-test
-// files, by name ("Go", "Queue.Push").
+// goDecls are the exported functions, methods and types of a package's
+// non-test files, by name ("Go", "Queue.Push", "Closed").
 type goDecls map[string]goDecl
+
+// StructFields returns the field names, in order, of the exported struct
+// type named name in Source. A record type declared in a v1 std package
+// that is not an operations type, such as queue.Closed, is this Go type of
+// the same name (docs/spec/stdlib.md, Types), so its fields are the
+// record's. It fails when there is no such struct type.
+func StructFields(name string) ([]string, error) {
+	decls, err := sourceDecls()
+	if err != nil {
+		return nil, err
+	}
+	return decls.structFields(name)
+}
+
+func (d goDecls) structFields(name string) ([]string, error) {
+	g, ok := d[name]
+	if !ok || g.typ == nil {
+		return nil, fmt.Errorf("runtime/v1: no exported Go type %s", name)
+	}
+	st, ok := g.typ.Type.(*ast.StructType)
+	if !ok || g.typ.TypeParams != nil || g.typ.Assign.IsValid() {
+		return nil, fmt.Errorf("runtime/v1: %s is not a non-generic struct type", name)
+	}
+	fields := []string{}
+	for _, f := range st.Fields.List {
+		if len(f.Names) == 0 {
+			return nil, fmt.Errorf("runtime/v1: %s embeds a field", name)
+		}
+		for _, n := range f.Names {
+			fields = append(fields, n.Name)
+		}
+	}
+	return fields, nil
+}
 
 // parseDecls parses every non-test Go file at the root of fsys.
 func parseDecls(fsys fs.FS) (goDecls, error) {
@@ -131,6 +176,14 @@ func parseDecls(fsys fs.FS) (goDecls, error) {
 			}
 		}
 		for _, d := range f.Decls {
+			if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.TYPE {
+				for _, s := range gd.Specs {
+					if ts := s.(*ast.TypeSpec); ts.Name.IsExported() {
+						decls[ts.Name.Name] = goDecl{typ: ts, rt: rt}
+					}
+				}
+				continue
+			}
 			fn, ok := d.(*ast.FuncDecl)
 			if !ok || !fn.Name.IsExported() {
 				continue
@@ -165,14 +218,67 @@ func recvName(e ast.Expr) string {
 
 func (d goDecls) body(name string) (Body, error) {
 	g, ok := d[name]
-	if !ok {
+	if !ok || g.fn == nil {
 		return Body{}, fmt.Errorf("runtime/v1: no exported Go body %s", name)
 	}
 	b, err := goShape(g.fn.Type, g.rt)
 	if err != nil {
 		return Body{}, fmt.Errorf("runtime/v1: %s: %w", name, err)
 	}
+	if b.TypeParams, err = d.typeParams(g.fn); err != nil {
+		return Body{}, fmt.Errorf("runtime/v1: %s: %w", name, err)
+	}
 	return b, nil
+}
+
+// typeParams are a function's own type parameters, or a method's: the
+// names its receiver gives them, with the constraints of the receiver
+// type's declaration.
+func (d goDecls) typeParams(fn *ast.FuncDecl) ([]TypeParam, error) {
+	if fn.Recv == nil || len(fn.Recv.List) != 1 {
+		return fieldParams(fn.Type.TypeParams, nil), nil
+	}
+	recv := fn.Recv.List[0].Type
+	base := recvName(recv)
+	g, ok := d[base]
+	if !ok || g.typ == nil {
+		return nil, fmt.Errorf("the receiver type %s is not declared", base)
+	}
+	if star, ok := recv.(*ast.StarExpr); ok {
+		recv = star.X
+	}
+	var names []string
+	switch x := recv.(type) {
+	case *ast.IndexExpr:
+		names = append(names, types.ExprString(x.Index))
+	case *ast.IndexListExpr:
+		for _, ix := range x.Indices {
+			names = append(names, types.ExprString(ix))
+		}
+	}
+	decl := fieldParams(g.typ.TypeParams, nil)
+	if len(names) != len(decl) {
+		return nil, fmt.Errorf("the receiver names %d type parameters of %s's %d", len(names), base, len(decl))
+	}
+	return fieldParams(g.typ.TypeParams, names), nil
+}
+
+// fieldParams lists a type-parameter list, renamed by names when given.
+func fieldParams(list *ast.FieldList, names []string) []TypeParam {
+	if list == nil {
+		return nil
+	}
+	var out []TypeParam
+	for _, f := range list.List {
+		for _, n := range f.Names {
+			name := n.Name
+			if names != nil {
+				name = names[len(out)]
+			}
+			out = append(out, TypeParam{Name: name, Constraint: types.ExprString(f.Type)})
+		}
+	}
+	return out
 }
 
 // goShape reads a Go function type under the hidden-argument convention.
