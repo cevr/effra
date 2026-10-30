@@ -1447,7 +1447,10 @@ func (c *checker) collectSelfFuncs() {
 		// a distinct local type: whether the kept declaration is one
 		// depends on which comes first, so the group's verdict must not
 		// read it (a follow-on of the duplicate; stage D1 round 2 review
-		// T1). Two members naming it still collide, whichever is kept.
+		// T1). Two members naming it still collide, whichever is kept. The
+		// restrictions that do not read the declaration (main is never a
+		// member; the type arguments are distinct type parameters of the
+		// function) still apply first (round 3 review M3).
 		owners := map[any]bool{}
 		valid := true
 		for _, g := range group {
@@ -1455,8 +1458,11 @@ func (c *checker) collectSelfFuncs() {
 			if g.owner != nil {
 				key = g.owner
 			}
-			if id, _, _ := selfOwnerName(g.Decl); id != nil && c.dupNames[id.Name] {
-				key = id.Name
+			if id, args, _ := selfOwnerName(g.Decl); id != nil && c.dupNames[id.Name] && g.Name != "main" {
+				c.cur = g.file
+				if c.selfArgsOK(g.Decl, args) {
+					key = id.Name
+				}
 			}
 			if key == nil || owners[key] {
 				valid = false
