@@ -251,6 +251,9 @@ func (l *lowerer) defaultFunc(n *check.Named, site syntax.Node) (string, []*chec
 	var parts []string
 	switch under := n.Underlying().(type) {
 	case *check.Map:
+	case *check.Tuple:
+		// A defined tuple keeps its Go type: a struct of F0, F1, ...
+		parts = tc.tupleDefaults(under)
 	case *check.Struct:
 		parts = tc.fieldDefaults(l.typeDecl(n.Obj, site), under, nil)
 	default:
@@ -480,6 +483,8 @@ func (l *lowerer) holdsMap(t check.Type) bool {
 		switch under := u.Underlying().(type) {
 		case *check.Map:
 			held = true
+		case *check.Tuple:
+			held = l.holdsMap(under)
 		case *check.Struct:
 			for _, f := range under.Fields {
 				if l.holdsMap(f.Type) {

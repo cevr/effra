@@ -323,6 +323,78 @@ func main() needs Console {
 `, "local let\npackage let\nomitted field\nnested omitted field\nlet of a record\nelided record\ngeneric record\ndefined Map\ntuple\nrecursive record\n")
 }
 
+// TestErgoRunNamedTupleDefaultMapIsWritable: a defined type over a tuple,
+// and an instance of a generic one, defaults like its tuple, keeping its
+// named Go type (stage D2 round 2 review M1): a direct let, a package let,
+// an omitted record field and a generic instance, each destructured, then
+// its Map written and counted. A default inside a generic function, whose
+// type mentions the function's type parameter, is built by a generic
+// default function. The first program is the review's reproduction.
+func TestErgoRunNamedTupleDefaultMapIsWritable(t *testing.T) {
+	wantRun(t, `type T (int, Map[string, int])
+func main() needs Console {
+    let tup T
+    let (n, m) = tup
+    let mut w = m
+    w["a"] = n
+    if len(w) == 1 { Console.Println("ok") }
+}
+`, "ok\n")
+	wantRun(t, `type T (int, Map[string, int])
+type P[A] (A, Map[string, A])
+type H { N int, U T }
+type G { Q P[string], K int }
+type Box[A] { V []A, M Map[string, A] }
+
+let pt T
+
+func report(name string, ok bool) needs Console {
+	if ok {
+		Console.Println(name)
+	}
+}
+
+func inGeneric[A](x A) int {
+	let mut b Box[A]
+	b.M["a"] = x
+	len(b.M)
+}
+
+func main() needs Console {
+	let tup T
+	let (n, m) = tup
+	let mut w = m
+	w["a"] = n
+	report("named tuple let", len(w) == 1)
+
+	let (pn, pm) = pt
+	let mut pw = pm
+	pw["a"] = pn
+	report("named tuple package let", len(pw) == 1)
+
+	let h = H{N: 1}
+	let (hn, hm) = h.U
+	let mut hw = hm
+	hw["a"] = hn + h.N
+	report("named tuple omitted field", len(hw) == 1)
+
+	let gi P[string]
+	let (gs, gm) = gi
+	let mut gw = gm
+	gw["k"] = gs
+	report("generic named tuple", len(gw) == 1)
+
+	let g = G{K: 2}
+	let (qs, qm) = g.Q
+	let mut qw = qm
+	qw["k"] = qs
+	report("generic named tuple field", len(qw) == 1 && g.K == 2)
+
+	report("generic function", inGeneric(5) == 1 && inGeneric("s") == 1)
+}
+`, "named tuple let\nnamed tuple package let\nnamed tuple omitted field\ngeneric named tuple\ngeneric named tuple field\ngeneric function\n")
+}
+
 // TestErgoRunDefaultsShareNoMap: every default builds new Maps (stage D2
 // round 2 review M2): two lets of one record type, the two fields of one
 // type in a record, a package let and a local, and two omitted fields of a
