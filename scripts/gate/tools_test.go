@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -73,12 +74,15 @@ var testScratch string
 
 // probeSource is a small executable standing in for a tool. It prints a
 // version that never changes. Beside a file <self>.hang it first sleeps for
-// 30 s, as a tool that never answers.
+// 30 s, as a tool that never answers. self is its file with symlinks
+// resolved: tests run it through a link on PATH, and os.Executable names the
+// link on darwin (measured on darwin/arm64), the file on Linux.
 const probeSource = `package main
 
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -86,6 +90,9 @@ var build = "` + probeBuildMarker + `"
 
 func main() {
 	self, err := os.Executable()
+	if err == nil {
+		self, err = filepath.EvalSymlinks(self)
+	}
 	if err != nil {
 		os.Exit(2)
 	}
@@ -236,6 +243,14 @@ func link(t *testing.T, bin, name, target string) {
 // keeps no memo a timestamp could vouch for. A memo keyed on (inode, size,
 // change time) fails the first attempt; twenty keep the test cheap for Go's
 // test cache, which re-stats every file a cached test opened.
+//
+// On darwin the kernel kills a signed binary whose pages no longer match its
+// code signature, and once it has, it keeps killing that file after its bytes
+// are restored; a new file with the same bytes runs (measured on darwin/arm64,
+// go1.27.2: a copy that was rewritten and restored without running in between
+// also runs). The fingerprint keys what the tool prints, so from the first
+// rewrite on the probe answers "failed: ", and restoring the bytes restores
+// the installation's part of the fingerprint, not the tool's answer.
 func TestToolFingerprintSeesAnInPlaceRewriteWithinOneTimestampTick(t *testing.T) {
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -251,10 +266,18 @@ func TestToolFingerprintSeesAnInPlaceRewriteWithinOneTimestampTick(t *testing.T)
 		if after == before || restored == after {
 			t.Fatalf("attempt %d: a same-size in-place rewrite kept the fingerprint", attempt)
 		}
-		if restored != before {
+		if restored != before && !killedButRestored(before, restored) {
 			t.Fatalf("attempt %d: restoring the bytes did not restore the fingerprint", attempt)
 		}
 	}
+}
+
+// killedButRestored reports whether, on darwin, restored is the fingerprint of
+// the bytes before keyed but of a tool the kernel now kills.
+func killedButRestored(before, restored string) bool {
+	_, beforeBytes, _ := strings.Cut(before, "\x00file\x00")
+	_, restoredBytes, _ := strings.Cut(restored, "\x00file\x00")
+	return runtime.GOOS == "darwin" && strings.HasPrefix(restored, "failed: \x00") && beforeBytes != "" && restoredBytes == beforeBytes
 }
 
 // The same build under another prefix is another installation: a tool may
