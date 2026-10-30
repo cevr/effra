@@ -164,22 +164,56 @@ func (c *checker) identical(a, b Type) bool {
 }
 
 // sameShape reports whether two signatures have identical parameters and
-// results.
+// results, where an unknown row may be identical to another row
+// (mayBeIdentical).
 func (c *checker) sameShape(a, b *Signature) bool {
 	if len(a.Params) != len(b.Params) || len(a.Results) != len(b.Results) {
 		return false
 	}
 	for i := range a.Params {
-		if !c.identical(a.Params[i].Type, b.Params[i].Type) {
+		if !c.mayBeIdentical(a.Params[i].Type, b.Params[i].Type) {
 			return false
 		}
 	}
 	for i := range a.Results {
-		if !c.identical(a.Results[i], b.Results[i]) {
+		if !c.mayBeIdentical(a.Results[i], b.Results[i]) {
 			return false
 		}
 	}
 	return true
+}
+
+// mayBeIdentical is identical, except that a function type nested in a
+// parameter or a result may hold an unknown row (Row.unknown): such a type
+// is identical to another when some content of the unknown row makes it so,
+// so a nested unknown row gives no follow-on "the parameters or results
+// differ" (stage D1 round 5). With no unknown row it is identical: a
+// signature's identity is its parameters, results and rows (intern.go).
+func (c *checker) mayBeIdentical(a, b Type) bool {
+	if c.identical(a, b) {
+		return true
+	}
+	as, ok := a.(*Signature)
+	bs, ok2 := b.(*Signature)
+	if !ok || !ok2 || len(as.TParams) > 0 || len(bs.TParams) > 0 {
+		return false
+	}
+	return c.sameShape(as, bs) && c.mayBeEqualRow(as.Errors, bs.Errors) && c.mayBeEqualRow(as.Uses, bs.Uses)
+}
+
+// mayBeEqualRow reports whether two rows are equal for some content of their
+// unknown parts: an unknown row holds its known part and may hold more.
+func (c *checker) mayBeEqualRow(a, b *Row) bool {
+	au, bu := a.unknown(c.types), b.unknown(c.types)
+	switch {
+	case au && bu:
+		return true
+	case au:
+		return a.known(c.types).subsetOf(c.types, b)
+	case bu:
+		return b.known(c.types).subsetOf(c.types, a)
+	}
+	return c.identical(&RowArg{Row: a}, &RowArg{Row: b})
 }
 
 // ---------------------------------------------------------------- assignability

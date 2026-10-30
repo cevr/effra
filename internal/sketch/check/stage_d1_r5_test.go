@@ -167,6 +167,50 @@ func TestUnknownRowOnTheReceivingSide(t *testing.T) {
 	})
 }
 
+// blockDecls refuses z for its error row (line 3) and zw for its capability
+// row (line 6; its error row {Q} is written). Both take no parameters, so
+// they fit a trailing block. run's block has the type of its first
+// argument; mk returns a function that returns its argument. Line 10 is the
+// first program line.
+const blockDecls = "type Bang {}\nextern go fixture.mark func mark() fails Bang\n" +
+	"func z() int { let m = Map[int, func() int]{1: z}; _ = m; try mark(); 1 }\n" +
+	"type Q {}\ntype Cap2 { N() }\n" +
+	"func zw() int fails Q { let m = Map[int, func() int fails Q]{1: zw}; _ = m; Cap2.N(); 1 }\n" +
+	"extern go fixture.mq func mq() fails Q\n" +
+	"func run[T any](x T, f T) T { x }\n" +
+	"func mk[T any](f T) func() T { func() T { f } }\n"
+
+// M2 and T2 in two more target positions: a trailing block whose expected
+// row is unknown infers that row, so its known Q or Cap2 reaches the type
+// parameter's binding; and a join widens an unknown row nested in a result
+// type, not only the outer one. Each Q or Cap2 named in a want is known, so
+// its S101 or S102 stays.
+func TestUnknownRowInBlockAndResultTargets(t *testing.T) {
+	cases := []d1Case{
+		{"block-errors", blockDecls + "func F() int { let g = run(z) { try mq(); 1 }; g() }\n", []string{"S108:3", "S108:6", "S101:10"}},
+		{"block-capability", blockDecls + "func F() int fails Q { let g = run(zw) { Cap2.N(); try mq(); 1 }; try g() }\n", []string{"S108:3", "S108:6", "S102:10"}},
+		{"nested-result", blockDecls + "func q0() int fails Q { try mq(); 1 }\nfunc F(c bool) int { (if c { mk(z) } else { mk(q0) })()() }\n", []string{"S108:3", "S108:6", "S101:11"}},
+		{"nested-result-second", blockDecls + "func q0() int fails Q { try mq(); 1 }\nfunc F(c bool) int { (if c { mk(q0) } else { mk(z) })()() }\n", []string{"S108:3", "S108:6", "S101:11"}},
+		// The nested rows differ whatever z's error row holds: z's
+		// capability row is known and empty, and w0 needs Cap2, so the
+		// results differ (an independent error) and stay reported.
+		{"nested-result-independent", blockDecls + "func w0() int needs Cap2 { Cap2.N(); 1 }\nfunc F(c bool) int { let g = if c { mk(z) } else { mk(w0) }; 1 }\n", []string{"S108:3", "S108:6", "S108:11"}},
+	}
+	runD1(t, cases)
+	wantMessages(t, "nested-result-independent", cases[len(cases)-1].src, "the parameters or results differ")
+	for _, tc := range cases {
+		if strings.HasSuffix(tc.name, "-independent") {
+			continue
+		}
+		_, ds := check.CheckSource(tc.src)
+		for _, d := range ds {
+			if strings.Contains(d.Message, "invalid") || strings.Contains(d.Message, "is wider than {}") || strings.Contains(d.Message, "results differ") {
+				t.Errorf("%s: a follow-on of the unknown row: %s", tc.name, describe(ds))
+			}
+		}
+	}
+}
+
 // T1: a value position handles nothing of an unknown row, so the row
 // escapes to the enclosing function's inferred row (expr.go, handled): b's
 // row is unknown, and the caller's try on it is a follow-on, not "try on an
