@@ -13,7 +13,7 @@ The standard library is the "Effect for Go" track, [#206](https://github.com/cev
 
 | Family | Ticket | Effect counterpart | Construct or package | Tier |
 | --- | --- | --- | --- | --- |
-| Tasks and supervision | [#207](https://github.com/cevr/ergo/issues/207) | Fiber, `Effect.all`/`forEach` concurrency, `race`/`raceAll`, FiberSet, FiberMap, FiberHandle, Supervisor | `go`, `Task`, `tasks.Map`, `tasks.Set`, `tasks.Race` | kernel + library |
+| Tasks and supervision | [#207](https://github.com/cevr/ergo/issues/207) | Fiber, `Effect.all`/`forEach` concurrency, `race`/`raceAll`, FiberSet, FiberMap, FiberHandle, Supervisor | `task.Go`, `Task`, `tasks.Map`, `tasks.Set`, `tasks.Race` | kernel + library |
 | Scope and resources | [#65](https://github.com/cevr/ergo/issues/65) | Scope, acquireRelease, ensuring, onExit, addFinalizer, Layer.scoped, forkScoped | automatic release ([resources.md](resources.md)); `build.Scope` for dynamic registration (README Gap 13) | kernel |
 | Schedule, retry and timeout | [#179](https://github.com/cevr/ergo/issues/179) | Schedule, retry, repeat, timeout, Clock.sleep, Duration | `schedule`, `retry.On`, `timeout.After(d) { }`, duration literals | library |
 | Channels, queues and streams | [#64](https://github.com/cevr/ergo/issues/64) | Queue, PubSub, Mailbox, Stream, Sink, Channel | `queue.Queue`, `for … in`, iterators that are resources | kernel + library |
@@ -42,7 +42,7 @@ Language v1 ([#196](https://github.com/cevr/ergo/issues/196)) has four small std
 
 | Package | Operations | Contract | Go body |
 | --- | --- | --- | --- |
-| `task` | `task.Go() { … }` yields a `Task[T, E]`; the prelude's `Task` has `Wait() T fails E` and `Stop()` | [runtime.md, Tasks](runtime.md#tasks) rules 7 to 12 | `Go`, `Task` (task.go) |
+| `task` | `task.Go() { … }` yields a `Task[T, E]`; the prelude's `Task` has `Wait() T fails E` and `Stop()` | [runtime.md, Tasks](runtime.md#tasks) rules 7 to 12 | `Go`, `Task`; `Task.Move`, which only the lowering calls (task.go) |
 | `scope` | `scope.OnExit() { … }` | [runtime.md, Exit actions](runtime.md#exit-actions) | `Scope.OnExit` (task.go) |
 | `queue` | `queue.New[T](capacity)`, `Push` (fails `queue.Closed`), `Pop` (fails `queue.Closed`), `Values` (a `Seq[T]`), `Close`; the failure `Closed` | [runtime.md, Queues](runtime.md#queues) | `New`, `Queue`, `Closed` (queue.go) |
 | `slice` | `slice.WithCapacity[T](n)` | below | `WithCapacity` (data.go) |

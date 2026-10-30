@@ -15,8 +15,8 @@ import (
 // a Go panic, so no catch, which is a type switch over returned errors, can
 // handle it (rows.md, catch rule 6):
 //
-//   - rt.Interrupted: an interruption, raised by a stopped wait, a Push to a
-//     closed queue or a Pop from a closed, drained one;
+//   - rt.Interrupted: an interruption, raised by a stopped wait (a closed
+//     queue is not one: Push and Pop return the typed failure Closed);
 //   - *exit: an exit already recorded at a boundary (a child's defects
 //     re-raised by Wait or Stop, a frame's combined exit), carried whole;
 //   - any other value: a fresh defect, a Go panic of the program or of an
@@ -49,7 +49,11 @@ type exit struct{ err error }
 // capture turns p, a panic recovered at a boundary of task t, into an exit
 // in canonical form: an interruption stays one, a carried exit is unpacked,
 // and anything else is a fresh defect with t's chain (G2) and the stack.
-func capture(t *rt.Task, p any) error {
+func capture(t *rt.Task, p any) error { return captureIn(t, p, false) }
+
+// captureIn is capture; inRelease marks a fresh defect as raised by an
+// exit action, not by the body (rt.Reason.InRelease).
+func captureIn(t *rt.Task, p any, inRelease bool) error {
 	switch e := p.(type) {
 	case *exit:
 		return e.err
@@ -60,6 +64,7 @@ func capture(t *rt.Task, p any) error {
 	}
 	var c rt.Cause
 	c.AddDefect(t, &Panic{Value: p, Stack: debug.Stack()})
+	c.Reasons[len(c.Reasons)-1].InRelease = inRelease
 	return c.Err()
 }
 
@@ -102,12 +107,21 @@ func settle(err *error, e error) {
 
 // guarded runs body as the body of task t and returns every exit as an
 // error: a panic is recovered here, before rt's own boundary sees it, so a
-// fresh defect keeps its stack and a carried exit merges flat.
+// fresh defect keeps its stack and a carried exit merges flat. It is the
+// task's boundary, so it holds the task scope, which owns the Tasks that
+// moved out of their frames and drains them when the body ends.
 func guarded[T any](t *rt.Task, body func(*rt.Task) (T, error)) (v T, err error) {
+	ts := &Scope{s: rt.NewScope(t)}
+	ts.root = ts
+	ctx := t.WithValue(taskScopeKey{}, ts)
 	defer func() {
 		if p := recover(); p != nil {
+			err = capture(t, p)
+		}
+		ctx.End()
+		if err = ts.end(err); err != nil {
 			var zero T
-			v, err = zero, capture(t, p)
+			v = zero
 		}
 	}()
 	return body(t)

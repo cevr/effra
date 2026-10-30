@@ -484,20 +484,209 @@ func TestAbandonedChild(t *testing.T) {
 // failure. Law R3 keeps that failure; rt drops it (#198 O1). #197 makes a
 // dropped Task a compile error, which removes this case from checked
 // programs. Change this test when either lands.
+//
+// The frame returns only after rt has finished the task (rt detaches a
+// finished task from its parent), so the frame's release meets a task that
+// already failed: the test fails if the frame keeps the failure (the gap
+// closed), and it cannot pass through a stop of a task that still runs.
 func TestGapR3NormalClose(t *testing.T) {
-	done := make(chan struct{})
 	err := frame(rt.Root("main"), func(s *Scope) error {
-		Go(s, "child", func(*rt.Task) (int, error) {
-			defer close(done)
-			return 0, bad{"unobserved"}
-		})
-		<-done
-		time.Sleep(time.Millisecond)
+		c := Go(s, "child", func(*rt.Task) (int, error) { return 0, bad{"unobserved"} })
+		deadline := time.Now().Add(10 * time.Second)
+		for c.h.Task().Parent() != nil {
+			if time.Now().After(deadline) {
+				t.Fatal("the child did not finish")
+			}
+			time.Sleep(100 * time.Microsecond)
+		}
 		return nil
 	})
 	if err != nil {
 		t.Errorf("exit %v; the gap drops the unobserved failure (update this test with #197/#124)", err)
 	}
+}
+
+// TestTaskLeavesItsFrame is the regression test of the stage 3a round 1
+// review, M1 (Tasks rule 8): a Task value that leaves the function that
+// started it moves to the task scope and stays live, so the receiver can
+// Wait for it, move it into its own frame, or leave it to the task scope,
+// which drains it when the task ends. A Task that leaves without a move was
+// drained by its frame, and a Wait on it is a named defect.
+func TestTaskLeavesItsFrame(t *testing.T) {
+	// start is a function that returns the Task it started, as the lowering
+	// writes it: the returned Task moves to the task scope.
+	start := func(rt0 *rt.Task, move bool, body func(*rt.Task) (int, error)) *Task[int] {
+		c, _ := frameValue(rt0, func(s *Scope) (*Task[int], error) {
+			c := Go(s, "escaped", body)
+			if move {
+				c.Move(nil)
+			}
+			return c, nil
+		})
+		return c
+	}
+	t.Run("Wait after the frame returned", func(t *testing.T) {
+		var v int
+		var werr error
+		err := runMain(func(root *rt.Task) error {
+			c := start(root, true, func(*rt.Task) (int, error) { return 7, nil })
+			v, werr = c.Wait()
+			return nil
+		})
+		if err != nil || werr != nil || v != 7 {
+			t.Errorf("Wait = %d, %v (exit %v); want 7", v, werr, err)
+		}
+	})
+	t.Run("into the receiver's frame", func(t *testing.T) {
+		var ended atomic.Bool
+		var endedAtFrame bool
+		err := runMain(func(root *rt.Task) error {
+			err := frame(root, func(s *Scope) error {
+				c := start(root, true, func(ct *rt.Task) (int, error) {
+					defer ended.Store(true)
+					sleepUntilStopped(ct)
+					return 0, nil
+				})
+				c.Move(s)
+				return nil
+			})
+			endedAtFrame = ended.Load()
+			return err
+		})
+		if err != nil || !endedAtFrame {
+			t.Errorf("exit %v, task ended at the receiver frame's end: %v; want nil, true", err, endedAtFrame)
+		}
+	})
+	t.Run("left to the task scope", func(t *testing.T) {
+		var ended atomic.Bool
+		var endedEarly bool
+		err := runMain(func(root *rt.Task) error {
+			_ = start(root, true, func(ct *rt.Task) (int, error) {
+				defer ended.Store(true)
+				sleepUntilStopped(ct)
+				return 0, nil
+			})
+			endedEarly = ended.Load()
+			return nil
+		})
+		if err != nil || endedEarly || !ended.Load() {
+			t.Errorf("exit %v, ended before the task's end %v, after %v; want nil, false, true", err, endedEarly, ended.Load())
+		}
+	})
+	t.Run("without a move, Wait is a named defect", func(t *testing.T) {
+		var p any
+		_ = runMain(func(root *rt.Task) error {
+			c := start(root, false, func(*rt.Task) (int, error) { return 7, nil })
+			p = recovered(func() { _, _ = c.Wait() })
+			return nil
+		})
+		if s, _ := p.(string); !strings.Contains(s, "its owner stopped when it ended") {
+			t.Errorf("Wait raised %#v; want the named defect", p)
+		}
+	})
+	t.Run("into an ended scope or another task", func(t *testing.T) {
+		var saved *Scope
+		var pEnded, pOther any
+		_ = runMain(func(root *rt.Task) error {
+			frameNoRow(root, func(s *Scope) { saved = s })
+			frameNoRow(root, func(s *Scope) {
+				c := Go(s, "c", func(*rt.Task) (int, error) { return 0, nil })
+				pEnded = recovered(func() { c.Move(saved) })
+				other := Go(s, "other", func(ct *rt.Task) (int, error) {
+					frameNoRow(ct, func(os *Scope) { pOther = recovered(func() { c.Move(os) }) })
+					return 0, nil
+				})
+				_, _ = other.Wait()
+			})
+			return nil
+		})
+		if s, _ := pEnded.(string); !strings.Contains(s, "has ended (law R9)") {
+			t.Errorf("Move into an ended scope raised %#v; want the R9 defect", pEnded)
+		}
+		if s, _ := pOther.(string); !strings.Contains(s, "another task") {
+			t.Errorf("Move into another task's frame raised %#v; want the R9 defect", pOther)
+		}
+	})
+}
+
+// TestGoInExitAction is the regression test of the stage 3a round 1 review,
+// M2 (Tasks rule 7; Exit actions 5): the block of an exit action is a frame
+// for the tasks it starts and the exit actions it registers, so task.Go in
+// it runs, a Wait in it works, a task it leaves is drained when the block
+// ends, before the next exit action runs, and an exit action it registers
+// runs when the block ends.
+func TestGoInExitAction(t *testing.T) {
+	t.Run("Go and Wait", func(t *testing.T) {
+		ran := false
+		var v int
+		err := runMain(func(root *rt.Task) error {
+			return frame(root, func(s *Scope) error {
+				s.OnExit(func() {
+					v, _ = Go(s, "cleanup", func(*rt.Task) (int, error) { ran = true; return 1, nil }).Wait()
+				})
+				return nil
+			})
+		})
+		if err != nil || !ran || v != 1 {
+			t.Errorf("exit %v, ran %v, Wait %d; want nil, true, 1", err, ran, v)
+		}
+	})
+	t.Run("a task it leaves ends with the block", func(t *testing.T) {
+		var r recorder
+		err := runMain(func(root *rt.Task) error {
+			return frame(root, func(s *Scope) error {
+				s.OnExit(func() { r.add("earlier action") })
+				s.OnExit(func() {
+					started := make(chan struct{})
+					Go(s, "cleanup", func(ct *rt.Task) (int, error) {
+						defer r.add("child ended")
+						close(started)
+						// Inside an exit action the child is shielded from
+						// the ambient stop, but its owner's drain stops it.
+						if err := rt.Sleep(ct, rt.Live{}, time.Hour); err != nil {
+							return 0, nil
+						}
+						return 0, nil
+					})
+					<-started
+				})
+				return nil
+			})
+		})
+		if err != nil || r.String() != "child ended earlier action" {
+			t.Errorf("exit %v, order %q; want nil, %q", err, r.String(), "child ended earlier action")
+		}
+	})
+	t.Run("an exit action it registers", func(t *testing.T) {
+		var r recorder
+		err := runMain(func(root *rt.Task) error {
+			return frame(root, func(s *Scope) error {
+				s.OnExit(func() { r.add("earlier action") })
+				s.OnExit(func() {
+					r.add("outer")
+					s.OnExit(func() { r.add("inner") })
+				})
+				return nil
+			})
+		})
+		if err != nil || r.String() != "outer inner earlier action" {
+			t.Errorf("exit %v, order %q; want nil, %q", err, r.String(), "outer inner earlier action")
+		}
+	})
+	t.Run("a defect in its task joins the frame's exit", func(t *testing.T) {
+		err := runMain(func(root *rt.Task) error {
+			return frame(root, func(s *Scope) error {
+				s.OnExit(func() {
+					_, _ = Go(s, "cleanup", func(*rt.Task) (int, error) { return explode(), nil }).Wait()
+				})
+				return nil
+			})
+		})
+		rs := reasons(err)
+		if len(rs) != 1 || rs[0].Kind != rt.KindDefect {
+			t.Errorf("reasons %+v; want the cleanup task's defect", rs)
+		}
+	})
 }
 
 // TestGoOnEndedFrame: a frame that has returned admits no task (law R9).
