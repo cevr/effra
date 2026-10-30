@@ -135,7 +135,10 @@ func buildAll(t *testing.T, programs []*lowered, link bool) map[string]string {
 			}
 		}
 	}
-	if out, ok := run("vet", "./p/..."); !ok {
+	// Ergo has no unreachable-code rule, so a checked program may keep
+	// statements after a total match whose every arm returns; the vet check
+	// "unreachable" reports that source, not the lowering (state.md follow-up).
+	if out, ok := run("vet", "-unreachable=false", "./p/..."); !ok {
 		report("vet", out)
 		return nil
 	}

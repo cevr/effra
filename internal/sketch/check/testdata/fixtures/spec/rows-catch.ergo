@@ -39,7 +39,7 @@ func checkout(id string) string fails OrderNotFound | GatewayDown | timeout.Expi
 	return Gateway.Charge(order)
 }
 
-func demo(id string) string needs Orders {
+func demo(id string) string fails GatewayDown | timeout.Expired {
 	let outcome = with Live { checkout(id) } catch {
 	case OrderNotFound:
 		"no such order"
@@ -47,11 +47,11 @@ func demo(id string) string needs Orders {
 		"gateway unavailable"
 	}
 
-	let order = try Orders.Find(id) catch {
+	let note = try with Live { checkout(id) } catch {
 	case OrderNotFound:
-		Order{ID: id}
-	} // any other failure of Find escapes through try
-	return outcome + order.ID
+		"no such order"
+	} // GatewayDown and timeout.Expired escape through try
+	return outcome + note
 }
 
 func main() {}

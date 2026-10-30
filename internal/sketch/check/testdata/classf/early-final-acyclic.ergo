@@ -5,4 +5,4 @@ extern go fixture.Choose func Choose[T](x T,y T) fails Bang
 func a() { return Bang }
 func c() { return Bang }
 func b() { return Choose(BoxOf(a),BoxOf(c)) }
-func F() { b() } // want S105
+func F() { b() } // want S101

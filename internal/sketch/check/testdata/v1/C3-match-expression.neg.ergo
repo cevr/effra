@@ -1,0 +1,19 @@
+// 196r: a value `match` must be total (S103); its arms have one type (S108).
+type Payment = Pending{} | Authorized{AuthID string} | Declined{}
+
+func code(p Payment) int {
+	let n = match p { // want S103
+	case Pending:
+		0
+	}
+	n
+}
+
+func text(p Payment) string {
+	match p {
+	case Pending:
+		"waiting"
+	case _:
+		0 // want S108
+	}
+}

@@ -2,6 +2,8 @@ package lower
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"ergo.local/prototype/internal/sketch/check"
@@ -45,6 +47,7 @@ func (fc *funcCtx) call(x *syntax.CallExpr) operand {
 		refuse(x, "the prelude dot call %s is lowered after check-v1 stage D (D-D6) and lower-v1 stage 3", c.Name)
 	}
 	text, result, fallible := fc.callText(x, c)
+	defer fc.identify(x, c)()
 	switch {
 	case result && fallible:
 		v, e := fc.temp("v"), fc.temp("err")
@@ -82,6 +85,7 @@ func (fc *funcCtx) callStmt(x *syntax.CallExpr) string {
 	if fallible && len(rowElems(c.Fails)) > 0 {
 		ice(x, "an untried fallible call in a statement")
 	}
+	fc.identify(x, c) // the caller writes text next, the statement's last line
 	return text
 }
 
@@ -116,6 +120,18 @@ func (fc *funcCtx) callText(x *syntax.CallExpr, c *check.Call) (string, bool, bo
 			}
 			head, rest = "("+vals[0]+")."+fd.name, vals[1:]
 		} else {
+			if len(c.TypeArgs) < len(c.Func.Sig.TParams) {
+				// Info names fewer type arguments than the function has
+				// (stage C round 4 review T1): a dot call on a generic
+				// type, whose receiver binds the rest, or an instance in
+				// parentheses, (Fn[int])(1), which is a value.
+				if c.Recv != nil {
+					refuse(x, "a dot call to the generic function %s is lowered after check-v1 stage D (D-D8)", c.Func.Name)
+				}
+				if _, ok := unparen(x.Fun).(*syntax.IndexExpr); ok {
+					refuse(x.Fun, "an explicit instantiation used as a value is lowered after check-v1 stage E")
+				}
+			}
 			head, rest = fd.name+fc.typeArgs(c.Func.Sig, c.TypeArgs, x), vals
 		}
 		if fd.env {
@@ -338,22 +354,12 @@ func (fc *funcCtx) with(x *syntax.CallExpr) operand {
 		refuse(x.Args[0], "a with of an imported wire is lowered after check-v1 stage B supplies its wire (check-v1 r5b m2)")
 	}
 	list := x.Trailing.List
-	var tail *syntax.ExprStmt
-	if len(list) > 0 {
-		if last, ok := list[len(list)-1].(*syntax.ExprStmt); ok {
-			if _, isTail := fc.l.info.Tails[last]; isTail {
-				tail = last
-			}
-		}
-	}
 	var res operand
-	valued := !fc.noValue(x) && tail != nil
-	if valued {
+	if !fc.noValue(x) {
 		res.val = fc.temp("v")
 		fc.line("var " + res.val + " " + fc.goType(fc.typeOf(x)))
 	}
-	fallible := tail != nil && fc.fallibleExpr(tail.X)
-	if fallible {
+	if fc.fallibleExpr(x) {
 		res.err = fc.temp("err")
 		fc.line("var " + res.err + " error")
 	}
@@ -369,24 +375,13 @@ func (fc *funcCtx) with(x *syntax.CallExpr) operand {
 	fc.line(build + "(&" + env + ")")
 	saved := fc.env
 	fc.env = "(&" + env + ")"
-	if tail == nil {
-		fc.stmts(list)
+	// The block yields by the one tail rule (D-C1, D-C2): its last
+	// statement, through a final if, match or block, assigns the with's
+	// value and passes its failure on.
+	if res.val == "" && res.err == "" {
+		fc.yieldList(list, dest{kind: destStmt})
 	} else {
-		fc.stmts(list[:len(list)-1])
-		fc.at(tail)
-		switch {
-		case fallible:
-			o := fc.expr(tail.X)
-			if res.val != "" {
-				fc.line(res.val + ", " + res.err + " = " + fc.convertAt(tail.X, o.val) + ", " + o.err)
-			} else {
-				fc.line(res.err + " = " + o.err)
-			}
-		case valued:
-			fc.line(res.val + " = " + fc.assigned(tail.X))
-		default:
-			fc.discard(tail.X)
-		}
+		fc.yieldList(list, dest{kind: destAssign, name: res.val, err: res.err})
 	}
 	fc.env = saved
 	fc.depth--
@@ -473,6 +468,10 @@ func (l *lowerer) emitWire(w *check.Wire, name string, site syntax.Node) {
 		b.needs = l.providerNeeds(b.entry.Provider)
 	}
 	fc := newFuncCtx(l, newNamer(l.names), true)
+	fc.owner = w.Name
+	if w.Decl != nil {
+		l.recordDecl(w.Name, w.Decl)
+	}
 	fc.frame = &frame{}
 	fc.depth = 1
 	fc.env = fc.scope.alloc("env")
@@ -571,8 +570,16 @@ func (l *lowerer) providerNeeds(x syntax.Expr) map[*check.TypeName]bool {
 // operation's exact Go signatures, the value is already the interface's;
 // otherwise an adapter struct calls the table's functions.
 func (l *lowerer) operations(conv check.Conversion, val string, site syntax.Node) string {
-	from, ok := conv.From.(*check.Named)
+	// A *T source (types.md, Methods 5) always goes through an adapter that
+	// holds the pointer: a table function on T reads *v, one on *T takes v
+	// (stage C round 4 review T1).
+	from, ptrSource, ok := opsSource(conv.From)
 	to, ok2 := conv.To.(*check.Named)
+	if _, isAny := conv.To.(*check.Interface); isAny {
+		// `any` waits for stage E as a type does (types.go): the corpus
+		// guard met it (stage C round 7).
+		refuse(site, "the type %s is lowered after check-v1 stage E (no any, constraints)", conv.To)
+	}
 	if !ok || !ok2 {
 		refuse(site, "an operations conversion from %s to %s is not lowered yet", conv.From, conv.To)
 	}
@@ -582,11 +589,21 @@ func (l *lowerer) operations(conv check.Conversion, val string, site syntax.Node
 	}
 	tc := &typeCtx{l: l, params: map[*check.TypeParam]string{}, site: site}
 	if mentionsTypeParam(conv.From) || mentionsTypeParam(conv.To) {
-		refuse(site, "an operations conversion inside a generic function is not lowered yet")
+		refuse(site, "an operations conversion inside a generic function is lowered after check-v1 stage E (D-E1)")
 	}
 	fromGo := tc.goType(conv.From)
 	tc.goType(conv.To) // the adapter implements it: the type is emitted
-	direct := from.Orig == nil
+	// An instance of a generic operation type, A[int]: its operations'
+	// signatures name A's type parameters, which stand for the instance's
+	// arguments here (stage C round 4 review T1).
+	if to.Orig != nil {
+		for i, tp := range to.Orig.TParams {
+			if i < len(to.TArgs) && tp.Kind == check.KindType {
+				tc.params[tp] = tc.goType(to.TArgs[i])
+			}
+		}
+	}
+	direct := from.Orig == nil && !ptrSource
 	for _, op := range toDecl.ops {
 		f := conv.Table[op.Name]
 		if f == nil {
@@ -596,7 +613,11 @@ func (l *lowerer) operations(conv check.Conversion, val string, site syntax.Node
 		if fd.env {
 			ice(site, "the provider function %s needs capabilities", f.Name)
 		}
-		if fd.method == nil || fd.method.tn != from.Obj || fd.ptr || fd.name != memberName(op.Name) || tc.funcMethodSig(f) != tc.methodSig(op.Sig) {
+		// Only a direct candidate compares signatures: a generic source's
+		// table function spells its own type parameters, which tc does not
+		// bind, and the adapter needs no comparison (stage C round 5
+		// review M1).
+		if direct && (fd.method == nil || fd.method.tn != from.Obj || fd.ptr || fd.name != memberName(op.Name) || tc.funcMethodSig(f) != tc.methodSig(op.Sig)) {
 			direct = false
 		}
 	}
@@ -623,8 +644,11 @@ func (l *lowerer) operations(conv check.Conversion, val string, site syntax.Node
 				args = append(args, n)
 			}
 			recv := self + ".v"
-			if fd.ptr {
+			switch {
+			case fd.ptr && !ptrSource:
 				recv = "&" + recv
+			case !fd.ptr && ptrSource:
+				recv = "*" + recv
 			}
 			var call string
 			if fd.method != nil {
@@ -689,4 +713,163 @@ func mentionsTypeParam(t check.Type) bool {
 func isString(t check.Type) bool {
 	b, ok := t.(*check.Basic)
 	return ok && b.Kind == check.String
+}
+
+// Call identities (#230). Every call of the program's source, to a function,
+// an operation or a function value, keeps its Ergo identity: the source
+// declaration that makes it, what it calls and its position. The program
+// lists them in its call table, ergoCalls, and the Go line that makes the
+// call stands directly after the //line directive of its own position, so a
+// Go stack and the table name one site: a defect's report reads its Ergo
+// call chain from them (v1.RegisterCalls). Only user code has identities:
+// library bodies carry no directives.
+
+// identify records x's identity when it has one and writes the directive
+// of its position, unless the current directive already names it. The Go
+// call line comes next. The function it returns writes the directive that
+// was current before, so the rest of the statement maps back to it; call
+// it after the call line.
+func (fc *funcCtx) identify(x *syntax.CallExpr, c *check.Call) func() {
+	none := func() {}
+	if !fc.directives || !x.Pos().IsValid() {
+		return none
+	}
+	fc.l.recordCall(x, fc.owner, fc.callee(x, c))
+	if x.Pos() == fc.lastPos {
+		return none
+	}
+	prev, site := fc.lastPos, fc.site
+	fc.at(x)
+	return func() {
+		if prev.IsValid() {
+			fc.out.WriteString(fc.l.directive(prev))
+			fc.lastPos = prev
+		}
+		fc.site = site
+	}
+}
+
+// callee is the Ergo name of what x calls: a function, qualified by its
+// package outside the user's and the prelude, a same-named function by its
+// receiver's type, an operation by its operations or capability type, and
+// a function value by the name it is called through.
+func (fc *funcCtx) callee(x *syntax.CallExpr, c *check.Call) string {
+	typeName := func(t check.Type) string {
+		if p, ok := t.(*check.Pointer); ok {
+			t = p.Elem
+		}
+		if n, ok := t.(*check.Named); ok {
+			return n.Obj.Name
+		}
+		return t.String()
+	}
+	switch c.Kind {
+	case check.CallFunc:
+		if c.Recv != nil {
+			return typeName(fc.typeOf(c.Recv)) + "." + c.Func.Name
+		}
+		if p := c.Func.Pkg; p != nil && p != fc.l.pkg && p.Path != "prelude" {
+			return p.Path + "." + c.Func.Name
+		}
+		return c.Func.Name
+	case check.CallOp:
+		return typeName(fc.typeOf(c.Recv)) + "." + c.Op.Name
+	case check.CallProviderOp:
+		if sel, ok := unparen(x.Fun).(*syntax.SelectorExpr); ok {
+			return typeName(fc.typeOf(sel.X)) + "." + c.Op.Name
+		}
+	case check.CallFuncValue:
+		switch f := unparen(x.Fun).(type) {
+		case *syntax.Ident:
+			return f.Name
+		case *syntax.SelectorExpr:
+			return f.Sel.Name
+		}
+		return "a function value"
+	}
+	return "a call"
+}
+
+// callIdent is one entry of the call table.
+type callIdent struct {
+	offset       int
+	fn, callee   string
+	line, column int
+}
+
+// recordCall adds x's identity to the call table once: a body lowered
+// again (an instance) does not repeat it.
+func (l *lowerer) recordCall(x *syntax.CallExpr, owner, callee string) {
+	if l.callSeen[x] {
+		return
+	}
+	if l.callSeen == nil {
+		l.callSeen = map[*syntax.CallExpr]bool{}
+	}
+	l.callSeen[x] = true
+	line, column := l.file.Position(x.Pos())
+	l.calls = append(l.calls, callIdent{offset: int(x.Pos()), fn: owner, callee: callee, line: line, column: column})
+}
+
+// declIdent is one entry of the declaration table: a source declaration's
+// name (the Func of its calls) and its first and last lines.
+type declIdent struct {
+	offset    int
+	name      string
+	line, end int
+}
+
+// recordDecl adds the source declaration n, named name, to the
+// declaration table once.
+func (l *lowerer) recordDecl(name string, n syntax.Node) {
+	if l.declSeen[n] {
+		return
+	}
+	if l.declSeen == nil {
+		l.declSeen = map[syntax.Node]bool{}
+	}
+	l.declSeen[n] = true
+	line, _ := l.file.Position(n.Pos())
+	end, _ := l.file.Position(n.End())
+	l.decls = append(l.decls, declIdent{offset: int(n.Pos()), name: name, line: line, end: end})
+}
+
+// callTable is the Go declaration of the program's source map and the init
+// function that registers it with the runtime (v1.RegisterCalls), written
+// for every program, its tables empty or not (stage C round 2 review m1):
+// the declaration table, each source declaration's name and lines, and the
+// call table, in source order. A call's Func is the source declaration that
+// makes it, Callee what it calls, and File, Line and Column its position,
+// which the //line directive before the call also names. The entry types
+// are aliases of the structs v1.RegisterCalls takes; registered, the tables
+// name the Ergo frames of a defect in its report and no Go frame
+// (runtime.md, Exit causes). It is written after the entry, so it may name
+// the runtime package.
+func (l *lowerer) callTable() string {
+	sort.SliceStable(l.decls, func(i, j int) bool { return l.decls[i].offset < l.decls[j].offset })
+	sort.SliceStable(l.calls, func(i, j int) bool { return l.calls[i].offset < l.calls[j].offset })
+	declEntry := l.pkgName(pkgKey{"decl", nil}, "ergoDecl")
+	declTable := l.pkgName(pkgKey{"decls", nil}, "ergoDecls")
+	entry := l.pkgName(pkgKey{"call", nil}, "ergoCall")
+	table := l.pkgName(pkgKey{"calls", nil}, "ergoCalls")
+	file := strconv.Quote(l.src)
+	var b strings.Builder
+	b.WriteString("// " + declEntry + " is one source declaration and its lines (#230).\n")
+	b.WriteString("type " + declEntry + " = struct {\n\tName      string\n\tFile      string\n\tLine, End int\n}\n\n")
+	b.WriteString("// " + declTable + " lists the program's source declarations, in source order.\n")
+	b.WriteString("var " + declTable + " = [...]" + declEntry + "{\n")
+	for _, d := range l.decls {
+		fmt.Fprintf(&b, "\t{Name: %s, File: %s, Line: %d, End: %d},\n", strconv.Quote(d.name), file, d.line, d.end)
+	}
+	b.WriteString("}\n\n")
+	b.WriteString("// " + entry + " is the Ergo identity of one lowered call (#230).\n")
+	b.WriteString("type " + entry + " = struct {\n\tFunc, Callee string\n\tFile         string\n\tLine, Column int\n}\n\n")
+	b.WriteString("// " + table + " lists the identity of each call of the program, in source order.\n")
+	b.WriteString("var " + table + " = [...]" + entry + "{\n")
+	for _, c := range l.calls {
+		fmt.Fprintf(&b, "\t{Func: %s, Callee: %s, File: %s, Line: %d, Column: %d},\n", strconv.Quote(c.fn), strconv.Quote(c.callee), file, c.line, c.column)
+	}
+	b.WriteString("}\n\n")
+	b.WriteString("func init() {\n\t" + l.rt() + ".RegisterCalls(" + declTable + "[:], " + table + "[:])\n}\n\n")
+	return b.String()
 }

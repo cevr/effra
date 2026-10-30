@@ -61,9 +61,20 @@ func (tc *typeCtx) goType(t check.Type) string {
 		}
 		ice(tc.site, "the type parameter %s appears outside its declaration", t.Name)
 	case *check.Tuple:
-		refuse(tc.site, "a tuple is lowered after check-v1 stage B (196t)")
+		// A tuple is structural (196t): an unnamed Go struct, identical
+		// wherever its element types are, and comparable when they are.
+		fields := make([]string, len(t.Types))
+		for i, e := range t.Types {
+			fields[i] = tupleField(i) + " " + tc.goType(e)
+		}
+		return "struct{ " + strings.Join(fields, "; ") + " }"
 	case *check.Union:
-		refuse(tc.site, "an inline union is lowered after check-v1 stage B (196p)")
+		// The row value of `case err:` (D-C3) is a Go error holding one of
+		// its error types.
+		if tc.l.isErrorValue(t) {
+			return "error"
+		}
+		ice(tc.site, "the anonymous union %s is not a row value; the checker builds no other", t)
 	case *check.Interface:
 		refuse(tc.site, "the type %s is lowered after check-v1 stage E (no any, constraints)", t)
 	}
@@ -146,18 +157,31 @@ func (tc *typeCtx) zero(t check.Type) string {
 // from the exact value.
 func (tc *typeCtx) constant(t check.Type, v constant.Value, site syntax.Node) string {
 	goType := tc.goType(t)
+	// A defined type over a basic type keeps its own name: Flag(true).
+	basic, _ := t.(*check.Basic)
+	nominal := false
+	if n, ok := t.(*check.Named); ok {
+		basic, _ = n.Underlying().(*check.Basic)
+		nominal = true
+	}
 	switch v.Kind() {
-	// An untyped Go string or bool constant can become only string or bool,
-	// the only types of these kinds (a defined type over one is check-v1
-	// stage B's), so the bare literal keeps its one type.
+	// An untyped Go string or bool constant becomes bool or string as a
+	// bare literal; a defined type over one is written as a conversion, so
+	// the constant keeps its nominal type.
 	case constant.Bool:
-		if b, ok := t.(*check.Basic); !ok || b.Kind != check.Bool {
+		if basic == nil || basic.Kind != check.Bool {
 			ice(site, "a bool constant of type %s", t)
+		}
+		if nominal {
+			return goType + "(" + strconv.FormatBool(constant.BoolVal(v)) + ")"
 		}
 		return strconv.FormatBool(constant.BoolVal(v))
 	case constant.String:
-		if !isString(t) {
+		if basic == nil || !isString(basic) {
 			ice(site, "a string constant of type %s", t)
+		}
+		if nominal {
+			return goType + "(" + strconv.Quote(constant.StringVal(v)) + ")"
 		}
 		return strconv.Quote(constant.StringVal(v))
 	case constant.Int:
@@ -198,6 +222,15 @@ func isInteger(t check.Type) bool {
 // (types.md, Error types 2). The checker's ErrorTypes of the type's
 // package, and of this package, decide it.
 func (l *lowerer) isErrorValue(t check.Type) bool {
+	if u, row := t.(*check.Union); row {
+		// A row value (D-C3): every variant is an error type.
+		for _, v := range u.Variants {
+			if !l.isErrorValue(v) {
+				return false
+			}
+		}
+		return len(u.Variants) > 0
+	}
 	n, ok := t.(*check.Named)
 	if !ok {
 		return false

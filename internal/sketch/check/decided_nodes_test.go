@@ -328,14 +328,14 @@ func f() {
 }
 func main() {}
 `, []string{"S109:3"}},
-	{"if value", "an if in value position is 196r's", `
+	{"if value", "an if in value position yields its branch (D-C2)", `
 func f(c bool) int {
 	let x = if c { 1 } else { 2 }
 	return x
 }
 func main() {}
-`, []string{"S109:3"}},
-	{"match value", "a match in value position is 196r's", `
+`, nil},
+	{"match value", "a match in value position yields its arm (D-C2)", `
 func f(n int) int {
 	let x = match n {
 	case 1: 10
@@ -344,7 +344,7 @@ func f(n int) int {
 	return x
 }
 func main() {}
-`, []string{"S109:3"}},
+`, nil},
 	{"value match", "a match over literal patterns", `
 func f(n int) int {
 	match n {
@@ -454,17 +454,17 @@ func f() string {
 }
 func main() {}
 `, nil},
-	{"catch-all binding", "a catch-all binding", `
+	{"catch-all binding", "case err: binds the row value (D-C3)", `
 type Gone {}
 func load() int fails Gone { return 1 }
-func f() int {
+func f() int fails Gone {
 	return load() catch {
 	case err:
-		0
+		return err
 	}
 }
 func main() {}
-`, []string{"S109:6"}},
+`, nil},
 	{"for in", "element and index bindings", `
 func f(xs []int64, m Map[string, int64]) int64 {
 	let mut s int64 = 0

@@ -714,10 +714,7 @@ func (c *checker) funcLit(x *syntax.FuncLit, expected *Signature, in *inferer) o
 	// (D3); which literals are value uses is lexical (refWalker).
 	frame := c.pushLit()
 	c.body(t, x.Type, sig.Params, func() {
-		c.stmtList(x.Body.List, false)
-		if len(sig.Results) > 0 && !c.terminatesList(x.Body.List) {
-			c.errorAt(x.Body.Rbrace, x.Body.Rbrace+1, CodeMissingRet, "this function literal can reach the end of its body without returning a value (rows.md, Totality 3)")
-		}
+		c.functionBody(x.Body, "this function literal")
 	})
 	sig.Errors = t.row(t.declErrors, t.errors)
 	sig.Uses = t.row(t.declUses, t.uses)
@@ -803,7 +800,7 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 		frame = c.pushLit()
 	}
 	c.body(t, nil, nil, func() {
-		res := c.yieldingBlock(b, b.List, t.results, t.resultKnown, func(op *operand) { c.escape(op.expr, op.errs) })
+		res := c.yieldingBlock(b, b.List, t.results, t.resultKnown, false, func(op *operand) { c.escape(op.expr, op.errs) })
 		if resultFree {
 			if res != nil && res != NoValue {
 				sig.Results = []Type{res}
@@ -824,90 +821,80 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 	return sig, refused
 }
 
-// yieldingBlock checks a block that yields its last expression: a with
-// block or a trailing block. When results are known, the last
-// expression is assigned to them; otherwise the result is its type (a
-// literal's default type), or no value; a single unknown result
-// is still the expected type of the last expression, as a hint (M16). pass
-// receives the last expression's error row, which passes through
-// (rows.md, With 6).
-func (c *checker) yieldingBlock(at syntax.Node, list []syntax.Stmt, results []Type, known bool, pass func(*operand)) Type {
-	if len(list) == 0 {
-		if known && len(results) > 0 {
-			c.errorf(at, CodeType, "this block yields no value; %s expected", results[0])
-		}
-		return NoValue
-	}
-	last, isExpr := list[len(list)-1].(*syntax.ExprStmt)
-	if !isExpr {
-		c.stmtList(list, false)
-		if known && len(results) > 0 {
-			c.errorf(list[len(list)-1], CodeType, "this block must end with an expression of type %s; a block yields its last expression", results[0])
-		}
-		return NoValue
-	}
-	c.stmtList(list[:len(list)-1], true)
-	var hint Type
-	if len(results) == 1 {
-		hint = results[0]
-	}
-	op := c.expr(last.X, hint)
-	if op.invalid() {
-		return nil
-	}
-	if known && len(results) == 0 {
-		c.needNoValueOrCall(&op)
-	} else {
-		switch op.mode {
-		case modeValue, modeConst, modeNoValue:
+// yieldingBlock checks a block that yields its last statement, by the one
+// tail rule of function bodies (D-C1, D-C2): a with block, a bare block or
+// a trailing block. With one known result every path yields a value of
+// that type (S107 for a path without one); with no result the tail is
+// discarded; otherwise the block yields a value when every path does, of
+// the first value's type (a single unknown result is still the tail's
+// expected type, as a hint; M16), and no value when a path has none, unless
+// need says the block's value is used: then such a path is S107 at its end,
+// as in every other body that yields a value (D-C1; review O1). pass
+// receives a fallible tail's error row, which passes through (rows.md,
+// With 6). The result is nil after an invalid tail (reported).
+func (c *checker) yieldingBlock(b *syntax.BlockStmt, list []syntax.Stmt, results []Type, known, need bool, pass func(*operand)) Type {
+	if !known || len(results) < 2 {
+		k := &sink{pass: pass, what: "the block's value"}
+		missed := false
+		switch {
+		case known && len(results) == 1:
+			k.want = results[0]
+			k.missing = func(end syntax.Pos) {
+				c.errorAt(end, end+1, CodeMissingRet, "this path can reach the end of the block without a value, and the block yields a value of type %s: end it with an expression, return or an else (rows.md, Totality 3)", results[0])
+			}
+		case known:
+			k.discard = true
 		default:
-			c.needValue(&op)
-			if op.invalid() {
-				return nil
+			k.optional = true
+			if len(results) == 1 {
+				k.hint = results[0]
+			}
+			if need {
+				k.missing = func(end syntax.Pos) {
+					missed = true
+					c.errorAt(end, end+1, CodeMissingRet, "this path can reach the end of the block without a value, and the block's value is used: end it with an expression, return or an else (rows.md, Totality 3)")
+				}
 			}
 		}
+		c.yieldList(list, k, b.Rbrace)
+		switch {
+		case known && len(results) == 1:
+			return results[0]
+		case known:
+			return NoValue
+		case missed:
+			// Reported at the path (D3): the block's value is invalid.
+			return nil
+		case k.bad && !k.none:
+			return nil
+		case k.none || k.join == nil:
+			return NoValue
+		}
+		return k.join
+	}
+	if len(list) == 0 {
+		c.errorf(b, CodeType, "this block yields no value; %s expected", results[0])
+		return NoValue
+	}
+	// A legacy result list of several types: the block yields one tuple.
+	c.stmtList(list[:len(list)-1], false)
+	last, isExpr := list[len(list)-1].(*syntax.ExprStmt)
+	if !isExpr {
+		c.stmt(list[len(list)-1])
+		c.errorf(list[len(list)-1], CodeType, "this block must end with an expression of type %s; a block yields its last expression", results[0])
+		return NoValue
+	}
+	op := c.expr(last.X, nil)
+	if op.invalid() {
+		return nil
 	}
 	if op.fallible() {
 		pass(&op)
 	}
-	switch {
-	case known && len(results) == 1:
-		if op.mode == modeNoValue {
-			c.errorf(last.X, CodeType, "this block yields no value; %s expected", results[0])
-			return nil
-		}
-		c.assign(&op, results[0], "the block's value")
-		c.tail(last, results[0])
-		return results[0]
-	case known && len(results) > 1:
-		if tup, ok := op.typ.(*Tuple); !ok || len(tup.Types) != len(results) {
-			c.errorf(last.X, CodeType, "this block yields the wrong number of values")
-		}
-		return op.typ
-	case known:
-		return NoValue
+	if tup, ok := op.typ.(*Tuple); !ok || len(tup.Types) != len(results) {
+		c.errorf(last.X, CodeType, "this block yields the wrong number of values")
 	}
-	if op.mode == modeNoValue {
-		return NoValue
-	}
-	t := c.typeOf(&op)
-	c.tail(last, t)
-	return t
-}
-
-// needNoValueOrCall accepts the last expression of a block whose value is
-// discarded: as an expression statement (S110 otherwise).
-func (c *checker) needNoValueOrCall(op *operand) {
-	switch op.mode {
-	case modeNoValue:
-		return
-	case modeValue, modeConst:
-		if !isCallLike(op.expr) {
-			c.errorf(op.expr, CodeUnused, "this value is not used; an expression statement is a call, try, catch or with")
-		}
-		return
-	}
-	c.needValue(op)
+	return op.typ
 }
 
 func isCallLike(x syntax.Expr) bool {

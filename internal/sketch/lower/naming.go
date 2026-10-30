@@ -20,7 +20,9 @@ import (
 //     lets and wire builders, so a source name keeps its spelling unless Go
 //     reserves it;
 //  2. the generated package entities: the runtime and time imports, the
-//     environment type and the shared empty environment;
+//     environment type, the shared empty environment, the pattern test
+//     helper, the call and declaration tables with their entry types
+//     (calls.go, #230) and the package initializer (decls.go, initFunc);
 //  3. every type and function of every library package the program reaches
 //     (the prelude and imported std packages, by path), used or not;
 //  4. the operations adapters of every operations conversion, and the text
@@ -38,8 +40,15 @@ func (l *lowerer) nameAll() {
 	l.declareNames()
 	l.pkgName(pkgKey{"import", runtimeImport}, "ergo")
 	l.pkgName(pkgKey{"import", "time"}, "time")
+	l.pkgName(pkgKey{"import", taskImport}, "rt")
 	l.pkgName(pkgKey{"env", nil}, "Env")
 	l.pkgName(pkgKey{"noenv", nil}, "noEnv")
+	l.pkgName(pkgKey{"is", nil}, "ergoIs")
+	l.pkgName(pkgKey{"call", nil}, "ergoCall")
+	l.pkgName(pkgKey{"calls", nil}, "ergoCalls")
+	l.pkgName(pkgKey{"decl", nil}, "ergoDecl")
+	l.pkgName(pkgKey{"decls", nil}, "ergoDecls")
+	l.pkgName(pkgKey{"init", nil}, "ergoInit")
 	libs := l.libraryPackages()
 	for _, p := range libs {
 		for _, tn := range p.Types {
@@ -66,7 +75,7 @@ func (l *lowerer) nameAll() {
 			}
 		}
 		for _, c := range convs {
-			from, ok := c.From.(*check.Named)
+			from, _, ok := opsSource(c.From)
 			to, ok2 := c.To.(*check.Named)
 			if c.Kind != check.ConvOperations || !ok || !ok2 || mentionsTypeParam(c.From) || mentionsTypeParam(c.To) {
 				continue
@@ -98,6 +107,16 @@ func (l *lowerer) nameAll() {
 // source and target types.
 func adapterKey(c check.Conversion) string {
 	return c.From.String() + " => " + c.To.String()
+}
+
+// opsSource is the named type an operations conversion converts from: T,
+// or T behind a pointer *T (ptr). ok is false for any other source.
+func opsSource(from check.Type) (named *check.Named, ptr, ok bool) {
+	if p, isPtr := from.(*check.Pointer); isPtr {
+		from, ptr = p.Elem, true
+	}
+	named, ok = from.(*check.Named)
+	return named, ptr, ok
 }
 
 // libraryPackages are the packages other than the user's that the user

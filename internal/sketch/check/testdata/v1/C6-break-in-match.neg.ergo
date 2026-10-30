@@ -1,0 +1,11 @@
+// Seventh round, item 4: a `match` is not a target of `break` or
+// `continue`, so outside a `for` they are S108.
+func f(n int) int {
+	match n {
+	case 0:
+		break // want S108
+	case _:
+		continue // want S108
+	}
+	n
+}

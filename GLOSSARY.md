@@ -97,6 +97,8 @@ A status in parentheses applies to the term's support: *checked* (the 2026 check
 
 **Irrefutable pattern** (checked): A pattern that matches every value of its type, such as a name, a tuple of names or a record pattern of the value's own type. `let` and `for` take only irrefutable patterns; a partial one belongs in a `match`.
 
+**Row value** (checked): The value `case err:` binds in a `catch` arm: the failures the earlier arms leave, typed as the anonymous union of their error types. It can be returned (a failure of those types), matched, caught or assigned to a declared union that lists each of them; it has no other operation.
+
 **Block**: A braced statement list. As the body of `with`, `timeout.After` or a trailing block, it yields its last expression, and `return`, `break` and `continue` are errors inside it.
 
 **Trailing block** (checked; the build lowers it only for `with` and `timeout.After` until #50): A block written after a call's parentheses. It is notation for a function-literal final argument whose body contains no `return`, `break` or `continue`; an early return needs an explicit `func` literal. It cannot escape the call unless the parameter type says so. The block of `with` is part of that construct instead.

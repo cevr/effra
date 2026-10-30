@@ -28,6 +28,9 @@ const (
 	kindRecord typeKind = iota + 1
 	kindOps
 	kindUnion
+	// kindDefined is `type N T` (D-B7): Go's `type N T`, with T's fields
+	// when T is a record.
+	kindDefined
 )
 
 // typeDecl is a lowered type declaration.
@@ -40,12 +43,17 @@ type typeDecl struct {
 	fields    []*check.Field
 	fieldName map[string]string
 	ops       []*check.Method
+	defined   check.Type // kindDefined: T, the type N is defined over
 	variants  []*check.TypeName
 	marker    string
 	errorType bool
 	library   bool
 	emitted   bool
 	queued    bool // a library type queued for emission
+	// refused is the refusal that ended the reading of the type's
+	// structure; every later use raises it again, so a half-read type is
+	// never used, even when the first reading ran under quiet.
+	refused *refusal
 }
 
 // funcDecl is a lowered function declaration.
@@ -95,6 +103,14 @@ func (l *lowerer) declareName(d syntax.Decl) {
 					if v, ok := l.info.Defs[id].(*check.Var); ok {
 						l.vars[v] = l.pkgName(pkgKey{"let", v}, v.Name)
 					}
+				}
+				if spec.Pattern != nil {
+					for _, v := range patternVars(l.info.Patterns[spec.Pattern], nil) {
+						l.vars[v] = l.pkgName(pkgKey{"let", v}, v.Name)
+					}
+				}
+				if len(spec.Values) == 1 && (spec.Pattern != nil || len(spec.Names) > 1) {
+					l.pkgName(pkgKey{"letinit", spec}, "ergoLet")
 				}
 			}
 		case *syntax.WireDecl:
@@ -153,13 +169,27 @@ func (l *lowerer) typeName(tn *check.TypeName) string {
 // typeDecl is the lowered declaration of tn, its structure read from the
 // declaring package's Info: a record's fields and an operation type's
 // operations are Defs of its declaring names, a union's variants its
-// checked underlying type. It queues nothing (useType).
+// checked underlying type. It queues nothing (useType). A refusal while it
+// reads the structure is kept on the declaration and raised at every later
+// use, at its own site: the naming pass reads types under quiet, and the
+// lowering must still report that refusal, not a name the pass missed.
 func (l *lowerer) typeDecl(tn *check.TypeName, site syntax.Node) *typeDecl {
 	l.typeName(tn)
 	td := l.types[tn]
+	if td.refused != nil {
+		panic(*td.refused)
+	}
 	if td.kind != 0 {
 		return td
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			if ref, ok := r.(refusal); ok {
+				td.refused = &ref
+			}
+			panic(r)
+		}
+	}()
 	named, ok := tn.Type.(*check.Named)
 	if !ok || tn.Decl == nil || tn.Pkg == nil || tn.Pkg.Info == nil {
 		refuse(site, "the type %s is not a declared record, operation type or union, which lowering supports so far", tn.Name)
@@ -179,6 +209,9 @@ func (l *lowerer) typeDecl(tn *check.TypeName, site syntax.Node) *typeDecl {
 		td.kind = kindRecord
 		td.fieldName = map[string]string{}
 		td.errorType = named.Obj.Pkg.ErrorTypes[named] || l.pkg.ErrorTypes[named]
+		// A defined error type over this record keeps its Go field names,
+		// so they avoid its Error method too.
+		avoidError := td.errorType || l.definedErrorOver(named)
 		taken := map[string]bool{}
 		for _, f := range spec.Fields.List {
 			for _, id := range f.Names {
@@ -187,7 +220,7 @@ func (l *lowerer) typeDecl(tn *check.TypeName, site syntax.Node) *typeDecl {
 					ice(id, "the field %s of %s has no Defs entry", id.Name, tn.Name)
 				}
 				goName := memberName(field.Name)
-				if td.errorType && goName == "Error" {
+				if avoidError && goName == "Error" {
 					goName = "Error_"
 				}
 				if taken[goName] {
@@ -232,9 +265,49 @@ func (l *lowerer) typeDecl(tn *check.TypeName, site syntax.Node) *typeDecl {
 	case *syntax.MachineType:
 		refuse(site, "machine plan values are lowered in lower-v1 stage 4 (spec D5)")
 	default:
-		refuse(site, "a defined type over another type is lowered after check-v1 stage B")
+		def := named.Defined()
+		if def == nil {
+			ice(site, "the type %s has no shape the lowering knows", tn.Name)
+		}
+		td.kind, td.defined = kindDefined, def
+		if base, ok := def.(*check.Named); ok {
+			// Go's `type N T` keeps T's fields, by their Go names.
+			if bd := l.typeDecl(base.Obj, site); bd.fieldName != nil {
+				td.fields, td.fieldName = bd.fields, bd.fieldName
+			}
+		}
+		// A defined type over a record, named in an error row, is an error
+		// type of its own: it gets its own Error method (types.md, Error
+		// types 1).
+		td.errorType = named.Obj.Pkg.ErrorTypes[named] || l.pkg.ErrorTypes[named]
 	}
 	return td
+}
+
+// definedErrorOver reports whether an error type of the program is defined
+// over named, directly or through other defined types.
+func (l *lowerer) definedErrorOver(named *check.Named) bool {
+	for _, pkg := range []*check.Package{named.Obj.Pkg, l.pkg} {
+		if pkg == nil {
+			continue
+		}
+		for n := range pkg.ErrorTypes {
+			for t := n.Defined(); t != nil; {
+				d, ok := t.(*check.Named)
+				if !ok {
+					break
+				}
+				if d.Orig != nil {
+					d = d.Orig
+				}
+				if d == named {
+					return true
+				}
+				t = d.Defined()
+			}
+		}
+	}
+	return false
 }
 
 // typeParams writes a type parameter list and returns the scope that names
@@ -308,15 +381,28 @@ func (l *lowerer) emitType(td *typeDecl) {
 	case kindUnion:
 		l.unionMarker(td)
 		b.WriteString("type " + td.name + tparams + " interface{ " + td.marker + "() }\n\n")
+		// Two instances of one generic record, V[A] | V[B], share the
+		// generic type's one marker method: Go declares methods on V, not
+		// on its instances. The checker admits only the listed instances.
+		marked := map[*typeDecl]bool{}
 		for _, v := range td.variants {
 			vd := l.useType(l.typeDecl(v, site))
 			if vd.kind != kindRecord {
 				refuse(site, "the variant %s of %s is not a record", v.Name, td.tn.Name)
 			}
 			l.emitType(vd)
+			if marked[vd] {
+				continue
+			}
+			marked[vd] = true
 			b.WriteString("func (" + l.recvType(vd) + ") " + td.marker + "() {}\n")
 		}
 		b.WriteString("\n")
+	case kindDefined:
+		b.WriteString("type " + td.name + tparams + " " + tc.goType(td.defined) + "\n\n")
+		if td.errorType {
+			l.errorMethod(b, td)
+		}
 	}
 }
 
@@ -530,10 +616,23 @@ func (l *lowerer) emitFuncBody(fd *funcDecl) {
 	scope := newNamer(l.names)
 	site := syntax.Node(f.Decl.Name)
 	fc := newFuncCtx(l, scope, directives)
+	fc.owner = f.Name
+	if fd.method != nil {
+		fc.owner = fd.method.tn.Name + "." + f.Name
+	}
+	if directives {
+		l.recordDecl(fc.owner, f.Decl)
+	}
 	var head strings.Builder
 	var params []*check.Var
 	if f.Decl.Type != nil && f.Decl.Type.Params != nil {
 		for _, field := range f.Decl.Type.Params.List {
+			if len(field.Names) == 0 {
+				// An unnamed parameter, func M(S, int): no name binds, so
+				// it gets a fresh Go name (stage C round 4 review T1).
+				params = append(params, nil)
+				continue
+			}
 			for _, id := range field.Names {
 				v, ok := f.Pkg.Info.Defs[id].(*check.Var)
 				if !ok {
@@ -637,34 +736,203 @@ func (l *lowerer) directive(pos syntax.Pos) string {
 	return Directive(l.src, line, column)
 }
 
-// packageLet lowers a package-level let to a Go package variable. Its
-// initializer runs in Go's package initialization, which orders variables by
-// their references (types.md, Methods 7).
+// packageLet lowers a package-level let to a Go package variable. A
+// constant initializer stays the variable's Go initializer, which cannot
+// fail; any other runs in initFunc, in Info.InitOrder, inside the program's
+// root task, so a defect in it is reported with its Ergo frames as any
+// other defect is (stage C round 2 review m1).
 func (l *lowerer) packageLet(d *syntax.VarDecl) {
 	for _, spec := range d.Specs {
-		if spec.Pattern != nil || len(spec.Names) != 1 || len(spec.Values) > 1 {
-			refuse(d, "a let with a pattern or several names is lowered after check-v1 stage B (196p, 196t)")
+		switch {
+		case spec.Pattern == nil && len(spec.Names) == 1 && len(spec.Values) <= 1:
+			var x syntax.Expr
+			if len(spec.Values) == 1 {
+				x = spec.Values[0]
+			}
+			l.packageVar(spec, spec.Names[0], x)
+		case spec.Pattern == nil && len(spec.Names) == len(spec.Values):
+			// `let a, b = x, y`: one Go variable per name.
+			for i, id := range spec.Names {
+				l.packageVar(spec, id, spec.Values[i])
+			}
+		case len(spec.Values) == 1:
+			l.packagePattern(spec)
+		default:
+			ice(spec, "a package let whose names and values do not pair")
 		}
-		v, ok := l.info.Defs[spec.Names[0]].(*check.Var)
-		if !ok {
-			ice(spec.Names[0], "the let %s has no Defs entry", spec.Names[0].Name)
-		}
-		fc := newFuncCtx(l, newNamer(l.names), true)
-		fc.frame = &frame{result: v.Type}
-		fc.depth = 1
-		goType := fc.goType(v.Type)
-		l.user.WriteString(l.directive(spec.Names[0].Pos()))
-		if len(spec.Values) == 0 {
-			l.user.WriteString("var " + l.vars[v] + " " + goType + "\n\n")
-			continue
-		}
-		val := fc.assigned(spec.Values[0])
-		if fc.out.Len() == 0 {
-			l.user.WriteString("var " + l.vars[v] + " " + goType + " = " + val + "\n\n")
-			continue
-		}
-		l.user.WriteString("var " + l.vars[v] + " = func() " + goType + " {\n" + fc.out.String() + "\treturn " + val + "\n}()\n\n")
 	}
+}
+
+// addInit records the Go code of the package initializer x for initFunc:
+// after the //line directive of at, a block of its own that runs stmts and
+// then assigns.
+func (l *lowerer) addInit(x syntax.Expr, at syntax.Pos, stmts string, assigns []string) {
+	var b strings.Builder
+	b.WriteString(l.directive(at))
+	b.WriteString("\t{\n" + stmts)
+	for _, a := range assigns {
+		b.WriteString("\t\t" + a + "\n")
+	}
+	b.WriteString("\t}\n")
+	if l.inits == nil {
+		l.inits = map[syntax.Expr]string{}
+	}
+	l.inits[x] = b.String()
+}
+
+// hasInits reports whether initFunc runs any initializer.
+func (l *lowerer) hasInits() bool {
+	for _, in := range l.info.InitOrder {
+		if _, ok := l.inits[in.Value]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// initFunc is the Go function that runs the package-level initializers in
+// Info.InitOrder (Go's initialization order: a let after every let it
+// refers to, directly or through functions, else in declaration order), or
+// "" when there is none. The entry calls it first inside v1.Main.
+func (l *lowerer) initFunc() string {
+	if !l.hasInits() {
+		return ""
+	}
+	name := l.pkgName(pkgKey{"init", nil}, "ergoInit")
+	var b strings.Builder
+	b.WriteString("// " + name + " runs the package-level lets in Go's initialization order,\n// inside the program's root task.\nfunc " + name + "() {\n")
+	for _, in := range l.info.InitOrder {
+		b.WriteString(l.inits[in.Value])
+	}
+	b.WriteString("}\n\n")
+	return b.String()
+}
+
+// packageVar lowers one name of a package-level let, with its initializer
+// x (nil for none). A name the checker gave no object, `_`, keeps its
+// initializer's evaluation.
+func (l *lowerer) packageVar(spec *syntax.VarSpec, id *syntax.Ident, x syntax.Expr) {
+	v, ok := l.info.Defs[id].(*check.Var)
+	if !ok && (id.Name != "_" || x == nil) {
+		ice(id, "the let %s has no Defs entry", id.Name)
+	}
+	refuseUntypedLet(spec, id)
+	fc := newFuncCtx(l, newNamer(l.names), true)
+	fc.depth = 2
+	name, goType := "_", ""
+	if ok {
+		fc.owner = v.Name
+		fc.frame = &frame{result: v.Type}
+		name, goType = l.vars[v], fc.goType(v.Type)
+	} else {
+		fc.owner = "_"
+		fc.frame = &frame{result: fc.typeOf(x)}
+		goType = fc.goType(fc.typeOf(x))
+	}
+	l.recordDecl(fc.owner, spec)
+	if x == nil {
+		l.user.WriteString(l.directive(id.Pos()))
+		l.user.WriteString("var " + name + " " + goType + "\n\n")
+		return
+	}
+	val := fc.assigned(x)
+	if _, constant := l.info.Values[x]; constant && fc.out.Len() == 0 {
+		l.user.WriteString(l.directive(id.Pos()))
+		l.user.WriteString("var " + name + " " + goType + " = " + val + "\n\n")
+		return
+	}
+	if name != "_" {
+		l.user.WriteString(l.directive(id.Pos()))
+		l.user.WriteString("var " + name + " " + goType + "\n\n")
+	}
+	l.addInit(x, id.Pos(), fc.out.String(), []string{name + " = " + val})
+}
+
+// packagePattern lowers a package-level let that destructures one value
+// (D-B5; 196t): `let P = e`, whose pattern the checker proved irrefutable,
+// or `let q, r = e` over a tuple. Its initializer, in initFunc, evaluates
+// the value once into a Go local and assigns each binding, a Go package
+// variable, from it.
+func (l *lowerer) packagePattern(spec *syntax.VarSpec) {
+	x := spec.Values[0]
+	fc := newFuncCtx(l, newNamer(l.names), true)
+	fc.depth = 2
+	t := fc.typeOf(x)
+	if c, ok := l.info.Implicit[x]; ok && spec.Pattern != nil {
+		t = c.To
+	}
+	// The owner of the initializer's calls is the let's first name (#230).
+	fc.owner = "_"
+	if len(spec.Names) > 0 {
+		fc.owner = spec.Names[0].Name
+	} else if vs := patternVars(l.info.Patterns[spec.Pattern], nil); len(vs) > 0 {
+		fc.owner = vs[0].Name
+	}
+	fc.frame = &frame{result: t}
+	l.recordDecl(fc.owner, spec)
+	at := spec.Pos()
+	if len(spec.Names) > 0 {
+		at = spec.Names[0].Pos()
+	}
+	val := ""
+	if spec.Pattern != nil {
+		val = fc.assigned(x)
+	} else {
+		val = fc.value(x)
+	}
+	init := l.pkgName(pkgKey{"letinit", spec}, "ergoLet")
+	var binds []patBind
+	if spec.Pattern != nil {
+		p := l.info.Patterns[spec.Pattern]
+		if p == nil {
+			ice(spec.Pattern, "a let pattern with no Patterns entry")
+		}
+		var tests []string
+		fc.pattern(p, init, t, spec.Pattern, &tests, &binds)
+	} else {
+		tup, ok := t.(*check.Tuple)
+		if !ok || len(tup.Types) != len(spec.Names) {
+			refuse(spec, "this let of several names is lowered after check-v1 stage D (the Map rule)")
+		}
+		for i, id := range spec.Names {
+			if w, ok := l.info.Defs[id].(*check.Var); ok {
+				binds = append(binds, patBind{w, init + "." + tupleField(i)})
+			}
+		}
+	}
+	assigns := []string{init + " := " + val}
+	if len(binds) == 0 {
+		assigns = append(assigns, "_ = "+init)
+	}
+	if len(binds) > 0 {
+		l.user.WriteString(l.directive(at))
+	}
+	for _, b := range binds {
+		name, ok := l.vars[b.v]
+		if !ok {
+			ice(spec, "the let binding %s has no Go name", b.v.Name)
+		}
+		l.user.WriteString("var " + name + " " + fc.goType(b.v.Type) + "\n\n")
+		assigns = append(assigns, name+" = "+b.val)
+	}
+	l.addInit(x, at, fc.out.String(), assigns)
+}
+
+// patternVars lists the variables a pattern binds, in order.
+func patternVars(p *check.Pattern, out []*check.Var) []*check.Var {
+	if p == nil {
+		return out
+	}
+	if (p.Kind == check.PatBind || p.Kind == check.PatAs) && p.Var != nil {
+		out = append(out, p.Var)
+	}
+	for _, e := range p.Elems {
+		out = patternVars(e, out)
+	}
+	for _, f := range p.Fields {
+		out = patternVars(f.Pattern, out)
+	}
+	return out
 }
 
 // env is the environment type's name: one field per capability the program

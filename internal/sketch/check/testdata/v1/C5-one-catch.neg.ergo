@@ -1,0 +1,45 @@
+// A total catch omits a failure of the row (S103); an arm names a type not
+// in the row (S108); a `case err:` binding is never read (S110); an arm
+// after `case err:` is unreachable (S108).
+type NotFound { ID string }
+type Declined { Reason string }
+type Frozen {}
+
+func Fetch(id string) string fails NotFound | Declined {
+	if id == "" {
+		return NotFound{ID: id}
+	}
+	id
+}
+
+func Missing(id string) string {
+	Fetch(id) catch { // want S103
+	case NotFound:
+		"missing"
+	}
+}
+
+func Stranger(id string) string {
+	Fetch(id) catch {
+	case NotFound, Declined:
+		"handled"
+	case Frozen: // want S108
+		"frozen"
+	}
+}
+
+func Unread(id string) string {
+	Fetch(id) catch {
+	case err: // want S110
+		"failed"
+	}
+}
+
+func Late(id string) string fails NotFound | Declined {
+	Fetch(id) catch {
+	case err:
+		return err
+	case NotFound: // want S108
+		"missing"
+	}
+}

@@ -98,7 +98,7 @@ The checker does not restrict `main`'s capability row; the build refuses what th
 
 ### S107: missing return
 
-- A function or function literal with a result whose body can reach its end (`missing-return`). A body terminates as in Go's terminating statements: a final `return`, an `if` with an `else` whose branches terminate, a `for` without a condition or `break`, and a `match` that is total (names every variant or has `case _`) and whose cases all terminate.
+- A body that needs a value and whose path ends in a statement with no value (`missing-return`; check-v1 D-C1): a function or function literal with a result, a branch of a value `if` or `match`, a trailing block with a known result, a `catch` arm whose value is used (review m1). A body yields its last expression; a final `if` with an `else`, a total `match` and a bare block yield through their branches (D-C2); a branch that ends in `return`, `break` or `continue` leaves. An `if` without `else` as a body's tail is S107 at the body's closing brace (`C1-tail-result.neg`). Other final statements terminate as in Go: a `for` without a condition or `break`.
 
 ### S108: type or declaration misuse
 
@@ -108,6 +108,8 @@ The checker does not restrict `main`'s capability row; the build refuses what th
 | A plain call `f(x)` of a name that several functions share; each takes a distinct named type of the package first and is called as `x.f(…)` (196m rule 3) | checker tests (`TestSelfCallSameNamedFunctions`) |
 | A union variant is not a record declared in the package (a basic, operation, union or defined type); an inline variant of a generic union written with other type arguments than the parameters its fields mention; a defined type over a type parameter or over itself (check-v1 D-B1) | `union-variant-interface`, `testdata/v1/B1-type-shapes.neg.ergo` |
 | A record with no fields written `Pending{}`, or a record with fields written bare (check-v1 D-B2) | `testdata/v1/B2-empty-record-bare.neg.ergo` |
+| A value `if` without `else` ("a value if needs an else"); branches of a value `if` or `match` with no expected type and two types (later literals take the first branch's type; branches never join into a union) (check-v1 D-C2) | `C2-if-expression.neg`, `C3-match-expression.neg`, `TestIfAndMatchAreExpressions` |
+| A catch arm after `case err:` or `case _`, or a `case err:` the arms before it leave nothing for; `case err:` beside another pattern; a catch arm the arms before it cover, together or alone (cumulative coverage); patterns of one arm that bind different names, in either order; an operator on a row value, `==` included (check-v1 D-C3; review M1, M2, M8) | `C5-one-catch.neg`, `TestOneCatchArms`, `TestCatchCoverageIsCumulative`, `TestCatchAlternativesBindTheSameNames`, `TestRowValueOperations` |
 | A pattern that does not fit its subject: a type that is neither a variant of the subject's union nor its own type, a constant of another type, a float or duration constant, a tuple of the wrong arity, `T{}` (write `case T:`), a field twice, a type test on an operation-type value, a name bound twice or not by every pattern of its case, a match or catch pattern name that names a function, package or package value; a bare prelude constant used as a let binder; a case earlier cases cover (unreachable), including `case _`; a duplicate constant arm names the earlier pattern (check-v1 D-B3, D-B4) | `testdata/v1/B5-constant-patterns.neg.ergo`, `B6-case-domain.neg.ergo`, `B7-pattern-bindings.neg.ergo` |
 | A conversion other than numeric, `duration` and `int64`, or between a defined type and its base (check-v1 D-B7) | `testdata/v1/B10-conversions.neg.ergo`; `TestConversionsRequireOneHop` |
 | A struct contains itself by value, also through an instance of a generic struct (`type U { F Wrap[U] }`), at any depth; one report per cycle | `recursive-struct`; checker domain tests (`TestFiniteChains`) |
@@ -148,8 +150,6 @@ The checker refuses a construct that another ticket owns, and names it, instead 
 | A wire header, `wire provides A, B { … }` or `wire needs C, D { … }` (#217) | [#196](https://github.com/cevr/ergo/issues/196) stage b, the wire header ([rows.md](rows.md#wire) rule 8; README Gap 33; `wire-exposure-hides-entry`) |
 | A `with` over a local value or over several wires, and a wire value outside `with`, `let w = wire { … }` | 196x, extern and wire values (check-v1) |
 | A union variant from another package, `type E = Declined \| timeout.Expired` | 196b, packages (spec Q7) |
-| An `if` or `match` in value position | 196r, tail results (check-v1) |
-| `case err:` or a record pattern in a catch arm | 196r, one catch (check-v1 stage C) |
 | The `ordered` constraint; an `escaping` function type | 196g, constraints; 196e, escaping (check-v1) |
 | A law, a `test` declaration, `assert` | 196l, laws and tests (check-v1) |
 | `import task`, `scope`, `slice` or `queue` | lower-v1, the std modules |

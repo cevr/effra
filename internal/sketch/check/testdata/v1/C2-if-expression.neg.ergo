@@ -1,0 +1,11 @@
+// 196r: a value `if` needs an `else` (S108), and its branches must have one
+// type (S108).
+func fee(gold bool) int {
+	let rate int = if gold { 0 } // want S108
+	rate
+}
+
+func word(c bool) string {
+	let v = if c { 1 } else { "x" } // want S108
+	v
+}

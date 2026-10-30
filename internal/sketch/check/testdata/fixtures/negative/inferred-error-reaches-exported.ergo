@@ -4,7 +4,7 @@ func fail() fails Fault { return Fault }
 func helper()           { try fail() }
 
 func Run() {
-	helper() // want S105
+	helper() // want S101
 }
 
 func main() {}

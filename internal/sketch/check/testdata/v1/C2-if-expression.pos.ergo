@@ -1,0 +1,11 @@
+// 196r (extended): `if` is an expression in every position; a value `if`
+// has an `else`, and its branches have one type.
+func fee(gold bool, total int64) int64 {
+	let rate int64 = if gold { 0 } else { 3 }
+	total * rate / 100
+}
+
+func pick(n int) string {
+	let word = if n > 1 { "many" } else if n == 1 { "one" } else { "none" }
+	word
+}

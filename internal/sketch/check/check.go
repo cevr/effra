@@ -193,6 +193,10 @@ type checker struct {
 	// callMark are undiagSeq at the start of the current statement and call.
 	rowsOpen                      int
 	undiagSeq, stmtMark, callMark int
+	// use is how the expression use.x, checked next, is used (tails.go,
+	// exprAs): a with, try or catch reads it to know whether its value is
+	// discarded (D-C1).
+	use useAt
 	// Row reads (provisional.go readRow; round 11 review): openRowSeq
 	// counts the reads of a row that holds an unsolved variable of a
 	// member of the component being checked.

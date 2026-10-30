@@ -1,0 +1,109 @@
+type NotFound { ID string }
+type Declined { Reason string }
+type Frozen {}
+type Order { ID string }
+type PayError = Declined | Frozen
+
+func fetch(id string) Order fails NotFound | Declined | Frozen {
+	if id == "" {
+		return NotFound{ID: id}
+	}
+	if id == "d" {
+		return Declined{Reason: "card"}
+	}
+	if id == "f" {
+		return Frozen
+	}
+	Order{ID: id}
+}
+
+func describe(id string) string fails Declined | Frozen {
+	let order = fetch(id) catch {
+	case NotFound as e:
+		Order{ID: "missing:" + e.ID}
+	case err:
+		return err
+	}
+	order.ID
+}
+
+func reason(id string) string {
+	describe(id) catch {
+	case Declined{Reason: "card"}:
+		"card"
+	case Declined{Reason: r}:
+		r
+	case Frozen:
+		"frozen"
+	}
+}
+
+func payName(p PayError) string {
+	match p {
+	case Declined:
+		"d"
+	case Frozen:
+		"f"
+	}
+}
+
+func keep(id string) string {
+	let o = fetch(id) catch {
+	case NotFound:
+		Order{ID: "nf"}
+	case err:
+		let p PayError = err
+		Order{ID: payName(p)}
+	}
+	o.ID
+}
+
+func kind(id string) string {
+	let v = fetch(id) catch {
+	case NotFound:
+		Order{ID: "nf"}
+	case err:
+		let label = match err {
+		case Declined:
+			"declined"
+		case Frozen:
+			"frozen"
+		}
+		Order{ID: label}
+	}
+	v.ID
+}
+
+func partial(id string) Order fails Declined | Frozen {
+	try fetch(id) catch {
+	case NotFound:
+		Order{ID: "none"}
+	}
+}
+
+func anything(id string) string {
+	let o = fetch(id) catch {
+	case _:
+		Order{ID: "failed"}
+	}
+	o.ID
+}
+
+func settle(id string) Order {
+	partial(id) catch {
+	case Declined:
+		Order{ID: "x"}
+	case Frozen:
+		Order{ID: "y"}
+	}
+}
+
+func main() needs Console {
+	if reason("a") == "a" && reason("") == "missing:" { Console.Println("as") }
+	if reason("d") == "card" && reason("f") == "frozen" { Console.Println("record") }
+	if kind("d") == "declined" && kind("f") == "frozen" && kind("") == "nf" { Console.Println("row match") }
+	let p = settle("")
+	let q = settle("f")
+	if keep("d") == "d" && keep("f") == "f" && keep("") == "nf" && anything("") == "failed" { Console.Println("convert") }
+	if p.ID == "none" && q.ID == "y" { Console.Println("partial") }
+}

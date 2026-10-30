@@ -17,19 +17,48 @@ func unparen(x syntax.Expr) syntax.Expr {
 // try checks `try e`: e's whole row escapes to the enclosing failure target
 // (rows.md, Error rows 4); try on an expression that cannot fail is S108.
 // `try e catch { … }` is one partial catch: the rest escapes through try.
+// try covers the whole expression to its right (196r, sixth round): every
+// fallible value inside it propagates (handled), the caught expression of
+// a partial catch included, while the catch handles its own row (D-C3).
 func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
+	var t *target
+	if c.fn != nil {
+		t = c.fn.t
+	}
+	// try passes its own use on: `try with W { … }` and `try e catch { … }`
+	// as statements discard their value (D-C1).
+	use := c.useOf(x)
+	inner := false
+	if t != nil {
+		saved := t.tried
+		t.tried = false
+		t.tries++
+		defer func() {
+			t.tries--
+			t.tried = saved || t.tried
+		}()
+	}
 	if ce, ok := unparen(x.X).(*syntax.CatchExpr); ok {
-		op := c.catch(ce, hint, true, true)
+		openMark := c.openRowSeq
+		op, valid := c.catchValid(ce, hint, use != useDiscard, true)
 		op.expr = ce
-		c.record(ce, op)
+		c.recordDown(x.X, ce, op)
 		if op.invalid() {
 			return op
+		}
+		if valid && op.errs.Empty() && (t == nil || !t.tried) && c.openRowSeq == openMark {
+			// The catch handles the whole row and nothing inside it
+			// propagates: try has nothing to pass on (review O3).
+			c.errorf(x, CodeType, "try over a catch that handles every failure: nothing is left to propagate; drop the try (rows.md, Error rows 6)")
 		}
 		c.escape(x, op.errs)
 		op.errs = nil
 		return op
 	}
-	op := c.expr(x.X, hint)
+	op := c.exprAs(x.X, hint, use)
+	if t != nil {
+		inner = t.tried
+	}
 	if op.invalid() {
 		return bad(x)
 	}
@@ -40,6 +69,10 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 		if op.invalid() {
 			return bad(x)
 		}
+	}
+	if !op.fallible() && inner {
+		op.addressable = false
+		return op
 	}
 	if !op.fallible() {
 		c.errorf(x, CodeType, "try on an expression that cannot fail (rows.md, Error rows 6)")
@@ -58,12 +91,25 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 // statements: when the catch's value is used, the arm's last statement
 // yields it, and return in an arm leaves the function (rows.md, Catch 7).
 func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool) operand {
+	op, _ := c.catchValid(x, hint, wantValue, partial)
+	return op
+}
+
+// catchValid is catch, and whether the catch is valid: its rest row (a
+// partial catch's errs) is then exact.
+func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial bool) (operand, bool) {
 	if x.Bind != nil {
 		c.undecided(x.Bind, "a catch binding before the arms")
-		return bad(x)
+		return bad(x), false
 	}
 	openMark := c.openRowSeq
-	op := c.expr(x.X, hint)
+	// A catch whose value is discarded discards its caught expression's
+	// value too (D-C1).
+	use := useValue
+	if !wantValue {
+		use = useDiscard
+	}
+	op := c.exprAs(x.X, hint, use)
 	valid := !op.invalid()
 	// open: the row may still grow in this component (rowWaits). operandOK:
 	// the caught expression is valid, so an arm its row lacks is not a
@@ -96,88 +142,105 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 			op.typ = valueType
 		}
 	}
-	// covered: the arm types in the row; seen: every arm type. Both are hash
-	// sets of interned ids, so an arm costs O(1) whatever the arm count (a
-	// Row copied per arm made a catch quadratic in its arms; round 14
-	// review M1). The table's generation moves only between body checks
-	// (newSolutions, rows.go), so the ids hold for the whole catch.
-	covered, seen := map[int32]bool{}, map[int32]bool{}
-	for _, arm := range x.Arms {
-		var types []Type
-		// The `as` name of each pattern of the arm, with its type: with
-		// several patterns, each binds the same name with one type (rule 6
-		// of the pattern language, D-B3), else S108.
-		var asNames []*syntax.Ident
-		var asTypes []Type
+	// The patterns of every arm resolve first, in source order, into one
+	// catch space (one budget); then the arms are judged in source order
+	// and their bodies checked (D-C3).
+	cs := c.newCatchSpace(x)
+	items := make([][]catchItem, len(x.Arms))
+	for ai, arm := range x.Arms {
 		for _, te := range arm.Types {
-			core, name := asParts(te)
-			asNames = append(asNames, name)
-			asTypes = append(asTypes, nil)
-			if _, ok := core.(*syntax.CompositeLit); ok {
-				c.notYet(core) // a record pattern in a catch arm, 196r
+			it, ok := cs.resolve(arm, te, row, open, operandOK)
+			if !ok {
 				valid = false
+			}
+			items[ai] = append(items[ai], it)
+		}
+	}
+	// rested: a `case err:` or `case _:` arm handled the rest; every arm
+	// after it is unreachable (D-C3).
+	rested := false
+	for ai, arm := range x.Arms {
+		// One binding set per pattern of the arm: every pattern binds the
+		// same names with one type (rule 6 of the pattern language, D-B3).
+		var lists [][]patBinding
+		// The names of the arm's skipped patterns (catchItem.placeholders).
+		var placeholders []*syntax.Ident
+		// The `case err:` binding of the rest, with its row value type.
+		var restName *syntax.Ident
+		var restType Type
+		for _, it := range items[ai] {
+			unreachable := rested && valid
+			if unreachable {
+				c.errorf(it.te, CodeType, "this arm is unreachable: the case err: or case _ before it handles every failure (rows.md, Catch 2)")
+			}
+			if it.skip {
+				placeholders = append(placeholders, it.placeholders...)
 				continue
 			}
-			if id, ok := core.(*syntax.Ident); ok && c.catchAll(id) {
-				c.notYet(id) // `case err:`, 196r
-				valid = false
+			if it.rest {
+				rest := row.without(c.types, cs.covered(row))
+				if valid && !unreachable && !cs.over() && rest.Empty() {
+					c.errorf(it.te, CodeType, "this arm is unreachable: the arms before it handle every failure of the row %s (rows.md, Catch 2)", rowText(row))
+				}
+				rested = true
+				for _, e := range rest.Elems() {
+					cs.coverWhole(e, it.te)
+				}
+				if it.restID.Name == "_" {
+					continue
+				}
+				restName, restType = it.restID, c.rowValue(rest)
+				if !valid || rest.Empty() {
+					restType = invalid
+				}
 				continue
 			}
-			orig := te
-			te = core
-			t := c.catchType(te, row, open, operandOK)
-			if t == nil {
+			lists = append(lists, it.binds)
+			if it.t == nil || unreachable {
 				continue
 			}
-			asTypes[len(asTypes)-1] = t
-			types = append(types, t)
-			if p := c.pattern(core, &Pattern{Kind: PatTypeTest, Type: t}); name != nil {
-				c.asPattern(orig, p, name)
-			}
-			// A duplicate arm is a fact of the arms alone: it holds
-			// whatever the row, so a row check on this catch (Catch 1 or
-			// the row half of Catch 2) never hides it (round 13 review M1).
-			id := c.types.id(t)
-			c.types.charge(1)
-			if seen[id] {
-				c.errorf(te, CodeType, "%s is caught twice (rows.md, Catch 2)", t)
-				continue
-			}
-			seen[id] = true
-			if !valid {
-				continue
-			}
-			if !row.has(c.types, t) {
-				c.errorf(te, CodeType, "%s is not in the caught row %s (rows.md, Catch 2)", t, rowText(row))
-				continue
-			}
-			covered[id] = true
+			cs.judge(it, row, valid)
 		}
 		saved := c.fn.scope
 		c.fn.scope = newScope(saved)
-		var asBinds []asBinding
-		if name, bt := c.armBinding(asNames, asTypes); name != nil {
-			if b, ok := c.declareAs(name, bt); ok {
-				asBinds = append(asBinds, b)
-				v, _ := c.fn.scope.names[name.Name].(*Var)
-				for _, other := range asNames[1:] {
-					if other != nil && other.Name == name.Name && v != nil {
-						c.def(other, v)
+		vars := c.declareArm(lists)
+		var restBind []asBinding
+		if restName != nil {
+			if b, ok := c.declareAs(restName, restType); ok {
+				restBind = append(restBind, b)
+				if v, isVar := c.fn.scope.names[restName.Name].(*Var); isVar && c.silent == 0 {
+					if p := c.pkg.Info.Patterns[restName]; p != nil {
+						p.Var = v
 					}
 				}
 			}
 		}
-		c.catchArm(arm, valueType, hasValue, wantValue && hasValue, valid)
-		c.unusedAs(asBinds)
+		for _, id := range placeholders {
+			if _, bound := c.fn.scope.names[id.Name]; !bound {
+				c.declareAs(id, invalid) // no type: no S110, no cascade
+			}
+		}
+		c.catchArm(arm, valueType, wantValue && hasValue)
+		c.unusedBindings(vars)
+		for _, b := range restBind {
+			if !b.group.used {
+				c.errorf(b.name, CodeUnused, "the binding %s is read nowhere in its arm; write case _ (rows.md, Totality 1)", b.name.Name)
+			}
+		}
 		c.fn.scope = saved
+	}
+	cs.record()
+	if cs.over() {
+		c.errorAt(x.Catch, x.Catch+5, CodeNotTotal, "too many cases to prove which arms of this catch are reachable and what it handles; split it (rows.md, Totality 5)")
+		valid = false
 	}
 	if !valid {
 		if hasValue {
-			return operand{mode: modeValue, typ: valueType}
+			return operand{mode: modeValue, typ: valueType}, false
 		}
-		return bad(x)
+		return bad(x), false
 	}
-	rest := row.without(c.types, covered)
+	rest := row.without(c.types, cs.covered(row))
 	if !partial && !rest.Empty() {
 		c.errorAt(x.Catch, x.Catch+5, CodeNotTotal, "this catch does not handle %s; a catch without try handles every error of the row (rows.md, Catch 4)", rowText(rest))
 	}
@@ -193,54 +256,242 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 	if partial {
 		res.errs = rest
 	}
-	return res
+	return res, true
 }
 
-// armBinding returns the name a catch arm binds and its type, from the
-// `as` name and the type of each of its patterns (nil where a pattern
-// names none or did not resolve). With several patterns, each binds the
-// same name with one type (rule 6 of the pattern language, D-B3): a
-// pattern that binds no name or another type is S108, and the name then
-// binds with the invalid type, so its reads add nothing (D3).
-func (c *checker) armBinding(names []*syntax.Ident, types []Type) (*syntax.Ident, Type) {
-	var first *syntax.Ident
-	for _, n := range names {
-		if n != nil && n.Name != "_" {
-			first = n
-			break
+// catchSpace is the one pattern space of a catch (D-C3): a subject column
+// per error type a record pattern names, and per caught type a matrix of
+// the rows its arms wrote, in source order. A type test is the empty row,
+// which covers its type. One solver answers every question of the catch,
+// so the whole catch shares one budget (rows.md, Totality 5).
+type catchSpace struct {
+	c      *checker
+	r      *patResolver
+	cols   map[int32]int // error type id → its subject column
+	mats   map[int32]*catchMatrix
+	solver *matrixSolver
+	// wholeSeen: the types a type test already named, for the "caught
+	// twice" diagnostic.
+	wholeSeen map[int32]bool
+}
+
+type catchMatrix struct {
+	rows   *rowSet
+	origin []syntax.Node // the pattern of each row, in order
+}
+
+// catchItem is one pattern of a catch arm, resolved.
+type catchItem struct {
+	te     syntax.Expr   // the pattern as written
+	skip   bool          // reported: the pattern takes no part
+	rest   bool          // `case err:` or `case _`
+	restID *syntax.Ident // the rest's name
+	t      Type          // the error type, nil when it did not resolve
+	row    solverRow     // its matrix row; nil after a reported pattern
+	whole  bool          // a type test: it covers t
+	binds  []patBinding  // its names, `as` included
+	// placeholders: the names a skipped pattern writes, bound in its arm
+	// with no type so a read there resolves to them, as the reference
+	// walk does, and adds no diagnostic (D3; stage C round 6 fuzz).
+	placeholders []*syntax.Ident
+}
+
+func (c *checker) newCatchSpace(x *syntax.CatchExpr) *catchSpace {
+	r := c.newPatResolver()
+	r.bindings = true
+	for _, arm := range x.Arms {
+		for _, te := range arm.Types {
+			r.sp.written += 1 + patternSize(te)
 		}
 	}
-	if first == nil {
-		return nil, nil
-	}
-	if len(names) == 1 {
-		if types[0] == nil {
-			return first, invalid
-		}
-		return first, types[0]
-	}
-	t := types[0]
-	ok := true
-	for i, n := range names {
-		switch {
-		case n == nil || n.Name != first.Name:
-			at := syntax.Node(first)
-			if n != nil {
-				at = n
+	return &catchSpace{c: c, r: r, cols: map[int32]int{}, mats: map[int32]*catchMatrix{}, wholeSeen: map[int32]bool{}}
+}
+
+// resolve resolves one pattern of arm: `case err:`, `case _`, a type test,
+// a record pattern T{F: p}, each with an optional `as` name. ok is false
+// after a reported pattern.
+func (cs *catchSpace) resolve(arm *syntax.CatchArm, te syntax.Expr, row *Row, open, evidence bool) (catchItem, bool) {
+	c, r := cs.c, cs.r
+	core, name := asParts(te)
+	it := catchItem{te: te}
+	if id, isID := core.(*syntax.Ident); isID && (id.Name == "_" || c.catchAll(id)) {
+		if len(arm.Types) > 1 || name != nil {
+			c.errorf(te, CodeType, "case %s: handles the rest of the row and stands alone in its arm (rows.md, Catch 2)", id.Name)
+			it.skip = true
+			if id.Name != "_" {
+				it.placeholders = append(it.placeholders, id)
 			}
-			c.errorf(at, CodeType, "%s is bound by one pattern of this arm and not by another; every pattern of an arm binds the same names (rows.md, Totality 1)", first.Name)
-			return first, invalid
-		case types[i] == nil || t == nil:
+			if name != nil && name.Name != "_" {
+				it.placeholders = append(it.placeholders, name)
+			}
+			return it, false
+		}
+		it.rest, it.restID = true, id
+		if id.Name == "_" {
+			c.pattern(core, &Pattern{Kind: PatWildcard})
+		} else {
+			c.pattern(core, &Pattern{Kind: PatBind})
+		}
+		return it, true
+	}
+	r.begin()
+	ok := true
+	var p *Pattern
+	if lit, isLit := core.(*syntax.CompositeLit); isLit {
+		var t Type
+		if lit.Type == nil {
+			c.errorf(lit, CodeType, "a record pattern in a catch arm names its error type: T{F: p} (rows.md, Catch 2)")
+		} else {
+			t = c.catchType(lit.Type, row, open, evidence)
+		}
+		if t == nil {
+			r.bindNames(lit)
 			ok = false
-		case !c.identical(types[i], t):
-			c.errorf(n, CodeType, "%s is bound as %s by the first pattern of its arm and as %s here; every pattern of an arm binds each name with one type (rows.md, Totality 1)", n.Name, t, types[i])
-			return first, invalid
+		} else {
+			col := cs.column(t)
+			res := r.pattern(lit, t, col)
+			p = res.info
+			it.t = t
+			if r.bad || r.resolve.over {
+				ok = false
+			} else {
+				it.row = solverRow{}
+				if res.has {
+					it.row = r.sp.flat(solverRow{{col, res.pat}})
+				}
+			}
+		}
+	} else if t := c.catchType(core, row, open, evidence); t != nil {
+		p = c.pattern(core, &Pattern{Kind: PatTypeTest, Type: t})
+		it.t, it.row, it.whole = t, solverRow{}, true
+	}
+	if name != nil && name.Name != "_" {
+		bt := it.t
+		info := &Pattern{Kind: PatAs}
+		if p != nil {
+			info = c.asPattern(te, p, name)
+		}
+		if p == nil || !ok {
+			bt = invalid
+		}
+		r.bind(name, bt, info, true)
+		if r.bad {
+			ok = false
 		}
 	}
 	if !ok {
-		return first, invalid
+		for k := range r.binds {
+			r.binds[k].t = invalid
+		}
+		it.row = nil
 	}
-	return first, t
+	it.binds = r.binds
+	return it, ok
+}
+
+// column is the subject column of error type t.
+func (cs *catchSpace) column(t Type) int {
+	id := cs.c.types.id(t)
+	if col, ok := cs.cols[id]; ok {
+		return col
+	}
+	col := cs.r.subject(t)
+	cs.cols[id] = col
+	return col
+}
+
+// matrix is the rows written so far for the error type id.
+func (cs *catchSpace) matrix(id int32) *catchMatrix {
+	if cs.solver == nil {
+		cs.solver = cs.r.sp.solverFor()
+	}
+	m := cs.mats[id]
+	if m == nil {
+		m = &catchMatrix{rows: newRowSet(cs.solver)}
+		cs.mats[id] = m
+	}
+	return m
+}
+
+// over reports a budget that ran out: nothing more is proved.
+func (cs *catchSpace) over() bool {
+	return cs.r.resolve.over || (cs.solver != nil && cs.solver.over)
+}
+
+// judge adds a pattern of a valid type to its matrix. A pattern the rows
+// before it cover is unreachable, a fact of the arms alone, so a row
+// diagnostic never hides it (round 13 review M1); then the type must be in
+// the caught row (rows.md, Catch 2).
+func (cs *catchSpace) judge(it catchItem, row *Row, valid bool) {
+	c := cs.c
+	id := c.types.id(it.t)
+	c.types.charge(1)
+	if it.row != nil && !cs.over() {
+		m := cs.matrix(id)
+		u, ok := cs.solver.caseUseful(m.rows, it.row)
+		if ok && !u {
+			if it.whole && cs.wholeSeen[id] {
+				c.errorf(it.te, CodeType, "%s is caught twice (rows.md, Catch 2)", it.t)
+			} else {
+				c.errorf(it.te, CodeType, "%s (unreachable; rows.md, Catch 2)", c.coveredBy(m.rows, m.origin))
+			}
+			return
+		}
+		if ok {
+			before := len(m.rows.rows)
+			m.rows.addRow(it.row)
+			if len(m.rows.rows) > before {
+				m.origin = append(m.origin, it.te)
+			}
+		}
+	}
+	if it.whole {
+		cs.wholeSeen[id] = true
+	}
+	if valid && !row.has(c.types, it.t) {
+		c.errorf(it.te, CodeType, "%s is not in the caught row %s (rows.md, Catch 2)", it.t, rowText(row))
+	}
+}
+
+// coverWhole records that the `case err:` or `case _` arm at n handles
+// every value of e.
+func (cs *catchSpace) coverWhole(e Type, n syntax.Node) {
+	m := cs.matrix(cs.c.types.id(e))
+	before := len(m.rows.rows)
+	m.rows.addRow(solverRow{})
+	if len(m.rows.rows) > before {
+		m.origin = append(m.origin, n)
+	}
+}
+
+// covered is the set of row types the arms so far handle whole: a type
+// whose matrix is total. A type with no arm is not covered.
+func (cs *catchSpace) covered(row *Row) map[int32]bool {
+	out := map[int32]bool{}
+	for _, e := range row.Elems() {
+		id := cs.c.types.id(e)
+		m := cs.mats[id]
+		if m == nil || cs.over() {
+			continue
+		}
+		if u, ok := cs.solver.caseUseful(m.rows, solverRow{}); ok && !u {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+// record keeps the catch's proof costs beside the matches' (metered tests).
+func (cs *catchSpace) record() {
+	c := cs.c
+	if cs.solver == nil || c.silent != 0 {
+		return
+	}
+	s := cs.solver
+	c.totalitySteps = append(c.totalitySteps, s.steps)
+	c.totalityBudgets = append(c.totalityBudgets, s.budget)
+	c.usefulSteps = append(c.usefulSteps, s.steps)
+	c.patternCosts = append(c.patternCosts, patternCost{cs.r.sp.written, s.budget, s.meter.cellBudget, s.steps, s.steps, s.cells, s.cells})
 }
 
 // catchType resolves an arm's type. A generic error type written without
@@ -272,54 +523,27 @@ func (c *checker) catchType(te syntax.Expr, row *Row, open, evidence bool) Type 
 	return t
 }
 
-func (c *checker) catchArm(arm *syntax.CatchArm, valueType Type, hasValue, yield, valid bool) {
+// catchArm checks an arm's statements by the one tail rule (D-C1, D-C2):
+// when the catch's value is used (yield), every path of the arm yields a
+// value of the caught expression's type or leaves the function (S107 for
+// a path without one); otherwise the arm's tail is discarded. A failure of
+// the tail must be handled, as in any value position.
+func (c *checker) catchArm(arm *syntax.CatchArm, valueType Type, yield bool) {
 	list := arm.Body
 	if len(list) == 0 {
 		if yield {
-			c.errorAt(arm.Colon, arm.Colon+1, CodeType, "this arm yields no value; %s expected (rows.md, Catch 3)", valueType)
+			c.errorAt(arm.Colon, arm.Colon+1, CodeMissingRet, "this arm yields no value, and the catch yields a value of type %s (rows.md, Catch 3)", valueType)
 		}
 		return
 	}
-	last, isExpr := list[len(list)-1].(*syntax.ExprStmt)
-	if !isExpr {
-		c.stmtList(list, false)
-		if yield && !c.terminatesList(list) {
-			c.errorf(list[len(list)-1], CodeType, "this arm must end with a value of type %s or leave the function (rows.md, Catch 7)", valueType)
-		}
-		return
-	}
-	c.stmtList(list[:len(list)-1], true)
-	var hint Type
-	if hasValue {
-		hint = valueType
-	}
-	op := c.expr(last.X, hint)
-	if op.invalid() {
-		return
-	}
-	switch op.mode {
-	case modeValue, modeConst, modeNoValue:
-	default:
-		c.needValue(&op)
-		if op.invalid() {
-			return
+	k := &sink{what: "the catch arm's value", discard: !yield}
+	if yield {
+		k.want = valueType
+		k.missing = func(at syntax.Pos) {
+			c.errorAt(at, at+1, CodeMissingRet, "this path of the arm can reach its end without a value, and the catch yields a value of type %s: end it with an expression, return or an else (rows.md, Catch 7)", valueType)
 		}
 	}
-	c.handled(&op)
-	switch {
-	case yield:
-		if op.mode == modeNoValue {
-			c.errorf(last.X, CodeType, "this arm yields no value; %s expected (rows.md, Catch 3)", valueType)
-			return
-		}
-		c.assign(&op, valueType, "the catch arm's value")
-	case !hasValue && valid:
-		if op.mode != modeNoValue {
-			c.errorf(last.X, CodeType, "the caught expression has no value, so an arm has no value (rows.md, Catch 3)")
-		}
-	case !hasValue:
-		c.needNoValueOrCall(&op)
-	}
+	c.yieldList(list, k, list[len(list)-1].Pos())
 }
 
 // preludeType returns a prelude declaration's type by name.
@@ -334,4 +558,12 @@ func preludeType(name string) *Named {
 	}
 	n, _ := tn.Type.(*Named)
 	return n
+}
+
+// rowValue is the type of a `case err:` binding: the row value of the
+// failures rest holds, the anonymous union of their error types (D-C3). It
+// can be returned (a failure of those types), matched, caught or assigned
+// to a declared union that lists each of them (ConvRow); nothing else.
+func (c *checker) rowValue(rest *Row) Type {
+	return &Union{Variants: rest.Elems()}
 }

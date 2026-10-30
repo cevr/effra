@@ -1,0 +1,22 @@
+// 196r and 196p: `match` is an expression in every position and yields the
+// value of the arm that runs.
+type Payment = Pending{} | Authorized{AuthID string} | Declined{}
+
+func log(p Payment) needs Console {
+	let text = match p {
+	case Pending:
+		"waiting"
+	case _:
+		"settled"
+	}
+	Console.Println(text)
+}
+
+func code(p Payment) int {
+	1 + match p {
+	case Authorized:
+		1
+	case _:
+		0
+	}
+}

@@ -331,7 +331,7 @@ func checkWireBuilds(t *testing.T, built map[string]*lowered) {
 		if n := strings.Count(goSrc, `Both{V: "one"}`); n != 1 {
 			t.Errorf("the shared provider is built %d times, want once:\n%s", n, goSrc)
 		}
-		healed := regexp.MustCompile(`(?s)func buildHealed\(.*?\n}\n`).FindString(goSrc)
+		healed := regexp.MustCompile(`(?s)func buildHealed\(.*?\n(?:/\*line [^*]*\*/)?}\n`).FindString(goSrc)
 		if healed == "" || strings.Contains(healed, "Div{") {
 			t.Errorf("Healed's builder builds the overridden provider Div, or is missing:\n%s", healed)
 		}

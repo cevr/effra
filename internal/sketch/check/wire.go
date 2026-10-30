@@ -14,6 +14,7 @@ import (
 // scope, before the discharge, so they charge the enclosing function and do
 // not see their own wire (With 3).
 func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
+	use := c.useOf(x)
 	if x.Trailing == nil {
 		c.errorf(x, CodeType, "with takes a wire and a block: with(W) { … } (rows.md, With 1)")
 		c.silentArgs(x)
@@ -40,16 +41,25 @@ func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
 	var errs *Row
 	// The with's expected type is the yielded expression's, as a hint: the
 	// block's own result stays its last expression's type (M16).
+	// A with whose value is discarded is a body with no result: its tails
+	// are dropped, as in every such body (D-C1; review m4). One whose value
+	// is used reports a path without a value at that path (review O1).
 	var expect []Type
 	if hint != nil {
 		expect = []Type{hint}
 	}
+	yieldKnown := use == useDiscard
+	if yieldKnown {
+		expect = nil
+	}
 	c.typedFrame(x.Trailing)
-	res := c.yieldingBlock(x.Trailing, x.Trailing.List, expect, false, func(op *operand) { errs = op.errs })
+	res := c.yieldingBlock(x.Trailing, x.Trailing.List, expect, yieldKnown, use == useValue, func(op *operand) { errs = errs.union(c.types, op.errs) })
 	c.fn.branches = c.fn.branches[:len(c.fn.branches)-1]
 	done()
 	t.withs = t.withs[:len(t.withs)-1]
 	c.recordWith(x, frame)
+	// A with's Fails is the row its block passes through (rows.md, With 6).
+	c.callInfo(x).Fails = errs
 	if res == nil {
 		return bad(x)
 	}

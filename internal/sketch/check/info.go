@@ -127,6 +127,20 @@ type Info struct {
 	Loops map[*syntax.RangeStmt]*Loop
 	// Withs is every with site.
 	Withs map[*syntax.CallExpr]*With
+	// InitOrder is every package-level let with an initializer, in Go's
+	// initialization order (go/types Info.InitOrder): a let comes after
+	// every let its initializer refers to, directly or through functions,
+	// and otherwise in declaration order. The lowering runs them in this
+	// order inside the program's root task (stage C round 2 review m1).
+	InitOrder []*Initializer
+}
+
+// Initializer is one package-level initializer: Vars are the names it
+// binds (several for a let with a pattern or `let q, r = e`; a name `_`
+// is a Var with no Defs entry) and Value its initializer expression.
+type Initializer struct {
+	Vars  []*Var
+	Value syntax.Expr
 }
 
 func newInfo() *Info {
@@ -190,7 +204,8 @@ type Call struct {
 	// Type is a conversion's target type.
 	Type Type
 	// Fails and Needs are the callee's error and capability rows at this
-	// site, after substitution.
+	// site, after substitution. A with's Fails is the row its block's
+	// tails pass through (rows.md, With 6).
 	Fails, Needs *Row
 }
 
@@ -626,6 +641,8 @@ func (c *checker) conversionOf(from, t Type) (Conversion, bool) {
 		return Conversion{}, false
 	}
 	switch {
+	case isRowValue(from) && isUnion(t):
+		return Conversion{Kind: ConvRow, From: from, To: t}, true
 	case isUnion(t) && !isUnion(from):
 		return Conversion{Kind: ConvVariant, From: from, To: t}, true
 	case asInterface(t) != nil && asInterface(from) == nil:
@@ -642,5 +659,12 @@ func (c *checker) conversionOf(from, t Type) (Conversion, bool) {
 
 func isUnion(t Type) bool {
 	_, ok := under0(t).(*Union)
+	return ok
+}
+
+// isRowValue reports the type of a `case err:` binding, an anonymous union
+// of error types (D-C3).
+func isRowValue(t Type) bool {
+	_, ok := t.(*Union)
 	return ok
 }

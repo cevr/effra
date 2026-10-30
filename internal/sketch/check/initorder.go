@@ -1,6 +1,7 @@
 package check
 
 import (
+	"container/heap"
 	"sort"
 	"strings"
 
@@ -233,4 +234,132 @@ func sortedDeps(m map[any]bool) []any {
 		return pi < pj
 	})
 	return out
+}
+
+// recordInitOrder fills Info.InitOrder from the dependency graph of the
+// reporting pass, by Go's rule (spec, Package initialization; go/types
+// initorder.go): the dependencies of a let are the lets its initializer
+// reaches through functions and methods, and the next let to initialize
+// is the earliest in declaration order whose dependencies are all
+// initialized. A let that binds several names is one initializer. A
+// package with an initialization cycle has a diagnostic (checkInitCycles),
+// so the order is not used; the earliest remaining let breaks the cycle
+// only to keep the walk total.
+func (c *checker) recordInitOrder() {
+	// node is the one initializer a package var belongs to.
+	node := func(pv *pkgVar) *pkgVar {
+		if pv.group != nil {
+			return pv.group.members[0]
+		}
+		return pv
+	}
+	var nodes []*pkgVar
+	order := map[*pkgVar]int{}
+	for _, pv := range c.vars {
+		if node(pv) == pv && len(pv.spec.Values) > 0 {
+			nodes = append(nodes, pv)
+		}
+	}
+	sort.SliceStable(nodes, func(i, j int) bool {
+		a, b := nodes[i], nodes[j]
+		if a.file.index != b.file.index {
+			return a.file.index < b.file.index
+		}
+		if a.spec != b.spec {
+			return a.spec.Pos() < b.spec.Pos()
+		}
+		return a.idx < b.idx
+	})
+	for i, n := range nodes {
+		order[n] = i
+	}
+	// deps[i] are the initializers node i waits for; users[j] the nodes
+	// that wait for j.
+	deps := make([]map[int]bool, len(nodes))
+	users := make([][]int, len(nodes))
+	for i, n := range nodes {
+		deps[i] = map[int]bool{}
+		seen := map[any]bool{}
+		var walk func(o any)
+		walk = func(o any) {
+			for _, d := range sortedDeps(c.init.deps[o]) {
+				if seen[d] {
+					continue
+				}
+				seen[d] = true
+				switch d := d.(type) {
+				case *pkgVar:
+					if j, ok := order[node(d)]; ok && j != i {
+						deps[i][j] = true
+					}
+				case *Func:
+					walk(d)
+				}
+			}
+		}
+		walk(n)
+		for j := range deps[i] {
+			users[j] = append(users[j], i)
+		}
+	}
+	waiting := make([]int, len(nodes))
+	ready := &intHeap{}
+	for i := range nodes {
+		waiting[i] = len(deps[i])
+		if waiting[i] == 0 {
+			heap.Push(ready, i)
+		}
+	}
+	done := make([]bool, len(nodes))
+	info := c.pkg.Info
+	info.InitOrder = info.InitOrder[:0]
+	for emitted := 0; emitted < len(nodes); emitted++ {
+		i := -1
+		if ready.Len() > 0 {
+			i = heap.Pop(ready).(int)
+		} else {
+			for j := range nodes {
+				if !done[j] {
+					i = j
+					break
+				}
+			}
+		}
+		done[i] = true
+		n := nodes[i]
+		in := &Initializer{}
+		switch {
+		case n.group != nil:
+			in.Value = n.spec.Values[0]
+			for _, m := range n.group.members {
+				in.Vars = append(in.Vars, m.obj)
+			}
+		case n.idx < len(n.spec.Values):
+			in.Value = n.spec.Values[n.idx]
+			in.Vars = []*Var{n.obj}
+		default:
+			in.Value = n.spec.Values[0]
+			in.Vars = []*Var{n.obj}
+		}
+		info.InitOrder = append(info.InitOrder, in)
+		for _, u := range users[i] {
+			if waiting[u]--; waiting[u] == 0 && !done[u] {
+				heap.Push(ready, u)
+			}
+		}
+	}
+}
+
+// intHeap is a min-heap of declaration indices.
+type intHeap []int
+
+func (h intHeap) Len() int           { return len(h) }
+func (h intHeap) Less(i, j int) bool { return h[i] < h[j] }
+func (h intHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *intHeap) Push(x any)        { *h = append(*h, x.(int)) }
+func (h *intHeap) Pop() any {
+	old := *h
+	x := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return x
 }

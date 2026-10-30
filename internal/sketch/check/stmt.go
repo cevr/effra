@@ -73,7 +73,7 @@ func (c *checker) stmt(s syntax.Stmt) {
 		// continue may not leave it (grammar.md, Statements 5).
 		done := c.openScope()
 		c.fn.branches = append(c.fn.branches, branch{kind: brBarrier})
-		c.yieldingBlock(s, s.List, nil, false, func(op *operand) { c.handled(op) })
+		c.yieldingBlock(s, s.List, nil, true, false, func(op *operand) { c.handled(op) })
 		c.fn.branches = c.fn.branches[:len(c.fn.branches)-1]
 		done()
 	case *syntax.IfStmt:
@@ -89,21 +89,9 @@ func (c *checker) stmt(s syntax.Stmt) {
 		}
 		done()
 	case *syntax.SwitchStmt:
-		if s.Init != nil || s.Tag == nil {
-			c.undecided(s, "a match with an init statement or no subject")
-			return
-		}
-		c.matchStmt(s, s.Switch, []syntax.Expr{s.Tag}, s.Clauses)
+		c.switchHeader(s, c.armStmts)
 	case *syntax.TypeSwitchStmt:
-		if s.Init != nil || s.Binds != nil || s.Define.IsValid() {
-			c.undecided(s, "a match header with an init statement or a binding")
-			return
-		}
-		subjects := make([]syntax.Expr, len(s.Subjects))
-		for i, g := range s.Subjects {
-			subjects[i] = g.X
-		}
-		c.matchStmt(s, s.Switch, subjects, s.Clauses)
+		c.typeSwitchHeader(s, c.armStmts)
 	case *syntax.ForStmt:
 		c.forStmt(s)
 	case *syntax.RangeStmt:
@@ -113,6 +101,34 @@ func (c *checker) stmt(s syntax.Stmt) {
 	default:
 		c.undecided(s, "")
 	}
+}
+
+// armStmts checks a statement match's arm.
+func (c *checker) armStmts(list []syntax.Stmt) { c.stmtList(list, false) }
+
+// switchHeader checks a match on literal patterns with body checking each
+// arm; false when its header is not decided syntax (reported).
+func (c *checker) switchHeader(s *syntax.SwitchStmt, body func([]syntax.Stmt)) bool {
+	if s.Init != nil || s.Tag == nil {
+		c.undecided(s, "a match with an init statement or no subject")
+		return false
+	}
+	c.matchStmt(s, s.Switch, []syntax.Expr{s.Tag}, s.Clauses, body)
+	return true
+}
+
+// typeSwitchHeader checks any other match, one subject per tuple element.
+func (c *checker) typeSwitchHeader(s *syntax.TypeSwitchStmt, body func([]syntax.Stmt)) bool {
+	if s.Init != nil || s.Binds != nil || s.Define.IsValid() {
+		c.undecided(s, "a match header with an init statement or a binding")
+		return false
+	}
+	subjects := make([]syntax.Expr, len(s.Subjects))
+	for i, g := range s.Subjects {
+		subjects[i] = g.X
+	}
+	c.matchStmt(s, s.Switch, subjects, s.Clauses, body)
+	return true
 }
 
 func (c *checker) block(b *syntax.BlockStmt) {
@@ -152,28 +168,9 @@ func (c *checker) recordDown(outer, inner syntax.Expr, op operand) {
 // exprStmt checks an expression statement: a call, try, catch or with
 // (S110 otherwise). A fallible statement is S105.
 func (c *checker) exprStmt(s *syntax.ExprStmt) {
-	x := unparen(s.X)
-	var op operand
-	switch e := x.(type) {
-	case *syntax.CatchExpr:
-		op = c.catch(e, nil, false, false)
-		op.expr = s.X
-		c.recordDown(s.X, e, op)
-	case *syntax.TryExpr:
-		if ce, ok := unparen(e.X).(*syntax.CatchExpr); ok {
-			op = c.catch(ce, nil, false, true)
-			c.recordDown(e.X, ce, op)
-			if !op.invalid() {
-				c.escape(e, op.errs)
-				op.errs = nil
-			}
-			c.recordDown(s.X, e, op)
-			return
-		}
-		op = c.expr(s.X, nil)
-	default:
-		op = c.expr(s.X, nil)
-	}
+	// The statement's value is discarded: a with, try or catch here is a
+	// body with no result (D-C1; review m4).
+	op := c.exprAs(s.X, nil, useDiscard)
 	if op.invalid() {
 		return
 	}
@@ -186,21 +183,39 @@ func (c *checker) exprStmt(s *syntax.ExprStmt) {
 		}
 	}
 	c.handled(&op)
+	c.unusedValue(s.X, op)
+}
+
+// unusedValue reports a value in statement position that is not a call's
+// result, Go's "evaluated but not used" (S110): a literal, a name, an
+// operator, a conversion or a built-in's value. A call's result is
+// discarded. One rule for an expression statement and for the discarded
+// tail of every body kind: an if or match arm, a with block, a trailing
+// block, a catch arm and a body with no result (rows.md, Totality 3;
+// stage C round 3 review m2).
+func (c *checker) unusedValue(at syntax.Expr, op operand) {
+	x := unparen(at)
 	if !isCallLike(x) {
-		c.errorf(s.X, CodeUnused, "this value is not used; an expression statement is a call, try, catch or with")
+		c.errorf(at, CodeUnused, "this value is not used; an expression statement is a call, try, catch or with")
 		return
 	}
-	if call, ok := x.(*syntax.CallExpr); ok && op.mode != modeNoValue {
-		if fun, ok := unparen(call.Fun).(*syntax.Ident); ok && fun.Name != "with" {
-			if o, isB := c.lookup(fun.Name).(*Builtin); isB {
-				c.errorf(s.X, CodeUnused, "the value of %s is not used", o.Name)
-				return
-			}
-			if tn, isT := c.lookup(fun.Name).(*TypeName); isT && !isCapability(tn.Type) {
-				c.errorf(s.X, CodeUnused, "the conversion to %s is not used", tn.Name)
-				return
-			}
-		}
+	call, ok := x.(*syntax.CallExpr)
+	if !ok || op.mode == modeNoValue {
+		return
+	}
+	// The call's resolved kind decides, never the callee's spelling, so a
+	// generic N[int](n) and a qualified pkg.T(x) conversion are a
+	// conversion like int8(n) (stage C round 4 review M1). Under silent
+	// checking Info has no entry and errorf reports nothing.
+	info := c.pkg.Info.Calls[call]
+	if info == nil {
+		return
+	}
+	switch {
+	case info.Kind == CallLen:
+		c.errorf(at, CodeUnused, "the value of len is not used")
+	case info.Kind == CallConversion && !isCapability(info.Type):
+		c.errorf(at, CodeUnused, "the conversion to %s is not used", info.Type)
 	}
 }
 
@@ -584,7 +599,7 @@ func (c *checker) branchStmt(s *syntax.BranchStmt) {
 			crossed = true
 			continue
 		}
-		if s.Tok == syntax.CONTINUE && b.kind != brLoop {
+		if b.kind != brLoop {
 			continue
 		}
 		if crossed {
@@ -596,7 +611,7 @@ func (c *checker) branchStmt(s *syntax.BranchStmt) {
 		c.errorf(s, CodeType, "%s cannot leave a with block or a block argument (grammar.md, Statements 5)", s.Tok)
 		return
 	}
-	c.errorf(s, CodeType, "%s is not inside a for or match", s.Tok)
+	c.errorf(s, CodeType, "%s is not inside a for", s.Tok)
 }
 
 func (c *checker) push(kind branchKind) func() {
@@ -771,9 +786,8 @@ func (c *checker) matchTerminates(s syntax.Stmt, clauses []*syntax.CaseClause) b
 	return true
 }
 
-// hasBreak reports whether a break leaves the statement being analysed: a
-// break outside any nested for or match (the decided language has no
-// labels).
+// hasBreak reports a break of the enclosing loop: match is transparent,
+// and a nested for owns its own breaks (the decided language has no labels).
 func hasBreak(s syntax.Stmt) bool {
 	found := false
 	syntax.Inspect(s, func(x syntax.Node) bool {
@@ -787,8 +801,8 @@ func hasBreak(s syntax.Stmt) bool {
 			if x.Tok == syntax.BREAK {
 				found = true
 			}
-		case *syntax.ForStmt, *syntax.RangeStmt, *syntax.SwitchStmt, *syntax.TypeSwitchStmt:
-			return syntax.Node(x) == syntax.Node(s)
+		case *syntax.ForStmt, *syntax.RangeStmt:
+			return false
 		}
 		return true
 	})

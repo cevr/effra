@@ -290,7 +290,11 @@ func (r *patResolver) pattern0(e syntax.Expr, t Type, col int) resolved {
 			if r.bindings && reusableBinderName(o) {
 				break
 			}
-			c.errorf(x, CodeType, "a pattern name binds; %s already names %s: compare with if, or choose another name (rows.md, Totality 1)", x.Name, objectNoun(o))
+			if r.bindings {
+				c.errorf(x, CodeType, "%s is a prelude name; choose another name (rows.md, Totality 6; D-D3)", x.Name)
+			} else {
+				c.errorf(x, CodeType, "a pattern name binds; %s already names %s: compare with if, or choose another name (rows.md, Totality 1)", x.Name, objectNoun(o))
+			}
 			if p, ok := o.(*PkgName); ok {
 				p.used = true // The refused occurrence must not add an unused import.
 			}
@@ -586,7 +590,7 @@ func (c *checker) isPatternType(name string) bool {
 // before it cover is S108 (unreachable); the match is total, by the
 // usefulness solver over the case matrix, or has `case _` (S103; rows.md,
 // Totality 2 and 5); each binding is read in its arm (S110).
-func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr, clauses []*syntax.CaseClause) {
+func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr, clauses []*syntax.CaseClause, body func([]syntax.Stmt)) {
 	done := c.openScope()
 	defer done()
 	n := len(subjects)
@@ -706,7 +710,7 @@ func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr
 		}
 		inner := c.openScope()
 		arm := c.declareArm(bindsOf[ci])
-		c.stmtList(cl.Body, false)
+		body(cl.Body)
 		c.unusedBindings(arm)
 		inner()
 	}
@@ -866,6 +870,14 @@ func (c *checker) declareArm(items [][]patBinding) []armVar {
 			v, ok := vars[b.id.Name]
 			if !ok {
 				c.errorf(b.id, CodeType, "%s is bound by this pattern and not by the first pattern of its case; every pattern of a case binds the same names (rows.md, Totality 1)", b.id.Name)
+				// The name still binds, with the invalid type, so its reads
+				// in the body add nothing (D3).
+				g := &switchGroup{used: true}
+				v := c.bindLocal(&Var{Name: b.id.Name, Type: invalid, Pos: b.id.Pos(), group: g, used: true})
+				c.def(b.id, v)
+				c.fn.scope.insert(b.id.Name, v)
+				b.info.Var = v
+				vars[b.id.Name], types[b.id.Name], groups[b.id.Name] = v, invalid, g
 				continue
 			}
 			c.def(b.id, v)
@@ -873,6 +885,9 @@ func (c *checker) declareArm(items [][]patBinding) []armVar {
 			if t := types[b.id.Name]; !isInvalid(t) && !isInvalid(b.t) && !c.identical(t, b.t) {
 				c.errorf(b.id, CodeType, "%s is bound as %s by the first pattern of its case and as %s here; every pattern of a case binds each name with one type (rows.md, Totality 1)", b.id.Name, t, b.t)
 				groups[b.id.Name].used = true // reported: no S110 beside it (D3)
+				// The name binds with the invalid type, so its reads in the
+				// body add nothing (D3).
+				v.Type, types[b.id.Name] = invalid, invalid
 			}
 		}
 		reported := false

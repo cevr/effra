@@ -113,10 +113,13 @@ var invalidRoutes = map[string][]route{
 		{name: "a value through catch", decls: "func mkf() task.Fn fails Bang { return task.Go }\n", local: "let launch = mkf() catch {\n\tcase Bang:\n\t\ttask.Go\n\t}", callee: "launch"},
 	},
 	"IfStmt": {
-		{name: "an if value", local: "let launch = if true { task.Go } else { task.Go }", callee: "launch", staged: "S109"},
+		{name: "an if value", local: "let launch = if true { task.Go } else { task.Go }", callee: "launch"},
 	},
 	"SwitchStmt": {
-		{name: "a match value", local: "let launch = match 1 {\n\tcase 1:\n\t\ttask.Go\n\tcase _:\n\t\ttask.Go\n\t}", callee: "launch", staged: "S109"},
+		{name: "a match value", local: "let launch = match 1 {\n\tcase 1:\n\t\ttask.Go\n\tcase _:\n\t\ttask.Go\n\t}", callee: "launch"},
+	},
+	"TypeSwitchStmt": {
+		{name: "a type match value", decls: "type A {}\ntype B {}\ntype U = A | B\n", params: "u U", args: "A", local: "let launch = match u {\n\tcase A:\n\t\ttask.Go\n\tcase B:\n\t\ttask.Go\n\t}", callee: "launch"},
 	},
 	"UnaryExpr": {
 		{name: "a pointer to a local", local: "let l1 = task.Go; let p = &l1", callee: "(*p)"},
@@ -134,7 +137,6 @@ var cannotCarry = map[string]string{
 	"InterpolatedString": "an interpolation is a string",
 	"TypeGuard":          "a type test is a bool",
 	"WireLit":            "a wire value is no function (withArg reads it)",
-	"TypeSwitchStmt":     "a type match as a value is S109, an if or match in value position (196r), as the SwitchStmt route shows; its bindings are AsPattern",
 	"ArrayType":          "a type, not a value",
 	"MapType":            "a type, not a value",
 	"ChanType":           "a type, not a value (not built: #196)",

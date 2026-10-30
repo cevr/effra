@@ -142,8 +142,10 @@ func F() int {
 	let f = Id[int]
 	return f(3) + Id[int](4)
 }`},
-	{"M10", "function-value-statement", "S110", `func Id[T](x T) T { return x }
+	{"M10", "function-value-discarded-tail", "S110", `func Id[T](x T) T { return x }
 func F() { Id[int] }`},
+	{"M10", "function-value-before-tail", "S110", `func Id[T](x T) T { return x }
+func F() { Id[int]; _ = 0 }`},
 	{"M10", "function-value-implicit", "S108", `func Await[T, E](x T, t Task[T, E]) T fails E { return t.Wait() }
 func F() { _ = Await[int] }`},
 	{"M11", "index-negative", "S108", `func F(xs []int) int { return xs[-1] }`},

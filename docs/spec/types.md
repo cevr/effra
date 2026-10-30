@@ -89,7 +89,7 @@ type Option[T] = Some[T]{ Value T } | None{}
 
 ## Defined types
 
-Status: **checked** by `internal/sketch/check` (check-v1 stage B).
+Status: **checked** by `internal/sketch/check` (check-v1 stage B) and **lowered** (check-v1 stage C): a Go defined type over the base type's Go type.
 
 ```go
 type Celsius float64
@@ -99,6 +99,7 @@ type Span (int, int)
 1. `type N T` defines a new nominal type over `T`, a basic, slice, map, function, tuple or record type; `N` is not identical to `T`, and a value crosses between them only by conversion ([Conversions](#conversions)). A defined type over a type parameter or over itself is S108.
 2. A defined type over a tuple destructures like its tuple (`let (lo, hi) = span`); a defined type over a record keeps its braces, even with no fields.
 3. Its operations are those of `T`: arithmetic on `Celsius`, comparison where `T` is comparable.
+4. A defined type over a record, named in an error row, is an error type of its own ([Error types](#error-types)): it is thrown and caught as itself, by type test and by record pattern, and its text is its base record's. A constant of a defined type keeps that type: `func f() Flag { true }` is `Flag(true)` in Go.
 
 ## Tuples
 
@@ -187,7 +188,7 @@ Status: **checked** (#196).
 
 Status: **checked** (#196); the build refuses operators other than `==` and `+` until #50.
 
-1. Go's operators on Go's operand types, with exact constant arithmetic (an overflow of the typed result is S108): arithmetic on numeric types, `+` on strings, ordering on numbers and strings, `==` and `!=` on comparable types (structs whose fields are comparable included; README Gap 26), `&&`, `||` and `!` on `bool`, shifts on integers. S108 otherwise. A comparison is `bool`.
+1. Go's operators on Go's operand types, with exact constant arithmetic (an overflow of the typed result is S108): arithmetic on numeric types, `+` on strings, ordering on numbers and strings, `==` and `!=` on comparable types (structs whose fields are comparable included; README Gap 26). Comparability is structural, and every use reads it (`==`, a tuple, a record field, a `comparable` constraint, a map key): a record or tuple compares when its fields do, a union only when every variant does, and a row value (`case err:`) and an operation type's value never do, because Go would compare them as interfaces and panic on a variant that does not compare (stage C round 2 review M1, M2); `&&`, `||` and `!` on `bool`, shifts on integers. S108 otherwise. A comparison is `bool`.
 2. **One type per operator** (196u rule 4). Both operands of a binary operator have one type, and no operand converts by itself: `a + b` with `a int32` and `b int64` is S108 "mismatched types int32 and int64; write int64(a)". A literal takes the other operand's type (`x + 1` with `x int8` adds two `int8`s). Two literals each take the expected type, else their defaults, so `let d = 1 + 2.5` is S108 "mismatched types int and float64; write 1.0 + 2.5". *Prior art:* Rust's rule; Gleam and OCaml separate float operators.
 3. **Shifts and conversions** (spec D-A3). A shift's left literal takes the expected type when that is an integer type, else `int`; any other expected type is S108 "the left operand of a shift is an integer, and float64 is expected here; write int(1) << n, then convert the result". The count is any integer type. A conversion `T(x)` gives a literal `x` no expected type: `x` is typed on its own, then converted, so `float64(1 << n)` converts an `int` shift (in Go it is invalid, a known trap). *Prior art:* Rust's `as` never types its operand from the target; Gleam and MoonBit shift through library functions on one integer type; Zig requires a fixed-width left operand unless the count is comptime-known.
 4. `duration` takes `+`, `-`, ordering and `==` between durations; an integer literal is never a `duration` (S108). Its other arithmetic is [#175](https://github.com/cevr/ergo/issues/175)'s.

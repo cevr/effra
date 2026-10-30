@@ -1,0 +1,27 @@
+// `fails` and `needs` (fifth round): an exported function spells both rows;
+// `try` escapes the callee's row into the caller's.
+type NotFound { ID string }
+type Declined { Reason string }
+
+type Orders {
+	Find(id string) string fails NotFound,
+}
+
+type Gateway {
+	Charge(order string) string fails Declined,
+}
+
+func Pay(id string) string fails NotFound | Declined needs Orders, Gateway {
+	let order = try Orders.Find(id)
+	Gateway.Charge(order)
+}
+
+func Settle(id string) fails NotFound needs Orders {
+	if id == "" {
+		return NotFound{ID: id}
+	}
+	let name = try Orders.Find(id)
+	if name == "" {
+		return NotFound{ID: name}
+	}
+}

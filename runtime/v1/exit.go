@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"strconv"
+	"strings"
 
 	"ergo.local/prototype/runtime/rt"
 )
@@ -127,6 +129,175 @@ func guarded[T any](t *rt.Task, body func(*rt.Task) (T, error)) (v T, err error)
 	return body(t)
 }
 
+// The program's source map (#230), which RegisterCalls sets once, before
+// main runs: registered, decls (each source declaration's name and lines)
+// and calls (the call table).
+var (
+	registered bool
+	decls      []struct {
+		Name      string
+		File      string
+		Line, End int
+	}
+	calls []struct {
+		Func, Callee string
+		File         string
+		Line, Column int
+	}
+)
+
+// RegisterCalls registers the program's source map (#230). decls has one
+// entry per source declaration (a function, a package-level let, a wire):
+// its Ergo name, its .ergo file and its first and last lines. table has one
+// entry per call of the program's source: its Ergo function, what it calls
+// and its .ergo position. Every lowered program registers both before main
+// runs, empty or not. Registered, the defect report names the Ergo frames
+// of the panic, innermost first, and never a Go frame.
+func RegisterCalls(declTable []struct {
+	Name      string
+	File      string
+	Line, End int
+}, table []struct {
+	Func, Callee string
+	File         string
+	Line, Column int
+}) {
+	registered, decls, calls = true, declTable, table
+}
+
+// ergoStack is the Ergo call chain of a defect's Go stack, innermost
+// first. Only frames at a position of the program's source (a line
+// directive names its file) count; Go frames at no source position, the
+// runtime's and generated code's, are left out. The frame that panicked
+// is the first source frame after the runtime's panic( frame (Go's
+// traceback lists the deferred recover above it); it is written "F at
+// file:line", F the declaration whose lines hold it. Each frame after it
+// is the call it made, from the call table: "F calls G at file:line:col";
+// when several calls share its line, the one whose callee is the
+// declaration of the frame inside it, else all of them ("G or H"). A run of
+// the same frame, as in a recursion, is written once with its
+// count.
+func ergoStack(stack []byte) []string {
+	type site struct {
+		file string
+		line int
+		// elided is Go's count of frames it left out here, past its
+		// traceback limit (no file then).
+		elided string
+	}
+	files := map[string]bool{}
+	for _, d := range decls {
+		files[d.File] = true
+	}
+	for _, c := range calls {
+		files[c.File] = true
+	}
+	var frames []site
+	lines := strings.Split(string(stack), "\n")
+	// Go writes each frame as a function line, then its location indented
+	// by a tab. Frames above the first panic( frame are the recover's own.
+	start := 0
+	for i, ln := range lines {
+		if strings.HasPrefix(ln, "panic(") {
+			start = i + 1
+			break
+		}
+	}
+	for _, ln := range lines[start:] {
+		if n, ok := strings.CutPrefix(ln, "..."); ok {
+			if n, ok := strings.CutSuffix(n, " frames elided..."); ok {
+				frames = append(frames, site{elided: n})
+			}
+			continue
+		}
+		loc, ok := strings.CutPrefix(ln, "\t")
+		if !ok {
+			continue
+		}
+		if i := strings.LastIndex(loc, " +0x"); i >= 0 {
+			loc = loc[:i]
+		}
+		i := strings.LastIndex(loc, ":")
+		if i < 0 || !files[loc[:i]] {
+			continue
+		}
+		n, err := strconv.Atoi(loc[i+1:])
+		if err != nil {
+			continue
+		}
+		frames = append(frames, site{file: loc[:i], line: n})
+	}
+	owner := func(f site) string {
+		for _, d := range decls {
+			if d.File == f.file && d.Line <= f.line && f.line <= d.End {
+				return d.Name
+			}
+		}
+		return ""
+	}
+	type entry struct {
+		text  string
+		times int
+	}
+	var entries []entry
+	add := func(s string) {
+		if n := len(entries); n > 0 && entries[n-1].text == s {
+			entries[n-1].times++
+			return
+		}
+		entries = append(entries, entry{s, 1})
+	}
+	for i, f := range frames {
+		if f.elided != "" {
+			add("..." + f.elided + " frames elided...")
+			continue
+		}
+		var here []int
+		if i > 0 {
+			for j, c := range calls {
+				if c.File == f.file && c.Line == f.line {
+					here = append(here, j)
+				}
+			}
+		}
+		if len(here) == 0 {
+			name := owner(f)
+			if name != "" {
+				name += " "
+			}
+			add(fmt.Sprintf("%sat %s:%d", name, f.file, f.line))
+			continue
+		}
+		if len(here) > 1 && frames[i-1].elided == "" {
+			// Several calls share the line: the one this frame made calls
+			// the declaration of the frame inside it.
+			var made []int
+			for _, j := range here {
+				if calls[j].Callee == owner(frames[i-1]) {
+					made = append(made, j)
+				}
+			}
+			if len(made) == 1 {
+				here = made
+			}
+		}
+		c := calls[here[0]]
+		callees := []string{c.Callee}
+		for _, j := range here[1:] {
+			callees = append(callees, calls[j].Callee)
+		}
+		add(fmt.Sprintf("%s calls %s at %s:%d:%d", c.Func, strings.Join(callees, " or "), c.File, c.Line, c.Column))
+	}
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		out[i] = e.text
+		if e.times > 1 {
+			out[i] = fmt.Sprintf("%s (%d times)", e.text, e.times)
+		}
+	}
+	return out
+}
+
 // Main runs body, the lowered main, as the root task of the program and
 // exits with the status of its exit (Exit causes, rule 6): 0 on success, 1
 // for a typed failure, 2 when any reason is a defect, as Go's own panic
@@ -182,7 +353,13 @@ func report(w io.Writer, err error) int {
 				}
 			}
 			if p, ok := r.Value.(*Panic); ok && len(p.Stack) > 0 {
-				fmt.Fprintf(w, "\n%s\n", p.Stack)
+				if !registered {
+					fmt.Fprintf(w, "\n%s\n", p.Stack)
+				} else {
+					for _, s := range ergoStack(p.Stack) {
+						fmt.Fprintf(w, "\t%s\n", s)
+					}
+				}
 			}
 		case rt.KindInterruption:
 			fmt.Fprintln(w, "interrupted")

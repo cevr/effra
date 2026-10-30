@@ -30,6 +30,11 @@ type target struct {
 	// entry being checked uses, for the wire's entry-cycle check (M14).
 	internal *capSet
 	charged  *Row
+	// tries counts the try expressions being checked in this body: inside
+	// one, every fallible value propagates (196r sixth round: try covers
+	// the whole expression to its right); tried records that one did.
+	tries int
+	tried bool
 }
 
 func (t *target) row(declared, inferred *Row) *Row {
@@ -221,6 +226,7 @@ func (c *checker) checkBodies() {
 	// component (methods add no edge); the reporting pass recorded them.
 	c.checkInstantiationCycles()
 	c.checkInitCycles()
+	c.recordInitOrder()
 }
 
 // discoverInit finds the package's initialization cycles before any body
@@ -940,10 +946,7 @@ func (c *checker) checkFuncBody(f *Func) bool {
 		frame.insert(p.Name, v)
 	}
 	c.bindRequirements(frame, d.Type)
-	c.stmtList(d.Body.List, false)
-	if len(sig.Results) > 0 && !c.terminatesList(d.Body.List) {
-		c.errorAt(d.Body.Rbrace, d.Body.Rbrace+1, CodeMissingRet, "%s can reach the end of its body without returning a value (rows.md, Totality 3)", name)
-	}
+	c.functionBody(d.Body, name)
 	c.reportUnused(fc)
 	changed := false
 	// Inference writes the solved rows into the variables, never into the
