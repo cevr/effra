@@ -86,6 +86,8 @@ func acquireOnce(open func() (io.ReadCloser, error), info func() (*debug.BuildIn
 				identity.Reason = "executing image identity is unsupported on this platform"
 			case errUnverified:
 				identity.Reason = "executing image does not match the kernel's code signature record"
+			case errNoSignatureRecord:
+				identity.Reason = "executing image has no kernel code signature record"
 			case errImageTooLarge:
 				identity.Reason = "executing image cannot be read within its byte limit"
 			default:

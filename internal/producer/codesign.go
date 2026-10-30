@@ -20,7 +20,10 @@ import (
 // pages fail, wherever they were read. Layouts follow xnu's cs_blobs.h and
 // Go's cmd/internal/codesign.
 
-var errUnverified = errors.New("executing image does not match the kernel's code signature record")
+var (
+	errUnverified        = errors.New("executing image does not match the kernel's code signature record")
+	errNoSignatureRecord = errors.New("executing image has no kernel code signature record")
+)
 
 const (
 	machoMagic64          = 0xfeedfacf
@@ -89,7 +92,11 @@ func codeSignature(image []byte) ([]byte, uint64, bool) {
 }
 
 // codeDirectories returns the primary and alternate CodeDirectory blobs of an
-// embedded signature (a big-endian SuperBlob).
+// embedded signature (a big-endian SuperBlob): at most one per slot, so at
+// most six, each hashed at most once. A signature that names a directory slot
+// twice is refused whole; otherwise a hostile file could point thousands of
+// entries at one large directory and make the first acquisition hash it
+// thousands of times.
 func codeDirectories(signature []byte) [][]byte {
 	if len(signature) < 12 || binary.BigEndian.Uint32(signature) != csMagicEmbedded {
 		return nil
@@ -100,12 +107,22 @@ func codeDirectories(signature []byte) [][]byte {
 	}
 	signature = signature[:length]
 	var directories [][]byte
+	var seen [1 + csSlotAlternateLast - csSlotAlternateFirst + 1]bool
 	for i := range count {
 		entry := signature[12+i*8:]
 		slot, offset := binary.BigEndian.Uint32(entry), uint64(binary.BigEndian.Uint32(entry[4:]))
-		if slot != csSlotCodeDirectory && (slot < csSlotAlternateFirst || slot > csSlotAlternateLast) {
+		index := 0
+		switch {
+		case slot == csSlotCodeDirectory:
+		case slot >= csSlotAlternateFirst && slot <= csSlotAlternateLast:
+			index = int(1 + slot - csSlotAlternateFirst)
+		default:
 			continue
 		}
+		if seen[index] {
+			return nil
+		}
+		seen[index] = true
 		if offset+8 > length || binary.BigEndian.Uint32(signature[offset:]) != csMagicCodeDirectory {
 			continue
 		}

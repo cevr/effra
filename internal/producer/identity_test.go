@@ -53,12 +53,26 @@ func TestUnavailableQualificationAndBoundedDeclarations(t *testing.T) {
 	fails := func(err error) func() (io.ReadCloser, error) {
 		return func() (io.ReadCloser, error) { return nil, err }
 	}
-	for _, open := range []func() (io.ReadCloser, error){fails(errors.New("private path")), func() (io.ReadCloser, error) { return brokenReader{}, nil }, fails(errUnsupported), fails(errUnverified), fails(errImageTooLarge)} {
+	for _, open := range []func() (io.ReadCloser, error){fails(errors.New("private path")), func() (io.ReadCloser, error) { return brokenReader{}, nil }, fails(errUnsupported), fails(errUnverified), fails(errNoSignatureRecord), fails(errImageTooLarge)} {
 		var count atomic.Int32
 		get := acquireOnce(func() (io.ReadCloser, error) { count.Add(1); return open() }, func() (*debug.BuildInfo, bool) { return nil, false }, func() (string, error) { return "nonce-A", nil })
 		first, second := get(), get()
 		if first != second || count.Load() != 1 || first.Strength != "unavailable" || first.Digest != "" || first.ReuseScope != "process" || first.Qualifier != "process:nonce-A" || strings.Contains(first.Reason, "private") {
 			t.Fatal(first, second, count.Load())
+		}
+	}
+	// Each way an image is unavailable says which: an image the kernel keeps
+	// no signature record of is not one that fails to match it.
+	for err, reason := range map[error]string{
+		errUnsupported:        "executing image identity is unsupported on this platform",
+		errUnverified:         "executing image does not match the kernel's code signature record",
+		errNoSignatureRecord:  "executing image has no kernel code signature record",
+		errImageTooLarge:      "executing image cannot be read within its byte limit",
+		errors.New("private"): "executing image cannot be opened",
+	} {
+		got := acquireOnce(fails(err), func() (*debug.BuildInfo, bool) { return nil, false }, func() (string, error) { return "nonce", nil })()
+		if got.Reason != reason {
+			t.Errorf("%v: reason %q, want %q", err, got.Reason, reason)
 		}
 	}
 	none := acquireOnce(func() (io.ReadCloser, error) { return nil, errUnsupported }, func() (*debug.BuildInfo, bool) { return nil, false }, func() (string, error) { return "", errors.New("no entropy") })()
