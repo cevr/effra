@@ -550,6 +550,11 @@ func (c *checker) unionType(n *Named, spec *syntax.InterfaceType, ctx *typeCtx) 
 			continue
 		}
 		if p := vn.origin().Obj.Pkg; p != c.pkg {
+			if isUnion(t) {
+				c.errorf(x, CodeType, "a union variant is a record declared in this package, not %s (types.md, Unions 1)", t)
+				u.Bad = true
+				continue
+			}
 			// A variant from another package needs a sealed interface over
 			// a foreign type (spec Q7): 196b's.
 			c.errorf(x, CodeOutside, "a union variant from another package (%s) is 196b's (packages); declare the record in this package", t)

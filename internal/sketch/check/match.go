@@ -1,6 +1,7 @@
 package check
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"unicode"
@@ -267,10 +268,15 @@ func (r *patResolver) pattern0(e syntax.Expr, t Type, col int) resolved {
 			return r.typeTest(x, t, col)
 		case *Func, *Builtin, *PkgName:
 			c.errorf(x, CodeType, "a pattern name binds; %s already names %s: compare with if, or choose another name (rows.md, Totality 1)", x.Name, objectNoun(o))
+			if p, ok := o.(*PkgName); ok {
+				p.used = true // The refused occurrence must not add an unused import.
+			}
+			r.bind(x, invalid, &Pattern{Kind: PatBind}, false)
 			return r.fail(nil, t)
 		case *Var:
 			if o.pkg {
 				c.errorf(x, CodeType, "a pattern name binds; %s already names a package value: compare with if, or choose another name (rows.md, Totality 1)", x.Name)
+				r.bind(x, invalid, &Pattern{Kind: PatBind}, false)
 				return r.fail(nil, t)
 			}
 		}
@@ -330,8 +336,8 @@ func (r *patResolver) typeTest(e syntax.Expr, t Type, col int) resolved {
 }
 
 // head resolves the type a type test or a record pattern names against a
-// value of type t at col: its constructor (-1 when it is t's own type and
-// t has one shape) and the narrowed type; ok false when reported.
+// value of type t at col: its constructor (-1 when it is t's own type)
+// and the narrowed type; ok false when reported.
 func (r *patResolver) head(e syntax.Expr, t Type, col int) (int, Type, bool) {
 	c := r.c
 	ci := r.info[col]
@@ -341,6 +347,9 @@ func (r *patResolver) head(e syntax.Expr, t Type, col int) (int, Type, bool) {
 		if idx == variantOver {
 			r.resolve.over = true // reported once by the match (S103)
 			return 0, nil, false
+		}
+		if idx == -1 {
+			return -1, t, true
 		}
 		if idx < 0 {
 			return 0, nil, false
@@ -612,27 +621,40 @@ func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr
 	}
 	useful := r.sp.solverFor(nrows)
 	matrix := newRowSet(useful)
+	var origin []syntax.Node // the case of each row of matrix, in order
+	judge := func(at syntax.Node, row solverRow) {
+		u, ok := useful.caseUseful(matrix, row)
+		if ok && !u {
+			c.errorf(at, CodeType, "%s (unreachable)", c.coveredBy(matrix, origin))
+			return
+		}
+		before := len(matrix.rows)
+		matrix.addRow(row)
+		if len(matrix.rows) > before {
+			origin = append(origin, at)
+		}
+	}
 	for ci, cl := range clauses {
 		for ii, item := range cl.List {
 			row := rowOf[ci][ii]
 			if row == nil || r.resolve.over {
 				continue
 			}
-			if u, ok := useful.caseUseful(matrix, row); ok && !u {
-				c.errorf(item, CodeType, "this case is already covered by the cases before it (unreachable)")
-				continue
-			}
-			matrix.addRow(row)
+			judge(item, row)
 		}
 		if cl.List == nil && valid && !r.resolve.over {
-			// A default is unreachable when the earlier cases are total.
-			// Reported patterns leave an incomplete matrix (D3).
+			// `case _` is judged like any case (D-B4): it is unreachable
+			// when the cases before it are total, so a dead default never
+			// hides a variant added later. Its question is the totality
+			// question, under the same budget (rows.md, Totality 5). After
+			// a reported pattern the cases before it are incomplete, so it
+			// only covers.
 			if patternsOK {
-				if u, ok := useful.caseUseful(matrix, solverRow{}); ok && !u {
-					c.errorf(cl, CodeType, "this case is already covered by the cases before it (unreachable)")
-				}
+				judge(cl, solverRow{})
+			} else {
+				matrix.addRow(solverRow{})
+				origin = append(origin, cl)
 			}
-			matrix.addRow(solverRow{})
 		}
 		inner := c.openScope()
 		arm := c.declareArm(bindsOf[ci])
@@ -692,6 +714,25 @@ func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr
 		}
 		c.errorAt(kw, kw+matchLen, CodeNotTotal, "this match is not total: no case handles %s; name every variant or add case _ (rows.md, Totality 2)", what)
 	}
+}
+
+// coveredBy says what covers an unreachable case row: the earlier case
+// that alone covers it, by its text ("the earlier case `B`"; no line, so the
+// message does not move with the declarations), or the cases before it together.
+func (c *checker) coveredBy(m *rowSet, origin []syntax.Node) string {
+	i := m.cover
+	if i < 0 || i >= len(origin) {
+		return "this case is already covered by the cases before it"
+	}
+	f := c.cur.syntax
+	text := "_"
+	if x, ok := origin[i].(syntax.Expr); ok {
+		text = strings.Join(strings.Fields(f.Src[x.Pos():x.End()]), " ")
+	}
+	if rs := []rune(text); len(rs) > 40 {
+		text = string(rs[:37]) + "…"
+	}
+	return fmt.Sprintf("this case is already covered by the earlier case `%s`", text)
 }
 
 // caseItem resolves one pattern of a case: a pattern of the subject, or of

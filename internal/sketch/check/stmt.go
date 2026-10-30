@@ -207,8 +207,22 @@ func (c *checker) exprStmt(s *syntax.ExprStmt) {
 // value needs a value (types.md, Zero values 3).
 func (c *checker) varDecl(d *syntax.VarDecl) {
 	for _, spec := range d.Specs {
-		if spec.Pattern != nil {
-			c.letPattern(spec)
+		p := spec.Pattern
+		if p == nil && len(spec.Names) == 1 {
+			n := spec.Names[0]
+			switch o := c.lookup(n.Name).(type) {
+			case *Const, *TypeName, *capBinding, *Func, *Builtin, *PkgName:
+				p = n
+			case *Var:
+				if o.pkg {
+					p = n
+				}
+			}
+		}
+		if p != nil {
+			patternSpec := *spec
+			patternSpec.Pattern = p
+			c.letPattern(&patternSpec)
 			continue
 		}
 		var declared Type

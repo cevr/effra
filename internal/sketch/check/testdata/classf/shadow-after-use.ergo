@@ -1,7 +1,7 @@
 type Cap { M() }
 func a() { // want S108
 	b()
-	let b = func() {}
+	let _ as b = func() {}
 	b()
 	Cap.M()
 }

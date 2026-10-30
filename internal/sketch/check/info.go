@@ -57,6 +57,10 @@ import (
 //     (a ParenExpr shares its inner node's), and a binding's Var is its
 //     Defs entry. A package-level `let P = e` defines each name of P as a
 //     package *Var.
+//     The frozen tree stores a local let's single bare name in VarSpec.Names
+//     even when it tests a known type or constant (VarSpec.Pattern is nil).
+//     In that case Info.Patterns holds its pattern, Uses names the referred
+//     object, and Defs has no binder. Lowering reads that pattern first.
 //   - A tuple value `(a, b)` and a tuple type have the *Tuple type; a
 //     function's one result may be a tuple, and `let q, r = f()`
 //     destructures it.

@@ -162,6 +162,11 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 				}
 				if spec.Pattern != nil {
 					pattern(spec.Pattern)
+				} else if len(spec.Names) == 1 && spec.Names[0].Name != "_" && info.Defs[spec.Names[0]] == nil {
+					// The frozen tree stores a single bare name in Names.
+					// A known type or constant tests instead of declaring a
+					// binder, and must have the same facts as any pattern.
+					pattern(spec.Names[0])
 				}
 			}
 		case *syntax.InterpolatedString:

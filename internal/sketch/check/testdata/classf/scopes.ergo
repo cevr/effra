@@ -34,8 +34,8 @@ func catches() {
 	}
 }
 func blocks() int {
-	let x = 1
-	let y = x
+	let _ as x = 1
+	let _ as y = x
 	if y > 0 {
 		return y
 	}

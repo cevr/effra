@@ -554,6 +554,9 @@ func constNumeric(op operand, t Type) bool {
 // refuses, naming the Ergo form to write instead.
 func (c *checker) conversionRefusal(arg syntax.Expr, v, t Type) string {
 	name := exprText(arg)
+	if lit, sign, ok := signedLit(arg); ok {
+		name = sign + lit.Value
+	}
 	if name == "this expression" {
 		name = "x"
 	}
