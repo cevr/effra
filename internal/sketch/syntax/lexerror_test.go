@@ -48,7 +48,9 @@ var lexErrorCases = []struct {
 	{"for header, no-break space before in", "func A(xs []int){for i, x in xs {\n}}", 25, "unexpected character U+00A0 '\\u00a0'"},
 	{"for header, stray character before in", "func A(xs []int){for i, x@ in xs {\n}}", 25, "unexpected character '@'"},
 	{"for header, unterminated string after patterns", `func A(){for i, x "`, 18, "string literal not terminated"},
-	{"index, type reading reaches the error", `func A(){let y = f[func("`, 24, "string literal not terminated"},
+	// `escaping func(` reads only as a type: with no repair, the fallback
+	// expression reading reports "a type is not a value" at the `escaping`.
+	{"index, type reading reaches the error", `func A(){let y = f[escaping func("`, 33, "string literal not terminated"},
 	// keysContinue reads a wire body's key list.
 	{"wire keys, unterminated string", `func A(){with wire{A, "`, 22, "string literal not terminated"},
 }
