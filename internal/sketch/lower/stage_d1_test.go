@@ -34,7 +34,9 @@ func TestUntypedLetIsRefusedBeforeLowering(t *testing.T) {
 // `op=`, through fields (nested too) and slice elements, from a function
 // literal that captures it, and in a `for` condition loop; a `let x T`
 // starts at its zero value; a record copy is a value (the original keeps
-// its field). Map entries are D2's (the Map rule).
+// its field); a write through a pointer needs no let mut, and a borrow,
+// `&r` or the implicit one of `r.bump()`, reaches the let mut local.
+// Map entries are D2's (the Map rule).
 func TestErgoRunLetMut(t *testing.T) {
 	wantRun(t, `type Inner { N int }
 type Outer { In Inner, Tag string }
@@ -106,6 +108,20 @@ func zero() bool {
 	ok && z == 3
 }
 
+func bump(r *Inner) { r.N = r.N + 1 }
+
+func set(p *Inner) { p.N = 7 }
+
+func pointers() bool {
+	let mut r = Inner{N: 1}
+	r.bump()
+	let was = r.N
+	let p = &r
+	set(p)
+	p.bump()
+	was == 2 && r.N == 8
+}
+
 func helper() int { 1 }
 
 func siblings(flag bool) int {
@@ -126,7 +142,8 @@ func main() needs Console {
 	report("captured", captured() == 7)
 	report("loop", loop() == 10)
 	report("zero", zero())
+	report("pointers", pointers())
 	report("siblings", siblings(true) == 12 && siblings(false) == 20 && helper() == 1)
 }
-`, "ops\nfields\nelements\ncaptured\nloop\nzero\nsiblings\n")
+`, "ops\nfields\nelements\ncaptured\nloop\nzero\npointers\nsiblings\n")
 }
