@@ -1,6 +1,6 @@
 # Standard library outline
 
-Status: **designed, not yet implemented**, except `timeout.After` and the prelude's `Console` and `Scheduler`, which the prototype has ([runtime.md](runtime.md#timeouts)).
+Status: **designed, not yet implemented**, except the prelude's `Console` (`Println`) and the `Sleep` of its live scheduler, which `ergo build` lowers ([runtime.md](runtime.md#host-and-lowering-notes)). The checker admits `timeout.After` ([runtime.md](runtime.md#timeouts)); its lowering, with the other prelude and std extern bodies, is lower-v1 stage 3, and a build that uses it is refused with S109 until then.
 
 The standard library is the "Effect for Go" track, [#206](https://github.com/cevr/ergo/issues/206). Its module map is the contract: each family states the Effect modules it covers, the construct it uses and its tier. Modules are restated in Ergo's idioms, not ported API for API. Effect is prior art for the guarantees, not a dependency (owner, 2026-10-26). Go names are kept wherever Go has one. Definitions are in the [glossary](../../GLOSSARY.md).
 

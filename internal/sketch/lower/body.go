@@ -1,0 +1,726 @@
+package lower
+
+import (
+	"go/constant"
+	"strconv"
+	"strings"
+
+	"ergo.local/prototype/internal/sketch/check"
+	"ergo.local/prototype/internal/sketch/syntax"
+)
+
+// Bodies (spec D4). Statements lower to Go statements in the source
+// function's own Go function: a with block, a catch and a match are Go
+// blocks and switches inside it, never closures, so return, try and defer
+// keep their frame. Every operand is evaluated once, left to right
+// (expr.go); a statement that yields no Go value is written for its
+// effects alone.
+
+// frame is the Go function being written: a declared function or a
+// function literal.
+type frame struct {
+	result   check.Type // nil when it returns no value
+	fallible bool
+}
+
+// loopCtx is an enclosing for loop: break and continue inside a match,
+// which lowers to a Go switch, name it by a label (spec D4: match does not
+// own break and continue).
+type loopCtx struct {
+	label    string
+	switches int // Go switches between the loop and the current statement
+}
+
+// funcCtx writes one Go function body.
+type funcCtx struct {
+	typeCtx
+	scope      *namer
+	out        *strings.Builder
+	depth      int
+	locals     map[*check.Var]string
+	frame      *frame
+	env        string // the current environment pointer; "" in a function with none
+	directives bool
+	loops      []*loopCtx
+}
+
+func newFuncCtx(l *lowerer, scope *namer, directives bool) *funcCtx {
+	return &funcCtx{typeCtx: typeCtx{l: l, params: map[*check.TypeParam]string{}}, out: &strings.Builder{}, scope: scope, locals: map[*check.Var]string{}, directives: directives}
+}
+
+// line writes one Go line at the current depth.
+func (fc *funcCtx) line(s string) {
+	fc.out.WriteString(strings.Repeat("\t", fc.depth) + s + "\n")
+}
+
+// at writes the //line directive of n, so the Go lines that follow map to
+// n's source line and column.
+func (fc *funcCtx) at(n syntax.Node) {
+	fc.site = n
+	if fc.directives && n != nil && n.Pos().IsValid() {
+		fc.out.WriteString(fc.l.directive(n.Pos()))
+	}
+}
+
+func (fc *funcCtx) temp(base string) string { return fc.scope.alloc(base) }
+
+// body writes a function body and closes it so Go sees every path end: a
+// value-returning body that may fall off its end ends in a panic, which a
+// checked program never reaches, and a fallible body with no value returns
+// nil.
+func (fc *funcCtx) body(list []syntax.Stmt) {
+	if fc.stmts(list) {
+		return
+	}
+	switch {
+	case fc.frame.result != nil:
+		fc.line("panic(\"ergo: unreachable: the function's end\")")
+	case fc.frame.fallible:
+		fc.line("return nil")
+	}
+}
+
+// stmts writes a statement list and reports whether its Go form ends in a
+// terminating statement (Go spec, Terminating statements).
+func (fc *funcCtx) stmts(list []syntax.Stmt) bool {
+	terminates := false
+	for _, s := range list {
+		terminates = fc.stmt(s)
+	}
+	return terminates
+}
+
+// block writes a nested statement list one level deeper.
+func (fc *funcCtx) block(list []syntax.Stmt) bool {
+	fc.depth++
+	t := fc.stmts(list)
+	fc.depth--
+	return t
+}
+
+// stmt writes one statement and reports whether it is terminating in Go.
+func (fc *funcCtx) stmt(s syntax.Stmt) bool {
+	fc.at(s)
+	switch s := s.(type) {
+	case *syntax.DeclStmt:
+		fc.let(s.Decl)
+	case *syntax.AssignStmt:
+		fc.assign(s)
+	case *syntax.ReturnStmt:
+		fc.ret(s)
+		return true
+	case *syntax.ExprStmt:
+		fc.exprStmt(s.X)
+	case *syntax.BlockStmt:
+		fc.line("{")
+		t := fc.block(s.List)
+		fc.line("}")
+		return t
+	case *syntax.IfStmt:
+		return fc.ifStmt(s)
+	case *syntax.ForStmt:
+		return fc.forStmt(s)
+	case *syntax.BranchStmt:
+		fc.branch(s)
+		return true
+	case *syntax.TypeSwitchStmt:
+		return fc.typeMatch(s)
+	case *syntax.SwitchStmt:
+		return fc.valueMatch(s)
+	case *syntax.RangeStmt:
+		refuse(s, "for … in is lowered after check-v1 stage D (one for, the Map rule and Range)")
+	case *syntax.AssertStmt:
+		refuse(s, "assert runs under ergo test, which lowering adds after check-v1 stage E (196l)")
+	default:
+		refuse(s, "this statement is not produced by the decided parser")
+	}
+	return false
+}
+
+// let lowers a local let: a Go variable of the checked type, so a literal
+// keeps its one type (196u).
+func (fc *funcCtx) let(d *syntax.VarDecl) {
+	for _, spec := range d.Specs {
+		if spec.Pattern != nil || len(spec.Names) != 1 || len(spec.Values) > 1 {
+			refuse(d, "a let with a pattern or several names is lowered after check-v1 stage B (196p, 196t)")
+		}
+		id := spec.Names[0]
+		if p := fc.l.info.Patterns[id]; p != nil && p.Kind == check.PatTypeTest {
+			// A known single name remains in Names in the frozen syntax,
+			// but has no binder. The checker proved this test irrefutable.
+			fc.discard(spec.Values[0])
+			continue
+		}
+		v, ok := fc.l.info.Defs[id].(*check.Var)
+		if id.Name == "_" {
+			if len(spec.Values) == 1 {
+				fc.discard(spec.Values[0])
+			}
+			continue
+		}
+		if !ok {
+			ice(id, "the let %s has no Defs entry", id.Name)
+		}
+		goType := fc.goType(v.Type)
+		if len(spec.Values) == 0 {
+			name := fc.declare(v)
+			fc.line("var " + name + " " + goType)
+		} else {
+			val := fc.assigned(spec.Values[0])
+			name := fc.declare(v)
+			fc.line("var " + name + " " + goType + " = " + val)
+		}
+		if !fc.l.reads[v] {
+			fc.line("_ = " + fc.locals[v])
+		}
+	}
+}
+
+// declare names a local variable.
+func (fc *funcCtx) declare(v *check.Var) string {
+	name := fc.scope.alloc(v.Name)
+	fc.locals[v] = name
+	return name
+}
+
+// assign lowers x = e and x op= e. The target's operands are evaluated
+// first, then the value (Go's two-phase assignment); an op-assignment reads
+// its target before the value.
+func (fc *funcCtx) assign(s *syntax.AssignStmt) {
+	if len(s.Lhs) != 1 || len(s.Rhs) != 1 {
+		refuse(s, "an assignment of several values is not produced by the decided parser")
+	}
+	op := ""
+	switch s.Tok {
+	case syntax.ASSIGN:
+	default:
+		text := s.Tok.String()
+		if !strings.HasSuffix(text, "=") || text == "==" || text == ":=" {
+			refuse(s, "the assignment %s is not produced by the decided parser", text)
+		}
+		op = strings.TrimSuffix(text, "=")
+	}
+	rhsEmits := fc.emits(s.Rhs[0])
+	target := fc.target(s.Lhs[0], rhsEmits)
+	if op == "" {
+		val := fc.assigned(s.Rhs[0])
+		fc.line(target + " = " + val)
+		return
+	}
+	if rhsEmits {
+		old := fc.temp("old")
+		fc.line(old + " := " + target)
+		val := fc.value(s.Rhs[0])
+		fc.line(target + " = " + old + " " + op + " " + val)
+		return
+	}
+	fc.line(target + " " + op + "= " + fc.value(s.Rhs[0]))
+}
+
+// target is an assignment target's Go text: a place. One order holds for
+// every place (spec D4): the place is fixed, left to right, before anything
+// evaluated after it (later). A place is a variable, a dereferenced pointer
+// *p, a field of a place, a field through a pointer, an element of a slice
+// or an element of an array place, nested in any order. The values that
+// pick the place, a pointer, a slice and an index, are bound to temporaries
+// when something after them writes statements, so a later operand that
+// reassigns a variable cannot move the place.
+func (fc *funcCtx) target(x syntax.Expr, later bool) string {
+	switch x := x.(type) {
+	case *syntax.Ident:
+		if x.Name == "_" {
+			return "_" // a discard: _ = e evaluates e
+		}
+		return fc.ident(x)
+	case *syntax.ParenExpr:
+		return fc.target(x.X, later)
+	case *syntax.StarExpr:
+		// *p: the place p points at, p bound first.
+		base := fc.value(x.X)
+		if later {
+			base = fc.spill(base)
+		}
+		return "(*" + base + ")"
+	case *syntax.SelectorExpr:
+		if _, isPtr := fc.typeOf(x.X).(*check.Pointer); isPtr {
+			base := fc.value(x.X)
+			if later {
+				base = fc.spill(base)
+			}
+			return base + "." + fc.fieldName(x)
+		}
+		return fc.target(x.X, later) + "." + fc.fieldName(x)
+	case *syntax.IndexExpr:
+		if len(x.Indices) != 1 {
+			refuse(x, "this assignment target is not lowered yet")
+		}
+		var base string
+		indexEmits := fc.emits(x.Indices[0])
+		switch fc.typeOf(x.X).(type) {
+		case *check.Map:
+			refuse(x, "assignment to a Map entry is lowered after check-v1 stage D (the Map rule)")
+		case *check.Slice:
+			base = fc.value(x.X)
+			if later || indexEmits {
+				base = fc.spill(base)
+			}
+		default:
+			base = fc.target(x.X, later || indexEmits)
+		}
+		index := fc.value(x.Indices[0])
+		if later && !fc.isConst(x.Indices[0]) {
+			index = fc.spill(index)
+		}
+		return base + "[" + index + "]"
+	}
+	refuse(x, "this assignment target is not lowered yet")
+	return ""
+}
+
+// isPlace reports whether x is a place target can lower: an addressable
+// Go expression.
+func (fc *funcCtx) isPlace(x syntax.Expr) bool {
+	switch x := x.(type) {
+	case *syntax.Ident:
+		_, ok := fc.l.info.Uses[x].(*check.Var)
+		return ok
+	case *syntax.ParenExpr:
+		return fc.isPlace(x.X)
+	case *syntax.StarExpr:
+		return true
+	case *syntax.SelectorExpr:
+		if id, ok := x.X.(*syntax.Ident); ok {
+			if _, isPkg := fc.l.info.Uses[id].(*check.PkgName); isPkg {
+				return false
+			}
+		}
+		if _, isPtr := fc.typeOf(x.X).(*check.Pointer); isPtr {
+			return true
+		}
+		return fc.isPlace(x.X)
+	case *syntax.IndexExpr:
+		if len(x.Indices) != 1 {
+			return false
+		}
+		switch fc.typeOf(x.X).(type) {
+		case *check.Slice:
+			return true
+		case *check.Map, *check.Signature:
+			return false
+		}
+		return fc.isPlace(x.X)
+	}
+	return false
+}
+
+// place is the address of the receiver x of a *T function: the place's
+// address when x is a place, fixed before anything later (target); else
+// x's value in a temporary, whose address Go can take.
+func (fc *funcCtx) place(x syntax.Expr, later bool) string {
+	if fc.isPlace(x) {
+		return "&" + fc.target(x, later)
+	}
+	t := fc.temp("r")
+	fc.line(t + " := " + fc.value(x))
+	return "&" + t
+}
+
+// ret lowers return. A value of an error type is a failure (types.md, Error
+// types 2); an untried fallible value returns its value and error as they
+// are.
+func (fc *funcCtx) ret(s *syntax.ReturnStmt) {
+	f := fc.frame
+	if len(s.Results) > 1 {
+		refuse(s, "returning several values is a tuple, lowered after check-v1 stage B (196t)")
+	}
+	if len(s.Results) == 0 {
+		if f.fallible {
+			fc.line("return nil")
+		} else {
+			fc.line("return")
+		}
+		return
+	}
+	x := s.Results[0]
+	if !fc.fallibleExpr(x) && fc.l.isErrorValue(fc.typeOf(x)) {
+		fc.fail(fc.value(x))
+		return
+	}
+	if fc.fallibleExpr(x) {
+		o := fc.expr(x)
+		switch {
+		case f.result != nil && o.val != "":
+			fc.line("return " + fc.convertAt(x, o.val) + ", " + o.err)
+		case f.result != nil:
+			ice(x, "a fallible return with no value in a function with a result")
+		default:
+			fc.line("return " + o.err)
+		}
+		return
+	}
+	if f.result == nil {
+		// A no-value call returned for its effect: return f().
+		fc.exprStmt(x)
+		if f.fallible {
+			fc.line("return nil")
+		} else {
+			fc.line("return")
+		}
+		return
+	}
+	val := fc.assigned(x)
+	if f.fallible {
+		fc.line("return " + val + ", nil")
+	} else {
+		fc.line("return " + val)
+	}
+}
+
+// fail leaves the current frame with err (rows.md, Escapes): the frame's
+// zero value and the error.
+func (fc *funcCtx) fail(err string) {
+	f := fc.frame
+	if !f.fallible {
+		fc.line("panic(" + err + ")")
+		return
+	}
+	if f.result != nil {
+		fc.line("return " + fc.zero(f.result) + ", " + err)
+		return
+	}
+	fc.line("return " + err)
+}
+
+// exprStmt writes an expression statement for its effects.
+func (fc *funcCtx) exprStmt(x syntax.Expr) {
+	fc.discard(x)
+}
+
+// discard evaluates x and drops its value: a call is a Go call statement,
+// and any other value is assigned to the blank identifier.
+func (fc *funcCtx) discard(x syntax.Expr) {
+	x = unparen(x)
+	if call, ok := x.(*syntax.CallExpr); ok {
+		if c := fc.l.info.Calls[call]; c != nil && c.Kind != check.CallWith && c.Kind != check.CallConversion && c.Kind != check.CallLen {
+			if text := fc.callStmt(call); text != "" {
+				fc.line(text)
+			}
+			return
+		}
+	}
+	o := fc.expr(x)
+	if o.err != "" {
+		ice(x, "an untried fallible expression in a statement")
+	}
+	if o.val != "" {
+		fc.line("_ = " + o.val)
+	}
+}
+
+// ifStmt lowers if/else. A condition that needs statements of its own is
+// evaluated in the else branch of the previous condition, never before it.
+func (fc *funcCtx) ifStmt(s *syntax.IfStmt) bool {
+	if s.Init != nil {
+		refuse(s, "an if with an init statement is not produced by the decided parser")
+	}
+	cond := fc.value(s.Cond)
+	fc.line("if " + cond + " {")
+	then := fc.block(s.Body.List)
+	switch e := s.Else.(type) {
+	case nil:
+		fc.line("}")
+		return false
+	case *syntax.BlockStmt:
+		fc.line("} else {")
+		els := fc.block(e.List)
+		fc.line("}")
+		return then && els
+	case *syntax.IfStmt:
+		fc.line("} else {")
+		fc.depth++
+		fc.at(e)
+		els := fc.ifStmt(e)
+		fc.depth--
+		fc.line("}")
+		return then && els
+	}
+	refuse(s.Else, "this else branch is not produced by the decided parser")
+	return false
+}
+
+// forStmt lowers a conditional loop. The condition is evaluated at the top
+// of every iteration, inside the loop, so a condition with effects runs once
+// per test; a loop with no condition and no break is terminating.
+func (fc *funcCtx) forStmt(s *syntax.ForStmt) bool {
+	if s.Init != nil || s.Post != nil {
+		refuse(s, "a for with init or post statements is not produced by the decided parser")
+	}
+	loop := &loopCtx{}
+	fc.loops = append(fc.loops, loop)
+	saved := fc.out
+	fc.out = &strings.Builder{}
+	breaks := false
+	if s.Cond == nil {
+		fc.line("for {")
+	} else if !fc.emits(s.Cond) {
+		fc.line("for " + fc.value(s.Cond) + " {")
+		breaks = true
+	} else {
+		fc.line("for {")
+		fc.depth++
+		cond := fc.value(s.Cond)
+		fc.line("if !(" + cond + ") {")
+		fc.line("\tbreak")
+		fc.line("}")
+		fc.depth--
+		breaks = true
+	}
+	breaks = fc.containsBreak(s.Body) || breaks
+	fc.block(s.Body.List)
+	fc.line("}")
+	body := fc.out.String()
+	fc.out = saved
+	fc.loops = fc.loops[:len(fc.loops)-1]
+	if loop.label != "" {
+		fc.out.WriteString(loop.label + ":\n")
+	}
+	fc.out.WriteString(body)
+	return !breaks
+}
+
+// containsBreak reports a break of this loop in its body: one not inside a
+// nested loop.
+func (fc *funcCtx) containsBreak(body *syntax.BlockStmt) bool {
+	found := false
+	var walk func(n syntax.Node) bool
+	walk = func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.ForStmt, *syntax.RangeStmt, *syntax.FuncLit:
+			return false
+		case *syntax.BranchStmt:
+			if n.Tok == syntax.BREAK {
+				found = true
+			}
+		}
+		return !found
+	}
+	for _, s := range body.List {
+		syntax.Inspect(s, walk)
+	}
+	return found
+}
+
+// branch lowers break and continue to the innermost loop, by a label when a
+// Go switch lies between them.
+func (fc *funcCtx) branch(s *syntax.BranchStmt) {
+	if s.Label != nil {
+		refuse(s, "a labelled branch is not produced by the decided parser")
+	}
+	if len(fc.loops) == 0 {
+		ice(s, "a break or continue outside a loop")
+	}
+	word := "break"
+	if s.Tok == syntax.CONTINUE {
+		word = "continue"
+	}
+	loop := fc.loops[len(fc.loops)-1]
+	if loop.switches == 0 {
+		fc.line(word)
+		return
+	}
+	if loop.label == "" {
+		loop.label = fc.temp("loop")
+	}
+	fc.line(word + " " + loop.label)
+}
+
+// enterSwitch and leaveSwitch track the Go switches inside the innermost
+// loop.
+func (fc *funcCtx) enterSwitch() {
+	if len(fc.loops) > 0 {
+		fc.loops[len(fc.loops)-1].switches++
+	}
+}
+
+func (fc *funcCtx) leaveSwitch() {
+	if len(fc.loops) > 0 {
+		fc.loops[len(fc.loops)-1].switches--
+	}
+}
+
+// typeMatch lowers a match on one subject with type patterns to a Go type
+// switch. The checker proved it total (Info contract 3), so it has no
+// default arm unless it writes case _.
+func (fc *funcCtx) typeMatch(s *syntax.TypeSwitchStmt) bool {
+	m := fc.l.info.Matches[s]
+	if m == nil {
+		ice(s, "a match with no Matches entry")
+	}
+	if s.Init != nil || len(s.Subjects) != 1 || len(s.Binds) > 0 {
+		refuse(s, "a match on several subjects or with a binding is lowered after check-v1 stage B (196p, 196t)")
+	}
+	subject := fc.value(s.Subjects[0].X)
+	if !fc.isInterface(fc.typeOf(s.Subjects[0].X)) {
+		refuse(s.Subjects[0], "a type match on a value that is not a union or an operation type is lowered after check-v1 stage B (196p)")
+	}
+	type arm struct {
+		types []string
+		as    *check.Var
+		body  []syntax.Stmt
+		def   bool
+	}
+	var arms []arm
+	bind := false
+	seen := map[string]bool{}
+	caseType := func(t check.Type, item syntax.Node) string {
+		goType := fc.goType(t)
+		if seen[goType] {
+			refuse(item, "this case's type is an earlier case's type, so this arm never runs; check-v1 stage B reports such an arm as unreachable (D-B4)")
+		}
+		seen[goType] = true
+		return goType
+	}
+	for _, cl := range s.Clauses {
+		a := arm{body: cl.Body, def: len(cl.List) == 0}
+		for _, item := range cl.List {
+			p := fc.l.info.Patterns[item]
+			if p == nil {
+				ice(item, "a case with no Patterns entry")
+			}
+			switch p.Kind {
+			case check.PatWildcard:
+				a.def = true
+			case check.PatTypeTest:
+				a.types = append(a.types, caseType(p.Type, item))
+			case check.PatAs:
+				if len(cl.List) != 1 || len(p.Elems) != 1 || p.Elems[0].Kind != check.PatTypeTest || p.Var == nil {
+					refuse(item, "this pattern is lowered after check-v1 stage B (196p)")
+				}
+				a.types = append(a.types, caseType(p.Elems[0].Type, item))
+				a.as = p.Var
+				bind = true
+			default:
+				refuse(item, "this pattern is lowered after check-v1 stage B (196p)")
+			}
+		}
+		arms = append(arms, a)
+	}
+	head := "switch " + subject + ".(type) {"
+	narrowed := ""
+	if bind {
+		narrowed = fc.temp("v")
+		head = "switch " + narrowed + " := " + subject + ".(type) {"
+	}
+	fc.line(head)
+	fc.enterSwitch()
+	// Go: a switch with a default whose every arm terminates is terminating.
+	terminates, hasDefault := true, false
+	for _, a := range arms {
+		hasDefault = hasDefault || a.def
+		if a.def {
+			fc.line("default:")
+		} else {
+			fc.line("case " + strings.Join(a.types, ", ") + ":")
+		}
+		fc.depth++
+		if a.as != nil {
+			name := fc.declare(a.as)
+			fc.line(name + " := " + narrowed)
+			if !fc.l.reads[a.as] {
+				fc.line("_ = " + name)
+			}
+		} else if bind {
+			fc.line("_ = " + narrowed)
+		}
+		terminates = fc.stmts(a.body) && terminates
+		fc.depth--
+	}
+	fc.leaveSwitch()
+	fc.line("}")
+	return terminates && hasDefault
+}
+
+// valueMatch lowers a match on constant patterns to a Go expression switch,
+// or a match with no subject to an if chain.
+func (fc *funcCtx) valueMatch(s *syntax.SwitchStmt) bool {
+	if fc.l.info.Matches[s] == nil {
+		ice(s, "a value match with no Matches entry")
+	}
+	if s.Init != nil {
+		refuse(s, "a match with an init statement is not produced by the decided parser")
+	}
+	if s.Tag == nil {
+		refuse(s, "a match with no subject is lowered after check-v1 stage C")
+	}
+	tag := fc.value(s.Tag)
+	fc.line("switch " + tag + " {")
+	fc.enterSwitch()
+	terminates, hasDefault := true, false
+	seen := map[string]bool{}
+	for _, cl := range s.Clauses {
+		var values []string
+		def := false
+		for _, item := range cl.List {
+			p := fc.l.info.Patterns[item]
+			if p == nil {
+				ice(item, "a value case with no Patterns entry")
+			}
+			switch p.Kind {
+			case check.PatWildcard:
+				def = true
+			case check.PatConst:
+				key := caseKey(p.Type, p.Value)
+				if seen[key] {
+					refuse(item, "this case value equals an earlier case's value in its type, so this arm never runs; check-v1 stage B reports such an arm as unreachable (D-B4)")
+				}
+				seen[key] = true
+				values = append(values, fc.constant(p.Type, p.Value, item))
+			default:
+				refuse(item, "this pattern is lowered after check-v1 stage B (196p)")
+			}
+		}
+		if def || len(cl.List) == 0 {
+			hasDefault = true
+			fc.line("default:")
+		} else {
+			fc.line("case " + strings.Join(values, ", ") + ":")
+		}
+		terminates = fc.block(cl.Body) && terminates
+	}
+	fc.leaveSwitch()
+	fc.line("}")
+	return terminates && hasDefault
+}
+
+// caseKey is a case constant's value in its type, as Go compares switch
+// cases: a float rounded to its width, so two literals that round to one
+// float32 are one value.
+func caseKey(t check.Type, v constant.Value) string {
+	if b, ok := t.(*check.Basic); ok {
+		switch b.Kind {
+		case check.Float32:
+			f, _ := constant.Float32Val(constant.ToFloat(v))
+			return "f32:" + strconv.FormatFloat(float64(f), 'g', -1, 32)
+		case check.Float64:
+			f, _ := constant.Float64Val(constant.ToFloat(v))
+			return "f64:" + strconv.FormatFloat(f, 'g', -1, 64)
+		}
+	}
+	if isInteger(t) {
+		if i := constant.ToInt(v); i.Kind() == constant.Int {
+			return "int:" + i.ExactString()
+		}
+	}
+	return v.Kind().String() + ":" + v.ExactString()
+}
+
+// isInterface reports a type that lowers to a Go interface: a union or an
+// operation type.
+func (fc *funcCtx) isInterface(t check.Type) bool {
+	n, ok := t.(*check.Named)
+	if !ok {
+		return false
+	}
+	td := fc.l.typeDecl(n.Obj, fc.site)
+	return td.kind == kindUnion || td.kind == kindOps
+}

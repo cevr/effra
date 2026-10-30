@@ -2,11 +2,11 @@
 // what the checker decided: the checker's Package and Info for the syntax
 // files it checked. It never parses, infers or re-checks (spec D1).
 //
-// This file holds the seam the build path uses before checked-tree lowering
-// lands: the checked unit and its source anchors. A source anchor names an
-// admitted source file in a //line directive, so the Go compiler, the
-// debugger and a panic's stack trace report the .ergo file, not the
-// generated Go.
+// This file holds the checked unit and its source anchors. A source anchor
+// names an admitted source file in a //line directive, so the Go compiler,
+// the debugger and a panic's stack trace report the .ergo file, not the
+// generated Go. module.go assembles the emitted Go module; decls.go,
+// body.go and expr.go lower declarations, statements and expressions.
 //
 // Prior art: Gleam and ReScript lower a typed tree to host source and keep
 // source positions on it; Borgo emits Go with //line directives; Go's own

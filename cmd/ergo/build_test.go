@@ -104,9 +104,12 @@ func TestPackageNeverWritesUnderHome(t *testing.T) {
 // GOTELEMETRYDIR is a non-settable go env value
 // (cmd/go/internal/telemetrycmd/telemetry.go). os.UserConfigDir is
 // $XDG_CONFIG_HOME or $HOME/.config on Linux, but $HOME/Library/Application
-// Support on darwin, which ignores XDG_CONFIG_HOME (os/file.go). So only a
-// HOME of its own keeps the go command's writes out of the witnessed HOME
-// on every platform. Ergo's processes keep the witnessed HOME, so Ergo's
+// Support on darwin, which ignores XDG_CONFIG_HOME (os/file.go). Release
+// toolchains also read TEST_TELEMETRY_DIR
+// (cmd/internal/telemetry/counter/counter.go), but that is an undocumented
+// test hook, so this witness does not rely on it: a HOME of its own keeps
+// the go command's writes out of the witnessed HOME on every platform
+// through documented behaviour. Ergo's processes keep the witnessed HOME, so Ergo's
 // own writes are still caught; GOCACHE, GOMODCACHE, GOPATH and GOENV are
 // pinned by the caller to the values this process resolved.
 func goOwnHome(t *testing.T) string {
@@ -237,7 +240,9 @@ func physicalTempDir(t *testing.T) string {
 	return dir
 }
 
-var lineDirective = regexp.MustCompile(`(?m)^//line (.+):\d+$`)
+// lineDirective matches a //line directive, path:line or path:line:column,
+// and captures its path.
+var lineDirective = regexp.MustCompile(`(?m)^//line (.+?):\d+(?::\d+)?$`)
 
 // TestBuildWorkMapsASymlinkedSource: when the source is reached through a
 // symbolic link to its directory, by a relative spelling from the linked
