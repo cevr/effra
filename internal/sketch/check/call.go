@@ -343,7 +343,7 @@ func (c *checker) explicit(x *syntax.IndexExpr, fun operand) operand {
 		}
 		targs[i] = t
 	}
-	return operand{mode: modeGeneric, typ: sig, fn: fun.fn, val: nil, obj: &explicitArgs{targs: targs}}
+	return operand{mode: modeGeneric, typ: sig, fn: fun.fn, val: nil, obj: &explicitArgs{targs: targs}, pinnedSig: fun.pinnedSig}
 }
 
 // cannotInfer reports a type parameter the inferred subset does not reach

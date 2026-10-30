@@ -68,6 +68,12 @@ func TestInvokedCallbackKeepsThePinnedRow(t *testing.T) {
 			"func F() int fails Bang { try run(z) }\n", []string{"S108:3", "S108:7"}},
 		{"nested-under-try", pinnedDecls + "func F() int fails Bang { try keep(func() int { 1 }) + a(1) }\n", []string{"S108:3"}},
 		{"value-if", pinnedDecls + "func F(c bool) int fails Bang { try if c { a(1) } else { 2 } }\n", []string{"S108:3"}},
+		// Every spelling that names the member keeps the provenance: a
+		// dot call and an explicit instantiation.
+		{"dot-call", pinnedDecls + "type Q { N int }\nfunc h(q Q) int { let m = Map[int, func(Q) int]{1: h}; _ = m; try mark(); 1 }\n" +
+			"func F(q Q) int fails Bang { try q.h() }\n", []string{"S108:3", "S108:8"}},
+		{"explicit-instance", pinnedDecls + "func g[T](v T) T { let m = Map[int, func(int) int]{1: g[int]}; _ = m; try mark(); v }\n" +
+			"func F() int fails Bang { try g[int](1) }\n", []string{"S108:3", "S108:7"}},
 	})
 }
 
