@@ -1,7 +1,9 @@
 package producer
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"debug/macho"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -87,8 +89,11 @@ func TestUnavailableQualificationAndBoundedDeclarations(t *testing.T) {
 	}
 }
 
-// The test binary is the embedding host. On Linux, and on darwin/arm64, where
-// the Go linker always signs, its identity is the digest of its own bytes.
+// The test binary is the embedding host. On Linux its identity is the digest
+// of its own bytes; on darwin/arm64, where the Go linker always signs, it is
+// the digest of the domain tag and its code below the signature. The darwin
+// expectation is computed here independently of the producer's parser:
+// debug/macho finds LC_CODE_SIGNATURE and its data offset bounds the code.
 func TestCurrentIdentifiesEmbeddingHost(t *testing.T) {
 	id := Current()
 	if id != Current() {
@@ -108,8 +113,26 @@ func TestCurrentIdentifiesEmbeddingHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sum := sha256.Sum256(content)
-	if id.Strength != "executing-artifact" || id.Digest != "sha256:"+hex.EncodeToString(sum[:]) || id.Reason != "" {
+	h := sha256.New()
+	if runtime.GOOS == "darwin" {
+		file, err := macho.NewFile(bytes.NewReader(content))
+		if err != nil {
+			t.Fatal(err)
+		}
+		end := -1
+		for _, load := range file.Loads {
+			if raw := load.Raw(); len(raw) >= 16 && file.ByteOrder.Uint32(raw) == 0x1d { // LC_CODE_SIGNATURE
+				end = int(file.ByteOrder.Uint32(raw[8:])) // dataoff
+			}
+		}
+		if end < 0 || end > len(content) {
+			t.Fatal("the test binary has no code signature")
+		}
+		h.Write([]byte("ergo-producer-darwin-code-1\x00"))
+		content = content[:end]
+	}
+	h.Write(content)
+	if id.Strength != "executing-artifact" || id.Digest != "sha256:"+hex.EncodeToString(h.Sum(nil)) || id.Reason != "" {
 		t.Fatal(id)
 	}
 }
