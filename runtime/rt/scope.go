@@ -171,16 +171,24 @@ func (s *Scope) runReleaseTraced(e entry, c *Cause) {
 // Release runs f as one release on t for a scope whose entries rt does not
 // hold, such as runtime/v1's frame list, and reports it as a Scope reports
 // its own releases (runReleaseTraced). The caller masks, as Scope.End does.
-// A panic of f is recovered and recorded into c: settle, called inside the
-// recover while the panicking frame is still on the stack, returns the
-// value of the fresh defect the panic is (nil when it carries an exit
-// instead) and the exits to add after it (the carried exit or interruption,
-// and the exits of whatever the release ends after its body); c records the
-// defect as raised in a release. On a traced tree, a panic first closes the
-// trace calls f opened and left open, never an outer one (the release-local
-// unwind), and the defect event links the innermost of them; when f ends,
-// on every path, the release event is raised.
-func Release(t *Task, c *Cause, f func(), settle func(p any) (defect any, exits error)) {
+// A panic of f is recovered and recorded into c, in causal order:
+//
+//  1. On a traced tree, the trace calls f opened and left open are closed,
+//     never an outer one (the release-local unwind).
+//  2. classify, called inside the recover while the panicking frame is still
+//     on the stack, returns the value of the fresh defect the panic is (nil
+//     when it carries an exit instead) and the exit it carries. c records
+//     the defect as raised in a release; its event links the innermost
+//     unwound call.
+//  3. after, when not nil, runs what the release ends after its body (the
+//     body's own frame, whose nested releases then report) with the carried
+//     exit, and returns the exits to add; with a nil after, the carried exit
+//     is added.
+//
+// A panic that escapes classify or after is recorded as one more defect of
+// the release, so the caller's later releases and its unmask still run.
+// When f ends, on every path, a traced tree raises the release event.
+func Release(t *Task, c *Cause, f func(), classify func(p any) (defect any, carried error), after func(carried error) error) {
 	floor := 0
 	if t.trace != nil {
 		floor = t.traceDepth()
@@ -191,11 +199,21 @@ func Release(t *Task, c *Cause, f func(), settle func(p any) (defect any, exits 
 			if t.trace != nil {
 				left = t.traceUnwind(p, floor)
 			}
-			defect, exits := settle(p)
-			if defect != nil {
-				c.defect(t, defect, true, left)
-			}
-			c.Add(exits)
+			func() {
+				defer func() {
+					if q := recover(); q != nil {
+						c.recovered(t, q, true, floor)
+					}
+				}()
+				defect, carried := classify(p)
+				if defect != nil {
+					c.defect(t, defect, true, left)
+				}
+				if after != nil {
+					carried = after(carried)
+				}
+				c.Add(carried)
+			}()
 		}
 		if t.trace != nil {
 			t.traceTask(TraceRelease, nil)

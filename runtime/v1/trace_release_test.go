@@ -172,3 +172,58 @@ func TestTracedReleaseUnwindsOnlyItsCalls(t *testing.T) {
 		t.Fatalf("panic events %+v; want the release defect, linking the unwound call %d", panics, exits[inner][0].ID)
 	}
 }
+
+// TestReleaseDefectEventOrder (stage 3b-runtime review m1, ported from the
+// reviewer's TestReviewReleaseDefectEventOrder): an exit action that
+// registers a nested exit action and then panics reports in causal order:
+// its panic event, then the nested action's release, then its own release,
+// as an rt scope that ends a nested scope of its own reports. Round 1
+// raised the panic event after the nested release.
+func TestReleaseDefectEventOrder(t *testing.T) {
+	rec := &events{}
+	root := rt.TracedRoot("traced", rec)
+	err := runFrame(root, func(t *rt.Task, s *Scope) error {
+		s.OnExit(func() {
+			s.OnExit(func() {})
+			panic("outer broke")
+		})
+		return nil
+	})
+	var order []string
+	rec.mu.Lock()
+	for _, ev := range rec.all {
+		switch {
+		case ev.Kind == rt.TracePanic && ev.InRelease:
+			order = append(order, "panic(in release)")
+		case ev.Kind == rt.TraceRelease:
+			order = append(order, "release")
+		}
+	}
+	rec.mu.Unlock()
+	want := []string{"panic(in release)", "release", "release"}
+	if strings.Join(order, " ") != strings.Join(want, " ") || shape(err) != "defect(outer broke, release true)" {
+		t.Fatalf("exit %s, event order %v; want %v", shape(err), order, want)
+	}
+}
+
+// TestReleaseUnmasksOnEveryPath (stage 3b-runtime review m2): the frame's
+// release unmasks its task on every path. rt.Release keeps every panic of a
+// release (rt's TestReleaseKeepsAPanicOfItsFollowUp), so this test plants an
+// entry whose action panics outside it, the one way a panic can leave the
+// release loop, and checks that the task is unmasked after the panic.
+func TestReleaseUnmasksOnEveryPath(t *testing.T) {
+	task := rt.Root("unmask")
+	s := NewScope(task)
+	s.push(&entry{action: func() { panic("escaped") }})
+	escaped := func() (p any) {
+		defer func() { p = recover() }()
+		s.release()
+		return nil
+	}()
+	if escaped != "escaped" {
+		t.Fatalf("recovered %v; want the planted panic", escaped)
+	}
+	if task.Masked() {
+		t.Fatal("the task is still masked after a panic left the release")
+	}
+}
