@@ -248,21 +248,27 @@ func collect(root string) bool {
 	if err != nil {
 		return false
 	}
-	defer f.Close()
 	if !tryLockExclusive(f) || !sameLease(f, path) {
+		f.Close()
 		return false // a live build holds it, or another sweep took it
 	}
 	var nonce [8]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
+		f.Close()
 		return false
 	}
 	aside := filepath.Join(filepath.Dir(root), removingPrefix+filepath.Base(root)+"-"+hex.EncodeToString(nonce[:]))
 	if err := os.Rename(root, aside); err != nil {
+		f.Close()
 		return false
 	}
 	// The lease goes first: from here no build can lock this root's lease
-	// by name, and what remains is a tree no build reaches.
+	// by name, and what remains is a tree no build reaches. So the lock is
+	// released before the removal: a build that waits on the old lease file
+	// wakes, finds that the root's path no longer names it, and takes a
+	// fresh root without waiting for the tree to be removed.
 	_ = os.Remove(filepath.Join(aside, leaseName))
+	f.Close()
 	if testHookCollecting != nil {
 		testHookCollecting(root)
 	}
