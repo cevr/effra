@@ -520,7 +520,21 @@ func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 		}
 		t = hint
 	default:
-		t = c.literalType(x, hint)
+		var fields bool
+		t, fields = c.literalType(x, hint)
+		if t == nil && fields {
+			// A generic record whose type arguments failed: its values are
+			// fields, which never elide their type, so an elided literal
+			// among them is not typed (strayValue), as the reference walk
+			// reads it (reflits.go elemOf; FuzzCheck d1665805d2fed622).
+			for _, e := range x.Elts {
+				if kv, ok := e.(*syntax.KeyValueExpr); ok {
+					e = kv.Value
+				}
+				c.strayValue(e, mark, false)
+			}
+			return bad(x)
+		}
 		if t == nil {
 			c.orphanElements(x, mark)
 			return bad(x)
@@ -598,28 +612,29 @@ func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 // literalType resolves a composite literal's written type. A generic type
 // written without type arguments takes them from the expected type (a union
 // that lists one of its instances, or an instance), else from its field
-// values (D6: Some{n}, Enter{x}).
-func (c *checker) literalType(x *syntax.CompositeLit, hint Type) Type {
+// values (D6: Some{n}, Enter{x}). fields reports a nil type of a generic
+// record: the literal's values are its fields.
+func (c *checker) literalType(x *syntax.CompositeLit, hint Type) (t Type, fields bool) {
 	raw := c.typExpr0(x.Type, c.localTypeCtx())
 	if isInvalid(raw) {
-		return nil
+		return nil, false
 	}
 	n, ok := raw.(*Named)
 	if !ok || n.Orig != nil || len(n.TParams) == 0 {
 		if tp, ok := raw.(*TypeParam); ok && tp.Kind != KindType {
 			c.errorf(x.Type, CodeType, "%s is %s parameter, not a type", tp.Name, tp.Kind)
-			return nil
+			return nil, false
 		}
-		return raw
+		return raw, false
 	}
 	if inst := instanceFromHint(n, hint); inst != nil {
-		return inst
+		return inst, false
 	}
 	// Infer from the field values.
 	s, ok := n.underlying().(*Struct)
 	if !ok {
 		c.errorf(x.Type, CodeType, "generic type %s needs type arguments", n)
-		return nil
+		return nil, false
 	}
 	m := map[*TypeParam]Type{}
 	set := map[*TypeParam]bool{}
@@ -651,6 +666,11 @@ func (c *checker) literalType(x *syntax.CompositeLit, hint Type) Type {
 			if ft == nil || c.isLiteral(val) != lits {
 				continue
 			}
+			if cl, ok := val.(*syntax.CompositeLit); ok && cl.Type == nil {
+				// A field never elides its type (fieldValue refuses it): it
+				// binds nothing and is not typed.
+				continue
+			}
 			c.silent++
 			op := c.expr(val, nil)
 			c.silent--
@@ -663,7 +683,7 @@ func (c *checker) literalType(x *syntax.CompositeLit, hint Type) Type {
 			if tp, isParam := ft.(*TypeParam); lits && isParam && set[tp] {
 				if prev, seen := byLiteral[tp]; seen && !c.identical(prev, op.typ) {
 					c.errorf(x.Type, CodeType, "cannot infer the type argument %s of %s: its literals take %s and %s; write %s[…] (D6)", tp.Name, n.Obj.Name, prev, op.typ, n.Obj.Name)
-					return nil
+					return nil, true
 				}
 				if m[tp] == nil {
 					byLiteral[tp] = op.typ
@@ -680,7 +700,7 @@ func (c *checker) literalType(x *syntax.CompositeLit, hint Type) Type {
 				b = &RowArg{Row: newRow()}
 			} else {
 				c.errorf(x.Type, CodeType, "cannot infer the type argument %s of %s: write %s[…] (D6)", tp.Name, n.Obj.Name, n.Obj.Name)
-				return nil
+				return nil, true
 			}
 		}
 		targs[i] = b
@@ -693,12 +713,12 @@ func (c *checker) literalType(x *syntax.CompositeLit, hint Type) Type {
 			cons := c.subst(tp.Constraint, paramMap(n.TParams, targs))
 			if why := c.satisfies(targs[i], cons); why != "" {
 				c.errorf(x.Type, CodeType, "the inferred type argument %s of %s does not satisfy %s: %s (types.md, Generics 2)", targs[i], n.Obj.Name, cons, why)
-				return nil
+				return nil, true
 			}
 		}
 	}
 	c.recordInstantiation(n.Obj.Name, n.TParams, targs, x)
-	return c.instantiate(n, targs)
+	return c.instantiate(n, targs), false
 }
 
 // instanceFromHint finds the instance of a generic origin that an expected

@@ -211,3 +211,42 @@ func TestLenOnly(t *testing.T) {
 		})
 	}
 }
+
+// FuzzCheck input d1665805d2fed622 (failing at d985bea6 too): a generic
+// record literal whose type arguments fail (none to infer, mixed literal
+// defaults) is refused, and its values are fields, which never elide their
+// type. The reference walk only visits an elided literal there (reflits.go
+// elemOf), so typing neither infers from one nor types it on the refusal
+// route (strayValue): no name in it resolves where the walk found no
+// reference. A let mut it reassigns still counts, so no false advice joins
+// the refusal.
+func TestStrayGenericRecordValuesAreNotReferences(t *testing.T) {
+	cases := []d1Case{
+		// Two unknown A0, the result type A without arguments, and the
+		// literal A whose argument cannot be inferred.
+		{"fuzz-input", "type A000000[A]{A A0}\ntype A[A]{A A0[A0]}\nfunc e(A0)A{A{{{{e}}}}}", []string{"S104:1", "S104:2", "S108:3", "S108:3"}},
+		{"nothing-to-infer", "type B[T]{a T, b func()}\nfunc t() { _ = B{b: {t}} }\n", []string{"S108:2"}},
+		{"positional", "type B[T]{b func(), a T}\nfunc t() { _ = B{{t}} }\n", []string{"S108:2"}},
+		{"mixed-defaults", "type B[T]{a T, c T, b func()}\nfunc t() { _ = B{a: 1, c: 1.5, b: {t}} }\n", []string{"S108:2"}},
+		// Inference succeeds: the field refuses the elided literal (control).
+		{"inferred", "type B[T]{a T, b func()}\nfunc t() { _ = B{a: 1, b: {t}} }\n", []string{"S108:2"}},
+	}
+	runD1(t, cases)
+	for _, src := range []string{
+		"type B[T]{a T, b func()}\nfunc e() int { let mut n = 0; _ = B{b: {func() { n = 1 }}}; n }",
+		"type B[T]{a T, b func()}\nfunc e() int { let mut n = 0; _ = B{a: 1, b: {func() { n = 1 }}}; n }",
+	} {
+		cases = append(cases, d1Case{name: src, src: src})
+	}
+	for _, tc := range cases {
+		_, ds := check.CheckSource(tc.src)
+		if p := check.RefWalkProblems(tc.src); len(p) > 0 {
+			t.Errorf("%s: reference walk: %s", tc.name, strings.Join(p, "; "))
+		}
+		for _, d := range ds {
+			if strings.Contains(d.Message, "never reassigned") {
+				t.Errorf("%s: false advice from a skipped reassignment: %s", tc.name, describe(ds))
+			}
+		}
+	}
+}
