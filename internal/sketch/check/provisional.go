@@ -144,7 +144,8 @@ func (c *checker) skipFrames(x *syntax.CallExpr) {
 // expression began), else refused-by-class-G in the reporting pass and
 // provisional in a silent one. Every route that skips a value holding a
 // frame comes here: a call's arguments and trailing block, the elements
-// of a literal whose type is unknown, the index of an invalid base
+// of a literal whose type is unknown or refused, a refused element of a
+// map, struct or machine literal (round 3 review M4), the index of an invalid base
 // (stage D1 round 1 review M6). The let mut locals the frame reassigns or
 // borrows count as reassigned, so Q3 adds no false S110 beside the
 // diagnostic that skipped it (M3).

@@ -562,7 +562,7 @@ func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 	}
 	switch u := under(t).(type) {
 	case *Struct:
-		if !c.structLit(x, t, u) {
+		if !c.structLit(x, t, u, mark) {
 			return operand{mode: modeValue, typ: t}
 		}
 	case *Slice:
@@ -579,6 +579,7 @@ func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 			kv, ok := e.(*syntax.KeyValueExpr)
 			if !ok {
 				c.errorf(e, CodeType, "a map literal's elements are key: value pairs")
+				c.orphan(e, mark)
 				continue
 			}
 			k := c.valueExpr(kv.Key, u.Key)
@@ -601,9 +602,11 @@ func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 	case *MachineType:
 		if len(x.Elts) > 0 {
 			c.errorf(x, CodeType, "a machine value has no fields")
+			c.orphanElements(x, mark)
 		}
 	default:
 		c.errorf(x, CodeType, "cannot write a composite literal of %s", t)
+		c.orphanElements(x, mark)
 		return bad(x)
 	}
 	return operand{mode: modeValue, typ: t}
@@ -738,8 +741,10 @@ func instanceFromHint(orig *Named, hint Type) Type {
 // structLit checks a struct literal: all keyed or all positional; a
 // positional literal lists every field; a keyed one names declared fields
 // once and sets every field that has no zero value (types.md, Structs 2;
-// Zero values 2).
-func (c *checker) structLit(x *syntax.CompositeLit, t Type, s *Struct) bool {
+// Zero values 2). A value it skips is an orphan (orphan), as every literal
+// refusal route makes it, so its callback frames are recorded (round 3
+// review M4).
+func (c *checker) structLit(x *syntax.CompositeLit, t Type, s *Struct, mark int) bool {
 	ok := true
 	if len(x.Elts) > 0 {
 		if _, keyed := x.Elts[0].(*syntax.KeyValueExpr); !keyed {
@@ -767,6 +772,7 @@ func (c *checker) structLit(x *syntax.CompositeLit, t Type, s *Struct) bool {
 	for _, e := range x.Elts {
 		kv, isKV := e.(*syntax.KeyValueExpr)
 		if !isKV {
+			c.orphan(e, mark)
 			continue
 		}
 		id, isID := kv.Key.(*syntax.Ident)
@@ -785,6 +791,7 @@ func (c *checker) structLit(x *syntax.CompositeLit, t Type, s *Struct) bool {
 		}
 		if set[id.Name] {
 			c.errorf(id, CodeType, "field %s is set twice", id.Name)
+			c.orphan(kv.Value, mark)
 			ok = false
 			continue
 		}
