@@ -327,8 +327,26 @@ func TestHTTPTransportRejectsAdmissionBeyondActiveBound(t *testing.T) {
 	if body := wait(t, held); string(body) != "/hold" {
 		t.Fatalf("admitted request: %q", body)
 	}
-	if _, body := exchange(t, server.address, "GET /after HTTP/1.1\r\nHost: x\r\n\r\n"); string(body) != "/after" {
-		t.Fatalf("admission was not released: %q", body)
+	// Reading the response does not join ServeHTTP: it releases admission
+	// in a defer after writing the body. Wait for an admitted request, with
+	// only empty 503 responses eligible for retry (#232).
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		response, body := exchange(t, server.address, "GET /after HTTP/1.1\r\nHost: x\r\n\r\n")
+		if response != nil && response.StatusCode == http.StatusServiceUnavailable {
+			requireStatusOnly(t, response, body, http.StatusServiceUnavailable)
+			if time.Now().Before(deadline) {
+				continue
+			}
+			t.Fatal("admission was not released before the deadline")
+		}
+		if response == nil || response.StatusCode != http.StatusOK || string(body) != "/after" {
+			t.Fatalf("request after admission release: %v %q", response, body)
+		}
+		break
+	}
+	if calls := server.calls.Load(); calls != 2 {
+		t.Fatalf("expected only the held and admitted requests to reach the handler: %d calls", calls)
 	}
 }
 
