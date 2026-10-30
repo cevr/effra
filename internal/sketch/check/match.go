@@ -126,15 +126,16 @@ func (r *patResolver) child(parent, ctor, field int, t Type) int {
 func (r *patResolver) columnOf(t Type) (column, colInfo) {
 	if u := r.c.subjectUnion(t); u != nil {
 		col := column{size: u.len()}
-		col.label = func(w witness, j int) string {
+		col.label = func(w witness, j int, out *strings.Builder) {
 			ctor, ok := w[j]
 			if !ok {
 				if r.sp.cols[j].parent >= 0 || u.len() == 0 {
-					return "_"
+					out.WriteByte('_')
+					return
 				}
 				ctor = 0 // a subject: name its first variant
 			}
-			return r.recordText(w, j, ctor, u.at(ctor))
+			r.recordText(w, j, ctor, u.at(ctor), out)
 		}
 		return col, colInfo{t: t, dom: domUnion, u: u}
 	}
@@ -143,15 +144,16 @@ func (r *patResolver) columnOf(t Type) (column, colInfo) {
 		switch {
 		case isBoolean(ut):
 			col := column{size: 2}
-			col.label = func(w witness, j int) string {
+			col.label = func(w witness, j int, out *strings.Builder) {
 				ctor, ok := w[j]
 				switch {
 				case !ok:
-					return "_"
+					out.WriteByte('_')
 				case ctor == 1:
-					return "true"
+					out.WriteString("true")
+				default:
+					out.WriteString("false")
 				}
-				return "false"
 			}
 			return col, colInfo{t: t, dom: domBool}
 		case isInteger(ut), isString(ut):
@@ -160,27 +162,37 @@ func (r *patResolver) columnOf(t Type) (column, colInfo) {
 	case *Tuple:
 		n := len(ut.Types)
 		col := column{size: 1}
-		col.label = func(w witness, j int) string {
+		col.label = func(w witness, j int, out *strings.Builder) {
 			if _, ok := w[j]; !ok {
-				return "_"
+				out.WriteByte('_')
+				return
 			}
-			parts := make([]string, n)
-			for i := range parts {
-				parts[i] = "_"
+			// A tuple pattern names every element in order, so its child
+			// columns already have field order. Write into one builder;
+			// nested witnesses never copy their full text at each parent.
+			kids := r.sp.cols[j].children[0]
+			out.WriteByte('(')
+			for i := range n {
+				if i > 0 {
+					out.WriteString(", ")
+				}
+				if i < len(kids) {
+					r.sp.writeWitness(w, kids[i], out)
+				} else {
+					out.WriteByte('_')
+				}
 			}
-			for _, k := range r.sp.cols[j].children[0] {
-				parts[r.sp.cols[k].field] = r.sp.witnessText(w, k)
-			}
-			return "(" + strings.Join(parts, ", ") + ")"
+			out.WriteByte(')')
 		}
 		return col, colInfo{t: t, dom: domTuple}
 	case *Struct:
 		col := column{size: 1}
-		col.label = func(w witness, j int) string {
+		col.label = func(w witness, j int, out *strings.Builder) {
 			if _, ok := w[j]; !ok {
-				return "_"
+				out.WriteByte('_')
+				return
 			}
-			return r.recordText(w, j, 0, t)
+			r.recordText(w, j, 0, t, out)
 		}
 		return col, colInfo{t: t, dom: domRecord}
 	}
@@ -189,8 +201,7 @@ func (r *patResolver) columnOf(t Type) (column, colInfo) {
 
 // recordText prints a record constructor of a witness: its name, with the
 // fields the witness constrains.
-func (r *patResolver) recordText(w witness, j, ctor int, t Type) string {
-	var parts []string
+func (r *patResolver) recordText(w witness, j, ctor int, t Type, out *strings.Builder) {
 	s, _ := under(t).(*Struct)
 	var shown []int
 	for _, k := range r.sp.cols[j].children[ctor] {
@@ -199,13 +210,20 @@ func (r *patResolver) recordText(w witness, j, ctor int, t Type) string {
 		}
 	}
 	sort.Slice(shown, func(a, b int) bool { return r.sp.cols[shown[a]].field < r.sp.cols[shown[b]].field })
-	for _, k := range shown {
-		parts = append(parts, s.Fields[r.sp.cols[k].field].Name+": "+r.sp.witnessText(w, k))
+	out.WriteString(t.String())
+	if len(shown) == 0 {
+		return
 	}
-	if len(parts) == 0 {
-		return t.String()
+	out.WriteByte('{')
+	for i, k := range shown {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(s.Fields[r.sp.cols[k].field].Name)
+		out.WriteString(": ")
+		r.sp.writeWitness(w, k, out)
 	}
-	return t.String() + "{" + strings.Join(parts, ", ") + "}"
+	out.WriteByte('}')
 }
 
 // fail notes a reported error in the current item.
@@ -515,7 +533,7 @@ func (r *patResolver) record(x *syntax.CompositeLit, t Type, col int) resolved {
 			kids = append(kids, cell{child, sub.pat})
 		}
 	}
-	sortRow(kids)
+	r.sp.sortRow(kids)
 	return resolved{pat: r.sp.node(ctor, kids), has: true, t: rt, info: info}
 }
 
@@ -546,7 +564,7 @@ func (r *patResolver) tuple(x *syntax.TupleExpr, t Type, col int) resolved {
 			kids = append(kids, cell{child, sub.pat})
 		}
 	}
-	sortRow(kids)
+	r.sp.sortRow(kids)
 	return resolved{pat: r.sp.node(0, kids), has: true, t: t, info: info}
 }
 
@@ -593,6 +611,15 @@ func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr
 		c.match(s, &Match{Subjects: subj, Arms: len(clauses)})
 	}
 	r := c.newPatResolver()
+	r.sp.written = len(subjects)
+	for _, cl := range clauses {
+		if cl.List == nil {
+			r.sp.written++
+		}
+		for _, item := range cl.List {
+			r.sp.written += patternSize(item)
+		}
+	}
 	cols := make([]int, n)
 	if valid {
 		for i, t := range subj {
@@ -640,11 +667,7 @@ func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr
 	// change whether a match near the budget is refused, never a proved
 	// verdict (D16 as amended in round 5). Reachability follows the cases'
 	// order: a case is unreachable when the cases before it cover it.
-	nrows := len(all)
-	if hasDefault {
-		nrows++
-	}
-	useful := r.sp.solverFor(nrows)
+	useful := r.sp.solverFor()
 	matrix := newRowSet(useful)
 	var origin []syntax.Node // the case of each row of matrix, in order
 	judge := func(at syntax.Node, row solverRow) {
@@ -690,7 +713,7 @@ func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr
 	// Totality is decided over the maximal case rows by a solver of its
 	// own, so it does not depend on which cases reachability judged first.
 	// A case _ covers totality; its reachability was proved above.
-	total := r.sp.solverFor(len(all))
+	total := r.sp.solverFor()
 	set := newRowSet(total)
 	if valid && patternsOK && !hasDefault {
 		for _, row := range all {
@@ -709,6 +732,7 @@ func (c *checker) matchStmt(s syntax.Stmt, kw syntax.Pos, subjects []syntax.Expr
 		c.totalitySteps = append(c.totalitySteps, total.steps)
 		c.totalityBudgets = append(c.totalityBudgets, total.budget)
 		c.usefulSteps = append(c.usefulSteps, useful.steps)
+		c.patternCosts = append(c.patternCosts, patternCost{r.sp.written, total.budget, total.meter.cellBudget, total.steps, useful.steps, total.cells, useful.cells})
 	}
 	c.totalSwitch[s] = true
 	switch {

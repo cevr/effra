@@ -152,6 +152,7 @@ type checker struct {
 	usefulSteps []int
 	// totalityBudgets records each totality solver's budget (solverFor).
 	totalityBudgets []int
+	patternCosts    []patternCost // work and allocation receipts at the source boundary
 	// bodyEdges counts the edges of the body graph: linear in the source
 	// (round-3 M5), and bounded by a test.
 	bodyEdges int

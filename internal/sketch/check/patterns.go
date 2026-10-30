@@ -77,6 +77,19 @@ func patternNames(p syntax.Expr, isType func(string) bool) []*syntax.Ident {
 
 // ---------------------------------------------------------------- irrefutable patterns
 
+// patternSize counts the syntax that is written, including field keys and
+// type names. It never walks a type's unwritten fields or an arm's body.
+func patternSize(p syntax.Expr) int {
+	n := 0
+	syntax.Inspect(p, func(node syntax.Node) bool {
+		if node != nil {
+			n++
+		}
+		return true
+	})
+	return n
+}
+
 // irrefutable resolves the pattern of a let or a for binding against a
 // value of type t (spec D-B5; 196v amended rule 4): a pattern that does
 // not cover t is S103 naming one missing case, and its names still bind
@@ -84,6 +97,7 @@ func patternNames(p syntax.Expr, isType func(string) bool) []*syntax.Ident {
 // (invalid after an error in the pattern), for the caller to declare.
 func (c *checker) irrefutable(p syntax.Expr, t Type, what string, own map[*syntax.Ident]bool) []patBinding {
 	r := c.newPatResolver()
+	r.sp.written = 1 + patternSize(p)
 	r.bindings = true
 	r.own = own
 	r.begin()
@@ -102,12 +116,13 @@ func (c *checker) irrefutable(p syntax.Expr, t Type, what string, own map[*synta
 		if res.has {
 			row = r.sp.flat(solverRow{{col, res.pat}})
 		}
-		s := r.sp.solverFor(1)
+		s := r.sp.solverFor()
 		w, missing, ok := s.total([]solverRow{row})
 		if c.silent == 0 {
 			c.totalitySteps = append(c.totalitySteps, s.steps)
 			c.totalityBudgets = append(c.totalityBudgets, s.budget)
 			c.usefulSteps = append(c.usefulSteps, 0)
+			c.patternCosts = append(c.patternCosts, patternCost{r.sp.written, s.budget, s.meter.cellBudget, s.steps, 0, s.cells, 0})
 		}
 		switch {
 		case !ok:

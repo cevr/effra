@@ -725,7 +725,8 @@ func TestTotalityBudget(t *testing.T) {
 			want = "total"
 		}
 		if got != want {
-			t.Fatalf("16 subjects, instance %d: verdict %s, enumeration says %s\n%s", k, got, want, src)
+			costs, _ := check.SolverCosts(src)
+			t.Fatalf("16 subjects, instance %d: verdict %s, enumeration says %s; costs %+v\n%s", k, got, want, costs, src)
 		}
 	}
 	refused := 0
