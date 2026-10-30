@@ -1,0 +1,2 @@
+go test fuzz v1
+string("type A{}\nfunc A()A{}\nfunc g()A needs A{0..0(){g}}")

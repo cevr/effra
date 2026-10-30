@@ -1,0 +1,2 @@
+go test fuzz v1
+string("type Store{A()}\ntype Holder{}\nfunc Get(Holder){let A=\"\"\nwith 0{Stor..Get()}(\"0000\")}")

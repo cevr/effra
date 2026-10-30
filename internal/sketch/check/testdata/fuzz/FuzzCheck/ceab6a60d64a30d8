@@ -1,0 +1,2 @@
+go test fuzz v1
+string("type Store{Label()string}\ntype Memory{}\nfunc Label(Memory){let A=with 0{Stor..Label()}%0(\"0000\")}")

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("func A(e int64)int64{let n\nlet A\nlet B\nlet C\nlet A0\nlet A00000\nif A{}\n0}")

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("type A000{}\ntype A0000{}\nfunc d(o A){d(o)}")

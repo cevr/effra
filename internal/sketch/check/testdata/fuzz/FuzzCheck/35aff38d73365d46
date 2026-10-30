@@ -1,0 +1,2 @@
+go test fuzz v1
+string("type Timer{A()}\ntype Plain{}\nfunc After(A Plain){\"\"%B}\nfunc A(){with 0{0(\"\\(Time..A%A0000)\")}}")

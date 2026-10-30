@@ -1,0 +1,2 @@
+go test fuzz v1
+string("func A000(){}\nfunc a0000(f func()fails A){return f()}")
