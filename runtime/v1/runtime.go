@@ -6,9 +6,17 @@
 // It holds only what lowered code cannot express as ordinary Go: the host's
 // providers (Console), the Go bodies of prelude extern declarations
 // (Sleep), how main reports a typed failure, and the text of a basic value
-// inside an error type's text. A defect is an ordinary Go panic: nothing
-// here recovers one, so Go's own report names the panicking frame, which
-// the //line directives map to the .ergo source.
+// inside an error type's text. A defect is an ordinary Go panic: nothing in
+// this file recovers one, so Go's own report names the panicking frame,
+// which the //line directives map to the .ergo source.
+//
+// The bodies of the std packages task, scope, queue and slice are in
+// task.go, queue.go and data.go, over runtime/rt; exit.go is the exit
+// vocabulary they share and the entry, Main, which records a defect with
+// its stack at a task or frame boundary. Their contract is
+// docs/spec/runtime.md (Tasks, Exit actions, Queues). The lowering copies
+// them into a module when it lowers the std signatures that bind them
+// (lower-v1 stage 3b); until then SourceFiles names this file alone.
 //
 // Prior art: Gleam's prelude.mjs and ReScript's runtime modules ship the
 // small host-language support that generated code calls; Borgo emits Go
