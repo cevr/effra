@@ -195,9 +195,26 @@ func TestUnknownRowInBlockAndResultTargets(t *testing.T) {
 		// capability row is known and empty, and w0 needs Cap2, so the
 		// results differ (an independent error) and stay reported.
 		{"nested-result-independent", blockDecls + "func w0() int needs Cap2 { Cap2.N(); 1 }\nfunc F(c bool) int { let g = if c { mk(z) } else { mk(w0) }; 1 }\n", []string{"S108:3", "S108:6", "S108:11"}},
+		// h's error row is unknown and holds the known Q (run widens z's
+		// row by q0's); b0's row is {Bang}, which no content of h's row
+		// equals, so the results differ here too.
+		{"nested-known-part-independent", blockDecls + "func q0() int fails Q { try mq(); 1 }\nfunc b0() int fails Bang { try mark(); 1 }\nfunc F(c bool) int { let h = run(z, q0); let g = if c { mk(h) } else { mk(b0) }; 1 }\n", []string{"S108:3", "S108:6", "S108:12"}},
+		{"nested-known-part-second-independent", blockDecls + "func q0() int fails Q { try mq(); 1 }\nfunc b0() int fails Bang { try mark(); 1 }\nfunc F(c bool) int { let h = run(z, q0); let g = if c { mk(b0) } else { mk(h) }; 1 }\n", []string{"S108:3", "S108:6", "S108:12"}},
+		// ap(z) returns a function whose parameter type is z's, with its
+		// unknown error row, and the call of it is not generic: a block or
+		// a literal passed there infers its row, which the unknown row
+		// accepts, so neither reports a follow-on S101 or S102.
+		{"concrete-block-errors", blockDecls + "func ap[T any](x T) func(f T) T { func(f T) T { f } }\nfunc F() int { _ = ap(z)() { try mq(); 1 }; 1 }\n", []string{"S108:3", "S108:6"}},
+		{"concrete-block-capability", blockDecls + "func ap[T any](x T) func(f T) T { func(f T) T { f } }\nfunc F() int { _ = ap(zw)() { Cap2.N(); try mq(); 1 }; 1 }\n", []string{"S108:3", "S108:6"}},
+		{"concrete-literal-errors", blockDecls + "func ap[T any](x T) func(f T) T { func(f T) T { f } }\nfunc F() int { _ = ap(z)(func() int { try mq(); 1 }); 1 }\n", []string{"S108:3", "S108:6"}},
+		{"concrete-literal-capability", blockDecls + "func ap[T any](x T) func(f T) T { func(f T) T { f } }\nfunc F() int { _ = ap(zw)(func() int fails Q { Cap2.N(); try mq(); 1 }); 1 }\n", []string{"S108:3", "S108:6"}},
 	}
 	runD1(t, cases)
-	wantMessages(t, "nested-result-independent", cases[len(cases)-1].src, "the parameters or results differ")
+	for _, tc := range cases {
+		if strings.HasSuffix(tc.name, "-independent") {
+			wantMessages(t, tc.name, tc.src, "the parameters or results differ")
+		}
+	}
 	for _, tc := range cases {
 		if strings.HasSuffix(tc.name, "-independent") {
 			continue
