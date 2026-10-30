@@ -483,13 +483,14 @@ func (fc *funcCtx) elements(list []syntax.Expr, _ check.Type) []string {
 	return out
 }
 
-// index lowers xs[i]. A Map index is the Map rule's (check-v1 stage D).
+// index lowers xs[i]. A Map read never reaches it: the checker refuses it
+// (D-D4, write m.Get(k)), and a Map write is an assignment target.
 func (fc *funcCtx) index(x *syntax.IndexExpr) string {
 	if sig, ok := fc.typeOf(x.X).(*check.Signature); ok && len(sig.TParams) > 0 {
 		refuse(x, "an explicit instantiation used as a value is lowered after check-v1 stage E")
 	}
 	if _, isMap := fc.typeOf(x.X).(*check.Map); isMap {
-		refuse(x, "a Map index is lowered after check-v1 stage D2 (the Map rule)")
+		ice(x, "a Map read reached lowering; the checker refuses it (D-D4)")
 	}
 	if len(x.Indices) != 1 {
 		ice(x, "an index with %d indices", len(x.Indices))

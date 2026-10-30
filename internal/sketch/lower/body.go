@@ -153,7 +153,7 @@ func (fc *funcCtx) stmt(s syntax.Stmt) bool {
 	case *syntax.SwitchStmt:
 		return fc.valueMatch(s, dest{})
 	case *syntax.RangeStmt:
-		refuse(s, "for … in is lowered after check-v1 stage D (one for, the Map rule and Range)")
+		return fc.rangeStmt(s)
 	case *syntax.AssertStmt:
 		refuse(s, "assert runs under ergo test, which lowering adds after check-v1 stage E (196l)")
 	default:
@@ -283,9 +283,9 @@ func (fc *funcCtx) target(x syntax.Expr, later bool) string {
 		var base string
 		indexEmits := fc.emits(x.Indices[0])
 		switch fc.typeOf(x.X).(type) {
-		case *check.Map:
-			refuse(x, "assignment to a Map entry is lowered after check-v1 stage D2 (the Map rule)")
-		case *check.Slice:
+		case *check.Slice, *check.Map:
+			// A Map write is total (D-D4, the Map rule): it inserts or
+			// replaces the entry.
 			base = fc.value(x.X)
 			if later || indexEmits {
 				base = fc.spill(base)
@@ -503,6 +503,127 @@ func (fc *funcCtx) forStmt(s *syntax.ForStmt) bool {
 	}
 	fc.out.WriteString(body)
 	return !breaks
+}
+
+// rangeStmt lowers a for-in over the domain the checker recorded
+// (Info.Loops, D-D4). A slice and a Map are Go's range; a Range[T] counts
+// from Start up to End, End excluded, evaluated once; a Seq[T] is Go's
+// range over func: the Seq keeps the uniform function shape of every Ergo
+// function value (funcType), so the loop adapts it to iter.Seq[T]'s
+// shape, and a break makes yield return false. Each binding is a Go
+// variable declared in the body, so a function literal captures one
+// iteration's value. A for-in can complete, so it is never terminating.
+func (fc *funcCtx) rangeStmt(s *syntax.RangeStmt) bool {
+	l := fc.l.info.Loops[s]
+	if l == nil {
+		ice(s, "a for-in with no Loops entry")
+	}
+	x := fc.value(s.X)
+	if l.Domain == check.LoopRange || l.Domain == check.LoopSeq {
+		x = fc.spill(x)
+	}
+	loop := &loopCtx{}
+	fc.loops = append(fc.loops, loop)
+	saved := fc.out
+	fc.out = &strings.Builder{}
+	pos, elem := "_", "_"
+	if bound(s.Key) {
+		pos = fc.temp("k")
+	}
+	if bound(s.Value) {
+		elem = fc.temp("v")
+	}
+	switch l.Domain {
+	case check.LoopSlice, check.LoopMap:
+		switch {
+		case pos == "_" && elem == "_":
+			fc.line("for range " + x + " {")
+		case elem == "_":
+			fc.line("for " + pos + " := range " + x + " {")
+		default:
+			fc.line("for " + pos + ", " + elem + " := range " + x + " {")
+		}
+	case check.LoopRange:
+		n, ok := fc.typeOf(s.X).(*check.Named)
+		if !ok {
+			ice(s.X, "a Range domain typed %s", fc.typeOf(s.X))
+		}
+		td := fc.l.typeDecl(n.Obj, s.X)
+		i := fc.temp("i")
+		fc.line("for " + i + " := " + x + "." + td.fieldName["Start"] + "; " + i + " < " + x + "." + td.fieldName["End"] + "; " + i + "++ {")
+		elem = i
+	case check.LoopSeq:
+		v := elem
+		if v == "_" {
+			v = fc.temp("v")
+		}
+		elemType := fc.goType(l.Elem)
+		yield := fc.temp("yield")
+		env := fc.env
+		if env == "" {
+			env = fc.l.noEnv()
+		}
+		// The Seq's row is empty (its type has none), so its error is nil.
+		adapter := "func(" + yield + " func(" + elemType + ") bool) { _ = " + x + "(" + env + ", func(_ *" + fc.l.env() + ", " + v + " " + elemType + ") (bool, error) { return " + yield + "(" + v + "), nil }) }"
+		if elem == "_" {
+			fc.line("for range " + adapter + " {")
+		} else {
+			fc.line("for " + elem + " := range " + adapter + " {")
+		}
+	default:
+		ice(s, "a for-in over the unknown domain %d", l.Domain)
+	}
+	fc.depth++
+	fc.loopBind(s.Key, pos, l.Pos)
+	fc.loopBind(s.Value, elem, l.Elem)
+	fc.depth--
+	fc.block(s.Body.List)
+	fc.line("}")
+	body := fc.out.String()
+	fc.out = saved
+	fc.loops = fc.loops[:len(fc.loops)-1]
+	if loop.label != "" {
+		fc.out.WriteString(loop.label + ":\n")
+	}
+	fc.out.WriteString(body)
+	return false
+}
+
+// bound reports a for binding that binds: present and not `_`.
+func bound(p syntax.Expr) bool {
+	if p == nil {
+		return false
+	}
+	id, ok := p.(*syntax.Ident)
+	return !ok || id.Name != "_"
+}
+
+// loopBind binds one for binding to val, the Go variable of the position
+// or the element, of type t: a name, or an irrefutable pattern the checker
+// proved (Info.Patterns).
+func (fc *funcCtx) loopBind(p syntax.Expr, val string, t check.Type) {
+	if !bound(p) {
+		return
+	}
+	var binds []patBind
+	id, _ := p.(*syntax.Ident)
+	if v, ok := fc.l.info.Defs[id].(*check.Var); ok && id != nil {
+		binds = append(binds, patBind{v, val})
+	} else if pat := fc.l.info.Patterns[p]; pat != nil {
+		// A pattern may bind nothing (`for T in ts` tests the type).
+		fc.line("_ = " + val)
+		var tests []string
+		fc.pattern(pat, val, t, p, &tests, &binds)
+	} else {
+		ice(p, "a for binding with neither a Defs nor a Patterns entry")
+	}
+	for _, b := range binds {
+		name := fc.declare(b.v)
+		fc.line("var " + name + " " + fc.goType(b.v.Type) + " = " + b.val)
+		if !fc.l.reads[b.v] {
+			fc.line("_ = " + name)
+		}
+	}
 }
 
 // containsBreak reports a break of this loop in its body: one not inside a

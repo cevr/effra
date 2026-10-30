@@ -157,7 +157,13 @@ func (fc *funcCtx) callText(x *syntax.CallExpr, c *check.Call) (string, bool, bo
 		provider := fc.envExpr(x) + "." + fc.l.envField(cap.Obj)
 		return provider + "." + memberName(c.Op.Name) + "(" + strings.Join(vals, ", ") + ")", len(c.Op.Sig.Results) > 0, len(rowElems(c.Op.Sig.Errors)) > 0
 	case check.CallFuncValue:
-		sig, ok := fc.typeOf(x.Fun).(*check.Signature)
+		// A value of a declared function type (Seq[T]) calls through its
+		// underlying signature.
+		ft := fc.typeOf(x.Fun)
+		if n, isNamed := ft.(*check.Named); isNamed {
+			ft = n.Underlying()
+		}
+		sig, ok := ft.(*check.Signature)
 		if !ok {
 			ice(x.Fun, "a called value that is not a function")
 		}
