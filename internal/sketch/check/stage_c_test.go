@@ -57,3 +57,28 @@ case _: continue } } } }`, check.CodeType, 2},
 		})
 	}
 }
+
+func TestFunctionBodiesYieldTailExpressions(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"value", `func Value() int { 42 }`},
+		{"context", `func Small() int8 { -128 }`},
+		{"early-return", `func F(n int) int { if n < 0 { return 0 }; n }`},
+		{"discard", `func F() { 123 }`},
+		{"literal", `func F() int { let f = func() int { 7 }; return f() }`},
+		{"failure", `type Failed { Code int }
+func F() int fails Failed { Failed{Code: 3} }`},
+		{"fallible", `type Failed { Code int }
+func G() int fails Failed { return Failed{Code: 3} }
+func F() int fails Failed { G() }`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, d := check.CheckSource(tc.src + "\n")
+			if len(d) != 0 {
+				t.Fatalf("want a typed tail body, got %s", describe(d))
+			}
+			if gaps := check.InfoGaps(tc.src + "\n"); len(gaps) != 0 {
+				t.Fatalf("Info gaps: %v", gaps)
+			}
+		})
+	}
+}

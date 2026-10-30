@@ -69,6 +69,14 @@ func (fc *funcCtx) temp(base string) string { return fc.scope.alloc(base) }
 // checked program never reaches, and a fallible body with no value returns
 // nil.
 func (fc *funcCtx) body(list []syntax.Stmt) {
+	if len(list) > 0 {
+		if last, ok := list[len(list)-1].(*syntax.ExprStmt); ok && fc.l.info.Tails[last] != nil {
+			fc.stmts(list[:len(list)-1])
+			fc.at(last)
+			fc.retExpr(last.X)
+			return
+		}
+	}
 	if fc.stmts(list) {
 		return
 	}
@@ -341,7 +349,13 @@ func (fc *funcCtx) ret(s *syntax.ReturnStmt) {
 		}
 		return
 	}
-	x := s.Results[0]
+	fc.retExpr(s.Results[0])
+}
+
+// retExpr is shared by explicit return and a checked function-body tail.
+// The source expression is retained so calls and directives keep their site.
+func (fc *funcCtx) retExpr(x syntax.Expr) {
+	f := fc.frame
 	if !fc.fallibleExpr(x) && fc.l.isErrorValue(fc.typeOf(x)) {
 		fc.fail(fc.value(x))
 		return
@@ -354,6 +368,9 @@ func (fc *funcCtx) ret(s *syntax.ReturnStmt) {
 		case f.result != nil:
 			ice(x, "a fallible return with no value in a function with a result")
 		default:
+			if o.val != "" {
+				fc.line("_ = " + o.val)
+			}
 			fc.line("return " + o.err)
 		}
 		return
@@ -400,6 +417,16 @@ func (fc *funcCtx) exprStmt(x syntax.Expr) {
 // and any other value is assigned to the blank identifier.
 func (fc *funcCtx) discard(x syntax.Expr) {
 	x = unparen(x)
+	// A package function's explicit type arguments construct a pure function
+	// value. Discarding it evaluates no receiver or argument and needs no
+	// adapter (in particular, no inferred generic-value instance).
+	if ix, ok := x.(*syntax.IndexExpr); ok {
+		if id, named := unparen(ix.X).(*syntax.Ident); named {
+			if _, function := fc.l.info.Uses[id].(*check.Func); function {
+				return
+			}
+		}
+	}
 	if call, ok := x.(*syntax.CallExpr); ok {
 		if c := fc.l.info.Calls[call]; c != nil && c.Kind != check.CallWith && c.Kind != check.CallConversion && c.Kind != check.CallLen {
 			if text := fc.callStmt(call); text != "" {

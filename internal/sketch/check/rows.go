@@ -940,10 +940,7 @@ func (c *checker) checkFuncBody(f *Func) bool {
 		frame.insert(p.Name, v)
 	}
 	c.bindRequirements(frame, d.Type)
-	c.stmtList(d.Body.List, false)
-	if len(sig.Results) > 0 && !c.terminatesList(d.Body.List) {
-		c.errorAt(d.Body.Rbrace, d.Body.Rbrace+1, CodeMissingRet, "%s can reach the end of its body without returning a value (rows.md, Totality 3)", name)
-	}
+	c.functionBody(d.Body, name)
 	c.reportUnused(fc)
 	changed := false
 	// Inference writes the solved rows into the variables, never into the

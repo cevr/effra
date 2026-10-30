@@ -714,10 +714,7 @@ func (c *checker) funcLit(x *syntax.FuncLit, expected *Signature, in *inferer) o
 	// (D3); which literals are value uses is lexical (refWalker).
 	frame := c.pushLit()
 	c.body(t, x.Type, sig.Params, func() {
-		c.stmtList(x.Body.List, false)
-		if len(sig.Results) > 0 && !c.terminatesList(x.Body.List) {
-			c.errorAt(x.Body.Rbrace, x.Body.Rbrace+1, CodeMissingRet, "this function literal can reach the end of its body without returning a value (rows.md, Totality 3)")
-		}
+		c.functionBody(x.Body, "this function literal")
 	})
 	sig.Errors = t.row(t.declErrors, t.errors)
 	sig.Uses = t.row(t.declUses, t.uses)
