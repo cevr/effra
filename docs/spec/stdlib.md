@@ -34,7 +34,7 @@ Out of scope for now: durable workflows.
 
 ## Prelude
 
-The prelude is in scope in every package without an import: `Option`, `Task`, `Decision`, `Clock`, `Scheduler`, `Random` and `Console`. The four capabilities are ordinary interfaces bound by `wire` (decision #102), so a test replaces any of them ([#209](https://github.com/cevr/ergo/issues/209)).
+The prelude is in scope in every package without an import: `Option`, `Range`, `Seq`, `Task`, `Decision`, `Clock`, `Scheduler`, `Random` and `Console`. The four capabilities are ordinary interfaces bound by `wire` (decision #102), so a test replaces any of them ([#209](https://github.com/cevr/ergo/issues/209)).
 
 ## v1 packages: task, scope, queue and slice
 
@@ -44,10 +44,10 @@ Language v1 ([#196](https://github.com/cevr/ergo/issues/196)) has four small std
 | --- | --- | --- | --- |
 | `task` | `func Go[T, E, R](body func() T fails E needs R) Task[T, E] needs R`; the prelude's `Task[T, E]` has `Wait() T fails E` and `Stop()` | [runtime.md, Tasks](runtime.md#tasks) rules 7 to 12 | `Go(s *Scope, span Site, body func(*rt.Task) (T, error)) *Task[T]`; the methods `Wait`, `Stop` and `Move(dest *Scope)`, the return of a Task, which only the lowering calls (task.go) |
 | `scope` | `func OnExit[R](body func() needs R) needs R` | [runtime.md, Exit actions](runtime.md#exit-actions) | `OnExit(s *Scope, body func())` (task.go) |
-| `queue` | `type Closed {}`; `type Queue[T] { Push(v T) fails Closed, Pop() T fails Closed, Close() }`; `func New[T](capacity int) Queue[T]` | [runtime.md, Queues](runtime.md#queues) | `New(capacity int) *Queue[T]`; the methods `Push(t *rt.Task, v T) error`, `Pop(t *rt.Task) (T, error)`, `Close()`, and `Values(t *rt.Task) iter.Seq[T]`; `Closed` (queue.go) |
+| `queue` | `type Closed {}`; `type Queue[T] { Push(v T) fails Closed, Pop() T fails Closed, Close(), Values() Seq[T] }`; `func New[T](capacity int) Queue[T]` | [runtime.md, Queues](runtime.md#queues) | `New(capacity int) *Queue[T]`; the methods `Push(t *rt.Task, v T) error`, `Pop(t *rt.Task) (T, error)`, `Close()`, and `Values(t *rt.Task) iter.Seq[T]`; `Closed` (queue.go) |
 | `slice` | `func WithCapacity[T](n int) []T` | below | `WithCapacity(n int) []T` (data.go) |
 
-**Not yet: `Values`.** `q.Values()` returns `Seq[T]` (lower-v1 Q1), and the prelude has no `Seq[T]` yet, so the Ergo `Queue` does not declare it. Its Go body is in queue.go. check-v1 stage D adds the prelude's `Seq[T]` and its loop domain, and then `Values() Seq[T]` joins `Queue`. A `for` over the queue is never an eagerly collected slice.
+**`Values`.** `q.Values()` returns the prelude's `Seq[T]` (lower-v1 Q1; [types.md, Loops and len](types.md#loops-and-len)): `for v in q.Values()` pops each value in turn, waiting like `Pop`, and ends when the queue is closed and empty; a `break` leaves the values not yet popped in the queue. Its Go body returns Go's `iter.Seq[T]`. A `for` over the queue is never an eagerly collected slice. The call is checked; its lowering, with the caller's task as the hidden argument, is check-v1 stage D3's, so the build refuses a call of a std operation (`Push`, `Pop`, `Close`, `Values`) with a located S109 naming D3.
 
 **Hidden arguments.** Some Go bodies need a value that the Ergo signature does not show and the lowering supplies at the call. The Go body names each one by its Go type, which no Ergo type lowers to, so the body's own signature is the binding; there is no attribute in the Ergo source:
 

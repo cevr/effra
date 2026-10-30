@@ -6,6 +6,13 @@ Entries describe user-visible changes and are true at the commit that carries th
 
 ### Breaking changes
 
+- The checker enforces stage D2 of the v1 checker, and every form it admits runs under `ergo run` ([#196](https://github.com/cevr/ergo/issues/196), one `for`; check-v1):
+  - `for` iterates four domains: a slice, a `Map` (one name binds the value, two the key and the value), the prelude's new `Range[T]` and the prelude's new `Seq[T]` (one name each). A string, an integer, a pointer or any other domain is S108 with the Ergo form to write, such as `for i in 0..len(s)` or `for x in *p`.
+  - `a..b` is a `Range[T]` value for one integer type `T`, also outside a `for`; non-integer operands are S108.
+  - `Seq[T]` is `func(yield func(v T) bool)`: convert a function to it, `Seq[int](f)`, and loop over it; a `break` makes `yield` return false. The std `Queue` gains `Values() Seq[T]`; the build refuses a call of a std operation with a located S109 naming check-v1 stage D3.
+  - A single-name `for` binder follows the one binder rule of `let`, with the same message.
+  - A Map read `m[k]` is S108 "a Map read may miss; write m.Get(k), which returns an Option"; a Map write `m[k] = v` runs.
+  - `len` is the only built-in function; it takes a slice, a `Map` or a string, and neither `len` nor an index sees through a pointer: write `len(*p)`, `(*p)[i]`.
 - The checker enforces stage D1 of the v1 checker, and every form it admits runs under `ergo run` ([#196](https://github.com/cevr/ergo/issues/196), 196v; check-v1):
   - An assignment `x = e` or `x op= e` needs a target rooted at a `let mut` local, directly or through fields and indexes; a target rooted at a call's result or a literal is S108. A parameter, a `let`, a pattern, `as`, `case err:` or loop binding and a package-level `let` are immutable (S108, "declare x with let mut"). A borrow `&x`, or a call `x.f()` of a function that takes `*T`, needs a `let mut` root too; a write through a pointer does not. A `let mut` that is never reassigned is S110 "n is never reassigned; write let n"; a reassignment inside a refused literal (a struct field value that elides its type) still counts. A struct literal's value never elides its type: an elided literal there is refused on every route (a field, an extra positional value, an unknown field, a key that is not a name, a field set twice), and names inside it are not resolved.
   - `let x` with neither a type nor a value is S108; a package-level `let mut` and `let mut` over a pattern are S108.
