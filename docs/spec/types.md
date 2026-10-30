@@ -89,7 +89,7 @@ type Option[T] = Some[T]{ Value T } | None{}
 
 ## Defined types
 
-Status: **checked** by `internal/sketch/check` (check-v1 stage B).
+Status: **checked** by `internal/sketch/check` (check-v1 stage B) and **lowered** (check-v1 stage C): a Go defined type over the base type's Go type.
 
 ```go
 type Celsius float64
@@ -99,6 +99,7 @@ type Span (int, int)
 1. `type N T` defines a new nominal type over `T`, a basic, slice, map, function, tuple or record type; `N` is not identical to `T`, and a value crosses between them only by conversion ([Conversions](#conversions)). A defined type over a type parameter or over itself is S108.
 2. A defined type over a tuple destructures like its tuple (`let (lo, hi) = span`); a defined type over a record keeps its braces, even with no fields.
 3. Its operations are those of `T`: arithmetic on `Celsius`, comparison where `T` is comparable.
+4. A defined type over a record, named in an error row, is an error type of its own ([Error types](#error-types)): it is thrown and caught as itself, by type test and by record pattern, and its text is its base record's. A constant of a defined type keeps that type: `func f() Flag { true }` is `Flag(true)` in Go.
 
 ## Tuples
 

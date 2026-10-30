@@ -104,6 +104,14 @@ func (l *lowerer) declareName(d syntax.Decl) {
 						l.vars[v] = l.pkgName(pkgKey{"let", v}, v.Name)
 					}
 				}
+				if spec.Pattern != nil {
+					for _, v := range patternVars(l.info.Patterns[spec.Pattern], nil) {
+						l.vars[v] = l.pkgName(pkgKey{"let", v}, v.Name)
+					}
+				}
+				if len(spec.Values) == 1 && (spec.Pattern != nil || len(spec.Names) > 1) {
+					l.pkgName(pkgKey{"letinit", spec}, "ergoLet")
+				}
 			}
 		case *syntax.WireDecl:
 			if w, ok := l.info.Defs[d.Name].(*check.Wire); ok {
@@ -201,6 +209,9 @@ func (l *lowerer) typeDecl(tn *check.TypeName, site syntax.Node) *typeDecl {
 		td.kind = kindRecord
 		td.fieldName = map[string]string{}
 		td.errorType = named.Obj.Pkg.ErrorTypes[named] || l.pkg.ErrorTypes[named]
+		// A defined error type over this record keeps its Go field names,
+		// so they avoid its Error method too.
+		avoidError := td.errorType || l.definedErrorOver(named)
 		taken := map[string]bool{}
 		for _, f := range spec.Fields.List {
 			for _, id := range f.Names {
@@ -209,7 +220,7 @@ func (l *lowerer) typeDecl(tn *check.TypeName, site syntax.Node) *typeDecl {
 					ice(id, "the field %s of %s has no Defs entry", id.Name, tn.Name)
 				}
 				goName := memberName(field.Name)
-				if td.errorType && goName == "Error" {
+				if avoidError && goName == "Error" {
 					goName = "Error_"
 				}
 				if taken[goName] {
@@ -265,8 +276,38 @@ func (l *lowerer) typeDecl(tn *check.TypeName, site syntax.Node) *typeDecl {
 				td.fields, td.fieldName = bd.fields, bd.fieldName
 			}
 		}
+		// A defined type over a record, named in an error row, is an error
+		// type of its own: it gets its own Error method (types.md, Error
+		// types 1).
+		td.errorType = named.Obj.Pkg.ErrorTypes[named] || l.pkg.ErrorTypes[named]
 	}
 	return td
+}
+
+// definedErrorOver reports whether an error type of the program is defined
+// over named, directly or through other defined types.
+func (l *lowerer) definedErrorOver(named *check.Named) bool {
+	for _, pkg := range []*check.Package{named.Obj.Pkg, l.pkg} {
+		if pkg == nil {
+			continue
+		}
+		for n := range pkg.ErrorTypes {
+			for t := n.Defined(); t != nil; {
+				d, ok := t.(*check.Named)
+				if !ok {
+					break
+				}
+				if d.Orig != nil {
+					d = d.Orig
+				}
+				if d == named {
+					return true
+				}
+				t = d.Defined()
+			}
+		}
+	}
+	return false
 }
 
 // typeParams writes a type parameter list and returns the scope that names
@@ -351,6 +392,9 @@ func (l *lowerer) emitType(td *typeDecl) {
 		b.WriteString("\n")
 	case kindDefined:
 		b.WriteString("type " + td.name + tparams + " " + tc.goType(td.defined) + "\n\n")
+		if td.errorType {
+			l.errorMethod(b, td)
+		}
 	}
 }
 
@@ -680,30 +724,143 @@ func (l *lowerer) directive(pos syntax.Pos) string {
 // their references (types.md, Methods 7).
 func (l *lowerer) packageLet(d *syntax.VarDecl) {
 	for _, spec := range d.Specs {
-		if spec.Pattern != nil || len(spec.Names) != 1 || len(spec.Values) > 1 {
-			refuse(d, "a let with a pattern or several names is lowered after check-v1 stage B (196p, 196t)")
+		switch {
+		case spec.Pattern == nil && len(spec.Names) == 1 && len(spec.Values) <= 1:
+			var x syntax.Expr
+			if len(spec.Values) == 1 {
+				x = spec.Values[0]
+			}
+			l.packageVar(spec.Names[0], x)
+		case spec.Pattern == nil && len(spec.Names) == len(spec.Values):
+			// `let a, b = x, y`: one Go variable per name.
+			for i, id := range spec.Names {
+				l.packageVar(id, spec.Values[i])
+			}
+		case len(spec.Values) == 1:
+			l.packagePattern(spec)
+		default:
+			ice(spec, "a package let whose names and values do not pair")
 		}
-		v, ok := l.info.Defs[spec.Names[0]].(*check.Var)
-		if !ok {
-			ice(spec.Names[0], "the let %s has no Defs entry", spec.Names[0].Name)
-		}
-		fc := newFuncCtx(l, newNamer(l.names), true)
+	}
+}
+
+// packageVar lowers one name of a package-level let, with its initializer
+// x (nil for none). A name the checker gave no object, `_`, keeps its
+// initializer's evaluation.
+func (l *lowerer) packageVar(id *syntax.Ident, x syntax.Expr) {
+	v, ok := l.info.Defs[id].(*check.Var)
+	if !ok && (id.Name != "_" || x == nil) {
+		ice(id, "the let %s has no Defs entry", id.Name)
+	}
+	fc := newFuncCtx(l, newNamer(l.names), true)
+	fc.depth = 1
+	name, goType := "_", ""
+	if ok {
 		fc.owner = v.Name
 		fc.frame = &frame{result: v.Type}
-		fc.depth = 1
-		goType := fc.goType(v.Type)
-		l.user.WriteString(l.directive(spec.Names[0].Pos()))
-		if len(spec.Values) == 0 {
-			l.user.WriteString("var " + l.vars[v] + " " + goType + "\n\n")
-			continue
-		}
-		val := fc.assigned(spec.Values[0])
-		if fc.out.Len() == 0 {
-			l.user.WriteString("var " + l.vars[v] + " " + goType + " = " + val + "\n\n")
-			continue
-		}
-		l.user.WriteString("var " + l.vars[v] + " = func() " + goType + " {\n" + fc.out.String() + "\treturn " + val + "\n}()\n\n")
+		name, goType = l.vars[v], fc.goType(v.Type)
+	} else {
+		fc.owner = "_"
+		fc.frame = &frame{result: fc.typeOf(x)}
+		goType = fc.goType(fc.typeOf(x))
 	}
+	l.user.WriteString(l.directive(id.Pos()))
+	if x == nil {
+		l.user.WriteString("var " + name + " " + goType + "\n\n")
+		return
+	}
+	val := fc.assigned(x)
+	if fc.out.Len() == 0 {
+		l.user.WriteString("var " + name + " " + goType + " = " + val + "\n\n")
+		return
+	}
+	l.user.WriteString("var " + name + " = func() " + goType + " {\n" + fc.out.String() + "\treturn " + val + "\n}()\n\n")
+}
+
+// packagePattern lowers a package-level let that destructures one value
+// (D-B5; 196t): `let P = e`, whose pattern the checker proved irrefutable,
+// or `let q, r = e` over a tuple. The initializer is evaluated once, into a
+// Go variable of its own, and each binding is a Go package variable read
+// from it, so Go's initialization order, which follows references, runs
+// the initializer before any binding and every binding before its readers
+// (types.md, Methods 7).
+func (l *lowerer) packagePattern(spec *syntax.VarSpec) {
+	x := spec.Values[0]
+	fc := newFuncCtx(l, newNamer(l.names), true)
+	fc.depth = 1
+	t := fc.typeOf(x)
+	if c, ok := l.info.Implicit[x]; ok && spec.Pattern != nil {
+		t = c.To
+	}
+	// The owner of the initializer's calls is the let's first name (#230).
+	fc.owner = "_"
+	if len(spec.Names) > 0 {
+		fc.owner = spec.Names[0].Name
+	} else if vs := patternVars(l.info.Patterns[spec.Pattern], nil); len(vs) > 0 {
+		fc.owner = vs[0].Name
+	}
+	fc.frame = &frame{result: t}
+	goType := fc.goType(t)
+	at := spec.Pos()
+	if len(spec.Names) > 0 {
+		at = spec.Names[0].Pos()
+	}
+	val := ""
+	if spec.Pattern != nil {
+		val = fc.assigned(x)
+	} else {
+		val = fc.value(x)
+	}
+	init := l.pkgName(pkgKey{"letinit", spec}, "ergoLet")
+	l.user.WriteString(l.directive(at))
+	if fc.out.Len() == 0 {
+		l.user.WriteString("var " + init + " " + goType + " = " + val + "\n\n")
+	} else {
+		l.user.WriteString("var " + init + " = func() " + goType + " {\n" + fc.out.String() + "\treturn " + val + "\n}()\n\n")
+	}
+	var binds []patBind
+	if spec.Pattern != nil {
+		p := l.info.Patterns[spec.Pattern]
+		if p == nil {
+			ice(spec.Pattern, "a let pattern with no Patterns entry")
+		}
+		var tests []string
+		fc.pattern(p, init, t, spec.Pattern, &tests, &binds)
+	} else {
+		tup, ok := t.(*check.Tuple)
+		if !ok || len(tup.Types) != len(spec.Names) {
+			refuse(spec, "this let of several names is lowered after check-v1 stage D (the Map rule)")
+		}
+		for i, id := range spec.Names {
+			if w, ok := l.info.Defs[id].(*check.Var); ok {
+				binds = append(binds, patBind{w, init + "." + tupleField(i)})
+			}
+		}
+	}
+	for _, b := range binds {
+		name, ok := l.vars[b.v]
+		if !ok {
+			ice(spec, "the let binding %s has no Go name", b.v.Name)
+		}
+		l.user.WriteString("var " + name + " " + fc.goType(b.v.Type) + " = " + b.val + "\n\n")
+	}
+}
+
+// patternVars lists the variables a pattern binds, in order.
+func patternVars(p *check.Pattern, out []*check.Var) []*check.Var {
+	if p == nil {
+		return out
+	}
+	if (p.Kind == check.PatBind || p.Kind == check.PatAs) && p.Var != nil {
+		out = append(out, p.Var)
+	}
+	for _, e := range p.Elems {
+		out = patternVars(e, out)
+	}
+	for _, f := range p.Fields {
+		out = patternVars(f.Pattern, out)
+	}
+	return out
 }
 
 // env is the environment type's name: one field per capability the program

@@ -82,6 +82,9 @@ func (l *lowerer) textTypes(t check.Type, site syntax.Node, seen map[pkgKey]bool
 			for _, v := range td.variants {
 				l.textTypes(v.Type, site, seen, visit)
 			}
+		case kindDefined:
+			// A defined type's text is its base type's.
+			l.textTypes(td.defined, site, seen, visit)
 		}
 		return
 	case *check.Slice:
@@ -197,6 +200,11 @@ func (l *lowerer) textFunc(t check.Type, site syntax.Node) {
 				}
 				s.WriteString("\t}\n\treturn \"<nil>\"\n")
 				return s.String()
+			}
+		case kindDefined:
+			body = func() string {
+				base := (&typeCtx{l: l, params: names, site: site}).goType(td.defined)
+				return "\treturn " + l.textExpr(td.defined, base+"("+v+")", site) + "\n"
 			}
 		}
 	case *check.Slice:

@@ -63,6 +63,87 @@ func main() needs Console {
 `, "collective\nwhole\nh ran\ncaught\nwith\nwith fails\nbodies\n")
 }
 
+// M5: a package-level let destructures once: a tuple pattern, a record
+// pattern and several names over a tuple, initialized
+// before their readers whatever the declaration order.
+func TestErgoRunPackageDestructuring(t *testing.T) {
+	wantRun(t, `let total = a + b + q + r + x + y
+let (a, b) = (1, 2)
+type Point { X int, Y int }
+let Point{X: x, Y: y} = origin()
+let q, r = pair()
+
+func origin() Point {
+	Point{X: 10, Y: 20}
+}
+func pair() (int, int) { (3, 4) }
+
+func main() needs Console {
+	if a + b == 3 && x == 10 && y == 20 && q + r == 7 && total == 40 {
+		Console.Println("ok")
+	}
+}
+`, "ok\n")
+}
+
+// M6: a defined type over a record, named in an error row, is an error type
+// of its own: thrown, caught by type and by record pattern, its text from
+// its base record's fields; a base field named Error keeps a Go name free
+// of the Error method; a generic defined error type too (its fields do not
+// mention T: a type-parameter field's text is lower-v1 stage 3's, for
+// records as well).
+func TestErgoRunDefinedErrorTypes(t *testing.T) {
+	wantRun(t, `type E { N int, Error string }
+type D E
+type Box[T] { V int }
+type Wrapped[T] Box[T]
+
+func g(n int) int fails D { D(E{N: n, Error: "boom"}) }
+func f(n int) int { g(n) catch { case D{N: 1}: 10; case D{N: k}: k } }
+func typed() string {
+	let v = g(2) catch { case D as d: return d.Error }
+	if v == 0 { "zero" } else { "none" }
+}
+func w() int fails Wrapped[string] { Wrapped[string](Box[string]{V: 7}) }
+func unwrap() int { w() catch { case Wrapped[string]{V: v}: v } }
+
+func main() needs Console {
+	if f(1) == 10 && f(5) == 5 && typed() == "boom" && unwrap() == 7 {
+		Console.Println("defined errors")
+	}
+	let r = g(3) catch {
+	case _:
+		Console.Println("caught")
+		0
+	}
+	if r == 0 {
+		Console.Println("zero")
+	}
+}
+`, "defined errors\ncaught\nzero\n")
+}
+
+// M7: a defined type over a basic type keeps its nominal type in emitted
+// constants: a tail, a conversion, a comparison and a constant pattern.
+func TestErgoRunDefinedBasicConstants(t *testing.T) {
+	wantRun(t, `type Flag bool
+type Text string
+type Code int
+
+func on() Flag { true }
+func name() Text { "x" }
+func code() Code { 7 }
+func label(t Text) string { match t { case "x": "ex"; case _: "other" } }
+func flip(f Flag) Flag { if f == true { false } else { true } }
+
+func main() needs Console {
+	if on() == Flag(true) && name() == "x" && string(name()) == "x" && code() == 7 && label("x") == "ex" && label(Text("y")) == "other" && flip(on()) == false {
+		Console.Println("defined constants")
+	}
+}
+`, "defined constants\n")
+}
+
 // M2, M8: a catch alternative that leaves a name unbound and equality on a
 // row value are refused before Go; neither program runs.
 func TestErgoRunReviewCRefusals(t *testing.T) {
