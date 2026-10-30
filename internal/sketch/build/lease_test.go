@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,16 +22,18 @@ import (
 // leaseCompiler is the process-scoped identity of the lease helper.
 var leaseCompiler = "process:" + strings.Repeat("7", 64)
 
-// leaseHelper is helper mode "lease", the owner of one private root: for
-// each line "build" on standard input it builds baseInput under
-// leaseCompiler and prints the module directory; for "link" it links the
-// last module to a fresh program and prints "linked PATH". It exits at the
-// end of its input, or when it is killed.
+// leaseHelper is helper mode "lease", a long-lived host that builds into
+// one private root. For each line on standard input: "build" builds
+// baseInput under leaseCompiler, takes the new module, then releases the one
+// it held, so its builds overlap, and prints the module directory; "link"
+// links the module it holds to a fresh program and prints "linked PATH";
+// "release" releases the module it holds and prints "released". It exits at
+// the end of its input, or when it is killed.
 func leaseHelper() int {
 	c := Cache{Root: os.Getenv(rootVariable)}
 	in := baseInput()
 	in.Compiler = leaseCompiler
-	var last Module
+	var held Module
 	lines := bufio.NewScanner(os.Stdin)
 	for lines.Scan() {
 		switch lines.Text() {
@@ -38,15 +43,20 @@ func leaseHelper() int {
 				fmt.Fprintln(os.Stderr, err)
 				return 1
 			}
-			last = module
+			held.Release()
+			held = module
 			fmt.Println(module.Dir)
 		case "link":
 			output := filepath.Join(os.Getenv(rootVariable), "program")
-			if out, err := hostToolchain().Command(last, output).CombinedOutput(); err != nil {
+			if out, err := hostToolchain().Command(held, output).CombinedOutput(); err != nil {
 				fmt.Fprintf(os.Stderr, "%v: %s\n", err, out)
 				return 1
 			}
 			fmt.Println("linked " + output)
+		case "release":
+			held.Release()
+			held = Module{}
+			fmt.Println("released")
 		}
 	}
 	return 0
@@ -67,15 +77,20 @@ func age(t *testing.T, root string) {
 	}
 }
 
-// sweepUntil sweeps c in a loop, re-ageing root before each sweep, until
-// stop is closed, and returns how many sweeps ran.
-func sweepUntil(c Cache, root string, stop <-chan struct{}) *atomic.Int64 {
+// sweepUntil sweeps c in a loop, re-ageing root before each pass, until the
+// returned stop is called. stop ends the loop, waits until the sweeping
+// goroutine has returned, and reports how many passes ran; it is safe to
+// call more than once, and the test's cleanup calls it on every path.
+func sweepUntil(t *testing.T, c Cache, root string) (stop func() int64) {
 	var n atomic.Int64
+	done := make(chan struct{})
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
 		old := time.Now().Add(-2 * privateLifetime)
 		for {
 			select {
-			case <-stop:
+			case <-done:
 				return
 			default:
 			}
@@ -84,14 +99,23 @@ func sweepUntil(c Cache, root string, stop <-chan struct{}) *atomic.Int64 {
 			n.Add(1)
 		}
 	}()
-	return &n
+	var once sync.Once
+	stop = func() int64 {
+		once.Do(func() { close(done); <-finished })
+		return n.Load()
+	}
+	t.Cleanup(func() { stop() })
+	return stop
 }
 
-// TestPrivateRootLease: a private root is removed only when no live process
-// owns it (the stage's round 1 review, M1). An owner process that has been
-// idle past privateLifetime keeps its root; it renews the root while sweeps
-// run; its root stays while it links the module after the build; and once
-// the owner is killed, the next sweep removes the root, aged as it is.
+// TestPrivateRootLease: a private root is removed only when no build holds
+// it (round 1 review M1), and a build holds it only from Module until its
+// Release (round 2 review O2). An owner process in the middle of a build,
+// idle past privateLifetime, keeps its root; overlapping builds keep it
+// while sweeps run; it stays while the owner links the module; once the
+// owner releases its build, the live owner holds nothing and an aged root
+// is removed, and its next build takes a fresh root; and once a building
+// owner is killed, the next sweep removes the root.
 func TestPrivateRootLease(t *testing.T) {
 	if !leasesSupported {
 		t.Skip("no flock here: private roots are never collected")
@@ -142,36 +166,32 @@ func TestPrivateRootLease(t *testing.T) {
 		t.Fatalf("the owner built %s, want a module under %s", first, private)
 	}
 
-	t.Run("a stale live owner keeps its root", func(t *testing.T) {
+	t.Run("a stale building owner keeps its root", func(t *testing.T) {
 		for range 3 {
 			age(t, private)
 			c.sweep(time.Now())
 		}
 		if !exists() {
-			t.Fatal("a sweep removed the root of a live owner")
+			t.Fatal("a sweep removed the root of a live build")
 		}
 	})
 
-	t.Run("an owner renews its root while sweeps run", func(t *testing.T) {
-		stop := make(chan struct{})
-		sweeps := sweepUntil(c, private, stop)
+	t.Run("overlapping builds keep the root while sweeps run", func(t *testing.T) {
+		stop := sweepUntil(t, c, private)
 		for range 10 {
 			if dir := ask("build"); dir != first {
-				close(stop)
 				t.Fatalf("the owner's build gave %s, want its module %s", dir, first)
 			}
 		}
-		close(stop)
-		if !exists() || sweeps.Load() == 0 {
-			t.Fatalf("root present %v after %d concurrent sweeps", exists(), sweeps.Load())
+		if sweeps := stop(); !exists() || sweeps == 0 {
+			t.Fatalf("root present %v after %d concurrent sweeps", exists(), sweeps)
 		}
 	})
 
 	t.Run("a root stays while its owner links", func(t *testing.T) {
-		stop := make(chan struct{})
-		sweeps := sweepUntil(c, private, stop)
+		stop := sweepUntil(t, c, private)
 		reply := ask("link")
-		close(stop)
+		sweeps := stop()
 		program, ok := strings.CutPrefix(reply, "linked ")
 		if !ok {
 			t.Fatalf("the owner answered %q", reply)
@@ -179,7 +199,21 @@ func TestPrivateRootLease(t *testing.T) {
 		in := baseInput()
 		in.Compiler = leaseCompiler
 		if got := runProgram(t, program); got != expectedOutput(t, in, "r1", "unset") || !exists() {
-			t.Fatalf("after %d sweeps: program printed %q, root present %v", sweeps.Load(), got, exists())
+			t.Fatalf("after %d sweeps: program printed %q, root present %v", sweeps, got, exists())
+		}
+	})
+
+	t.Run("a live owner holds nothing between builds", func(t *testing.T) {
+		if reply := ask("release"); reply != "released" {
+			t.Fatalf("the owner answered %q", reply)
+		}
+		age(t, private)
+		c.sweep(time.Now())
+		if _, err := os.Stat(private); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("the released root of a live owner is still there: %v", err)
+		}
+		if dir := ask("build"); dir != first || !exists() {
+			t.Fatalf("the next build gave %s, root present %v; want a fresh %s", dir, exists(), first)
 		}
 	})
 
@@ -194,7 +228,7 @@ func TestPrivateRootLease(t *testing.T) {
 		if _, err := os.Stat(private); !os.IsNotExist(err) {
 			t.Fatalf("the abandoned root is still there: %v", err)
 		}
-		if names := entries(t, root, "private"); len(names) != 0 {
+		if names := slices.DeleteFunc(entries(t, root, "private"), func(name string) bool { return name == stampName }); len(names) != 0 {
 			t.Fatalf("the sweep left %v", names)
 		}
 	})
@@ -241,4 +275,223 @@ func TestLeaseRaceWithSweep(t *testing.T) {
 		owned.Close()
 	}
 	t.Logf("300 rounds: the sweep won %d", removed)
+}
+
+// TestCollectKeepsAnArrivingBuildsModule (round 2 review M1): a sweep
+// collecting an ownerless root with real module files pauses after it has
+// unlinked the root's lease; in the pause a build takes the root and its
+// module; then the removal finishes. The build's module must still be
+// whole: the sweep renamed the root aside first, so the build made a fresh
+// root and emitted into it. Removing in place instead would let the build
+// lock a new lease and reuse the old module, which the removal then deletes.
+func TestCollectKeepsAnArrivingBuildsModule(t *testing.T) {
+	if !leasesSupported {
+		t.Skip("no flock here")
+	}
+	root := t.TempDir()
+	c := Cache{Root: root}
+	in := baseInput()
+	in.Compiler = "process:" + strings.Repeat("8", 64)
+	var calls atomic.Int32
+	old, err := c.Module(in, emitFor(in, &calls))
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.Release()
+	private := privateRootOf(root, in.Compiler)
+	age(t, private)
+
+	var arrived Module
+	var arriveErr error
+	paused := false
+	testHookCollecting = func(string) {
+		paused = true
+		arrived, arriveErr = c.Module(in, emitFor(in, &calls))
+	}
+	defer func() { testHookCollecting = nil }()
+	if !collect(private) {
+		t.Fatal("the sweep did not collect the ownerless, aged root")
+	}
+	defer arrived.Release()
+	if !paused || arriveErr != nil {
+		t.Fatalf("the build in the pause: ran %v, error %v", paused, arriveErr)
+	}
+	summary, err := in.Summarize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verify(arrived.Dir, arrived.Key, summary); err != nil {
+		t.Fatalf("the module of the build that arrived during the collection is damaged: %v", err)
+	}
+	if arrived.Reused || calls.Load() != 2 {
+		t.Fatalf("the build in the pause reused %v after %d emissions; want a fresh module", arrived.Reused, calls.Load())
+	}
+	program, err := link(t, hostToolchain(), arrived)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runProgram(t, program); got != expectedOutput(t, in, "r1", "unset") {
+		t.Fatalf("the arrived module's program printed %q", got)
+	}
+}
+
+// TestLeaseIsHeldPerBuild (round 2 review O2): a build holds its private
+// root from Module until Release. Builds of one process share the lease and
+// count their uses; the root is free only after the last release. A build
+// whose emission fails, or panics, holds nothing when Module returns.
+// Release is safe to repeat and never gives back another build's use.
+func TestLeaseIsHeldPerBuild(t *testing.T) {
+	if !leasesSupported {
+		t.Skip("no flock here")
+	}
+	root := t.TempDir()
+	c := Cache{Root: root}
+	in := baseInput()
+	in.Compiler = "process:" + strings.Repeat("9", 64)
+	private := privateRootOf(root, in.Compiler)
+
+	first, err := c.Module(in, emitFor(in, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := c.Module(in, emitFor(in, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Release()
+	first.Release() // a repeated release gives back nothing more
+	if !heldLease(private) || collect(private) {
+		t.Fatal("a root was freed while a build still holds it")
+	}
+	second.Release()
+	if heldLease(private) {
+		t.Fatal("the root is still held after every build released it")
+	}
+
+	failing := in
+	failing.Sources = append(slices.Clone(in.Sources), Source{Path: "/src/app/c.ergo", Text: []byte("func failing() {}\n")})
+	if _, err := c.Module(failing, func() ([]File, error) { return nil, errors.New("emission failed") }); err == nil {
+		t.Fatal("a failing emission built a module")
+	}
+	if heldLease(private) {
+		t.Fatal("a failed build still holds its root")
+	}
+	func() {
+		defer func() { _ = recover() }()
+		_, _ = c.Module(failing, func() ([]File, error) { panic("emission panicked") })
+	}()
+	if heldLease(private) {
+		t.Fatal("a panicking build still holds its root")
+	}
+	age(t, private)
+	if !collect(private) {
+		t.Fatal("a root no build holds was not collected")
+	}
+
+	published := in
+	published.Compiler = "sha256:compiler-1"
+	m, err := c.Module(published, emitFor(published, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Release() // a published module holds nothing; Release is a no-op
+}
+
+// TestSweepIsRateLimited (round 2 review O1): Module sweeps at most once per
+// sweepInterval per cache. A recent stamp means no pass, so an aged,
+// ownerless root stays; a stamp that is due runs one pass, which removes it
+// and renews the stamp; a pass another process has claimed (it holds the
+// stamp's lock) is not run twice; and one pass removes at most
+// sweepRemovals roots.
+func TestSweepIsRateLimited(t *testing.T) {
+	if !leasesSupported {
+		t.Skip("no flock here")
+	}
+	root := t.TempDir()
+	c := Cache{Root: root}
+	in := baseInput()
+	in.Compiler = "process:" + strings.Repeat("a", 64)
+	build := func() {
+		t.Helper()
+		m, err := c.Module(in, emitFor(in, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.Release()
+	}
+	build() // the first build in a cache sweeps and writes the stamp
+	stamp := filepath.Join(root, "private", stampName)
+	data, err := os.ReadFile(stamp)
+	if err != nil || !recent(data, time.Now()) {
+		t.Fatalf("no recent stamp after the first build: %q %v", data, err)
+	}
+	abandoned := func(n int) []string {
+		t.Helper()
+		var roots []string
+		for i := range n {
+			r := filepath.Join(root, "private", fmt.Sprintf("abandoned-%03d", i))
+			if err := os.MkdirAll(filepath.Join(r, "modules"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			age(t, r)
+			roots = append(roots, r)
+		}
+		return roots
+	}
+	present := func(roots []string) int {
+		n := 0
+		for _, r := range roots {
+			if _, err := os.Stat(r); err == nil {
+				n++
+			}
+		}
+		return n
+	}
+	due := func() {
+		t.Helper()
+		then := time.Now().Add(-sweepInterval - time.Hour).Unix()
+		if err := os.WriteFile(stamp, []byte(strconv.FormatInt(then, 10)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	roots := abandoned(1)
+	build()
+	if present(roots) != 1 {
+		t.Fatal("a build with a recent stamp swept")
+	}
+
+	due()
+	claim, err := os.OpenFile(stamp, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tryLockExclusive(claim) {
+		t.Fatal("the test could not claim the stamp")
+	}
+	build()
+	claim.Close()
+	if present(roots) != 1 {
+		t.Fatal("a build swept while another process held the claim")
+	}
+
+	build()
+	if present(roots) != 0 {
+		t.Fatal("a build with a due stamp did not sweep")
+	}
+	if data, err := os.ReadFile(stamp); err != nil || !recent(data, time.Now()) {
+		t.Fatalf("the pass did not renew the stamp: %q %v", data, err)
+	}
+
+	many := abandoned(sweepRemovals + 5)
+	due()
+	build()
+	if left := present(many); left != 5 {
+		t.Fatalf("one pass left %d of %d roots, want %d (at most %d removals)", left, len(many), 5, sweepRemovals)
+	}
+	due()
+	build()
+	if left := present(many); left != 0 {
+		t.Fatalf("the next pass left %d roots", left)
+	}
 }

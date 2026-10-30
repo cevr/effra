@@ -273,6 +273,9 @@ func Build(a Analysis, req BuildRequest) (build.Module, error) {
 	if err != nil {
 		return build.Module{}, err
 	}
+	// The build holds a private module's root until its link ends, on every
+	// path; then a long-lived host holds nothing between builds.
+	defer module.Release()
 	absolute, err := filepath.Abs(req.Output)
 	if err != nil {
 		return module, err
