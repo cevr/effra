@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -135,11 +136,13 @@ func goOwnHome(t *testing.T) string {
 	return dir
 }
 
-// TestBuildReusesTheModuleWithoutAProducerImage: a compiler whose producer
-// identity is process-scoped (as off Linux and darwin/arm64) still keys the
-// emission cache on its executable's bytes, so two processes building one
-// unchanged source name the same module.
-func TestBuildReusesTheModuleWithoutAProducerImage(t *testing.T) {
+// TestBuildWithoutAProducerImageIsPrivate: a compiler whose producer
+// identity is process-scoped (as off Linux and darwin/arm64, or after a
+// failed darwin verification) builds each module in a private root of its
+// process and publishes nothing, so no other process can take its output
+// under a key only it can trust. Each build still produces a program that
+// runs.
+func TestBuildWithoutAProducerImageIsPrivate(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
@@ -152,19 +155,28 @@ func TestBuildReusesTheModuleWithoutAProducerImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	xdg := filepath.Join(t.TempDir(), "xdg")
+	private := filepath.Join(xdg, "ergo", "private") + string(filepath.Separator)
 	var works []string
 	for range 2 {
 		stdout, stderr, code := cachedCLI(t, binary, directory, xdg, "build", "main.ergo", "-o", "app", "-work")
 		if code != 0 {
 			t.Fatalf("build: exit %d %s\n%s", code, stdout, stderr)
 		}
-		works = append(works, workDir(t, stderr))
+		work := workDir(t, stderr)
+		if !strings.HasPrefix(work, private) {
+			t.Fatalf("WORK=%s, want a module under %s", work, private)
+		}
+		works = append(works, work)
+		if out, err := exec.Command(filepath.Join(directory, "app")).Output(); err != nil || string(out) != "ok\n" {
+			t.Fatalf("the built program printed %q: %v", out, err)
+		}
 	}
-	if works[0] != works[1] {
-		t.Fatalf("two processes of one compiler published %s and %s", works[0], works[1])
+	// One private root per process: modules/KEY sits two levels below it.
+	if filepath.Dir(filepath.Dir(works[0])) == filepath.Dir(filepath.Dir(works[1])) {
+		t.Fatalf("two processes shared the private root of %s and %s", works[0], works[1])
 	}
-	if entries, err := os.ReadDir(filepath.Join(xdg, "ergo", "modules")); err != nil || len(entries) != 1 {
-		t.Fatalf("modules %v %v, want one", entries, err)
+	if entries, err := os.ReadDir(filepath.Join(xdg, "ergo", "modules")); !errors.Is(err, fs.ErrNotExist) && (err != nil || len(entries) != 0) {
+		t.Fatalf("a process-scoped compiler published %v (%v)", entries, err)
 	}
 }
 

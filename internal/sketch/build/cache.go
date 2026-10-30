@@ -14,12 +14,20 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Cache is the emission cache rooted at Root. A published module lives at
 // Root/modules/KEY; builders stage under Root/staging, on the same file
-// system, so publication is one rename.
+// system, so publication is one rename. A module whose compiler identity is
+// process-scoped is built in the process's private root,
+// Root/private/ID/modules/KEY, and never published (CompilerIdentity).
 type Cache struct{ Root string }
+
+// privateLifetime is how long a private root stays after its process last
+// built in it. A later private build removes older ones; a process that
+// builds again after that emits its module again.
+const privateLifetime = 24 * time.Hour
 
 // DefaultRoot is $XDG_CACHE_HOME/ergo when XDG_CACHE_HOME is absolute,
 // else os.UserCacheDir()/ergo. The XDG base directory specification makes
@@ -62,14 +70,18 @@ type Manifest struct {
 	Complete bool         `json:"complete"`
 }
 
-// Module is a published generated module.
+// Module is a generated module: published, or private to the process.
 type Module struct {
-	// Dir is the module's stable absolute directory, Root/modules/KEY.
+	// Dir is the module's absolute directory: Root/modules/KEY when it is
+	// published, Root/private/ID/modules/KEY when it is private.
 	Dir string
 	Key string
 	// Reused reports that a complete, verified entry served the build and
 	// nothing was emitted or written.
-	Reused   bool
+	Reused bool
+	// Private reports that the compiler identity is process-scoped, so the
+	// module was built in the process's private root and not published.
+	Private  bool
 	Manifest Manifest
 }
 
@@ -90,10 +102,54 @@ var testHookStaged func(staging string) error
 // non-regular file, or an unreadable or foreign manifest) is moved aside
 // and removed, then replaced. When builders race, the first rename wins and
 // every other builder verifies and uses the winner's entry.
+//
+// When in.Compiler is process-scoped, the same steps run in the process's
+// private root instead, and the module is never published: a key that only
+// one process can trust never names a shared entry.
 func (c Cache) Module(in Input, emit Emitter) (Module, error) {
 	if !filepath.IsAbs(c.Root) {
 		return Module{}, fmt.Errorf("build: cache root %q is not absolute", c.Root)
 	}
+	if processScoped(in.Compiler) {
+		private, err := c.private(in.Compiler)
+		if err != nil {
+			return Module{}, err
+		}
+		module, err := private.module(in, emit)
+		module.Private = err == nil
+		return module, err
+	}
+	return c.module(in, emit)
+}
+
+// private is the private root of the process whose identity is compiler.
+// It makes the root, marks it as just used, and removes the private roots
+// no process has built in for privateLifetime; a failed removal is left for
+// a later build.
+func (c Cache) private(compiler string) (Cache, error) {
+	sum := sha256.Sum256([]byte(compiler))
+	parent := filepath.Join(c.Root, "private")
+	own := filepath.Join(parent, hex.EncodeToString(sum[:16]))
+	if err := os.MkdirAll(own, 0o755); err != nil {
+		return Cache{}, err
+	}
+	now := time.Now()
+	if err := os.Chtimes(own, now, now); err != nil {
+		return Cache{}, err
+	}
+	if list, err := os.ReadDir(parent); err == nil {
+		for _, e := range list {
+			path := filepath.Join(parent, e.Name())
+			if info, err := os.Lstat(path); err == nil && path != own && now.Sub(info.ModTime()) > privateLifetime {
+				_ = os.RemoveAll(path)
+			}
+		}
+	}
+	return Cache{Root: own}, nil
+}
+
+// module is Module in the root c, which publishes.
+func (c Cache) module(in Input, emit Emitter) (Module, error) {
 	summary, err := in.Summarize()
 	if err != nil {
 		return Module{}, err

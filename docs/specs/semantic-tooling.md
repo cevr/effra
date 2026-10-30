@@ -89,8 +89,11 @@ Formatter reports carry the same producer identity while retaining their
 independent style/schema version and input/output byte digests. `code.format`
 also accepts `expectedProducer`. Built-in lint and shared diagnostic reports
 carry the qualified semantic snapshot; external rule-pack analysis identities
-remain part of the unfinished custom-lint unit. Compilation, emission, build,
-run and raw `fmt --stdin` do not acquire inspection identity. LSP diagnostics
+remain part of the unfinished custom-lint unit. Compilation, emission and raw
+`fmt --stdin` do not acquire inspection identity. The emission cache acquires
+it once, lazily, when it first needs a cache key (`build`, and `run` when it
+builds): one running compiler has one identity, and a process-scoped one
+builds privately and never publishes (`internal/sketch/build`). LSP diagnostics
 still publish the finite diagnostics-only protocol and expose no reusable type
 references or new navigation capabilities.
 
