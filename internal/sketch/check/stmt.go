@@ -199,17 +199,23 @@ func (c *checker) unusedValue(at syntax.Expr, op operand) {
 		c.errorf(at, CodeUnused, "this value is not used; an expression statement is a call, try, catch or with")
 		return
 	}
-	if call, ok := x.(*syntax.CallExpr); ok && op.mode != modeNoValue {
-		if fun, ok := unparen(call.Fun).(*syntax.Ident); ok && fun.Name != "with" {
-			if o, isB := c.lookup(fun.Name).(*Builtin); isB {
-				c.errorf(at, CodeUnused, "the value of %s is not used", o.Name)
-				return
-			}
-			if tn, isT := c.lookup(fun.Name).(*TypeName); isT && !isCapability(tn.Type) {
-				c.errorf(at, CodeUnused, "the conversion to %s is not used", tn.Name)
-				return
-			}
-		}
+	call, ok := x.(*syntax.CallExpr)
+	if !ok || op.mode == modeNoValue {
+		return
+	}
+	// The call's resolved kind decides, never the callee's spelling, so a
+	// generic N[int](n) and a qualified pkg.T(x) conversion are a
+	// conversion like int8(n) (stage C round 4 review M1). Under silent
+	// checking Info has no entry and errorf reports nothing.
+	info := c.pkg.Info.Calls[call]
+	if info == nil {
+		return
+	}
+	switch {
+	case info.Kind == CallLen:
+		c.errorf(at, CodeUnused, "the value of len is not used")
+	case info.Kind == CallConversion && !isCapability(info.Type):
+		c.errorf(at, CodeUnused, "the conversion to %s is not used", info.Type)
 	}
 }
 
