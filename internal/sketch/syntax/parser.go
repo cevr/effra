@@ -74,6 +74,8 @@ type parser struct {
 
 // ---------------------------------------------------------------- tokens and errors
 
+// next advances to the next token. It stops at EOF and at the ILLEGAL
+// token of a lexical error, so the parse never reads past the error.
 func (p *parser) next() {
 	if p.tok.tok != EOF && p.tok.tok != ILLEGAL {
 		p.i++
@@ -81,6 +83,9 @@ func (p *parser) next() {
 	}
 }
 
+// peek returns the token n past the current one, or the stream's final
+// EOF past the end: a lookahead stops at EOF, including after a lexical
+// error's ILLEGAL token (scanner.fail).
 func (p *parser) peek(n int) token {
 	if p.i+n < len(p.toks) {
 		return p.toks[p.i+n]

@@ -8,10 +8,12 @@ import (
 	"ergo.local/prototype/internal/sketch/sketchtest"
 )
 
-// FuzzParse: Parse never panics, and every error is a located S001 (or the
-// parser's S108 for a type that mixes fields and operations) whose
-// line and column agree with its byte offset. The corpus, the spec fences
-// and the fixture tables are the seeds.
+// FuzzParse: the token stream keeps its invariant (checkStream), Parse
+// never panics, and every error is a located S001 (or the parser's S108
+// for a type that mixes fields and operations) whose line and column agree
+// with its byte offset. The corpus, the spec fences, the fixture tables
+// and the lookahead cases of #226 are the seeds; testdata/fuzz/FuzzParse
+// holds the FuzzCheck crashers as regressions.
 func FuzzParse(f *testing.F) {
 	positive, err := sketchtest.Positive()
 	if err != nil {
@@ -29,7 +31,13 @@ func FuzzParse(f *testing.F) {
 			f.Add(m.Src)
 		}
 	}
+	for _, c := range lexErrorCases {
+		f.Add(c.src)
+	}
 	f.Fuzz(func(t *testing.T, src string) {
+		if broken := checkStream(src, scan(src).toks); broken != "" {
+			t.Fatal(broken)
+		}
 		file, err := Parse(src)
 		if err == nil {
 			if file == nil {
