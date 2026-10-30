@@ -288,3 +288,39 @@ func TestStampReading(t *testing.T) {
 		t.Fatal("recent misjudges a stamp")
 	}
 }
+
+// TestFailedLeftoverRemovalIsNotCounted (stage 3b-runtime item 4): a root
+// left aside that the sweep cannot remove (here a directory inside it
+// without write permission) is not counted as removed: reclaim reports
+// false, the leftover stays for a later pass, and a pass with sweepRemovals
+// aged roots besides it still removes every one of them.
+func TestFailedLeftoverRemovalIsNotCounted(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root removes a directory without write permission")
+	}
+	f := newSweepFixture(t)
+	f.build()
+	stuck := filepath.Join(f.root, "private", removingPrefix+"stuck")
+	locked := filepath.Join(stuck, "locked")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "file"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	if f.c.reclaim(time.Now(), stuck) {
+		t.Fatal("reclaim counted a leftover it could not remove")
+	}
+	if _, err := os.Stat(stuck); err != nil {
+		t.Fatalf("the leftover is gone: %v", err)
+	}
+	aged := f.plant("aged", sweepRemovals, true)
+	if complete, _ := f.c.sweep(time.Now(), 0); !complete || present(aged) != 0 {
+		t.Fatalf("a pass with a stuck leftover: complete %v, %d of %d aged roots left; want all removed", complete, present(aged), len(aged))
+	}
+}

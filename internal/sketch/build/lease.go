@@ -294,8 +294,7 @@ func (c Cache) sweep(now time.Time, cursor int) (bool, int) {
 // privateLifetime. It reports whether it removed it.
 func (c Cache) reclaim(now time.Time, root string) bool {
 	if strings.HasPrefix(filepath.Base(root), removingPrefix) {
-		_ = os.RemoveAll(root)
-		return true
+		return os.RemoveAll(root) == nil // a failed removal stays for a later pass
 	}
 	if heldLease(root) {
 		return false
