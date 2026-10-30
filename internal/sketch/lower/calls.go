@@ -608,7 +608,11 @@ func (l *lowerer) operations(conv check.Conversion, val string, site syntax.Node
 		if fd.env {
 			ice(site, "the provider function %s needs capabilities", f.Name)
 		}
-		if fd.method == nil || fd.method.tn != from.Obj || fd.ptr || fd.name != memberName(op.Name) || tc.funcMethodSig(f) != tc.methodSig(op.Sig) {
+		// Only a direct candidate compares signatures: a generic source's
+		// table function spells its own type parameters, which tc does not
+		// bind, and the adapter needs no comparison (stage C round 5
+		// review M1).
+		if direct && (fd.method == nil || fd.method.tn != from.Obj || fd.ptr || fd.name != memberName(op.Name) || tc.funcMethodSig(f) != tc.methodSig(op.Sig)) {
 			direct = false
 		}
 	}
