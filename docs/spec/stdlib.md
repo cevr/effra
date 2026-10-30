@@ -1,6 +1,6 @@
 # Standard library outline
 
-Status: **designed, not yet implemented**, except the prelude's `Console` (`Println`) and the `Sleep` of its live scheduler, which `ergo build` lowers ([runtime.md](runtime.md#host-and-lowering-notes)). The checker admits `timeout.After` ([runtime.md](runtime.md#timeouts)); its lowering, with the other prelude and std extern bodies, is lower-v1 stage 3, and a build that uses it is refused with S109 until then.
+Status: **designed, not yet implemented**, except the prelude's `Console` (`Println`) and the `Sleep` of its live scheduler, which `ergo build` lowers ([runtime.md](runtime.md#host-and-lowering-notes)). The checker admits `timeout.After` ([runtime.md](runtime.md#timeouts)); its lowering, with the other prelude and std extern bodies, is lower-v1 stage 3, and a build that uses it is refused with S109 until then. The Go bodies of the four v1 packages `task`, `scope`, `queue` and `slice` are implemented in `runtime/v1` ([v1 packages](#v1-packages-task-scope-queue-and-slice)); their Ergo signatures land with their lowering (lower-v1 stage 3b), and until then an import of them is S109.
 
 The standard library is the "Effect for Go" track, [#206](https://github.com/cevr/ergo/issues/206). Its module map is the contract: each family states the Effect modules it covers, the construct it uses and its tier. Modules are restated in Ergo's idioms, not ported API for API. Effect is prior art for the guarantees, not a dependency (owner, 2026-10-26). Go names are kept wherever Go has one. Definitions are in the [glossary](../../GLOSSARY.md).
 
@@ -13,7 +13,7 @@ The standard library is the "Effect for Go" track, [#206](https://github.com/cev
 
 | Family | Ticket | Effect counterpart | Construct or package | Tier |
 | --- | --- | --- | --- | --- |
-| Tasks and supervision | [#207](https://github.com/cevr/ergo/issues/207) | Fiber, `Effect.all`/`forEach` concurrency, `race`/`raceAll`, FiberSet, FiberMap, FiberHandle, Supervisor | `go`, `Task`, `tasks.Map`, `tasks.Set`, `tasks.Race` | kernel + library |
+| Tasks and supervision | [#207](https://github.com/cevr/ergo/issues/207) | Fiber, `Effect.all`/`forEach` concurrency, `race`/`raceAll`, FiberSet, FiberMap, FiberHandle, Supervisor | `task.Go`, `Task`, `tasks.Map`, `tasks.Set`, `tasks.Race` | kernel + library |
 | Scope and resources | [#65](https://github.com/cevr/ergo/issues/65) | Scope, acquireRelease, ensuring, onExit, addFinalizer, Layer.scoped, forkScoped | automatic release ([resources.md](resources.md)); `build.Scope` for dynamic registration (README Gap 13) | kernel |
 | Schedule, retry and timeout | [#179](https://github.com/cevr/ergo/issues/179) | Schedule, retry, repeat, timeout, Clock.sleep, Duration | `schedule`, `retry.On`, `timeout.After(d) { }`, duration literals | library |
 | Channels, queues and streams | [#64](https://github.com/cevr/ergo/issues/64) | Queue, PubSub, Mailbox, Stream, Sink, Channel | `queue.Queue`, `for … in`, iterators that are resources | kernel + library |
@@ -35,6 +35,19 @@ Out of scope for now: durable workflows.
 ## Prelude
 
 The prelude is in scope in every package without an import: `Option`, `Task`, `Decision`, `Clock`, `Scheduler`, `Random` and `Console`. The four capabilities are ordinary interfaces bound by `wire` (decision #102), so a test replaces any of them ([#209](https://github.com/cevr/ergo/issues/209)).
+
+## v1 packages: task, scope, queue and slice
+
+Language v1 ([#196](https://github.com/cevr/ergo/issues/196)) has four small std packages beside the prelude. A file imports each one it uses; none is ambient (parse-v1 ruling 6). Each pairs ordinary Ergo signatures with a Go body in `runtime/v1`, bound by the identity of the declaration it implements, never by its target text ([runtime.md](runtime.md#host-and-lowering-notes), Extern bodies). The signatures land with their lowering in lower-v1 stage 3b; the bodies and their tests are in `runtime/v1` now.
+
+| Package | Operations | Contract | Go body |
+| --- | --- | --- | --- |
+| `task` | `task.Go() { … }` yields a `Task[T, E]`; the prelude's `Task` has `Wait() T fails E` and `Stop()` | [runtime.md, Tasks](runtime.md#tasks) rules 7 to 12 | `Go`, `Task`; `Task.Move(dest)`, the return of a Task, which only the lowering calls (task.go) |
+| `scope` | `scope.OnExit() { … }` | [runtime.md, Exit actions](runtime.md#exit-actions) | `Scope.OnExit` (task.go) |
+| `queue` | `queue.New[T](capacity)`, `Push` (fails `queue.Closed`), `Pop` (fails `queue.Closed`), `Values` (a `Seq[T]`), `Close`; the failure `Closed` | [runtime.md, Queues](runtime.md#queues) | `New`, `Queue`, `Closed` (queue.go) |
+| `slice` | `slice.WithCapacity[T](n)` | below | `WithCapacity` (data.go) |
+
+**Slices and Maps.** `slice.WithCapacity[T](n)` is an empty slice with room for `n` elements; it makes no element, and a negative `n` is a defect, as Go's `make` panics. There is no `slice.Repeat`: not every type has a zero value (parse-v1 ruling 7). The prelude's `xs.Append(x)` returns the slice with `x` at the end, `m.Get(k)` returns `Option[V]` and `m.Delete(k)` returns the Map without `k` (check-v1 D-D6). `Append` and `Delete` have Go bodies in data.go. `Get` builds the program's own `Option`, so its body is lowered at the call. A slice and a Map alias as in Go in v1: `Append` may share the array, and `Delete` changes the Map it is given ([#222](https://github.com/cevr/ergo/issues/222), [#197](https://github.com/cevr/ergo/issues/197)). *Prior art:* Go `make([]T, 0, n)` and `append`; Gleam's `list` module and Elixir's `Enum` keep collection functions out of the prelude.
 
 ## Packages by origin
 
