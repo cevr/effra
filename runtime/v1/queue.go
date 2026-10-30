@@ -54,6 +54,9 @@ type Queue[T any] struct {
 	// a waiter makes it. It is nil when nobody waits, so an uncontended
 	// Push or Pop allocates nothing for it.
 	wake chan struct{}
+	// parked counts the Pushes and Pops parked in wait, which a change
+	// wakes.
+	parked int
 }
 
 // Closed is queue.Closed, the typed failure of Push on a closed queue and
@@ -191,9 +194,11 @@ func (q *Queue[T]) wait() {
 		q.wake = make(chan struct{})
 	}
 	ch := q.wake
+	q.parked++
 	q.mu.Unlock()
 	<-ch
 	q.mu.Lock()
+	q.parked--
 }
 
 // signal wakes every waiter, which looks again. q.mu is held.

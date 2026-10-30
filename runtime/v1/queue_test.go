@@ -70,13 +70,11 @@ func TestQueueContract(t *testing.T) {
 		push(t, q, 1)
 		done := make(chan error, 1)
 		go func() { done <- q.Push(2) }()
-		if !blockedErr(done) {
-			t.Fatal("Push into a full queue did not wait")
-		}
+		parked(t, q, 1) // Push into a full queue waits
 		if got := pop(t, q); got != 1 {
 			t.Fatalf("Pop() = %d; want 1", got)
 		}
-		if err := <-done; err != nil {
+		if err := result(t, done); err != nil {
 			t.Fatalf("the waiting Push failed with %v", err)
 		}
 		if got := pop(t, q); got != 2 {
@@ -87,13 +85,11 @@ func TestQueueContract(t *testing.T) {
 		q := New[string](0)
 		done := make(chan error, 1)
 		go func() { done <- q.Push("v") }()
-		if !blockedErr(done) {
-			t.Fatal("Push into a capacity-0 queue returned before a Pop took the value")
-		}
+		parked(t, q, 1) // the Push waits for the Pop that takes its value
 		if got := pop(t, q); got != "v" {
 			t.Fatalf("Pop() = %q; want v", got)
 		}
-		if err := <-done; err != nil {
+		if err := result(t, done); err != nil {
 			t.Fatalf("the Push failed with %v", err)
 		}
 	})
@@ -134,11 +130,9 @@ func TestQueueContract(t *testing.T) {
 		push(t, q, 1)
 		done := make(chan error, 1)
 		go func() { done <- q.Push(2) }()
-		if !blockedErr(done) {
-			t.Fatal("Push did not wait")
-		}
+		parked(t, q, 1)
 		q.Close()
-		if err := <-done; err != (Closed{}) {
+		if err := result(t, done); err != (Closed{}) {
 			t.Fatalf("the waiting Push gave %v; want queue.Closed", err)
 		}
 		var got []int
@@ -156,17 +150,18 @@ func TestQueueContract(t *testing.T) {
 			_, err := q.Pop()
 			done <- err
 		}()
-		if !blockedErr(done) {
-			t.Fatal("Pop did not wait")
-		}
+		parked(t, q, 1)
 		q.Close()
-		if err := <-done; err != (Closed{}) {
+		if err := result(t, done); err != (Closed{}) {
 			t.Fatalf("the waiting Pop gave %v; want queue.Closed", err)
 		}
 	})
 	t.Run("Values drains and ends at Close", func(t *testing.T) {
 		q := New[int](4)
+		producer := make(chan struct{})
+		defer func() { <-producer }()
 		go func() {
+			defer close(producer)
 			for i := range 100 {
 				_ = q.Push(i)
 			}
@@ -201,9 +196,13 @@ func TestQueueContract(t *testing.T) {
 	})
 	t.Run("Close never waits", func(t *testing.T) {
 		q := New[int](0)
-		go func() { _ = q.Push(1) }()
-		time.Sleep(time.Millisecond)
-		q.Close()
+		done := make(chan error, 1)
+		go func() { done <- q.Push(1) }()
+		parked(t, q, 1)
+		q.Close() // returns while a Push waits: it never waits itself
+		if err := result(t, done); err != (Closed{}) {
+			t.Fatalf("the waiting Push gave %v; want queue.Closed", err)
+		}
 	})
 	t.Run("a closed queue is a typed failure, not an interruption", func(t *testing.T) {
 		// The review's case (stage 3a round 1, m1): a child that pops a
@@ -225,15 +224,37 @@ func TestQueueContract(t *testing.T) {
 	})
 }
 
-// blockedErr reports whether done is still empty after a moment: the
-// operation that sends on it is waiting. When it is not, the test fails,
-// so the value it took is not needed.
-func blockedErr(done <-chan error) bool {
+// parked waits until n operations wait in q. It reads the count under q's
+// mutex, so each of them has released the lock and holds the wake channel
+// that the next change closes: the change it waits for then reaches the
+// wait, not the fast path. The deadline only fails the setup.
+func parked[T any](t *testing.T, q *Queue[T], n int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		q.mu.Lock()
+		k := q.parked
+		q.mu.Unlock()
+		if k >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("setup: %d operations wait in the queue after 10s; want %d", k, n)
+		}
+		time.Sleep(50 * time.Microsecond)
+	}
+}
+
+// result receives an operation's result; the deadline fails a wait that
+// nothing woke.
+func result(t *testing.T, done <-chan error) error {
+	t.Helper()
 	select {
-	case <-done:
-		return false
-	case <-time.After(20 * time.Millisecond):
-		return true
+	case err := <-done:
+		return err
+	case <-time.After(10 * time.Second):
+		t.Fatal("the operation did not return after 10s: nothing woke it")
+		return nil
 	}
 }
 
