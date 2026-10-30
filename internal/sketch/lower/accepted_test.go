@@ -68,6 +68,7 @@ var refusedFamilies = map[string]string{
 	"call:Func:genericDot":    "check-v1 stage D",
 	"VarSpec:untyped":         "check-v1 stage D",
 	"conv:Operations:generic": "check-v1 stage E",
+	"Interface:any":           "check-v1 stage E",
 }
 
 // refusalReasons classifies a refusal by its message into the refused
@@ -101,6 +102,7 @@ var refusalReasons = []struct {
 	{"call:Func:genericDot", regexp.MustCompile(`^a dot call to the generic function \S+ is lowered after check-v1 stage D \(D-D8\)$`)},
 	{"VarSpec:untyped", regexp.MustCompile(`^a let with neither a type nor a value is decided in check-v1 stage D \(D-D1\)$`)},
 	{"conv:Operations:generic", regexp.MustCompile(`^an operations conversion inside a generic function is lowered after check-v1 stage E \(D-E1\)$`)},
+	{"Interface:any", regexp.MustCompile(`^the type .+ is lowered after check-v1 stage E \(no any, constraints\)$`)},
 }
 
 // refusalFamily is the refused family a refusal message stands at, or "".

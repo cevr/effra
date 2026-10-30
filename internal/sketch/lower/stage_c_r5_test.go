@@ -48,6 +48,7 @@ func TestCorpusGuardDeferredRefusals(t *testing.T) {
 		{"generic-dot-call", "type G[T] { v T }\nfunc pick[T, U](g G[T], u U) U { u }\nfunc f(g G[int]) string { g.pick(\"x\") }\n", "a dot call to the generic function pick is lowered after check-v1 stage D (D-D8)"},
 		{"parenthesised-instance", "func Fn[T](x T) T { x }\nfunc f() int { ((Fn[int]))(1) }\n", "an explicit instantiation used as a value is lowered after check-v1 stage E"},
 		{"untyped-let", "let pattern\n", "a let with neither a type nor a value is decided in check-v1 stage D (D-D1)"},
+		{"any-conversion", "func use(x any) {}\nfunc f() { use(1) }\n", "the type any is lowered after check-v1 stage E (no any, constraints)"},
 		{"untyped-local-let", "func f() {\n\tlet x\n\t_ = x\n}\n", "a let with neither a type nor a value is decided in check-v1 stage D (D-D1)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,8 +56,14 @@ func TestCorpusGuardDeferredRefusals(t *testing.T) {
 			if len(o.diags) != 0 || o.err != nil || o.panicked != nil {
 				t.Fatalf("want a clean check and a refusal; got diags %v, err %v, panic %v", o.diags, o.err, o.panicked)
 			}
-			if len(o.refused) != 1 || o.refused[0].Message != tc.want || undeferred(o.refused[0].Message) != "" {
-				t.Fatalf("want the refusal %q, a documented deferral; got %v", tc.want, o.refused)
+			// One refusal per declaration that holds the form, each this one.
+			if len(o.refused) == 0 {
+				t.Fatalf("want the refusal %q; got none", tc.want)
+			}
+			for _, r := range o.refused {
+				if r.Message != tc.want || undeferred(r.Message) != "" {
+					t.Fatalf("want only the refusal %q, a documented deferral; got %v", tc.want, o.refused)
+				}
 			}
 		})
 	}
