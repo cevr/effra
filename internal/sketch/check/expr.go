@@ -742,7 +742,7 @@ func (c *checker) structLit(x *syntax.CompositeLit, t Type, s *Struct, mark int)
 						op := c.fieldValue(e, s.Fields[i].Type)
 						c.assign(&op, s.Fields[i].Type, "field "+s.Fields[i].Name)
 					} else {
-						c.valueExpr(e, nil)
+						c.strayValue(e, mark, true)
 					}
 				}
 				return false
@@ -759,26 +759,26 @@ func (c *checker) structLit(x *syntax.CompositeLit, t Type, s *Struct, mark int)
 	for _, e := range x.Elts {
 		kv, isKV := e.(*syntax.KeyValueExpr)
 		if !isKV {
-			c.orphan(e, mark)
+			c.strayValue(e, mark, false)
 			continue
 		}
 		id, isID := kv.Key.(*syntax.Ident)
 		if !isID {
 			c.errorf(kv.Key, CodeType, "a struct literal's key is a field name")
-			c.valueExpr(kv.Value, nil)
+			c.strayValue(kv.Value, mark, true)
 			ok = false
 			continue
 		}
 		f, _ := s.field(id.Name)
 		if f == nil {
 			c.errorf(id, CodeUnknown, "%s has no field %s", t, id.Name)
-			c.valueExpr(kv.Value, nil)
+			c.strayValue(kv.Value, mark, true)
 			ok = false
 			continue
 		}
 		if set[id.Name] {
 			c.errorf(id, CodeType, "field %s is set twice", id.Name)
-			c.orphan(kv.Value, mark)
+			c.strayValue(kv.Value, mark, false)
 			ok = false
 			continue
 		}
@@ -820,10 +820,36 @@ func kindName(s *Struct, field string) string {
 	return f.Type.String()
 }
 
+// strayValue checks a value that a struct literal's refusal route skips (an
+// extra positional value, an unknown field, a key that is not a name, a
+// field set twice). A struct literal's value never elides its type, so an
+// elided literal there is refused untyped, as fieldValue refuses one, and
+// nothing in it is a reference: the reference walk only visits it (rows.md,
+// Inference 6, round 18; reflits.go compositeLit; FuzzCheck input
+// ae4371d31e8dd0ae). The let mut locals it reassigns count as reassigned,
+// so no false S110 joins the refusal (markReassignedIn). report says
+// whether the value's own errors show (valueExpr) or it is an orphan of an
+// error already reported (orphan).
+func (c *checker) strayValue(v syntax.Expr, mark int, report bool) {
+	if cl, ok := v.(*syntax.CompositeLit); ok && cl.Type == nil {
+		if report {
+			c.errorf(cl, CodeType, "a composite literal without a type needs one from its context")
+		}
+		c.markReassignedIn(cl)
+		return
+	}
+	if report {
+		c.valueExpr(v, nil)
+		return
+	}
+	c.orphan(v, mark)
+}
+
 // fieldValue checks a struct literal's field value against the field type
 // ft. A composite literal there writes its type: as in Go, a type is
 // elided only for the elements of an array, slice or map literal and for
-// a map literal's keys (Go spec, Composite literals; round 17 C1).
+// a map literal's keys (Go spec, Composite literals; round 17 C1). Its
+// let mut reassignments still count (markReassignedIn).
 func (c *checker) fieldValue(v syntax.Expr, ft Type) operand {
 	if cl, ok := v.(*syntax.CompositeLit); ok && cl.Type == nil {
 		text := "{…}"
@@ -833,6 +859,7 @@ func (c *checker) fieldValue(v syntax.Expr, ft Type) operand {
 			}
 		}
 		c.errorf(cl, CodeType, "missing type in composite literal; write %s%s", c.localTypeText(ft), text)
+		c.markReassignedIn(cl)
 		return bad(cl)
 	}
 	return c.valueExpr(v, ft)
