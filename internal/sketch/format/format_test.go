@@ -139,6 +139,20 @@ func TestSupersededInputs(t *testing.T) {
 	}
 }
 
+// Unquoted paths keep each slash. Comments start between words, including
+// immediately after a keyword, and retain their place when formatted.
+func TestImportPathComments(t *testing.T) {
+	for _, src := range []string{
+		"import net/http // note\n",
+		"import go net/http /* note */\n",
+		"import alias /* note */ example.com/json\n",
+		"import/* note */net/http\n",
+		"extern go net/http.Get /* note */ func Get()\n",
+	} {
+		check(t, "path comments", src, 3)
+	}
+}
+
 // TestCommentPositions: comments in every position keep their order, and
 // the layout is idempotent and canonical (spec risk 4).
 func TestCommentPositions(t *testing.T) {

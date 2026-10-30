@@ -39,8 +39,9 @@ type interpolation struct {
 // Two contexts change how words lex. After `import` (and its optional `go`)
 // up to two words on the line are PATH tokens, the alias and the unquoted
 // import path; after `extern go` one word is the PATH of the target. A path
-// word starts with a letter, a digit or `_` and runs over letters, digits
-// and `_ . / - ~ +`. Inside an interpreted string, `\(` opens an
+// word has nonempty elements separated by `/` or `.`; an element starts
+// with a letter or `_` and continues with letters, digits, `_` or `-`
+// (grammar.md, Literals). Inside an interpreted string, `\(` opens an
 // interpolation whose tokens lex normally up to its matching `)`.
 type scanner struct {
 	src      string
@@ -219,15 +220,16 @@ func pathRune(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
-// pathWord scans one word of an import or extern line. Right after import,
-// the word `go` is the keyword of a Go import.
+// pathWord scans one whole word of an import or extern line, enforcing
+// grammar.md's import_path. A slash inside the word belongs to the path:
+// `a//b` is an empty path element, not `a` followed by a comment (#231).
+// Comments between words still lex in run. Right after import, the word
+// `go` is the keyword of a Go import.
 func (s *scanner) pathWord(start int) {
 	src := s.src
 	end := start
+	elementStart := true
 	for end < len(src) {
-		if src[end] == '/' && end+1 < len(src) && (src[end+1] == '/' || src[end+1] == '*') {
-			break
-		}
 		r, size := utf8.DecodeRuneInString(src[end:])
 		if r == utf8.RuneError && size == 1 {
 			s.fail(end, 1, "invalid UTF-8 byte %#x", src[end])
@@ -236,7 +238,24 @@ func (s *scanner) pathWord(start int) {
 		if !pathRune(r) {
 			break
 		}
+		if r == '/' || r == '.' {
+			if elementStart {
+				s.fail(end, size, "an import path must have nonempty elements")
+				return
+			}
+			elementStart = true
+		} else {
+			if !identRune(r, elementStart) && (elementStart || r != '-') {
+				s.fail(end, size, "invalid character %q in import path element", r)
+				return
+			}
+			elementStart = false
+		}
 		end += size
+	}
+	if elementStart {
+		s.fail(end-1, 1, "an import path must not end with '/' or '.'")
+		return
 	}
 	word := src[start:end]
 	s.offset = end
