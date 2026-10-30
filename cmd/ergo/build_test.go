@@ -136,9 +136,9 @@ func goOwnHome(t *testing.T) string {
 }
 
 // TestBuildReusesTheModuleWithoutAProducerImage: a compiler whose producer
-// identity is process-scoped (as off Linux) still keys the emission cache
-// on its executable's bytes, so two processes building one unchanged
-// source name the same module.
+// identity is process-scoped (as off Linux and darwin/arm64) still keys the
+// emission cache on its executable's bytes, so two processes building one
+// unchanged source name the same module.
 func TestBuildReusesTheModuleWithoutAProducerImage(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -146,11 +146,7 @@ func TestBuildReusesTheModuleWithoutAProducerImage(t *testing.T) {
 	}
 	directory := smokeDir(t)
 	ownerPath := filepath.Join(root, "internal", "producer", "identity.go")
-	implementation := producerSmokeRead(t, ownerPath)
-	unavailable := strings.Replace(strings.Replace(implementation, "\n\t\"os\"", "", 1), `return os.Open("/proc/self/exe")`, "return nil, errUnsupported", 1)
-	if unavailable == implementation {
-		t.Fatal("identity owner anchors are missing")
-	}
+	unavailable := producerUnavailableSource(t, producerSmokeRead(t, ownerPath))
 	binary := producerSmokeOverlays(t, root, directory, ownerPath, map[string]string{"unavailable": unavailable})["unavailable"]
 	if err := os.WriteFile(filepath.Join(directory, "main.ergo"), []byte(sketchCleanSource), 0o644); err != nil {
 		t.Fatal(err)
