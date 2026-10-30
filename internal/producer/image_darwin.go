@@ -18,8 +18,11 @@ const csOpsCDHash = 5
 // /proc/self/exe, and os.Executable names the path the process was started
 // from, which may since name other bytes. The kernel keeps the cdhash of the
 // image it executes; the file at that path counts only if its code signature
-// carries that cdhash and its pages match it (verifyCodeSignature). The file
-// is read once, so the bytes verified are the bytes hashed. A Go binary for
+// carries that cdhash, its pages match it, and the file ends where its
+// signature ends (verifyCodeSignature): a universal file or a byte after the
+// signature gives a process-scoped identity, because the digest would name
+// bytes the kernel never checked. The file is read once, so the bytes
+// verified are the bytes hashed. A Go binary for
 // darwin/arm64 is always signed (the linker signs it ad hoc); an unsigned
 // image has no kernel record, and its identity stays process-scoped.
 //

@@ -232,6 +232,13 @@ type replaced struct {
 // kernel's cdhash check, so it is process-scoped and the module is private;
 // one acquired before is the running image's digest. Without a kernel
 // record (darwin/amd64 and the rest) the identity is always process-scoped.
+//
+// Two replacements run: another compiler (a -X variant, whose signed code
+// differs), and the running compiler's own bytes plus one byte after its
+// code signature, whose signed pages and cdhash equal the running image's.
+// The second is the case a pages-only check would miss: on darwin it is
+// refused for its trailing byte (internal/producer), so its whole-file
+// digest never keys a module.
 func TestNoPublicationUnderAReplacementsKey(t *testing.T) {
 	binary, err := os.Executable()
 	if err != nil {
@@ -239,53 +246,63 @@ func TestNoPublicationUnderAReplacementsKey(t *testing.T) {
 	}
 	running := fileDigest(t, binary)
 	dir := t.TempDir()
-	replacement := linkVariant(t, dir, "ergo-identity-marker-1")
-	replacementDigest := fileDigest(t, replacement)
-	if replacementDigest == running {
-		t.Fatal("the replacement compiler has the running compiler's digest")
+	variant := linkVariant(t, dir, "ergo-identity-marker-1")
+	trailing := filepath.Join(dir, "trailing-compiler")
+	copyFile(t, binary, trailing)
+	if f, err := os.OpenFile(trailing, os.O_APPEND|os.O_WRONLY, 0); err != nil {
+		t.Fatal(err)
+	} else if _, err := f.Write([]byte{0}); err != nil || f.Close() != nil {
+		t.Fatal("append a byte to the trailing replacement")
 	}
-	for _, mode := range []string{"replace", "replace-early"} {
-		t.Run(mode, func(t *testing.T) {
-			work := filepath.Join(dir, mode)
-			installed := filepath.Join(work, "compiler")
-			staged := filepath.Join(work, "staged")
-			root := filepath.Join(work, "cache")
-			copyFile(t, binary, installed)
-			copyFile(t, replacement, staged)
-			child := exec.Command(installed, "-test.run=^$")
-			child.Env = append(os.Environ(), helperVariable+"="+mode, rootVariable+"="+root, stagedVariable+"="+staged)
-			out, err := child.Output()
-			if err != nil {
-				t.Fatalf("replace helper: %v", err)
-			}
-			var got replaced
-			if err := json.Unmarshal(out, &got); err != nil {
-				t.Fatalf("replace helper printed %q: %v", out, err)
-			}
-			if fileDigest(t, installed) != replacementDigest {
-				t.Fatal("the compiler's path does not name the replacement")
-			}
-			if got.Identity == replacementDigest {
-				t.Fatalf("the running compiler took the replacement's identity %s", got.Identity)
-			}
-			for _, compiler := range publishedCompilers(t, root) {
-				if compiler == replacementDigest {
-					t.Fatalf("a module is published under the replacement's identity %s", compiler)
+	for _, replacing := range []struct{ name, path string }{{"variant", variant}, {"trailing", trailing}} {
+		replacement := replacing.path
+		replacementDigest := fileDigest(t, replacement)
+		if replacementDigest == running {
+			t.Fatal("the replacement compiler has the running compiler's digest")
+		}
+		for _, mode := range []string{"replace", "replace-early"} {
+			t.Run(replacing.name+"/"+mode, func(t *testing.T) {
+				work := filepath.Join(dir, replacing.name, mode)
+				installed := filepath.Join(work, "compiler")
+				staged := filepath.Join(work, "staged")
+				root := filepath.Join(work, "cache")
+				copyFile(t, binary, installed)
+				copyFile(t, replacement, staged)
+				child := exec.Command(installed, "-test.run=^$")
+				child.Env = append(os.Environ(), helperVariable+"="+mode, rootVariable+"="+root, stagedVariable+"="+staged)
+				out, err := child.Output()
+				if err != nil {
+					t.Fatalf("replace helper: %v", err)
 				}
-			}
-			kernelNamesImage := runtime.GOOS == "linux" || contentIdentity() && mode == "replace-early"
-			switch {
-			case kernelNamesImage:
-				if got.Identity != running || got.Private || !strings.HasPrefix(got.Dir, filepath.Join(root, "modules")+string(filepath.Separator)) {
-					t.Fatalf("got %+v; want the running digest %s, published", got, running)
+				var got replaced
+				if err := json.Unmarshal(out, &got); err != nil {
+					t.Fatalf("replace helper printed %q: %v", out, err)
 				}
-			default:
-				if !processScoped(got.Identity) || !got.Private || len(publishedCompilers(t, root)) != 0 {
-					t.Fatalf("got %+v, published %v; want a process-scoped identity and a private module", got, publishedCompilers(t, root))
+				if fileDigest(t, installed) != replacementDigest {
+					t.Fatal("the compiler's path does not name the replacement")
 				}
-			}
-			t.Logf("%s on %s/%s: identity %s, private %v", mode, runtime.GOOS, runtime.GOARCH, got.Identity, got.Private)
-		})
+				if got.Identity == replacementDigest {
+					t.Fatalf("the running compiler took the replacement's identity %s", got.Identity)
+				}
+				for _, compiler := range publishedCompilers(t, root) {
+					if compiler == replacementDigest {
+						t.Fatalf("a module is published under the replacement's identity %s", compiler)
+					}
+				}
+				kernelNamesImage := runtime.GOOS == "linux" || contentIdentity() && mode == "replace-early"
+				switch {
+				case kernelNamesImage:
+					if got.Identity != running || got.Private || !strings.HasPrefix(got.Dir, filepath.Join(root, "modules")+string(filepath.Separator)) {
+						t.Fatalf("got %+v; want the running digest %s, published", got, running)
+					}
+				default:
+					if !processScoped(got.Identity) || !got.Private || len(publishedCompilers(t, root)) != 0 {
+						t.Fatalf("got %+v, published %v; want a process-scoped identity and a private module", got, publishedCompilers(t, root))
+					}
+				}
+				t.Logf("%s/%s on %s/%s: identity %s, private %v", replacing.name, mode, runtime.GOOS, runtime.GOARCH, got.Identity, got.Private)
+			})
+		}
 	}
 }
 

@@ -23,6 +23,17 @@ import (
 var (
 	errUnverified        = errors.New("executing image does not match the kernel's code signature record")
 	errNoSignatureRecord = errors.New("executing image has no kernel code signature record")
+	// The two below verify as code but are not all bound to the running
+	// image: the digest names every byte of the file, so a file with any
+	// byte outside the verified structure gets no artifact identity.
+	errUniversal = errors.New("executing image is a universal file, whose other slices the kernel check does not cover")
+	errTrailing  = errors.New("executing image has bytes after its code signature, which the kernel check does not cover")
+)
+
+// fatMagic and fatMagic64 begin a universal (fat) file, big-endian.
+const (
+	fatMagic   = 0xcafebabe
+	fatMagic64 = 0xcafebabf
 )
 
 const (
@@ -41,8 +52,19 @@ const (
 )
 
 // verifyCodeSignature checks image, a thin 64-bit little-endian Mach-O file,
-// against cdhash, the kernel's record of the executing image.
+// against cdhash, the kernel's record of the executing image. It accepts the
+// image only when every byte of the file is bound to the running image: the
+// pages below the signature match a CodeDirectory with that cdhash, and the
+// file ends exactly where the signature that LC_CODE_SIGNATURE names ends.
+// A universal file, or a byte after the signature, verifies nothing about
+// those bytes, so the identity, a digest of the whole file, would name bytes
+// the kernel never checked (codesign --verify --strict refuses both).
 func verifyCodeSignature(image, cdhash []byte) error {
+	if len(image) >= 4 {
+		if magic := binary.BigEndian.Uint32(image); magic == fatMagic || magic == fatMagic64 {
+			return errUniversal
+		}
+	}
 	if len(cdhash) != cdhashSize || len(image) < machoHeaderSize64 || binary.LittleEndian.Uint32(image) != machoMagic64 {
 		return errUnverified
 	}
@@ -53,6 +75,9 @@ func verifyCodeSignature(image, cdhash []byte) error {
 	for _, directory := range codeDirectories(signature) {
 		sum, ok := directoryHash(directory)
 		if ok && bytes.Equal(sum[:cdhashSize], cdhash) && pagesMatch(image, directory, codeEnd) {
+			if codeEnd+uint64(len(signature)) != uint64(len(image)) {
+				return errTrailing
+			}
 			return nil
 		}
 	}
