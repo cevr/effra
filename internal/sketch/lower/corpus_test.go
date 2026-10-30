@@ -34,26 +34,22 @@ import (
 // refusedFamilies of TestAcceptedNodesLower). An internal compiler error
 // always fails.
 //
-// Bounds: at stage C the enumerated corpus is about 2,000 candidates;
-// about 450 check clean and lower, and one go command vets and builds them
-// in about ten seconds. Past maxCandidates the test takes every k-th
-// candidate in a stable order, before checking and lowering, and says so.
+// Bounds: at stage C the enumerated corpus is about 2,600 candidates;
+// about 550 check clean and lower, and one go command vets and builds them
+// in about ten seconds. checkCorpus counts the candidates first; past
+// maxCandidates it builds only every k-th candidate, in a stable order,
+// so neither enumeration nor checking and lowering grow past the cap, and
+// the test says so (round 4 review T3, round 5 residual).
 // The .ergo fixtures under ../check/testdata are lowered and built by
 // TestAcceptedNodesLower.
 func TestCheckCorpusBuilds(t *testing.T) {
 	const maxCandidates = 8000
-	sources, files := checkCorpus(t, "../check")
+	sources, files, total, k := checkCorpus(t, "../check", maxCandidates)
 	if files < 30 || len(sources) < 200 {
 		t.Fatalf("the corpus has %d candidates from %d files; the check tests moved?", len(sources), files)
 	}
-	if n := len(sources); n > maxCandidates {
-		k := (n + maxCandidates - 1) / maxCandidates
-		var sample []string
-		for i := 0; i < n; i += k {
-			sample = append(sample, sources[i])
-		}
-		t.Logf("sampled every %dth of %d candidates", k, n)
-		sources = sample
+	if k > 1 {
+		t.Logf("sampled every %dth of %d candidates", k, total)
 	}
 	var programs []*lowered
 	rejected, deferred := 0, map[string]int{}
@@ -122,30 +118,48 @@ func undeferred(message string) string {
 	return ""
 }
 
+// corpusFile is one test file's named strings and source literals.
+type corpusFile struct{ named, lits []string }
+
+// candidates is the number of candidates the file makes: each named
+// string, each literal, and each literal after each named string.
+func (f corpusFile) candidates() int {
+	return len(f.named) + len(f.lits)*(1+len(f.named))
+}
+
+// candidate builds the file's i-th candidate, in the order: the named
+// strings, then each literal followed by its prefixed forms. A prefixed
+// form equal to its literal is "" (skipped).
+func (f corpusFile) candidate(i int) string {
+	if i < len(f.named) {
+		return f.named[i]
+	}
+	i -= len(f.named)
+	lit, j := f.lits[i/(1+len(f.named))], i%(1+len(f.named))
+	if j == 0 {
+		return lit
+	}
+	if pre := f.named[j-1]; pre != lit {
+		return pre + lit
+	}
+	return ""
+}
+
 // checkCorpus returns the distinct candidate sources in dir's test files
-// by the enumeration rule of TestCheckCorpusBuilds, in a stable order, and
-// the number of files read.
-func checkCorpus(t *testing.T, dir string) ([]string, int) {
+// by the enumeration rule of TestCheckCorpusBuilds, in a stable order, the
+// number of files read, the number of candidates the rule makes, and the
+// stride k. It reads each file's named strings and literals, which grow
+// with the files' text, then counts the candidates without building them;
+// past limit it builds only every k-th, so the work and the memory for
+// candidates stay bounded by limit however many prefixes the files hold.
+func checkCorpus(t *testing.T, dir string, limit int) (out []string, files, total, k int) {
 	t.Helper()
 	paths, err := filepath.Glob(filepath.Join(dir, "*_test.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	sort.Strings(paths)
-	seen := map[string]bool{}
-	var out []string
-	add := func(src string) {
-		if !looksLikeSource(src) {
-			return
-		}
-		if !strings.HasSuffix(src, "\n") {
-			src += "\n"
-		}
-		if !seen[src] {
-			seen[src] = true
-			out = append(out, src)
-		}
-	}
+	var cfs []corpusFile
 	for _, p := range paths {
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -155,29 +169,44 @@ func checkCorpus(t *testing.T, dir string) ([]string, int) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		named := namedStrings(f)
-		for _, s := range named {
-			add(s)
-		}
+		cf := corpusFile{named: namedStrings(f)}
 		ast.Inspect(f, func(n ast.Node) bool {
-			lit, ok := n.(*ast.BasicLit)
-			if !ok || lit.Kind != token.STRING {
-				return true
-			}
-			s, err := strconv.Unquote(lit.Value)
-			if err != nil || !looksLikeSource(s) {
-				return true
-			}
-			add(s)
-			for _, pre := range named {
-				if pre != s {
-					add(pre + s)
+			if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				if s, err := strconv.Unquote(lit.Value); err == nil && looksLikeSource(s) {
+					cf.lits = append(cf.lits, s)
 				}
 			}
 			return true
 		})
+		cfs = append(cfs, cf)
+		total += cf.candidates()
 	}
-	return out, len(paths)
+	k = 1
+	if total > limit {
+		k = (total + limit - 1) / limit
+	}
+	seen := map[string]bool{}
+	index := 0
+	for _, cf := range cfs {
+		n := cf.candidates()
+		// The first index of this file that the stride selects.
+		first := (k - index%k) % k
+		for i := first; i < n; i += k {
+			src := cf.candidate(i)
+			if !looksLikeSource(src) {
+				continue
+			}
+			if !strings.HasSuffix(src, "\n") {
+				src += "\n"
+			}
+			if !seen[src] {
+				seen[src] = true
+				out = append(out, src)
+			}
+		}
+		index += n
+	}
+	return out, len(paths), total, k
 }
 
 // namedStrings returns the values of the file's string consts and vars,

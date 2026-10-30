@@ -81,7 +81,7 @@ func TestCheckCorpusEnumeration(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "x_test.go"), []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, files := checkCorpus(t, dir)
+	got, files, total, k := checkCorpus(t, dir, 1000)
 	if files != 1 {
 		t.Fatalf("read %d files", files)
 	}
@@ -93,5 +93,17 @@ func TestCheckCorpusEnumeration(t *testing.T) {
 		if !have[want] {
 			t.Errorf("the corpus misses %q; it has %q", want, strings.Join(got, "|"))
 		}
+	}
+	if k != 1 {
+		t.Fatalf("under the limit the stride is %d", k)
+	}
+	// Round 5 review T3 residual: past the limit, the reader builds only
+	// every k-th candidate, the same ones on every run, never more than
+	// the limit.
+	limit := total / 3
+	first, _, total2, k2 := checkCorpus(t, dir, limit)
+	again, _, _, _ := checkCorpus(t, dir, limit)
+	if total2 != total || k2 != (total+limit-1)/limit || len(first) > limit || strings.Join(first, "|") != strings.Join(again, "|") {
+		t.Fatalf("limit %d of %d: stride %d, built %d, stable %v", limit, total, k2, len(first), strings.Join(first, "|") == strings.Join(again, "|"))
 	}
 }
