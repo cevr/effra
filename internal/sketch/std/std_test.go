@@ -1,6 +1,7 @@
 package std_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -171,6 +172,69 @@ func TestEachExternHasItsGoBody(t *testing.T) {
 	}
 }
 
+// errorValues are the runtime/v1 values of the error types the v1 packages
+// declare, by Ergo name. Every record type of a v1 package is listed here
+// or in TestStdTypesBindRuntimeTypes fails.
+var errorValues = map[string]error{
+	"queue.Closed": v1.Closed{},
+}
+
+// TestStdTypesBindRuntimeTypes: a record type declared in a v1 package,
+// which is not an operations type, is the exported runtime/v1 struct type
+// of the same name with the same fields, and an error type's Go text is
+// its Ergo name (docs/spec/stdlib.md, Types). So the lowering binds
+// queue.Closed to v1.Closed, the value Push and Pop return, and a catch of
+// queue.Closed matches it; it never generates a fresh error type for it.
+func TestStdTypesBindRuntimeTypes(t *testing.T) {
+	seen := 0
+	for _, path := range v1Packages {
+		pkg, err := check.Std.Import(path)
+		if err != nil {
+			t.Fatalf("check.Std.Import(%q): %v", path, err)
+		}
+		for _, tn := range pkg.Types {
+			n, ok := tn.Type.(*check.Named)
+			if !ok {
+				t.Errorf("%s.%s is not a named type", path, tn.Name)
+				continue
+			}
+			if _, ops := operations(n); ops {
+				continue // bound through the extern that returns it (goType)
+			}
+			st, ok := n.Underlying().(*check.Struct)
+			if !ok {
+				t.Errorf("%s.%s is neither a record nor an operations type: it needs a binding rule", path, tn.Name)
+				continue
+			}
+			seen++
+			var want []string
+			for _, f := range st.Fields {
+				want = append(want, f.Name)
+			}
+			got, err := v1.StructFields(tn.Name)
+			if err != nil {
+				t.Errorf("%s.%s: %v", path, tn.Name, err)
+				continue
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("%s.%s has fields %v, its Go type v1.%s has %v", path, tn.Name, want, tn.Name, got)
+			}
+			name := path + "." + tn.Name
+			v, ok := errorValues[name]
+			if !ok {
+				t.Errorf("%s is a record of a v1 package with no entry in errorValues", name)
+				continue
+			}
+			if v.Error() != name {
+				t.Errorf("v1.%s's text is %q, want its Ergo name %q", tn.Name, v.Error(), name)
+			}
+		}
+	}
+	if seen != len(errorValues) {
+		t.Errorf("checked %d records of v1 packages, errorValues lists %d", seen, len(errorValues))
+	}
+}
+
 // matchSig checks a Go body's shape against an Ergo signature.
 func matchSig(t *testing.T, where string, sig *check.Signature, body v1.Body) {
 	t.Helper()
@@ -187,6 +251,10 @@ func matchSig(t *testing.T, where string, sig *check.Signature, body v1.Body) {
 			t.Errorf("%s: parameter %s is not a function, the Go parameter %s is", where, p.Name, body.Params[i].Type)
 		case isFunc:
 			matchSig(t, where+" "+p.Name, inner, *body.Params[i].Func)
+		default:
+			if g, ok := goType(p.Type); !ok || g != body.Params[i].Type {
+				t.Errorf("%s: parameter %s lowers to Go %q, but the Go parameter is %s", where, p.Name, g, body.Params[i].Type)
+			}
 		}
 	}
 	want := len(sig.Results)
@@ -197,9 +265,64 @@ func matchSig(t *testing.T, where string, sig *check.Signature, body v1.Body) {
 		t.Errorf("%s: want %d Go results (fallible %v), got %v", where, want, sig.Fallible, body.Results)
 		return
 	}
+	for i, r := range sig.Results {
+		if g, ok := goType(r); !ok || g != body.Results[i] {
+			t.Errorf("%s: result %d lowers to Go %q, but the Go result is %s", where, i+1, g, body.Results[i])
+		}
+	}
 	if sig.Fallible && body.Results[want-1] != "error" {
 		t.Errorf("%s: an error row needs a last Go result error, got %v", where, body.Results)
 	}
+}
+
+// goType is the Go type, as a body in runtime/v1 writes it, of an Ergo type
+// a std signature uses (docs/spec/stdlib.md, Types): a basic type is its
+// Go type; a type parameter keeps its name; []T is a Go slice; a type
+// declared in a v1 package, or the prelude's Task, is the runtime/v1 type
+// of the same name, by pointer for an operations type, with its type
+// arguments but not its row arguments. ok is false for any other type, so
+// a signature that uses one needs a rule here first.
+func goType(t check.Type) (string, bool) {
+	switch t := t.(type) {
+	case *check.Basic:
+		return t.Name, true
+	case *check.TypeParam:
+		return t.Name, t.Kind == check.KindType
+	case *check.Slice:
+		e, ok := goType(t.Elem)
+		return "[]" + e, ok
+	case *check.Named:
+		pkg := ""
+		if t.Obj.Pkg != nil {
+			pkg = t.Obj.Pkg.Path
+		}
+		if !slices.Contains(v1Packages, pkg) && !isTask(t) {
+			return "", false
+		}
+		var args []string
+		for _, a := range t.TArgs {
+			if p, ok := a.(*check.TypeParam); ok && p.Kind != check.KindType {
+				continue // a row argument has no Go type argument
+			}
+			if _, ok := a.(*check.RowArg); ok {
+				continue
+			}
+			g, ok := goType(a)
+			if !ok {
+				return "", false
+			}
+			args = append(args, g)
+		}
+		name := t.Obj.Name
+		if len(args) > 0 {
+			name += "[" + strings.Join(args, ", ") + "]"
+		}
+		if _, ops := operations(t); ops {
+			name = "*" + name
+		}
+		return name, true
+	}
+	return "", false
 }
 
 func hasHidden(b v1.Body, h v1.Hidden) bool {

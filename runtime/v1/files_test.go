@@ -106,3 +106,48 @@ func unexported(s *Scope) {}
 		}
 	}
 }
+
+// TestStructFields reads the struct types a record of a v1 package binds
+// (docs/spec/stdlib.md, Types): the real Closed, and synthetic types that
+// are not a plain struct.
+func TestStructFields(t *testing.T) {
+	if got, err := StructFields("Closed"); err != nil || len(got) != 0 {
+		t.Errorf("StructFields(Closed) = %v, %v; want no fields", got, err)
+	}
+	src := `package v1
+
+type Rec struct {
+	A    int
+	B, C string
+}
+type Gen[T any] struct{ V T }
+type Alias = struct{}
+type Emb struct{ Rec }
+type Named int
+type hidden struct{}
+
+func Rec2() {}
+`
+	decls, err := parseDecls(fstest.MapFS{"a.go": {Data: []byte(src)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := decls.structFields("Rec"); err != nil || !reflect.DeepEqual(got, []string{"A", "B", "C"}) {
+		t.Errorf("Rec: %v, %v; want [A B C]", got, err)
+	}
+	for name, msg := range map[string]string{
+		"Gen":    "not a non-generic struct",
+		"Alias":  "not a non-generic struct",
+		"Named":  "not a non-generic struct",
+		"Emb":    "embeds a field",
+		"hidden": "no exported Go type",
+		"Rec2":   "no exported Go type",
+	} {
+		if _, err := decls.structFields(name); err == nil || !strings.Contains(err.Error(), msg) {
+			t.Errorf("%s: error %v, want one containing %q", name, err, msg)
+		}
+	}
+	if _, err := decls.body("Rec"); err == nil || !strings.Contains(err.Error(), "no exported Go body") {
+		t.Errorf("a type is not a body: %v", err)
+	}
+}

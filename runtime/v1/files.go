@@ -90,16 +90,51 @@ func BodyOf(name string) (Body, error) {
 // sourceDecls parses Source once per process.
 var sourceDecls = sync.OnceValues(func() (goDecls, error) { return parseDecls(Source) })
 
-// goDecl is one exported function or method of a parsed package, with the
-// local name its file gives runtime/rt.
+// goDecl is one exported function, method or type of a parsed package,
+// with the local name its file gives runtime/rt.
 type goDecl struct {
-	fn *ast.FuncDecl
-	rt string
+	fn  *ast.FuncDecl
+	typ *ast.TypeSpec
+	rt  string
 }
 
-// goDecls are the exported functions and methods of a package's non-test
-// files, by name ("Go", "Queue.Push").
+// goDecls are the exported functions, methods and types of a package's
+// non-test files, by name ("Go", "Queue.Push", "Closed").
 type goDecls map[string]goDecl
+
+// StructFields returns the field names, in order, of the exported struct
+// type named name in Source. A record type declared in a v1 std package
+// that is not an operations type, such as queue.Closed, is this Go type of
+// the same name (docs/spec/stdlib.md, Types), so its fields are the
+// record's. It fails when there is no such struct type.
+func StructFields(name string) ([]string, error) {
+	decls, err := sourceDecls()
+	if err != nil {
+		return nil, err
+	}
+	return decls.structFields(name)
+}
+
+func (d goDecls) structFields(name string) ([]string, error) {
+	g, ok := d[name]
+	if !ok || g.typ == nil {
+		return nil, fmt.Errorf("runtime/v1: no exported Go type %s", name)
+	}
+	st, ok := g.typ.Type.(*ast.StructType)
+	if !ok || g.typ.TypeParams != nil || g.typ.Assign.IsValid() {
+		return nil, fmt.Errorf("runtime/v1: %s is not a non-generic struct type", name)
+	}
+	fields := []string{}
+	for _, f := range st.Fields.List {
+		if len(f.Names) == 0 {
+			return nil, fmt.Errorf("runtime/v1: %s embeds a field", name)
+		}
+		for _, n := range f.Names {
+			fields = append(fields, n.Name)
+		}
+	}
+	return fields, nil
+}
 
 // parseDecls parses every non-test Go file at the root of fsys.
 func parseDecls(fsys fs.FS) (goDecls, error) {
@@ -131,6 +166,14 @@ func parseDecls(fsys fs.FS) (goDecls, error) {
 			}
 		}
 		for _, d := range f.Decls {
+			if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.TYPE {
+				for _, s := range gd.Specs {
+					if ts := s.(*ast.TypeSpec); ts.Name.IsExported() {
+						decls[ts.Name.Name] = goDecl{typ: ts, rt: rt}
+					}
+				}
+				continue
+			}
 			fn, ok := d.(*ast.FuncDecl)
 			if !ok || !fn.Name.IsExported() {
 				continue
@@ -165,7 +208,7 @@ func recvName(e ast.Expr) string {
 
 func (d goDecls) body(name string) (Body, error) {
 	g, ok := d[name]
-	if !ok {
+	if !ok || g.fn == nil {
 		return Body{}, fmt.Errorf("runtime/v1: no exported Go body %s", name)
 	}
 	b, err := goShape(g.fn.Type, g.rt)
