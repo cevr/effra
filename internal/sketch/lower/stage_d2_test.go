@@ -253,7 +253,27 @@ func TestErgoRunMapWriteAndLen(t *testing.T) {
 `, "map write\nlen\n")
 }
 
-// TestRangeLowersWithoutRefusal: no for-in, `a..b` or Map write is refused
+// TestQueueValuesRefusedNamingD3: queue.Values() returns a Seq[T] and a for
+// over it checks clean, but a call of a std operation, with the caller's
+// task as its hidden argument, is lowered by stage D3 (the Info requests
+// from lower-v1 3b-runtime): a located refusal at the call names D3, never
+// an internal compiler error.
+func TestQueueValuesRefusedNamingD3(t *testing.T) {
+	src := "import queue\n\nfunc f(q queue.Queue[int]) int {\n\tlet mut s = 0\n\tfor v in q.Values() {\n\t\ts += v\n\t}\n\ts\n}\n"
+	o := lowerSource("r", src, false)
+	if len(o.diags) != 0 {
+		t.Fatalf("want a clean check; got %v", o.diags)
+	}
+	if o.panicked != nil || len(o.refused) != 1 {
+		t.Fatalf("want one refusal; got refusals %v, panic %v, err %v\n%s", o.refused, o.panicked, o.err, o.mainGo())
+	}
+	r := o.refused[0]
+	if r.Line != 5 || r.Column != 11 || !strings.Contains(r.Message, "check-v1 stage D3") {
+		t.Fatalf("want a refusal at 5:11 naming check-v1 stage D3; got %+v", r)
+	}
+}
+
+// TestRangeLowersWithoutRefusal:no for-in, `a..b` or Map write is refused
 // by the lowering any more (the stage D refusals are gone).
 func TestRangeLowersWithoutRefusal(t *testing.T) {
 	o := lowerSource("r", "func f(xs []int, m Map[int, int]) int {\n\tlet mut s = 0\n\tlet mut w = m\n\tfor i, x in xs {\n\t\tw[i] = x\n\t}\n\tfor v in w {\n\t\ts += v\n\t}\n\tlet r = 0..len(xs)\n\tfor i in r {\n\t\ts += i\n\t}\n\ts\n}\n", false)

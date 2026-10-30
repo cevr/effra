@@ -1,7 +1,7 @@
 // Package queue is a first-in-first-out list of values between tasks
 // (docs/spec/runtime.md, Queues; #207). The Go bodies are runtime/v1's New
 // and the methods of its Queue; the caller's task, a hidden argument of
-// Push and Pop, is docs/spec/stdlib.md's Hidden arguments.
+// Push, Pop and Values, is docs/spec/stdlib.md's Hidden arguments.
 
 // Closed is the failure of Push on a closed queue and of Pop on a closed,
 // empty one. A closed queue is a normal end of the protocol, not a stop.
@@ -18,6 +18,10 @@ type Queue[T] {
 	// Close ends admission. It does nothing on a closed queue, never waits
 	// and never fails; the values in the queue stay for Pop.
 	Close(),
+	// Values pops each value in turn, as a Seq for a for loop: it waits
+	// like Pop and ends when the queue is closed and empty. A break stops
+	// it; the values not yet popped stay in the queue.
+	Values() Seq[T],
 }
 
 // New makes an open, empty queue that holds up to capacity values no Pop

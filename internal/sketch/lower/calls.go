@@ -142,6 +142,12 @@ func (fc *funcCtx) callText(x *syntax.CallExpr, c *check.Call) (string, bool, bo
 		if c.Recv == nil || c.Op == nil {
 			ice(x, "an operation call with no receiver or operation")
 		}
+		// An operation of a std type (queue.Queue) has a runtime/v1 Go body
+		// that takes the caller's task as a hidden argument; binding it is
+		// D3's, as a std function call is (useFunc).
+		if n, ok := fc.typeOf(c.Recv).(*check.Named); ok && n.Obj.Pkg != nil && n.Obj.Pkg != fc.l.pkg && n.Obj.Pkg.Path != "prelude" {
+			refuse(x, "a call to the std operation %s.%s is lowered after check-v1 stage D3 (std calls with their hidden task and scope arguments)", n.Obj.Name, c.Op.Name)
+		}
 		vals := fc.callArgs(append([]syntax.Expr{c.Recv}, args...), x)
 		return "(" + vals[0] + ")." + memberName(c.Op.Name) + "(" + strings.Join(vals[1:], ", ") + ")", len(c.Op.Sig.Results) > 0, len(rowElems(c.Op.Sig.Errors)) > 0
 	case check.CallProviderOp:

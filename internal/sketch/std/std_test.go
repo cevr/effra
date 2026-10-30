@@ -20,9 +20,6 @@ const v1Path = "ergo.local/prototype/runtime/v1"
 // that no Ergo operation binds, each with the reason. A body that binds no
 // declaration and is not listed here fails TestEachExternHasItsGoBody.
 var unbound = map[string]string{
-	// Info request for check-v1 stage D: Values() Seq[T] needs the
-	// prelude's Seq[T] and its loop domain (lower-v1 Q1).
-	"Queue.Values": "the prelude has no Seq[T] yet",
 	// The return of a Task (Tasks rule 8): only the lowering calls it.
 	"Task.Move": "lowering only",
 }
@@ -368,6 +365,11 @@ func goType(t check.Type) (string, bool) {
 		pkg := ""
 		if t.Obj.Pkg != nil {
 			pkg = t.Obj.Pkg.Path
+		}
+		// The prelude's Seq[T] is Go's iter.Seq[T] at a std body (D-D4).
+		if pkg == "prelude" && t.Obj.Name == "Seq" && len(t.TArgs) == 1 {
+			e, ok := goType(t.TArgs[0])
+			return "iter.Seq[" + e + "]", ok
 		}
 		if !slices.Contains(v1Packages, pkg) && !isTask(t) {
 			return "", false
