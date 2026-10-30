@@ -290,7 +290,11 @@ func (r *patResolver) pattern0(e syntax.Expr, t Type, col int) resolved {
 			if r.bindings && reusableBinderName(o) {
 				break
 			}
-			c.errorf(x, CodeType, "a pattern name binds; %s already names %s: compare with if, or choose another name (rows.md, Totality 1)", x.Name, objectNoun(o))
+			if r.bindings {
+				c.errorf(x, CodeType, "%s is a prelude name; choose another name (rows.md, Totality 6; D-D3)", x.Name)
+			} else {
+				c.errorf(x, CodeType, "a pattern name binds; %s already names %s: compare with if, or choose another name (rows.md, Totality 1)", x.Name, objectNoun(o))
+			}
 			if p, ok := o.(*PkgName); ok {
 				p.used = true // The refused occurrence must not add an unused import.
 			}
