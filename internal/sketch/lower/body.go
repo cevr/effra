@@ -284,7 +284,7 @@ func (fc *funcCtx) target(x syntax.Expr, later bool) string {
 		indexEmits := fc.emits(x.Indices[0])
 		switch fc.typeOf(x.X).(type) {
 		case *check.Map:
-			refuse(x, "assignment to a Map entry is lowered after check-v1 stage D (the Map rule)")
+			refuse(x, "assignment to a Map entry is lowered after check-v1 stage D2 (the Map rule)")
 		case *check.Slice:
 			base = fc.value(x.X)
 			if later || indexEmits {

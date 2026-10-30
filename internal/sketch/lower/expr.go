@@ -473,7 +473,7 @@ func (fc *funcCtx) index(x *syntax.IndexExpr) string {
 		refuse(x, "an explicit instantiation used as a value is lowered after check-v1 stage E")
 	}
 	if _, isMap := fc.typeOf(x.X).(*check.Map); isMap {
-		refuse(x, "a Map index is lowered after check-v1 stage D (the Map rule)")
+		refuse(x, "a Map index is lowered after check-v1 stage D2 (the Map rule)")
 	}
 	if len(x.Indices) != 1 {
 		ice(x, "an index with %d indices", len(x.Indices))
