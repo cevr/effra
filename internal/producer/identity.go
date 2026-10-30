@@ -6,10 +6,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
-	"os"
-	"runtime"
 	"runtime/debug"
 	"sync"
 )
@@ -36,7 +35,10 @@ type Declaration struct {
 	CGOEnabled  string `json:"cgoEnabled,omitempty"`
 }
 
-var current = acquireOnce(func() (io.ReadCloser, error) { return openImage(runtime.GOOS) }, debug.ReadBuildInfo, processNonce)
+// openImage, one per platform, returns the executing image's bytes: through
+// /proc/self/exe on Linux, verified against the kernel's code signature record
+// on Darwin, and nowhere else.
+var current = acquireOnce(openImage, debug.ReadBuildInfo, processNonce)
 
 func processNonce() (string, error) {
 	var bytes [32]byte
@@ -44,7 +46,7 @@ func processNonce() (string, error) {
 	return hex.EncodeToString(bytes[:]), err
 }
 
-// Current acquires exactly once, including failure. It never follows an
+// Current acquires exactly once, including failure. It never trusts an
 // installation pathname, executes Git, or publishes arbitrary build settings.
 func Current() Identity { return current() }
 
@@ -57,18 +59,14 @@ func (identity Identity) Require(expected string) error {
 	return nil
 }
 
-func openImage(goos string) (io.ReadCloser, error) {
-	if goos != "linux" {
-		return nil, errUnsupported
-	}
-	return os.Open("/proc/self/exe")
-}
+var (
+	errUnsupported   = errors.New("executing image identity unsupported")
+	errImageTooLarge = errors.New("executing image exceeds its byte limit")
+)
 
-type unsupported struct{}
-
-func (unsupported) Error() string { return "executing image identity unsupported" }
-
-var errUnsupported = unsupported{}
+// A large embedding host cannot make acquisition unbounded. This cap limits
+// streamed work, not the semantic projection's metadata budget.
+const maxImageBytes = 256 << 20
 
 func acquireOnce(open func() (io.ReadCloser, error), info func() (*debug.BuildInfo, bool), nonce func() (string, error)) func() Identity {
 	return sync.OnceValue(func() Identity {
@@ -83,17 +81,20 @@ func acquireOnce(open func() (io.ReadCloser, error), info func() (*debug.BuildIn
 		identity.Declaration = declaration(build, ok)
 		image, err := open()
 		if err != nil {
-			identity.Reason = "executing image cannot be opened"
-			if err == errUnsupported {
-				identity.Reason = "executing image identity requires Linux procfs"
+			switch err {
+			case errUnsupported:
+				identity.Reason = "executing image identity is unsupported on this platform"
+			case errUnverified:
+				identity.Reason = "executing image does not match the kernel's code signature record"
+			case errImageTooLarge:
+				identity.Reason = "executing image cannot be read within its byte limit"
+			default:
+				identity.Reason = "executing image cannot be opened"
 			}
 			return fallback()
 		}
 		defer image.Close()
 		hash := sha256.New()
-		// A large embedding host cannot make acquisition unbounded. This cap
-		// limits streamed work, not the semantic projection's metadata budget.
-		const maxImageBytes = 256 << 20
 		count, err := io.Copy(hash, io.LimitReader(image, maxImageBytes+1))
 		if err != nil || count > maxImageBytes {
 			identity.Reason = "executing image cannot be read within its byte limit"

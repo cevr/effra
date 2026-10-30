@@ -1,8 +1,11 @@
 package producer
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
+	"os"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -47,7 +50,10 @@ func (brokenReader) Read([]byte) (int, error) { return 0, errors.New("private ho
 func (brokenReader) Close() error             { return nil }
 
 func TestUnavailableQualificationAndBoundedDeclarations(t *testing.T) {
-	for _, open := range []func() (io.ReadCloser, error){func() (io.ReadCloser, error) { return nil, errors.New("private path") }, func() (io.ReadCloser, error) { return brokenReader{}, nil }, func() (io.ReadCloser, error) { return openImage("unsupported") }} {
+	fails := func(err error) func() (io.ReadCloser, error) {
+		return func() (io.ReadCloser, error) { return nil, err }
+	}
+	for _, open := range []func() (io.ReadCloser, error){fails(errors.New("private path")), func() (io.ReadCloser, error) { return brokenReader{}, nil }, fails(errUnsupported), fails(errUnverified), fails(errImageTooLarge)} {
 		var count atomic.Int32
 		get := acquireOnce(func() (io.ReadCloser, error) { count.Add(1); return open() }, func() (*debug.BuildInfo, bool) { return nil, false }, func() (string, error) { return "nonce-A", nil })
 		first, second := get(), get()
@@ -66,12 +72,29 @@ func TestUnavailableQualificationAndBoundedDeclarations(t *testing.T) {
 	}
 }
 
+// The test binary is the embedding host. On Linux, and on darwin/arm64, where
+// the Go linker always signs, its identity is the digest of its own bytes.
 func TestCurrentIdentifiesEmbeddingHost(t *testing.T) {
 	id := Current()
-	if runtime.GOOS == "linux" && id.Strength != "executing-artifact" {
-		t.Fatal(id)
-	}
 	if id != Current() {
 		t.Fatal("unstable current identity")
+	}
+	if runtime.GOOS != "linux" && (runtime.GOOS != "darwin" || runtime.GOARCH != "arm64") {
+		if id.Strength != "unavailable" {
+			t.Fatal(id)
+		}
+		return
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(content)
+	if id.Strength != "executing-artifact" || id.Digest != "sha256:"+hex.EncodeToString(sum[:]) || id.Reason != "" {
+		t.Fatal(id)
 	}
 }

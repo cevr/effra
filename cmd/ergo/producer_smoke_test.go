@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -33,9 +34,20 @@ func TestProducerSmoke(t *testing.T) {
 	commandsPath := filepath.Join(root, "cmd", "ergo", "commands.go")
 	ownerPath := filepath.Join(root, "internal", "producer", "identity.go")
 	implementation := producerSmokeRead(t, ownerPath)
+	// A content identity needs the executing image's bytes from the kernel:
+	// procfs on Linux, or the code signature record on darwin/arm64, where
+	// the Go linker signs every binary. Elsewhere (darwin/amd64 binaries are
+	// unsigned) the identity is process-scoped, which unavailable-identity
+	// covers.
+	requireContentIdentity := func(t *testing.T) {
+		if runtime.GOOS != "linux" && (runtime.GOOS != "darwin" || runtime.GOARCH != "arm64") {
+			t.Skipf("%s/%s has no kernel record of the executing image's bytes", runtime.GOOS, runtime.GOARCH)
+		}
+	}
 
 	t.Run("artifact-replacement", func(t *testing.T) {
 		t.Parallel()
+		requireContentIdentity(t)
 		directory, file := workspace(t)
 		original := producerSmokeRead(t, commandsPath)
 		const anchor = `Ergo prototype\nusage:`
@@ -88,9 +100,18 @@ func TestProducerSmoke(t *testing.T) {
 	// rather than duplicating a repository to create distinct dirty builds.
 	t.Run("dirty-hosts", func(t *testing.T) {
 		t.Parallel()
+		requireContentIdentity(t)
 		directory := t.TempDir()
 		fixture := filepath.Join(directory, "host")
-		smokeWrite(t, fixture, filepath.Join("internal", "producer", "identity.go"), implementation)
+		sources, err := filepath.Glob(filepath.Join(filepath.Dir(ownerPath), "*.go"))
+		if err != nil || len(sources) == 0 {
+			t.Fatalf("producer sources: %v %v", sources, err)
+		}
+		for _, source := range sources {
+			if !strings.HasSuffix(source, "_test.go") {
+				smokeWrite(t, fixture, filepath.Join("internal", "producer", filepath.Base(source)), producerSmokeRead(t, source))
+			}
+		}
 		smokeWrite(t, fixture, "go.mod", "module ergo.local/prototype\n\ngo 1.27\n")
 		const host = `package main
 import("encoding/json";"os";"ergo.local/prototype/internal/producer")
@@ -125,10 +146,7 @@ func main(){json.NewEncoder(os.Stdout).Encode(map[string]any{"marker":marker,"pr
 	t.Run("unavailable-identity", func(t *testing.T) {
 		t.Parallel()
 		directory, file := workspace(t)
-		unavailable := strings.Replace(strings.Replace(implementation, "\n\t\"os\"", "", 1), `return os.Open("/proc/self/exe")`, "return nil, errUnsupported", 1)
-		if unavailable == implementation {
-			t.Fatal("identity owner anchors are missing")
-		}
+		unavailable := producerUnavailableSource(t, implementation)
 		fallback := producerSmokeOverlays(t, root, directory, ownerPath, map[string]string{"unavailable": unavailable})["unavailable"]
 		first := smokeJSON(t, []byte(producerSmokeRun(t, directory, fallback, "check", file)))
 		other := smokeJSON(t, []byte(producerSmokeRun(t, directory, fallback, "check", file)))
@@ -177,6 +195,18 @@ func main(){json.NewEncoder(os.Stdout).Encode(map[string]any{"marker":marker,"pr
 			}
 		}
 	})
+}
+
+// producerUnavailableSource is the producer's identity.go with the platform's
+// image source replaced by one that has none, as on a platform without a
+// content identity.
+func producerUnavailableSource(t *testing.T, implementation string) string {
+	t.Helper()
+	const anchor = "acquireOnce(openImage,"
+	if !strings.Contains(implementation, anchor) {
+		t.Fatal("identity owner anchor is missing")
+	}
+	return strings.Replace(implementation, anchor, "acquireOnce(func() (io.ReadCloser, error) { return nil, errUnsupported },", 1)
 }
 
 func producerSmokeRead(t *testing.T, path string) string {
