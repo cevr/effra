@@ -70,3 +70,19 @@ func TestInvokedCallbackKeepsThePinnedRow(t *testing.T) {
 		{"value-if", pinnedDecls + "func F(c bool) int fails Bang { try if c { a(1) } else { 2 } }\n", []string{"S108:3"}},
 	})
 }
+
+// M2: a call of a function on a let mut local inside a frame typing skipped
+// is an implicit borrow in every callee spelling typing accepts, so Q3 adds
+// no "never reassigned" beside the unknown callee's S104. The controls: the
+// same spellings in a frame typing checks, and an explicit &r.
+func TestImplicitBorrowSpellingsInSkippedFrames(t *testing.T) {
+	const decls = "type R { N int }\nfunc Bump(r *R) { r.N = 1 }\nfunc Set[T](r *R, v T) { r.N = 2 }\n" +
+		"func each(cb func()) { cb() }\n"
+	var cases []d1Case
+	for _, call := range []string{"r.Bump()", "(r.Bump)()", "((r.Bump))()", "r.Set[int](1)", "(r.Set[int])(1)", "Bump(&r)"} {
+		cases = append(cases,
+			d1Case{"skipped " + call, decls + "func f() int {\n\tlet mut r = R{N: 0}\n\tunknown(func() { " + call + " })\n\tr.N\n}\n", []string{"S104:7"}},
+			d1Case{"checked " + call, decls + "func f() int {\n\tlet mut r = R{N: 0}\n\teach(func() { " + call + " })\n\tr.N\n}\n", nil})
+	}
+	runD1(t, cases)
+}

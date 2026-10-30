@@ -199,7 +199,10 @@ func (c *checker) markReassignedIn(n syntax.Node) {
 				mark(s.X)
 			}
 		case *syntax.CallExpr:
-			if sel, ok := s.Fun.(*syntax.SelectorExpr); ok {
+			// Every spelling of a called selector, as typing reads it:
+			// x.f(), (x.f)(), ((x.f))(), x.f[T]() (stage D1 round 2
+			// review M2).
+			if sel := calledSelector(s.Fun); sel != nil {
 				mark(sel.X)
 			}
 		}

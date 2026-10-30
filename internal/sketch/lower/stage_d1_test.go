@@ -147,3 +147,25 @@ func main() needs Console {
 }
 `, "ops\nfields\nelements\ncaptured\nloop\nzero\npointers\nsiblings\n")
 }
+
+// TestErgoRunImplicitBorrowSpellings: the implicit borrow of a called
+// selector reaches the let mut local in every spelling, parenthesised once
+// or twice, from a callback the callee runs (the run control of the check
+// test TestImplicitBorrowSpellingsInSkippedFrames; stage D1 round 2 review
+// M2).
+func TestErgoRunImplicitBorrowSpellings(t *testing.T) {
+	wantRun(t, `type R { N int }
+
+func Bump(r *R) { r.N = r.N + 1 }
+
+func each(cb func()) { cb() }
+
+func main() needs Console {
+	let mut r = R{N: 0}
+	each(func() { r.Bump() })
+	each(func() { (r.Bump)() })
+	each(func() { ((r.Bump))() })
+	if r.N == 3 { Console.Println("three borrows") }
+}
+`, "three borrows\n")
+}

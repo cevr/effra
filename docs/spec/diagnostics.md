@@ -165,7 +165,7 @@ The checker refuses a construct that another ticket owns, and names it, instead 
 - An `as` binding is read in no case (`unused-type-switch-binding`).
 - An expression statement is not a call, `try`, `catch` or `with` (`unused-expression`, `probes/unused-expression.ergo`).
 - An import is not used (Go's rule).
-- A `let mut` local is never reassigned: "n is never reassigned; write let n". An assignment through a field or an index, and a borrow, count; a `let mut` read nowhere keeps only its unused diagnostic (check-v1 Q3; `D10-mut-reassigned.neg`, `TestLetMutNeverReassigned`).
+- A `let mut` local is never reassigned: "n is never reassigned; write let n". An assignment through a field or an index, and a borrow, count, the implicit one of a call `x.f(…)` in every spelling (`(x.f)(…)`, `x.f[T](…)`) included, also inside a callback the checker could not type; a `let mut` read nowhere keeps only its unused diagnostic (check-v1 Q3; `D10-mut-reassigned.neg`, `TestLetMutNeverReassigned`).
 
 *Prior art:* Go rejects unused locals, imports and unused expression values; Rust and Gleam warn instead. Ergo keeps Go's errors because its output is Go and because an unread value usually hides a dropped result.
 
