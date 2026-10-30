@@ -46,7 +46,9 @@ type Range[T] { Start T, End T }
 // when yield returns false. `for v in s` runs the loop body as yield, and a
 // break makes yield return false. Law: a Seq never calls yield again after
 // yield returns false. Any function of this shape is a Seq by conversion,
-// Seq[T](f); the lowering is Go's iter.Seq[T] (range over func).
+// Seq[T](f). A Seq value lowers to the one Go shape of every Ergo function
+// value (spec D5); the for adapts it to Go's range over func at the loop,
+// and a std binding that returns Go's iter.Seq[T] adapts at the call.
 type Seq[T] func(yield func(v T) bool)
 
 // Decision is the result of a machine's step (docs/spec/runtime.md,
