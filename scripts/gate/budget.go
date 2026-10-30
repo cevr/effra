@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -16,6 +17,9 @@ const (
 	stepMemoryVariable = "ERGO_GATE_STEP_MEMORY"
 	// gateMemoryVariable overrides the gate budget, half of physical memory.
 	gateMemoryVariable = "ERGO_GATE_MEMORY"
+	// hostMemoryVariable overrides the host budget, three quarters of
+	// physical memory: the cap on every gate of the host together.
+	hostMemoryVariable = "ERGO_GATE_HOST_MEMORY"
 	// mechanismVariable set to "rss" forces the RSS watch where the systemd
 	// scope would work, so its tests run on Linux too.
 	mechanismVariable = "ERGO_GATE_MEMORY_MECHANISM"
@@ -35,46 +39,67 @@ const (
 // reached 44 GB, stops at it. The gate budget, half of the workbox's 62G,
 // is 31G: room for the concurrent steps of one gate (about 4G together at
 // these peaks) and for one runaway step, while one gate never takes more
-// than half the host.
+// than half the host. The host budget, three quarters of it (47G), bounds
+// the gates that run at once (up to three on the workbox) and leaves the
+// rest of the host a quarter.
 const defaultStepMemory int64 = 8 << 30
 
-// memoryBudget is the hard cap, in bytes, of each step and of all the steps
-// of one gate together.
-type memoryBudget struct{ step, gate int64 }
+// memoryBudget is the hard cap, in bytes, of each step, of all the steps of
+// one gate together, and of all the gates of the host together.
+type memoryBudget struct{ step, gate, host int64 }
 
 // currentBudget reads the budget from the environment. The gate budget
-// defaults to half of physical memory, so one gate cannot take the host,
-// and a step budget above the gate budget is lowered to it.
+// defaults to half of physical memory, so one gate cannot take the host, and
+// the host budget to three quarters, so the gates together cannot either. A
+// budget above the one that holds it is lowered to it.
 func currentBudget() (memoryBudget, error) {
 	budget := memoryBudget{step: defaultStepMemory}
-	if value := os.Getenv(stepMemoryVariable); value != "" {
-		parsed, err := parseBytes(value)
-		if err != nil {
-			return memoryBudget{}, fmt.Errorf("%s: %w", stepMemoryVariable, err)
+	for _, setting := range []struct {
+		variable string
+		size     *int64
+		// share of physical memory, in quarters, when the variable is unset;
+		// 0 means a fixed default already in size.
+		quarters int64
+	}{
+		{stepMemoryVariable, &budget.step, 0},
+		{gateMemoryVariable, &budget.gate, 2},
+		{hostMemoryVariable, &budget.host, 3},
+	} {
+		if value := os.Getenv(setting.variable); value != "" {
+			parsed, err := parseBytes(value)
+			if err != nil {
+				return memoryBudget{}, fmt.Errorf("%s: %w", setting.variable, err)
+			}
+			*setting.size = parsed
+			continue
 		}
-		budget.step = parsed
-	}
-	if value := os.Getenv(gateMemoryVariable); value != "" {
-		parsed, err := parseBytes(value)
-		if err != nil {
-			return memoryBudget{}, fmt.Errorf("%s: %w", gateMemoryVariable, err)
+		if setting.quarters == 0 {
+			continue
 		}
-		budget.gate = parsed
-	} else {
 		total := physicalMemory()
 		if total <= 0 {
-			return memoryBudget{}, fmt.Errorf("physical memory unknown on this host: set %s", gateMemoryVariable)
+			if setting.variable == hostMemoryVariable {
+				// The host budget is then the gate budget: one gate's bound.
+				budget.host = budget.gate
+				continue
+			}
+			return memoryBudget{}, fmt.Errorf("physical memory unknown on this host: set %s", setting.variable)
 		}
-		// Rounded down to whole gibibytes (mebibytes on a tiny host), which
-		// read well in the budget line.
-		half, unit := total/2, int64(1<<30)
-		if half < unit {
-			unit = 1 << 20
-		}
-		budget.gate = half / unit * unit
+		*setting.size = roundedDown(total / 4 * setting.quarters)
 	}
+	budget.gate = min(budget.gate, budget.host)
 	budget.step = min(budget.step, budget.gate)
 	return budget, nil
+}
+
+// roundedDown rounds a default budget down to whole gibibytes (mebibytes on
+// a tiny host), which read well in the budget line.
+func roundedDown(size int64) int64 {
+	unit := int64(1 << 30)
+	if size < unit {
+		unit = 1 << 20
+	}
+	return size / unit * unit
 }
 
 // softLimit is the GOMEMLIMIT each step's Go processes get unless the
@@ -90,7 +115,7 @@ func softLimit(budget memoryBudget) string {
 func stepSoftLimit() string {
 	budget, err := currentBudget()
 	if err != nil {
-		budget = memoryBudget{step: defaultStepMemory, gate: defaultStepMemory}
+		budget = memoryBudget{step: defaultStepMemory, gate: defaultStepMemory, host: defaultStepMemory}
 	}
 	return softLimit(budget)
 }
@@ -177,6 +202,41 @@ func stepExceeded(budget memoryBudget) string {
 
 func gateExceeded(budget memoryBudget) string {
 	return fmt.Sprintf("gate memory budget exceeded (%s); the step was the largest when the gate's steps together passed it", formatBytes(budget.gate))
+}
+
+func hostExceeded(host int64) string {
+	return fmt.Sprintf("host memory budget exceeded (%s); the step was the largest when the host's gates together passed it", formatBytes(host))
+}
+
+// runBudgeted runs command, not yet started, as the named step under the
+// step budget, and returns what it used. Every process the gate starts for
+// a step runs through it.
+func runBudgeted(limit limiter, name string, command *exec.Cmd) (usage, error) {
+	watch, err := limit.prepare(name, command)
+	if err != nil {
+		return usage{}, err
+	}
+	if err = command.Start(); err == nil {
+		watch.started(command.Process.Pid)
+		err = command.Wait()
+	}
+	return watch.finish(), err
+}
+
+// recordDurations measures the slow packages (writeDurations) under the
+// memory budget, as the gate runs its steps.
+func (g *gate) recordDurations(out io.Writer) error {
+	budget, err := currentBudget()
+	if err != nil {
+		return err
+	}
+	limit, err := g.openLimiter(budget)
+	if err != nil {
+		return err
+	}
+	defer limit.close()
+	fmt.Fprintf(out, "gate: memory budget: %s\n", limit.describe())
+	return writeDurations(g.root, limit)
 }
 
 // openLimiter chooses the mechanism: the systemd scope the gate runs in, or

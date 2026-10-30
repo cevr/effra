@@ -25,7 +25,12 @@ var rssInterval = 250 * time.Millisecond
 // the resident memory of every process (ps, which darwin and Linux both
 // have), and a group over the step budget is killed whole. When the groups
 // together pass the gate budget, the largest is killed, as the kernel's
-// out-of-memory killer picks the largest task under a cgroup limit.
+// out-of-memory killer picks the largest task under a cgroup limit. A step
+// can pass its budget between two samples: at the 250 ms interval a step
+// allocating fast was seen at up to 41% over it (peaks of 639.9M to 724.5M
+// under a 512M budget) before the kill. The watch sees only its own gate's
+// steps, so it bounds no sum across gates. A process that leaves its step's
+// process group (setpgid, setsid) leaves the watch too.
 type rssWatch struct {
 	budget memoryBudget
 	reason string
@@ -54,7 +59,7 @@ func openRSSWatch(budget memoryBudget, reason string) (limiter, error) {
 }
 
 func (w *rssWatch) describe() string {
-	return fmt.Sprintf("RSS watch %s (%s)", describeBudget(w.budget), w.reason)
+	return fmt.Sprintf("RSS watch %s, no bound across gates (%s)", describeBudget(w.budget), w.reason)
 }
 
 func (w *rssWatch) prepare(name string, command *exec.Cmd) (stepWatch, error) {

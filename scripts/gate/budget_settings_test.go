@@ -34,29 +34,41 @@ func TestBudgetSizes(t *testing.T) {
 	}
 }
 
-// The step budget defaults to 8G and the gate budget to half of physical
-// memory; the variables override them, a step budget above the gate's is
-// lowered to it, and a value that does not parse stops the gate.
+// The step budget defaults to 8G, the gate budget to half of physical
+// memory and the host budget to three quarters; the variables override
+// them, a budget above the one that holds it is lowered to it, and a value
+// that does not parse stops the gate.
 func TestBudgetFromEnvironment(t *testing.T) {
 	t.Setenv(stepMemoryVariable, "")
 	t.Setenv(gateMemoryVariable, "")
+	t.Setenv(hostMemoryVariable, "")
 	budget, err := currentBudget()
 	if err != nil {
 		t.Fatal(err)
 	}
-	half := physicalMemory() / 2
-	if budget.step != min(8<<30, budget.gate) || budget.gate > half || budget.gate < half-(1<<30) {
+	half, threeQuarters := physicalMemory()/2, physicalMemory()/4*3
+	if budget.step != min(8<<30, budget.gate) || budget.gate > half || budget.gate < half-(1<<30) || budget.host > threeQuarters || budget.host < threeQuarters-(1<<30) {
 		t.Errorf("default budget %+v; physical memory %d", budget, physicalMemory())
 	}
 	t.Setenv(stepMemoryVariable, "2G")
 	t.Setenv(gateMemoryVariable, "6G")
-	if budget, err := currentBudget(); err != nil || budget != (memoryBudget{step: 2 << 30, gate: 6 << 30}) {
-		t.Errorf("budget %+v, %v; want 2G per step, 6G per gate", budget, err)
+	t.Setenv(hostMemoryVariable, "12G")
+	if budget, err := currentBudget(); err != nil || budget != (memoryBudget{step: 2 << 30, gate: 6 << 30, host: 12 << 30}) {
+		t.Errorf("budget %+v, %v; want 2G per step, 6G per gate, 12G per host", budget, err)
 	}
 	t.Setenv(stepMemoryVariable, "16G")
 	if budget, err := currentBudget(); err != nil || budget.step != 6<<30 {
 		t.Errorf("budget %+v, %v; want the step budget lowered to the gate's 6G", budget, err)
 	}
+	t.Setenv(hostMemoryVariable, "4G")
+	if budget, err := currentBudget(); err != nil || budget != (memoryBudget{step: 4 << 30, gate: 4 << 30, host: 4 << 30}) {
+		t.Errorf("budget %+v, %v; want the gate and step budgets lowered to the host's 4G", budget, err)
+	}
+	t.Setenv(hostMemoryVariable, "a lot")
+	if _, err := currentBudget(); err == nil || !strings.Contains(err.Error(), hostMemoryVariable) {
+		t.Errorf("an unreadable host budget gave %v, want an error naming %s", err, hostMemoryVariable)
+	}
+	t.Setenv(hostMemoryVariable, "")
 	t.Setenv(stepMemoryVariable, "lots")
 	if _, err := currentBudget(); err == nil || !strings.Contains(err.Error(), stepMemoryVariable) {
 		t.Errorf("an unreadable step budget gave %v, want an error naming %s", err, stepMemoryVariable)

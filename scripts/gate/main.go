@@ -11,22 +11,29 @@
 // complete by construction (the last shard skips exactly what the others run).
 //
 // Every step runs under a memory budget: a hard cap for the step with all the
-// processes it starts (ERGO_GATE_STEP_MEMORY, default 8G) and one for all the
+// processes it starts (ERGO_GATE_STEP_MEMORY, default 8G), one for all the
 // steps of the gate together (ERGO_GATE_MEMORY, default half of physical
-// memory). Go processes in a step get GOMEMLIMIT at 3/4 of the step cap
-// unless the caller set it. On Linux with a working `systemd-run --user`, the
-// gate re-executes itself in one transient scope whose MemoryMax is the gate
-// budget, with swap denied, and starts each step in its own child cgroup
-// whose memory.max is the step budget, so the kernel enforces both caps and
-// the gate reads the step's OOM events before it removes the cgroup.
-// Elsewhere (darwin, or where the probe fails), each step runs in its own
-// process group and one sampler stops a group whose resident memory passes
-// the step budget, and the largest group when the sum passes the gate budget;
-// ERGO_GATE_MEMORY_MECHANISM=rss forces this fallback. The gate prints once
-// which mechanism enforces the budget. A step stopped for its budget fails
-// with "memory budget exceeded (<budget>)" and its captured output, and its
-// result is never recorded as passed. Each step's summary line reports its
-// peak memory.
+// memory) and one for all the gates of the host together
+// (ERGO_GATE_HOST_MEMORY, default three quarters of physical memory). Go
+// processes in a step get GOMEMLIMIT at 3/4 of the step cap unless the caller
+// set it. On Linux with a working `systemd-run --user`, the gate re-executes
+// itself in one transient scope in the user slice ergo-gates.slice; the
+// scope's MemoryMax is the gate budget, with swap denied, and the gate sets
+// the slice's MemoryMax to the host budget. Each step starts in its own child
+// cgroup whose memory.max is the step budget and whose memory.oom.group stops
+// the whole step at an out-of-memory kill, so the kernel enforces all three
+// caps, and the gate reads the step's OOM events before it removes the
+// cgroup. A gate started inside another gate's step opens no scope: the outer
+// step's caps hold, and it watches its steps' RSS. Elsewhere (darwin, or
+// where the probe fails), each step runs in its own process group and one
+// sampler stops a group whose resident memory passes the step budget, and the
+// largest group when the sum passes the gate budget; this fallback has no
+// bound across gates, and a step can pass its budget between two samples.
+// ERGO_GATE_MEMORY_MECHANISM=rss forces it. The gate prints once which
+// mechanism enforces the budget. A step stopped for its budget fails with
+// "memory budget exceeded (<budget>)" and its captured output, and its result
+// is never recorded as passed. Each step's summary line reports its peak
+// memory. -record-durations runs its packages under the same budget.
 package main
 
 import (
@@ -154,7 +161,7 @@ func main() {
 	flag.Parse()
 	scope, scopeNote := os.Getenv(scopeVariable), ""
 	os.Unsetenv(scopeVariable)
-	if !*list && !*recordDurations && scope == "" {
+	if !*list && scope == "" {
 		budget, err := currentBudget()
 		if err != nil {
 			fatal(err)
@@ -174,7 +181,8 @@ func main() {
 	// stat data, failing a concurrent step that must write the index.
 	os.Setenv("GIT_OPTIONAL_LOCKS", "0")
 	if *recordDurations {
-		if err := writeDurations(root); err != nil {
+		g := &gate{root: root, scope: scope, scopeNote: scopeNote}
+		if err := g.recordDurations(os.Stdout); err != nil {
 			fatal(err)
 		}
 		return
@@ -396,15 +404,7 @@ func (g *gate) execute(step *Step) *result {
 	var output bytes.Buffer
 	command.Stdout = &output
 	command.Stderr = &output
-	watch, err := g.limit.prepare(step.Name, command)
-	var used usage
-	if err == nil {
-		if err = command.Start(); err == nil {
-			watch.started(command.Process.Pid)
-			err = command.Wait()
-		}
-		used = watch.finish()
-	}
+	used, err := runBudgeted(g.limit, step.Name, command)
 	r := &result{outcome: passed, output: output.Bytes(), duration: time.Since(started), begun: started.Sub(g.started), peak: used.peak}
 	if command.ProcessState != nil {
 		// A reaped child's usage includes the descendants it reaped.
