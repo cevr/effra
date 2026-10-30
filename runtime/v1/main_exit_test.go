@@ -36,7 +36,7 @@ func TestMainHelper(t *testing.T) {
 		case "closed":
 			q := New[int](1)
 			q.Close()
-			return q.Push(1)
+			return q.Push(root, 1)
 		}
 		return nil
 	})
