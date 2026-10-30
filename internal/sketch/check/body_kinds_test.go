@@ -20,7 +20,7 @@ func TestEveryBodyKindYields(t *testing.T) {
 		{"with-match", "func f(b bool) int { with W { match b { case true: 1; case false: 2 } } }", ""},
 		{"with-nested", "func f(b bool, c bool) int {\n\twith W {\n\t\tif b { if c { 1 } else { 2 } } else { 3 }\n\t}\n}", ""},
 		{"with-statement", "func f(b bool) {\n\twith W {\n\t\tif b { g() catch { case E: 0 } }\n\t}\n}", ""},
-		{"with-missing-else", "func f(b bool) int {\n\twith W {\n\t\tif b { 1 }\n\t}\n}", "S107:10"},
+		{"with-missing-else", "func f(b bool) int {\n\twith W {\n\t\tif b { 1 }\n\t}\n}", "S107:9"},
 		{"with-int8-literals", "func f(b bool) int8 { with W { if b { 1 } else { 2 } } }", ""},
 		// trailing blocks
 		{"trailing-if", "func f(b bool) int { use() { if b { 1 } else { 2 } } }", ""},

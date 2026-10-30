@@ -10,6 +10,49 @@ import "ergo.local/prototype/internal/sketch/syntax"
 // arm, or a with block's or trailing block's known result. A branch that
 // ends in return, break or continue has no value and joins any type.
 
+// useMode is how an expression's value is used: one discard rule for every
+// body with no result (D-C1).
+type useMode int
+
+const (
+	// useValue: the value is used (an operand, an argument, a let).
+	useValue useMode = iota
+	// useDiscard: the value is dropped (an expression statement, the tail
+	// of a body with no result, the caught expression of a statement
+	// catch).
+	useDiscard
+	// useOptional: the tail of a body whose own use is not known yet (a
+	// with block or an inferred trailing block).
+	useOptional
+)
+
+type useAt struct {
+	x syntax.Expr
+	m useMode
+}
+
+// exprAs checks x, whose value is used as m: a with, try or catch at x reads
+// m through useOf. The record names x itself, so no other expression reads
+// it, and it does not outlive the check of x.
+func (c *checker) exprAs(x syntax.Expr, hint Type, m useMode) operand {
+	saved := c.use
+	c.use = useAt{unparen(x), m}
+	op := c.expr(x, hint)
+	c.use = saved
+	return op
+}
+
+// useOf is how x is used: what exprAs recorded for it, else useValue. It
+// reads the record once.
+func (c *checker) useOf(x syntax.Expr) useMode {
+	if c.use.x != nil && c.use.x == x {
+		m := c.use.m
+		c.use = useAt{}
+		return m
+	}
+	return useValue
+}
+
 // sink is where a body's last value goes.
 type sink struct {
 	// want is the expected type. Without one, the branches have one type:
@@ -67,7 +110,7 @@ func (k *sink) exprHint() Type {
 // miss is a path that ends with no value at end: an optional body then has
 // no value; any other body reports it.
 func (k *sink) miss(end syntax.Pos) {
-	if k.optional {
+	if k.optional && k.missing == nil {
 		k.none = true
 		return
 	}
@@ -170,7 +213,14 @@ func (c *checker) yieldStmt(s syntax.Stmt, k *sink, end syntax.Pos) {
 
 // yieldExpr checks a body's last expression statement against k.
 func (c *checker) yieldExpr(last *syntax.ExprStmt, k *sink, end syntax.Pos) {
-	op := c.expr(last.X, k.exprHint())
+	use := useValue
+	switch {
+	case k.discard:
+		use = useDiscard
+	case k.optional && k.missing == nil:
+		use = useOptional
+	}
+	op := c.exprAs(last.X, k.exprHint(), use)
 	if op.invalid() {
 		k.bad = true
 		return
@@ -255,8 +305,9 @@ func (c *checker) ifYield(s *syntax.IfStmt, k *sink, end syntax.Pos) {
 	switch e := s.Else.(type) {
 	case nil:
 		switch {
-		case k.discard, k.optional:
-			k.none = k.none || k.optional
+		case k.discard:
+		case k.optional && k.missing == nil:
+			k.none = true
 		case k.noElse != nil:
 			k.noElse(s)
 		default:
@@ -305,7 +356,10 @@ func (c *checker) matchYield(s syntax.Stmt, k *sink) bool {
 // expected type every branch is assigned to it; without one the branches
 // have one type. An if without else there is S108.
 func (c *checker) branches(x syntax.Expr, hint Type) operand {
-	k := &sink{want: hint, what: "the branch's value"}
+	// A fallible branch tail passes its failures to the expression, as a
+	// with block's does: an enclosing catch or try handles them (review O2).
+	var errs *Row
+	k := &sink{want: hint, what: "the branch's value", pass: func(op *operand) { errs = errs.union(c.types, op.errs) }}
 	k.missing = func(end syntax.Pos) {
 		c.errorAt(end, end+1, CodeMissingRet, "this branch can reach its end without a value; a value if or match yields a value from every branch (D-C1)")
 	}
@@ -334,10 +388,10 @@ func (c *checker) branches(x syntax.Expr, hint Type) operand {
 		// The inferred type is not every branch's (reported, D3).
 		return bad(x)
 	case t != nil:
-		return operand{mode: modeValue, typ: t}
+		return operand{mode: modeValue, typ: t, errs: errs}
 	case k.bad:
 		return bad(x)
 	}
 	// Every branch leaves (return, break or continue): no value.
-	return operand{mode: modeNoValue, typ: NoValue}
+	return operand{mode: modeNoValue, typ: NoValue, errs: errs}
 }

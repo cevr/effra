@@ -66,8 +66,12 @@ func (fc *funcCtx) yieldStmt(s syntax.Stmt, d dest) bool {
 			o := fc.expr(s.X)
 			if d.name != "" && o.val != "" {
 				fc.line(d.name + ", " + d.err + " = " + fc.convertAt(s.X, o.val) + ", " + o.err)
-			} else {
-				fc.line(d.err + " = " + o.err)
+				return false
+			}
+			fc.line(d.err + " = " + o.err)
+			if o.val != "" {
+				// The body's value is discarded (D-C1); its failure is not.
+				fc.line("_ = " + o.val)
 			}
 			return false
 		}
@@ -135,18 +139,66 @@ func (fc *funcCtx) ifYield(s *syntax.IfStmt, d dest) bool {
 }
 
 // branchExpr lowers an if or match in value position: a Go variable of the
-// checked type, assigned by every branch that yields (D-C2). A branch that
-// leaves (return, break, continue) assigns nothing.
+// checked type, assigned by every branch that yields (D-C2), and a Go error
+// variable when a branch's tail can fail, which the expression passes on to
+// its enclosing try or catch, as a with block does (review O2). A branch
+// that leaves (return, break, continue) assigns nothing.
 func (fc *funcCtx) branchExpr(x syntax.Expr) operand {
 	s := x.(syntax.Stmt)
-	if fc.noValue(x) {
-		fc.yieldStmt(s, dest{})
-		return operand{}
+	var res operand
+	if !fc.noValue(x) {
+		res.val = fc.temp("v")
+		fc.line("var " + res.val + " " + fc.goType(fc.typeOf(x)))
 	}
-	v := fc.temp("v")
-	fc.line("var " + v + " " + fc.goType(fc.typeOf(x)))
-	fc.yieldStmt(s, dest{kind: destAssign, name: v})
-	return operand{val: v}
+	if fc.tailFallible(s) {
+		res.err = fc.temp("err")
+		fc.line("var " + res.err + " error")
+	}
+	if res.val == "" && res.err == "" {
+		fc.yieldStmt(s, dest{})
+		return res
+	}
+	fc.yieldStmt(s, dest{kind: destAssign, name: res.val, err: res.err})
+	return res
+}
+
+// tailFallible reports whether a tail that s yields can fail: a fallible
+// expression statement Info.Tails records, or a branch of a final if, match
+// or block whose own tail can.
+func (fc *funcCtx) tailFallible(s syntax.Stmt) bool {
+	last := func(list []syntax.Stmt) bool {
+		return len(list) > 0 && fc.tailFallible(list[len(list)-1])
+	}
+	switch s := s.(type) {
+	case *syntax.ExprStmt:
+		_, tail := fc.l.info.Tails[s]
+		return tail && fc.fallibleExpr(s.X)
+	case *syntax.IfStmt:
+		if last(s.Body.List) {
+			return true
+		}
+		switch e := s.Else.(type) {
+		case *syntax.BlockStmt:
+			return last(e.List)
+		case *syntax.IfStmt:
+			return fc.tailFallible(e)
+		}
+	case *syntax.SwitchStmt:
+		for _, cl := range s.Clauses {
+			if last(cl.Body) {
+				return true
+			}
+		}
+	case *syntax.TypeSwitchStmt:
+		for _, cl := range s.Clauses {
+			if last(cl.Body) {
+				return true
+			}
+		}
+	case *syntax.BlockStmt:
+		return last(s.List)
+	}
+	return false
 }
 
 // noCase writes the default arm Go needs after a match the checker proved

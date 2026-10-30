@@ -53,6 +53,12 @@ func (fc *funcCtx) noValue(x syntax.Expr) bool {
 // one (rows.md, Error rows 2).
 func (fc *funcCtx) fallibleExpr(x syntax.Expr) bool {
 	x = unparen(x)
+	switch s := x.(type) {
+	case *syntax.IfStmt, *syntax.SwitchStmt, *syntax.TypeSwitchStmt:
+		// An if or match in value position passes a fallible branch
+		// tail's failure on, as a with block does (review O2).
+		return fc.tailFallible(s.(syntax.Stmt))
+	}
 	call, ok := x.(*syntax.CallExpr)
 	if !ok {
 		return false

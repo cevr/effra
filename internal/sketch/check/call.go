@@ -800,7 +800,7 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 		frame = c.pushLit()
 	}
 	c.body(t, nil, nil, func() {
-		res := c.yieldingBlock(b, b.List, t.results, t.resultKnown, func(op *operand) { c.escape(op.expr, op.errs) })
+		res := c.yieldingBlock(b, b.List, t.results, t.resultKnown, false, func(op *operand) { c.escape(op.expr, op.errs) })
 		if resultFree {
 			if res != nil && res != NoValue {
 				sig.Results = []Type{res}
@@ -827,12 +827,15 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 // that type (S107 for a path without one); with no result the tail is
 // discarded; otherwise the block yields a value when every path does, of
 // the first value's type (a single unknown result is still the tail's
-// expected type, as a hint; M16), and no value when a path has none. pass
+// expected type, as a hint; M16), and no value when a path has none, unless
+// need says the block's value is used: then such a path is S107 at its end,
+// as in every other body that yields a value (D-C1; review O1). pass
 // receives a fallible tail's error row, which passes through (rows.md,
 // With 6). The result is nil after an invalid tail (reported).
-func (c *checker) yieldingBlock(b *syntax.BlockStmt, list []syntax.Stmt, results []Type, known bool, pass func(*operand)) Type {
+func (c *checker) yieldingBlock(b *syntax.BlockStmt, list []syntax.Stmt, results []Type, known, need bool, pass func(*operand)) Type {
 	if !known || len(results) < 2 {
 		k := &sink{pass: pass, what: "the block's value"}
+		missed := false
 		switch {
 		case known && len(results) == 1:
 			k.want = results[0]
@@ -846,6 +849,12 @@ func (c *checker) yieldingBlock(b *syntax.BlockStmt, list []syntax.Stmt, results
 			if len(results) == 1 {
 				k.hint = results[0]
 			}
+			if need {
+				k.missing = func(end syntax.Pos) {
+					missed = true
+					c.errorAt(end, end+1, CodeMissingRet, "this path can reach the end of the block without a value, and the block's value is used: end it with an expression, return or an else (rows.md, Totality 3)")
+				}
+			}
 		}
 		c.yieldList(list, k, b.Rbrace)
 		switch {
@@ -853,6 +862,9 @@ func (c *checker) yieldingBlock(b *syntax.BlockStmt, list []syntax.Stmt, results
 			return results[0]
 		case known:
 			return NoValue
+		case missed:
+			// Reported at the path (D3): the block's value is invalid.
+			return nil
 		case k.bad && !k.none:
 			return nil
 		case k.none || k.join == nil:

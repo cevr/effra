@@ -25,6 +25,9 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 	if c.fn != nil {
 		t = c.fn.t
 	}
+	// try passes its own use on: `try with W { … }` and `try e catch { … }`
+	// as statements discard their value (D-C1).
+	use := c.useOf(x)
 	inner := false
 	if t != nil {
 		saved := t.tried
@@ -36,17 +39,23 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 		}()
 	}
 	if ce, ok := unparen(x.X).(*syntax.CatchExpr); ok {
-		op := c.catch(ce, hint, true, true)
+		diags, openMark := len(c.diags), c.openRowSeq
+		op := c.catch(ce, hint, use != useDiscard, true)
 		op.expr = ce
-		c.record(ce, op)
+		c.recordDown(x.X, ce, op)
 		if op.invalid() {
 			return op
+		}
+		if op.errs.Empty() && (t == nil || !t.tried) && len(c.diags) == diags && c.openRowSeq == openMark {
+			// The catch handles the whole row and nothing inside it
+			// propagates: try has nothing to pass on (review O3).
+			c.errorf(x, CodeType, "try over a catch that handles every failure: nothing is left to propagate; drop the try (rows.md, Error rows 6)")
 		}
 		c.escape(x, op.errs)
 		op.errs = nil
 		return op
 	}
-	op := c.expr(x.X, hint)
+	op := c.exprAs(x.X, hint, use)
 	if t != nil {
 		inner = t.tried
 	}
@@ -87,7 +96,13 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 		return bad(x)
 	}
 	openMark := c.openRowSeq
-	op := c.expr(x.X, hint)
+	// A catch whose value is discarded discards its caught expression's
+	// value too (D-C1).
+	use := useValue
+	if !wantValue {
+		use = useDiscard
+	}
+	op := c.exprAs(x.X, hint, use)
 	valid := !op.invalid()
 	// open: the row may still grow in this component (rowWaits). operandOK:
 	// the caught expression is valid, so an arm its row lacks is not a

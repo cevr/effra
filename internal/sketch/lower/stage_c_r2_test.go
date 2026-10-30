@@ -24,7 +24,7 @@ func h(n int) int fails X needs Console {
 	n
 }
 func whole() int fails E needs Console { try h(flag(true)) catch { case X: 0 } }
-func caught() int fails E needs Console { try h(3) catch { case X: 0 } }
+func caught(b bool) int fails E needs Console { try h(if b { flag(true) } else { 3 }) catch { case X: 0 } }
 
 func withIf(b bool) int { with W { if b { 1 } else { 2 } } }
 func withMatch(b bool) int { with W { match b { case true: 3; case false: 4 } } }
@@ -43,7 +43,7 @@ func main() needs Console {
 	if w == 9 {
 		Console.Println("whole")
 	}
-	let c = caught() catch { case E: 0 }
+	let c = caught(false) catch { case E: 0 }
 	if c == 3 {
 		Console.Println("caught")
 	}

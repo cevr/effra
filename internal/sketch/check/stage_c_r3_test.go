@@ -1,0 +1,115 @@
+package check_test
+
+import (
+	"testing"
+
+	"ergo.local/prototype/internal/sketch/check"
+)
+
+// Stage C round 2 review witnesses m4, O1, O2 and O3, at check.Check.
+
+// m4: one discard rule (D-C1). A with, try or catch whose value is
+// discarded is a body with no result, so its tails are dropped whatever
+// their types, as in a match statement or a void function's tail.
+func TestDiscardedBodiesDropTheirTails(t *testing.T) {
+	const decls = "let W = wire {}\ntype E {}\nfunc g(b bool) int fails E { 1 }\n"
+	for _, tc := range []struct{ name, src string }{
+		{"with-statement", "func f(b bool) { with W { if b { 1 } else { \"s\" } } }"},
+		{"with-statement-in-body", "func f(b bool) int { with W { if b { 1 } else { \"s\" } }; 0 }"},
+		{"with-statement-match", "func f(n int) { with W { match n { case 0: 1; case _: \"s\" } } }"},
+		{"with-void-tail", "func f(b bool) { with W { if b { 1 } else { \"s\" } } }"},
+		{"with-trailing-void", "func each(f func()) { f() }\nfunc f(b bool) { each() { with W { if b { 1 } else { \"s\" } } } }"},
+		{"with-caught-statement", "func f(b bool) { with W { if b { g(b) } else { \"s\" } } catch { case E: 0 } }"},
+		{"catch-void-tail", "func f(b bool) { g(b) catch { case E: if b { 1 } else { \"s\" } } }"},
+		{"with-under-catch-arm", "func f(b bool) { g(b) catch { case E: with W { if b { 1 } else { \"s\" } } } }"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := decls + tc.src + "\n"
+			if got, d := codeLines(src); got != "" {
+				t.Fatalf("want no diagnostic, got %s", describe(d))
+			}
+			if gaps := check.InfoGaps(src); len(gaps) != 0 {
+				t.Fatalf("Info gaps: %v", gaps)
+			}
+		})
+	}
+	// A with whose value is used still has one type (D-C2).
+	src := decls + "func f(b bool) int { 1 + with W { if b { 1 } else { \"s\" } } }\n"
+	if got, d := codeLines(src); got != "S108:4" {
+		t.Fatalf("a used with keeps one type: want [S108:4], got %s", describe(d))
+	}
+}
+
+// O1: a with whose value is used reports a path without a value at that
+// path, S107, like every other body kind; it is not "this expression has
+// no value" at the with.
+func TestUsedWithReportsItsPath(t *testing.T) {
+	const decls = "let W = wire {}\n"
+	for _, tc := range []struct{ name, src, want string }{
+		{"let", "func f(b bool) int {\n\tlet x = with W {\n\t\tif b { 1 }\n\t}\n\tx\n}", "S107:5"},
+		{"operand", "func f(b bool) int {\n\t1 + with W {\n\t\tif b { 2 }\n\t}\n}", "S107:5"},
+		{"argument", "func id(n int) int { n }\nfunc f(b bool) int {\n\tid(with W {\n\t\tif b { 2 }\n\t})\n}", "S107:6"},
+		{"empty", "func f() int {\n\tlet x = with W {\n\t}\n\tx\n}", "S107:4"},
+		{"statement-path", "func f(b bool) int {\n\tlet x = with W {\n\t\tif b { 2 } else {\n\t\t\tlet y = 3\n\t\t\t_ = y\n\t\t}\n\t}\n\tx\n}", "S107:7"},
+		{"statement-without-else", "func f(b bool) {\n\twith W {\n\t\tif b { 1 }\n\t}\n}", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := decls + tc.src + "\n"
+			if got, d := codeLines(src); got != tc.want {
+				t.Fatalf("want [%s], got %s", tc.want, describe(d))
+			}
+		})
+	}
+}
+
+// O2: an if or match branch's fallible tail passes its failure to the
+// expression, as a with block's does, so an enclosing catch or try
+// handles it; the two shapes agree.
+func TestBranchTailsPassFailures(t *testing.T) {
+	const decls = "let W = wire {}\ntype E {}\ntype F {}\nfunc g(b bool) int fails E { 1 }\nfunc h(n int) int fails F { n }\n"
+	for _, tc := range []struct{ name, src, want string }{
+		{"if-catch", "func f(b bool, c bool) int { (if c { g(b) } else { 2 }) catch { case E: 3 } }", ""},
+		{"with-catch", "func f(b bool, c bool) int { with W { if c { g(b) } else { 2 } } catch { case E: 3 } }", ""},
+		{"match-catch", "func f(b bool, n int) int { (match n { case 0: g(b); case _: h(n) }) catch { case E: 4; case F: 5 } }", ""},
+		{"match-catch-partial-total", "func f(b bool, n int) int { (match n { case 0: g(b); case _: h(n) }) catch { case E: 4 } }", "S103:6"},
+		{"if-try", "func f(b bool, c bool) int fails E { try 1 + (if c { g(b) } else { 2 }) }", ""},
+		{"if-return", "func f(b bool, c bool) int fails E { (if c { g(b) } else { 2 }) }", ""},
+		{"if-unhandled", "func f(b bool, c bool) int { let x = if c { g(b) } else { 2 }; x }", "S105:6"},
+		{"with-unhandled", "func f(b bool, c bool) int { let x = with W { if c { g(b) } else { 2 } }; x }", "S105:6"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := decls + tc.src + "\n"
+			if got, d := codeLines(src); got != tc.want {
+				t.Fatalf("want [%s], got %s", tc.want, describe(d))
+			}
+			if tc.want == "" {
+				if gaps := check.InfoGaps(src); len(gaps) != 0 {
+					t.Fatalf("Info gaps: %v", gaps)
+				}
+			}
+		})
+	}
+}
+
+// O3: try over a catch that handles the whole row, with nothing inside it
+// that propagates, is a redundant try (S108), as a try on an expression
+// that cannot fail is.
+func TestRedundantTryOverTotalCatch(t *testing.T) {
+	const decls = "type E {}\ntype F {}\nfunc g() int fails E { 1 }\nfunc k() int fails F { 2 }\nfunc h(n int) int fails E { n }\nfunc two() int fails E | F { 3 }\n"
+	for _, tc := range []struct{ name, src, want string }{
+		{"whole-row", "func f() int { try g() catch { case E: 1 } }", "S108:7"},
+		{"whole-row-statement", "func f() { try g() catch { case E: 1 } }", "S108:7"},
+		{"whole-row-rest", "func f() int { try two() catch { case E: 1; case _: 2 } }", "S108:7"},
+		{"rest-escapes", "func f() int fails F { try two() catch { case E: 1 } }", ""},
+		{"inner-propagates", "func f() int fails F { try h(k()) catch { case E: 1 } }", ""},
+		{"partial-record", "type R { B bool }\nfunc r() int fails R { 1 }\nfunc f() int fails R { try r() catch { case R{B: true}: 1 } }", ""},
+		{"invalid-catch-no-cascade", "func f() int { try g() catch { case F: 1 } }", "S108:7"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := decls + tc.src + "\n"
+			if got, d := codeLines(src); got != tc.want {
+				t.Fatalf("want [%s], got %s", tc.want, describe(d))
+			}
+		})
+	}
+}

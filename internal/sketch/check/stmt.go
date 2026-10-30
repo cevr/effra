@@ -73,7 +73,7 @@ func (c *checker) stmt(s syntax.Stmt) {
 		// continue may not leave it (grammar.md, Statements 5).
 		done := c.openScope()
 		c.fn.branches = append(c.fn.branches, branch{kind: brBarrier})
-		c.yieldingBlock(s, s.List, nil, false, func(op *operand) { c.handled(op) })
+		c.yieldingBlock(s, s.List, nil, true, false, func(op *operand) { c.handled(op) })
 		c.fn.branches = c.fn.branches[:len(c.fn.branches)-1]
 		done()
 	case *syntax.IfStmt:
@@ -169,27 +169,9 @@ func (c *checker) recordDown(outer, inner syntax.Expr, op operand) {
 // (S110 otherwise). A fallible statement is S105.
 func (c *checker) exprStmt(s *syntax.ExprStmt) {
 	x := unparen(s.X)
-	var op operand
-	switch e := x.(type) {
-	case *syntax.CatchExpr:
-		op = c.catch(e, nil, false, false)
-		op.expr = s.X
-		c.recordDown(s.X, e, op)
-	case *syntax.TryExpr:
-		if ce, ok := unparen(e.X).(*syntax.CatchExpr); ok {
-			op = c.catch(ce, nil, false, true)
-			c.recordDown(e.X, ce, op)
-			if !op.invalid() {
-				c.escape(e, op.errs)
-				op.errs = nil
-			}
-			c.recordDown(s.X, e, op)
-			return
-		}
-		op = c.expr(s.X, nil)
-	default:
-		op = c.expr(s.X, nil)
-	}
+	// The statement's value is discarded: a with, try or catch here is a
+	// body with no result (D-C1; review m4).
+	op := c.exprAs(s.X, nil, useDiscard)
 	if op.invalid() {
 		return
 	}
