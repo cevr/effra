@@ -9,6 +9,24 @@
 // tests are not cached here: Go's own per-package test cache stays
 // authoritative, and slow packages are split into processes whose union is
 // complete by construction (the last shard skips exactly what the others run).
+//
+// Every step runs under a memory budget: a hard cap for the step with all the
+// processes it starts (ERGO_GATE_STEP_MEMORY, default 8G) and one for all the
+// steps of the gate together (ERGO_GATE_MEMORY, default half of physical
+// memory). Go processes in a step get GOMEMLIMIT at 3/4 of the step cap
+// unless the caller set it. On Linux with a working `systemd-run --user`, the
+// gate re-executes itself in one transient scope whose MemoryMax is the gate
+// budget, with swap denied, and starts each step in its own child cgroup
+// whose memory.max is the step budget, so the kernel enforces both caps and
+// the gate reads the step's OOM events before it removes the cgroup.
+// Elsewhere (darwin, or where the probe fails), each step runs in its own
+// process group and one sampler stops a group whose resident memory passes
+// the step budget, and the largest group when the sum passes the gate budget;
+// ERGO_GATE_MEMORY_MECHANISM=rss forces this fallback. The gate prints once
+// which mechanism enforces the budget. A step stopped for its budget fails
+// with "memory budget exceeded (<budget>)" and its captured output, and its
+// result is never recorded as passed. Each step's summary line reports its
+// peak memory.
 package main
 
 import (
@@ -93,6 +111,8 @@ type result struct {
 	output   []byte
 	duration time.Duration
 	cpu      time.Duration
+	// peak is the most memory the step held, in bytes, or 0 if unknown.
+	peak int64
 	// begun is when the step started, from the start of the run, so a
 	// log shows the critical path and not only each step's own time.
 	begun time.Duration
@@ -120,6 +140,11 @@ type gate struct {
 
 	installedDigests map[string]string
 	installedMu      sync.Mutex
+
+	// scope is the unit of the systemd scope the gate was re-executed in,
+	// or empty; scopeNote says why there is none.
+	scope, scopeNote string
+	limit            limiter
 }
 
 func main() {
@@ -127,6 +152,16 @@ func main() {
 	noCache := flag.Bool("no-cache", false, "run every step even when a pass for identical inputs is recorded")
 	recordDurations := flag.Bool("record-durations", false, "measure the sharded Go packages and rewrite "+durationsFile)
 	flag.Parse()
+	scope, scopeNote := os.Getenv(scopeVariable), ""
+	os.Unsetenv(scopeVariable)
+	if !*list && !*recordDurations && scope == "" {
+		budget, err := currentBudget()
+		if err != nil {
+			fatal(err)
+		}
+		// Returns only when the gate cannot run in its own scope.
+		scopeNote = enterScope(budget)
+	}
 	root, err := repositoryRoot()
 	if err != nil {
 		fatal(err)
@@ -161,7 +196,7 @@ func main() {
 		fatal(err)
 	}
 	fmt.Println(identity)
-	g := &gate{root: root, cacheDir: cacheDirectory(), noCache: *noCache, steps: steps}
+	g := &gate{root: root, cacheDir: cacheDirectory(), noCache: *noCache, steps: steps, scope: scope, scopeNote: scopeNote}
 	os.Exit(g.run(os.Stdout))
 }
 
@@ -269,6 +304,16 @@ func (g *gate) run(out io.Writer) int {
 	if slices.ContainsFunc(g.steps, runsGoTest) {
 		fmt.Fprintf(out, "gate: go test steps receive only %s\n", strings.Join(testenv.Names, " "))
 	}
+	budget, err := currentBudget()
+	if err == nil {
+		g.limit, err = g.openLimiter(budget)
+	}
+	if err != nil {
+		fmt.Fprintln(out, "gate:", err)
+		return 2
+	}
+	defer g.limit.close()
+	fmt.Fprintf(out, "gate: memory budget: %s\n", g.limit.describe())
 
 	results := make([]*result, len(g.steps))
 	done := make([]chan struct{}, len(g.steps))
@@ -299,11 +344,11 @@ func (g *gate) run(out io.Writer) int {
 		r := results[i]
 		switch r.outcome {
 		case passed:
-			fmt.Fprintf(out, "== %s: ok (%.1fs, cpu %.1fs, from %.1fs)\n", step.Name, r.duration.Seconds(), r.cpu.Seconds(), r.begun.Seconds())
+			fmt.Fprintf(out, "== %s: ok (%s)\n", step.Name, r.measures())
 		case cached:
 			fmt.Fprintf(out, "== %s: ok, cached (%s)\n", step.Name, r.note)
 		case failed:
-			fmt.Fprintf(out, "== %s: FAILED (%.1fs, cpu %.1fs, from %.1fs)\n", step.Name, r.duration.Seconds(), r.cpu.Seconds(), r.begun.Seconds())
+			fmt.Fprintf(out, "== %s: FAILED (%s)\n", step.Name, r.measures())
 			failures = append(failures, step.Name)
 		case blocked:
 			fmt.Fprintf(out, "== %s: not run (%s)\n", step.Name, r.note)
@@ -351,15 +396,30 @@ func (g *gate) execute(step *Step) *result {
 	var output bytes.Buffer
 	command.Stdout = &output
 	command.Stderr = &output
-	err := command.Run()
-	r := &result{outcome: passed, output: output.Bytes(), duration: time.Since(started), begun: started.Sub(g.started)}
+	watch, err := g.limit.prepare(step.Name, command)
+	var used usage
+	if err == nil {
+		if err = command.Start(); err == nil {
+			watch.started(command.Process.Pid)
+			err = command.Wait()
+		}
+		used = watch.finish()
+	}
+	r := &result{outcome: passed, output: output.Bytes(), duration: time.Since(started), begun: started.Sub(g.started), peak: used.peak}
 	if command.ProcessState != nil {
 		// A reaped child's usage includes the descendants it reaped.
 		r.cpu = command.ProcessState.UserTime() + command.ProcessState.SystemTime()
 	}
-	if err != nil {
+	if err != nil || used.verdict != "" {
 		r.outcome = failed
-		fmt.Fprintf(&output, "gate: %s: %v\n", step.Name, err)
+		if err != nil {
+			fmt.Fprintf(&output, "gate: %s: %v\n", step.Name, err)
+		}
+		// A step over its budget fails, and is never recorded, whatever its
+		// exit status.
+		if used.verdict != "" {
+			fmt.Fprintf(&output, "gate: %s: %s\n", step.Name, used.verdict)
+		}
 		r.output = output.Bytes()
 		return r
 	}
@@ -367,6 +427,15 @@ func (g *gate) execute(step *Step) *result {
 		g.record(receipt{Step: step.Name, Key: key, Duration: r.duration.Seconds(), Passed: time.Now(), Output: output.String()})
 	}
 	return r
+}
+
+// measures are a run step's wall time, CPU time, start and peak memory.
+func (r *result) measures() string {
+	text := fmt.Sprintf("%.1fs, cpu %.1fs, from %.1fs", r.duration.Seconds(), r.cpu.Seconds(), r.begun.Seconds())
+	if r.peak > 0 {
+		text += ", peak " + formatBytes(r.peak)
+	}
+	return text
 }
 
 // gcPercent is the Go collector target for every step's Go processes (tests,
@@ -395,11 +464,15 @@ func (g *gate) toolDigest(step *Step) string {
 }
 
 // stepEnvironment is the environment every step runs with: the caller's,
-// with the gate's collector target unless the caller sets one.
+// with the gate's collector target and the soft memory limit below the step
+// budget (stepSoftLimit) unless the caller sets them.
 func stepEnvironment() []string {
 	environment := os.Environ()
 	if _, set := os.LookupEnv("GOGC"); !set {
 		environment = append(environment, "GOGC="+gcPercent)
+	}
+	if _, set := os.LookupEnv("GOMEMLIMIT"); !set {
+		environment = append(environment, "GOMEMLIMIT="+stepSoftLimit())
 	}
 	return environment
 }
