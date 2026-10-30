@@ -446,9 +446,7 @@ func (c *checker) ident(x *syntax.Ident) operand {
 		if refused {
 			return bad(x)
 		}
-		if unknown {
-			sig = c.unknownSig(sig)
-		}
+		sig = c.unknownSig(sig, unknown)
 		if len(sig.TParams) > 0 {
 			return operand{mode: modeGeneric, typ: sig, fn: o}
 		}
@@ -998,9 +996,7 @@ func (c *checker) selfCall(x *syntax.SelectorExpr, base operand, sig *Signature,
 	if refused {
 		return bad(x)
 	}
-	if unknown {
-		sig = c.unknownSig(sig)
-	}
+	sig = c.unknownSig(sig, unknown)
 	t := base.typ
 	if p, ok := t.(*Pointer); ok {
 		t = p.Elem

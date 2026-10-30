@@ -240,8 +240,8 @@ func (c *checker) assignable(v, t Type) (bool, string) {
 		if ve := vs.Errors.known(c.types); !ve.subsetOf(c.types, tt.Errors) {
 			return false, fmt.Sprintf("its error row %s is wider than %s", rowText(ve), rowText(tt.Errors))
 		}
-		if !vs.Uses.subsetOf(c.types, tt.Uses) {
-			return false, fmt.Sprintf("its capability row %s is wider than %s", rowText(vs.Uses), rowText(tt.Uses))
+		if vu := vs.Uses.known(c.types); !vu.subsetOf(c.types, tt.Uses) {
+			return false, fmt.Sprintf("its capability row %s is wider than %s", rowText(vu), rowText(tt.Uses))
 		}
 		return true, ""
 	}
@@ -426,8 +426,8 @@ func (c *checker) implements(v Type, it *Interface) string {
 		if ge := got.Errors.known(c.types); !ge.subsetOf(c.types, m.Sig.Errors) {
 			return fmt.Sprintf("%s.%s can fail with %s, wider than %s", v, m.Name, rowText(ge.minus(c.types, m.Sig.Errors)), rowText(m.Sig.Errors))
 		}
-		if !got.Uses.subsetOf(c.types, m.Sig.Uses) {
-			return fmt.Sprintf("%s.%s requires %s, which the interface's method does not (README Gap 17 stays with #37)", v, m.Name, rowText(got.Uses.minus(c.types, m.Sig.Uses)))
+		if gu := got.Uses.known(c.types); !gu.subsetOf(c.types, m.Sig.Uses) {
+			return fmt.Sprintf("%s.%s requires %s, which the interface's method does not (README Gap 17 stays with #37)", v, m.Name, rowText(gu.minus(c.types, m.Sig.Uses)))
 		}
 		if got.Fallible != m.Sig.Fallible {
 			return fmt.Sprintf("%s.%s differs in fallibility from the interface's method", v, m.Name)

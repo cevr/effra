@@ -497,13 +497,13 @@ func (c *checker) finishInfo() {
 			call.Fails = c.types.resolve(call.Fails).known(c.types)
 		}
 		if call.Needs != nil {
-			call.Needs = c.types.resolve(call.Needs)
+			call.Needs = c.types.resolve(call.Needs).known(c.types)
 		}
 	}
 	for x, sig := range c.pkg.Info.Literals {
-		if sig.Errors.unknown(c.types) {
+		if sig.Errors.unknown(c.types) || sig.Uses.unknown(c.types) {
 			s := *sig
-			s.Errors = sig.Errors.known(c.types)
+			s.Errors, s.Uses = sig.Errors.known(c.types), sig.Uses.known(c.types)
 			c.pkg.Info.Literals[x] = &s
 		}
 	}
@@ -553,7 +553,7 @@ func (c *checker) finalType(t Type, memo map[Type]Type) Type {
 		if e := c.types.resolve(t.Errors).known(c.types); e != t.Errors {
 			s.Errors, changed = e, true
 		}
-		if u := c.types.resolve(t.Uses); u != t.Uses {
+		if u := c.types.resolve(t.Uses).known(c.types); u != t.Uses {
 			s.Uses, changed = u, true
 		}
 		if changed {

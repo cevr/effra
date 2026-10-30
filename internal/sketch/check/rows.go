@@ -54,6 +54,16 @@ func (c *checker) charge(n syntax.Node, cap Type) {
 		return
 	}
 	t := c.fn.t
+	if cap == Type(invalid) {
+		// An unknown capability row (Row.unknown): no with is known to bind
+		// what it holds, an inferred row takes invalid and so is unknown
+		// too, and a written row is not known to miss it (stage D1 round 4
+		// review M1).
+		if t.declUses == nil && !t.wire {
+			t.uses = t.uses.with(c.types, invalid)
+		}
+		return
+	}
 	for i := len(t.withs) - 1; i >= 0; i-- {
 		// An unknown scope is a with whose wire is unknown (reported): it
 		// discharges everything, so no charge cascades from it (D3; M18).
@@ -368,9 +378,12 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 		if n.fn != nil {
 			delete(c.settled, n.fn)
 			// A refused member stays refused for the components checked
-			// after this one (groupRef).
+			// after this one (groupRef), with the rows its body exceeded:
+			// only those are unknown. A written row, or an inferred row
+			// whose pinned empty row held, is evidence (stage D1 round 4
+			// review M1).
 			if c.refused(n.fn) {
-				c.refusedMembers[n.fn] = true
+				c.refusedMembers[n.fn] = c.exceeded(n.fn)
 			}
 		}
 	}
@@ -523,15 +536,18 @@ func funcKey(f *Func) string {
 // (D3); the S108 is at the member's declaration (reportGroup). A reference
 // from outside the component, checked after it settled, keeps f's written
 // signature, so an arity or argument mistake there is still reported; only
-// its pinned rows are no evidence, so when f is refused the reference is
-// unknown: its error row holds invalid (unknownSig), and every row that
-// takes it, through bindings, literals, generics and inference, is unknown
-// too, so no definite-row check cascades from it (classf/go-statement.ergo's
-// caller F got a cascade "returns no value"; stage D1 round 1 review M5;
-// round 3 review M1, M2; rows.md, Inference 6).
-func (c *checker) groupRef(f *Func) (refused, unknown bool) {
+// only the pinned rows its body exceeded are no evidence, so when f is
+// refused each of those rows is unknown in the reference: it holds invalid
+// (unknownSig), and every row that takes it, through bindings, literals,
+// generics and inference, is unknown too, so no definite-row check cascades
+// from it (classf/go-statement.ergo's caller F got a cascade "returns no
+// value"; stage D1 round 1 review M5; round 3 review M1, M2; rows.md,
+// Inference 6). Only an unknown row holds invalid: a written row, and an
+// inferred row whose pinned empty row held, stay as they are (round 4
+// review M1).
+func (c *checker) groupRef(f *Func) (refused bool, unknown [2]bool) {
 	if !f.inferErrors && !f.inferUses {
-		return false, false
+		return false, unknown
 	}
 	if !c.group[f] {
 		// The silent passes read it too, so the fixpoint and the
@@ -546,18 +562,28 @@ func (c *checker) groupRef(f *Func) (refused, unknown bool) {
 	if c.refused(f) {
 		// An undiagnosed value: its S108 is decided last (reportGroup).
 		c.readUndiagnosed()
-		return true, false
+		return true, unknown
 	}
-	return false, false
+	return false, unknown
 }
 
 // unknownSig is the signature a reference to a refused class G member from a
-// later component has: its written signature, with invalid in its error row
-// (Row.unknown), so every row that takes it is unknown and no definite-row
-// check cascades from it. The member's own row variable is not changed.
-func (c *checker) unknownSig(sig *Signature) *Signature {
+// later component has: its written signature, with invalid in each row its
+// body exceeded (rows: errors, capabilities; Row.unknown), so every row that
+// takes it is unknown and no definite-row check cascades from it. The
+// member's own row variables are not changed. It is sig itself when no row
+// is unknown.
+func (c *checker) unknownSig(sig *Signature, rows [2]bool) *Signature {
+	if !rows[0] && !rows[1] {
+		return sig
+	}
 	s := *sig
-	s.Errors = sig.Errors.with(c.types, invalid)
+	if rows[0] {
+		s.Errors = sig.Errors.with(c.types, invalid)
+	}
+	if rows[1] {
+		s.Uses = sig.Uses.with(c.types, invalid)
+	}
 	return &s
 }
 

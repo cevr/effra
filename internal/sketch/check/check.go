@@ -73,8 +73,10 @@ type checker struct {
 	// prelude name), so the binder rules add no second diagnostic (D3).
 	refusedBinders map[binderKey]bool
 	// refusedMembers holds the class G members the reporting pass refused,
-	// so a reference from a later component is invalid too (groupRef).
-	refusedMembers map[*Func]bool
+	// with which of their inferred rows (errors, capabilities) the body
+	// exceeded, so a reference from a later component has those rows
+	// unknown and the others as they are (groupRef, unknownSig).
+	refusedMembers map[*Func][2]bool
 	// dupNames holds the package names declared more than once (declare):
 	// which declaration is kept depends on the order, so a decision that
 	// reads the kept one is a follow-on of the duplicate (collectSelfFuncs).
@@ -329,7 +331,7 @@ func newChecker(path string, imp Importer, universe *Scope) *checker {
 		pkgPatterns: map[*syntax.VarSpec]*pkgPattern{},
 
 		refusedBinders: map[binderKey]bool{},
-		refusedMembers: map[*Func]bool{},
+		refusedMembers: map[*Func][2]bool{},
 		dupNames:       map[string]bool{},
 	}
 	c.types.substRow = c.substRow
