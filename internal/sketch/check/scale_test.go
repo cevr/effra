@@ -628,13 +628,13 @@ var scaleShapes = []scaleShape{
 	},
 	{
 		name:    "long names",
-		finding: "checker-196 r21 m1: each wire that reaches a capability hashes its whole name again, so the cost is the name length times the wire count",
+		finding: "checker-196 r21 m1: each wire that reaches a capability hashes its whole name again, so the cost is the name length times the wire count; issue #234",
 		n:       200,
 		// Measured on main e36c9471: bytes exponent 1.02, time exponent
 		// 1.92 to 2.00; the time over the control's grows 3.2x to 3.9x
 		// from n to 4n. A linear stand-in (a 40-byte name) grew at most
 		// 1.45x in 15 runs of three concurrent copies.
-		skip:    "proposed issue: a capability's priority (FNV over the whole name) and its key comparison run on every insert, once per wire that reaches it, so check time is the name length times the wire count (checker-196 r21 m1)",
+		skip:    "#234: a capability's priority (FNV over the whole name) and its key comparison run on every insert, once per wire that reaches it, so check time is the name length times the wire count (checker-196 r21 m1)",
 		source:  func(n int) string { return longNames(n, false) },
 		control: func(n int) string { return longNames(n, true) },
 	},
