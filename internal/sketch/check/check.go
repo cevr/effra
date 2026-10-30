@@ -75,6 +75,10 @@ type checker struct {
 	// refusedMembers holds the class G members the reporting pass refused,
 	// so a reference from a later component is invalid too (groupRef).
 	refusedMembers map[*Func]bool
+	// dupNames holds the package names declared more than once (declare):
+	// which declaration is kept depends on the order, so a decision that
+	// reads the kept one is a follow-on of the duplicate (collectSelfFuncs).
+	dupNames map[string]bool
 
 	cur *fileInfo
 	// instance caches the instances of generic named types by their
@@ -326,6 +330,7 @@ func newChecker(path string, imp Importer, universe *Scope) *checker {
 
 		refusedBinders: map[binderKey]bool{},
 		refusedMembers: map[*Func]bool{},
+		dupNames:       map[string]bool{},
 	}
 	c.types.substRow = c.substRow
 	return c

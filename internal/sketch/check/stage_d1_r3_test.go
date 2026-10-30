@@ -86,3 +86,29 @@ func TestImplicitBorrowSpellingsInSkippedFrames(t *testing.T) {
 	}
 	runD1(t, cases)
 }
+
+// T1: whether same-named functions are a valid group must not read which
+// declaration of a duplicated type is kept (an operation type, which owns
+// no functions, or a record): both orders give the duplicate's one S108,
+// and every declaration order passes the order oracle. A group that is
+// invalid whichever declaration is kept (both name the duplicated type, or
+// another member's first parameter is not a local type) still reports the
+// redeclaration. The review's FuzzCheck input is the corpus seed
+// testdata/fuzz/FuzzCheck/704c117a97aa3fef.
+func TestOverloadsOnADuplicatedType(t *testing.T) {
+	runD1(t, []d1Case{
+		{"operation-type-first", "type Y { M() int }\ntype Y { N int }\ntype E { N int }\nfunc f(y Y) {}\nfunc f(e E) {}\n", []string{"S108:2"}},
+		{"record-first", "type Y { N int }\ntype Y { M() int }\ntype E { N int }\nfunc f(y Y) {}\nfunc f(e E) {}\n", []string{"S108:2"}},
+		{"both-name-it", "type Y { M() int }\ntype Y { N int }\nfunc f(y Y) {}\nfunc f(y *Y) {}\n", []string{"S108:2", "S108:4"}},
+		{"not-a-local-type", "type Y { N int }\ntype Y { M() int }\nfunc f(y Y) {}\nfunc f(n int) {}\n", []string{"S108:2", "S108:4"}},
+	})
+	for _, src := range []string{
+		"type Y { M() int }\ntype Y { N int }\ntype E { N int }\nfunc f(y Y) {}\nfunc f(e E) {}\n",
+		"type Y { N int }\ntype Y { M() int }\ntype E { N int }\nfunc f(y Y) {}\nfunc f(e E) {}\n",
+		"type A{A()A}\ntype A{A()A}\ntype y{A()A}\ntype y{A A}\nfunc l(A y)A{A00}\ntype e{A A}\nfunc l(A e)A{A0000}",
+	} {
+		if p := check.OrderProblems(src, 16); len(p) > 0 {
+			t.Errorf("declaration order: %v", p)
+		}
+	}
+}

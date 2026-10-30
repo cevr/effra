@@ -286,6 +286,7 @@ func (c *checker) declare(id *syntax.Ident, o Object) bool {
 			what = "declared as a type"
 		}
 		c.errorf(id, CodeType, "%s is already %s in this package", id.Name, what)
+		c.dupNames[id.Name] = true
 		return false
 	}
 	c.pkg.Scope.insert(id.Name, o)
@@ -1442,14 +1443,26 @@ func (c *checker) collectSelfFuncs() {
 			continue
 		}
 		group := append([]*Func{f}, f.same...)
-		owners := map[*Named]bool{}
+		// A first parameter that names a duplicated declaration counts as
+		// a distinct local type: whether the kept declaration is one
+		// depends on which comes first, so the group's verdict must not
+		// read it (a follow-on of the duplicate; stage D1 round 2 review
+		// T1). Two members naming it still collide, whichever is kept.
+		owners := map[any]bool{}
 		valid := true
 		for _, g := range group {
-			if g.owner == nil || owners[g.owner] {
+			var key any
+			if g.owner != nil {
+				key = g.owner
+			}
+			if id, _, _ := selfOwnerName(g.Decl); id != nil && c.dupNames[id.Name] {
+				key = id.Name
+			}
+			if key == nil || owners[key] {
 				valid = false
 				break
 			}
-			owners[g.owner] = true
+			owners[key] = true
 		}
 		if valid {
 			for _, g := range group {
@@ -1478,6 +1491,34 @@ func (c *checker) collectSelfFuncs() {
 // binds.
 func (c *checker) selfOwner(f *Func) (*Named, []syntax.Expr, bool) {
 	d := f.Decl
+	id, args, ptr := selfOwnerName(d)
+	if id == nil {
+		return nil, nil, false
+	}
+	tn, ok := c.pkg.Scope.names[id.Name].(*TypeName)
+	if !ok {
+		return nil, nil, false
+	}
+	n, _ := tn.Type.(*Named)
+	if n == nil || n.Obj.Pkg != c.pkg || n.method(f.Name) != nil {
+		return nil, nil, false
+	}
+	if _, isIface := n.underlying().(*Interface); isIface {
+		return nil, nil, false
+	}
+	// A field of the same name does not stop f: x.f selects the field
+	// first, and f stays in the type's operation set, so it satisfies an
+	// interface method f (types.md, Structs 1; round 7 review O2).
+	if len(args) != len(n.TParams) || !c.selfArgsOK(d, args) {
+		return nil, nil, false
+	}
+	return n, args, ptr
+}
+
+// selfOwnerName returns the type name d's first parameter writes, T, *T or
+// T[A, B], with the type arguments and whether it is a pointer; nil when
+// the first parameter writes another type or d has none.
+func selfOwnerName(d *syntax.FuncDecl) (*syntax.Ident, []syntax.Expr, bool) {
 	if d.Type == nil || d.Type.Params == nil || len(d.Type.Params.List) == 0 {
 		return nil, nil, false
 	}
@@ -1506,24 +1547,7 @@ func (c *checker) selfOwner(f *Func) (*Named, []syntax.Expr, bool) {
 			}
 		}
 	}
-	tn, ok := c.pkg.Scope.names[id.Name].(*TypeName)
-	if !ok {
-		return nil, nil, false
-	}
-	n, _ := tn.Type.(*Named)
-	if n == nil || n.Obj.Pkg != c.pkg || n.method(f.Name) != nil {
-		return nil, nil, false
-	}
-	if _, isIface := n.underlying().(*Interface); isIface {
-		return nil, nil, false
-	}
-	// A field of the same name does not stop f: x.f selects the field
-	// first, and f stays in the type's operation set, so it satisfies an
-	// interface method f (types.md, Structs 1; round 7 review O2).
-	if len(args) != len(n.TParams) || !c.selfArgsOK(d, args) {
-		return nil, nil, false
-	}
-	return n, args, ptr
+	return id, args, ptr
 }
 
 // selfArgsOK reports whether every type argument of a first parameter's

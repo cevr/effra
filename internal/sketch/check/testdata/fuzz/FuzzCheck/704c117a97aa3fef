@@ -1,0 +1,2 @@
+go test fuzz v1
+string("type A{A()A}\ntype A{A()A}\ntype y{A()A}\ntype y{A A}\nfunc l(A y)A{A00}\ntype e{A A}\nfunc l(A e)A{A0000}")
