@@ -1,0 +1,10 @@
+// Package scope registers exit actions (docs/spec/runtime.md, Exit
+// actions). The Go body is runtime/v1's OnExit; its hidden argument, the
+// caller's frame scope, is docs/spec/stdlib.md's Hidden arguments.
+
+// OnExit registers body on the innermost enclosing function, as Go's defer
+// does: it runs when that function returns, on every path, masked, and the
+// blocks one call registered run last registered first. The block reads
+// its variables when it runs. It is called directly, never as a value (an
+// extern function is call-only).
+extern go ergo.local/prototype/runtime/v1.OnExit func OnExit[R](body func() needs R) needs R

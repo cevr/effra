@@ -1,0 +1,12 @@
+// Package task starts tasks (docs/spec/runtime.md, Tasks; #207). A Task is
+// the prelude's Task[T, E]: Wait() T fails E and Stop(). The Go body is
+// runtime/v1's Go; its hidden arguments, the caller's frame scope and the
+// call's site, are docs/spec/stdlib.md's Hidden arguments.
+
+// Go starts body as a child task of the calling task and returns at once:
+// the block runs later (parse-v1 ruling 5). The calling function owns the
+// Task until a Wait, a Stop or a direct return; when it returns without
+// them, it stops the task and waits until it has ended. The block's value
+// and failures are the Task's T and E; the providers it needs are the
+// caller's.
+extern go ergo.local/prototype/runtime/v1.Go func Go[T, E, R](body func() T fails E needs R) Task[T, E] needs R
