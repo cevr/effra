@@ -180,6 +180,34 @@ func TestTryCoversACaughtExpression(t *testing.T) {
 	}
 }
 
+// Comparability is structural (stage C round 2 review M1, M2): a union
+// compares only when every variant does, a row value and an operation
+// type's value never do, and every route reads the one rule: ==, a tuple,
+// a record field, a comparable constraint and a map key.
+func TestComparabilityIsStructural(t *testing.T) {
+	const decls = "type E { N []int }\ntype F {}\ntype V = E | F\ntype C { N int }\ntype U = C | F\ntype Svc { Do() int }\nfunc g() int fails E { 1 }\nfunc eq[T comparable](a T, b T) bool { a == b }\n"
+	for _, tc := range []struct{ name, src, want string }{
+		{"row-tuple", "func f() int {\n\tg() catch { case err: if (err, 1) == (err, 1) { 1 } else { 0 } }\n}", "S108:10"},
+		{"row-generic", "func f() int {\n\tg() catch { case err: if eq(err, err) { 1 } else { 0 } }\n}", "S108:10"},
+		{"row-assigned-union", "func f() int {\n\tg() catch {\n\tcase err:\n\t\tlet v V = err\n\t\tif v == v { 1 } else { 0 }\n\t}\n}", "S108:13"},
+		{"union-variant", "func same(a V, b V) bool { a == b }", "S108:9"},
+		{"union-record-field", "type H { X V }\nfunc same(a H, b H) bool { a == b }", "S108:10"},
+		{"union-generic", "func same(a V, b V) bool { eq(a, b) }", "S108:9"},
+		{"union-map-key", "func f() int { let m = Map[V, int]{}; len(m) }", "S108:9"},
+		{"operation-type", "func same(a Svc, b Svc) bool { a == b }", "S108:9"},
+		{"comparable-union", "func same(a U, b U) bool { a == b && eq(a, b) && (a, 1) == (b, 1) }", ""},
+		{"comparable-union-key", "func f() int { let m = Map[U, int]{}; len(m) }", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := decls + tc.src + "\n"
+			got, d := codeLines(src)
+			if got != tc.want {
+				t.Fatalf("want [%s], got %s", tc.want, describe(d))
+			}
+		})
+	}
+}
+
 // D-C3 (review M8): a row value is returned, matched, caught or assigned
 // to a union that lists its types, and has no other operation.
 func TestRowValueOperations(t *testing.T) {

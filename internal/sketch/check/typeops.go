@@ -405,8 +405,14 @@ func (c *checker) implements(v Type, it *Interface) string {
 	return ""
 }
 
-// comparable reports whether == applies to values of t (Go's rule; a
-// union compares as an interface).
+// comparable reports whether == applies to values of t. Comparability is
+// structural (types.md, Operators 1): a record or tuple compares when its
+// fields do, and a union only when every variant does. A row value (a
+// `case err:` binding, D-C3) never compares, and neither does an operation
+// type's value, whose provider type is not known here: Go would compare
+// either as an interface and panic on a variant that does not compare. Every
+// use of comparability reads this one rule: ==, tuples, record fields,
+// comparable constraints and map keys.
 func comparable(t Type) bool {
 	return comparableSeen(t, map[Type]bool{})
 }
@@ -436,7 +442,24 @@ func comparableSeen(t Type, seen map[Type]bool) bool {
 			}
 		}
 		return true
-	case *Interface, *Union, *Pointer:
+	case *Union:
+		if isRowValue(t) {
+			return false
+		}
+		// A recursive union reaches itself through its named type.
+		if seen[t] {
+			return true
+		}
+		seen[t] = true
+		for _, v := range u.Variants {
+			if !comparableSeen(v, seen) {
+				return false
+			}
+		}
+		return true
+	case *Interface:
+		return false
+	case *Pointer:
 		return true
 	case *TypeParam:
 		ci := asInterface(u.Constraint)
