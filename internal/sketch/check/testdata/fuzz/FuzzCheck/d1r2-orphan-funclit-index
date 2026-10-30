@@ -1,0 +1,2 @@
+go test fuzz v1
+string("func probe() int { 0[func() { probe() }] }")

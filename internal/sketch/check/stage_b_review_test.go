@@ -22,8 +22,12 @@ func TestRefusedPatternNameBinds(t *testing.T) {
 			src := fmt.Sprintf("%s\ntype R { Value string }\nfunc F(r R) string { match r { case R{Value: %s}: return %s } }\n", tc.decl, tc.name, tc.name)
 			_, d := check.CheckSource(src)
 			want := tc.name + " already names"
-			if tc.name == "Finished" {
+			switch tc.name {
+			case "Finished":
 				want = "Finished does not match"
+			case "len":
+				// D-D3 in every binder kind (stage D1 round 1 review m2).
+				want = "len is a prelude name, which cannot be redeclared"
 			}
 			if len(d) != 1 || d[0].Code != check.CodeType || !strings.Contains(d[0].Message, want) {
 				t.Fatalf("want one refused-name diagnostic, got %s", describe(d))
@@ -36,7 +40,7 @@ func TestRefusedPatternNameBinds(t *testing.T) {
 // be reused. Known types still test, and prelude names stay protected.
 func TestSingleNameLetPattern(t *testing.T) {
 	for _, tc := range []struct{ name, src, code string }{
-		{"constant", `func F() { let true = false }`, check.CodeType},
+		{"constant", `func F() { let true = false; _ = true }`, check.CodeType},
 		{"variant", `type State = Pending{} | Finished{}
 func F(s State) { let Pending = s }`, check.CodeNotTotal},
 		{"own-record", `type R { N int }

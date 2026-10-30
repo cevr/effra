@@ -9,8 +9,9 @@ import (
 	"ergo.local/prototype/internal/sketch/check"
 )
 
-// A protected name in a binder names the prelude rule. Comparing is advice
-// for match arms; it cannot repair a local declaration.
+// A protected name in a binder names the prelude rule, in a let and in a
+// match arm alike (D-D3 for every binder kind; stage D1 round 1 review
+// m2).
 func TestPreludeLetNamesUseBinderDiagnostic(t *testing.T) {
 	for _, name := range []string{"Sleep", "len"} {
 		t.Run(name, func(t *testing.T) {
@@ -20,8 +21,8 @@ func TestPreludeLetNamesUseBinderDiagnostic(t *testing.T) {
 				t.Fatalf("want one prelude-binder diagnostic %q, got %s", want, describe(d))
 			}
 			_, arm := check.CheckSource(fmt.Sprintf("func F(n int) int { match n { case %s: return %s\ncase _: return 0 } }\n", name, name))
-			if len(arm) != 1 || arm[0].Code != check.CodeType || !strings.Contains(arm[0].Message, "compare with if") {
-				t.Fatalf("match-arm advice changed: %s", describe(arm))
+			if len(arm) != 1 || arm[0].Code != check.CodeType || arm[0].Message != want {
+				t.Fatalf("want one prelude-binder diagnostic %q in a match arm, got %s", want, describe(arm))
 			}
 		})
 	}

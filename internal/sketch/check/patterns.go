@@ -99,6 +99,7 @@ func (c *checker) irrefutable(p syntax.Expr, t Type, what string, own map[*synta
 	r := c.newPatResolver()
 	r.sp.written = 1 + patternSize(p)
 	r.bindings = true
+	r.letFor = true
 	r.own = own
 	r.begin()
 	if isInvalid(t) {
@@ -148,12 +149,10 @@ func (c *checker) irrefutable(p syntax.Expr, t Type, what string, own map[*synta
 func (c *checker) declareBindings(binds []patBinding) []*Var {
 	var out []*Var
 	for _, b := range binds {
-		if isInvalid(b.t) {
-			// A placeholder of a refused pattern, or a binding of an
-			// invalid value: the pattern carries the one diagnostic, so
-			// the binder rules add none (D3).
-			c.refuseBinder(b.id.Pos())
-		}
+		// A binder of an invalid value, or of a pattern with an error
+		// elsewhere, still meets D-D2, D-D3 and the duplicate check: they
+		// do not depend on its type. A binder the pattern itself refused
+		// is recorded there (refuseBinder) and adds nothing.
 		v := c.declareLocal(b.id, b.t)
 		if v != nil {
 			b.info.Var = v

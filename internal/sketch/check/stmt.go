@@ -1,7 +1,6 @@
 package check
 
 import (
-	"ergo.local/prototype/internal/sketch/std"
 	"ergo.local/prototype/internal/sketch/syntax"
 )
 
@@ -243,15 +242,13 @@ func (c *checker) varDecl(d *syntax.VarDecl) {
 			c.mutPattern(d)
 		}
 		p := spec.Pattern
-		if p == nil && len(spec.Names) == 1 {
-			n := spec.Names[0]
-			switch o := c.lookup(n.Name).(type) {
-			case *Const, *TypeName, *capBinding, *Builtin:
-				p = n
-			case *Func:
-				if o.Pkg != nil && o.Pkg.Path == std.PreludePath {
-					p = n
-				}
+		// A single name that names a type or a constant of the package is
+		// a pattern (a type test, a constant); a prelude name is a binder
+		// that D-D3 refuses, binding with the value's type (declareLocal).
+		if p == nil && len(spec.Names) == 1 && !c.isPreludeName(spec.Names[0].Name) {
+			switch c.lookup(spec.Names[0].Name).(type) {
+			case *Const, *TypeName, *capBinding:
+				p = spec.Names[0]
 			}
 		}
 		if p != nil {
@@ -458,6 +455,9 @@ func (c *checker) lhs(x syntax.Expr) operand {
 	}
 	op := c.valueExpr(x, nil)
 	if op.invalid() {
+		// A target that fails typing (`c.Cuont = 2`) carries its own
+		// diagnostic; its let mut root still counts as reassigned (D3).
+		c.markReassigned(x)
 		return op
 	}
 	c.assignable0(x, &op)
@@ -509,6 +509,7 @@ func (c *checker) returnStmt(s *syntax.ReturnStmt) {
 		if len(results) == 1 {
 			hint = results[0]
 		}
+		pinnedMark := c.pinnedSeq
 		op := c.expr(s.Results[0], hint)
 		if op.invalid() {
 			return
@@ -539,6 +540,9 @@ func (c *checker) returnStmt(s *syntax.ReturnStmt) {
 			return
 		}
 		switch {
+		case len(results) == 0 && op.mode == modeNoValue && c.pinnedSeq != pinnedMark:
+			// `return b()` over a refused member's pinned row: with its
+			// real row it may pass failures on, so this is a follow-on.
 		case len(results) == 0:
 			c.errorf(s.Results[0], CodeType, "%s returns no value", c.describeTarget())
 		case len(results) == 1:

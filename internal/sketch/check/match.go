@@ -89,6 +89,9 @@ type patResolver struct {
 	bound    map[string]bool // the names binds holds
 	bad      bool            // the current item has a reported error
 	bindings bool            // let/for: D-D2 permits binding over package objects
+	// letFor: a let or for pattern, where a bare prelude name is a binder
+	// D-D3 refuses, never a type test or a constant.
+	letFor bool
 	// own holds the binding names of a package-level let's pattern, which
 	// the package scope already declares: they bind, not refer.
 	own map[*syntax.Ident]bool
@@ -281,6 +284,15 @@ func (r *patResolver) pattern0(e syntax.Expr, t Type, col int) resolved {
 			r.bind(x, t, info, false)
 			return resolved{t: t, info: info}
 		}
+		if r.letFor && c.isPreludeName(x.Name) {
+			// A let or for pattern has no type test on a bare name of
+			// the prelude: the name is a binder, D-D3's S108 is its one
+			// diagnostic, and it binds with the value's type.
+			c.preludeName(x)
+			info := &Pattern{Kind: PatBind}
+			r.bind(x, t, info, false)
+			return resolved{t: t, info: info}
+		}
 		switch o := c.lookup(x.Name).(type) {
 		case *Const:
 			return r.constant(x, t, col)
@@ -290,8 +302,9 @@ func (r *patResolver) pattern0(e syntax.Expr, t Type, col int) resolved {
 			if r.bindings && reusableBinderName(o) {
 				break
 			}
-			if r.bindings {
-				// Only a prelude function or built-in is not reusable.
+			if r.bindings || c.isPreludeName(x.Name) {
+				// A prelude function or built-in: D-D3, in every
+				// binder kind (match and catch patterns included).
 				c.preludeName(x)
 			} else {
 				c.errorf(x, CodeType, "a pattern name binds; %s already names %s: compare with if, or choose another name (rows.md, Totality 1)", x.Name, objectNoun(o))

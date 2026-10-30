@@ -128,29 +128,83 @@ func (c *checker) bindLocal(v *Var) *Var {
 // else refused-by-class-G in the reporting pass, and provisional (no
 // record) in a silent one.
 func (c *checker) skipFrames(x *syntax.CallExpr) {
-	if c.curGen == 0 {
+	for _, a := range x.Args {
+		if fl, ok := a.(*syntax.FuncLit); ok {
+			c.skipFrame(fl, c.callMark)
+		}
+	}
+	if x.Trailing != nil {
+		c.skipFrame(x.Trailing, c.callMark)
+	}
+}
+
+// skipFrame records the callback frame n, when typing did not check it in
+// this body check, as skipFrames does: invalid-diagnosed when nothing
+// undiagnosed was read since mark (the undiagSeq where the skipping
+// expression began), else refused-by-class-G in the reporting pass and
+// provisional in a silent one. Every route that skips a value holding a
+// frame comes here: a call's arguments and trailing block, the elements
+// of a literal whose type is unknown, the index of an invalid base
+// (stage D1 round 1 review M6). The let mut locals the frame reassigns or
+// borrows count as reassigned, so Q3 adds no false S110 beside the
+// diagnostic that skipped it (M3).
+func (c *checker) skipFrame(n syntax.Node, mark int) {
+	if c.curGen == 0 || c.frameGen[n] == c.curGen {
 		return
 	}
+	c.markReassignedIn(n)
 	rec := c.frameInv
-	if c.undiagSeq != c.callMark {
+	if c.undiagSeq != mark {
 		if c.silent > 0 {
 			return
 		}
 		rec = c.frameRef
 	}
-	skip := func(n syntax.Node) {
-		if c.frameGen[n] != c.curGen {
-			rec[n] = c.curGen
+	rec[n] = c.curGen
+}
+
+// markReassignedIn marks, from the syntax alone, each let mut local that
+// a frame typing skipped assigns to, borrows with &, or calls a function
+// on (which may take *T): the frame's names are not in scope, and D-D2
+// means a name there that a visible let mut has is that local. Marking
+// too many only drops an S110 in a program that already has an error.
+func (c *checker) markReassignedIn(n syntax.Node) {
+	mark := func(x syntax.Expr) {
+		for {
+			switch e := x.(type) {
+			case *syntax.ParenExpr:
+				x = e.X
+			case *syntax.SelectorExpr:
+				x = e.X
+			case *syntax.IndexExpr:
+				x = e.X
+			case *syntax.Ident:
+				if v, ok := c.lookup(e.Name).(*Var); ok && v.mut {
+					v.reassigned = true
+				}
+				return
+			default:
+				return
+			}
 		}
 	}
-	for _, a := range x.Args {
-		if fl, ok := a.(*syntax.FuncLit); ok {
-			skip(fl)
+	syntax.Inspect(n, func(n syntax.Node) bool {
+		switch s := n.(type) {
+		case *syntax.AssignStmt:
+			for _, l := range s.Lhs {
+				mark(l)
+			}
+		case *syntax.UnaryExpr:
+			if s.Op == syntax.AND {
+				mark(s.X)
+			}
+		case *syntax.CallExpr:
+			if sel, ok := s.Fun.(*syntax.SelectorExpr); ok {
+				mark(sel.X)
+			}
 		}
-	}
-	if x.Trailing != nil {
-		skip(x.Trailing)
-	}
+		return true
+	})
 }
 
 // frameStateAt is typing's record of the callback frame n in the body

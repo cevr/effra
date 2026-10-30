@@ -483,53 +483,44 @@ func fitsInt64(v constant.Value) bool {
 // ---------------------------------------------------------------- composite literals
 
 // orphanElements types the element values of a composite literal whose
-// written type did not resolve (reported there), as the arguments of an
-// invalid callee are (silentArgs): each value's own errors show and its
-// names resolve as the reference walk resolves them (class H; stage D1
-// fuzz triage, `with 0 { with wire { A: A{read} } {} }`). A key is a field
-// name of an unknown type and stays unchecked; a function literal and an
-// elided-type literal need the missing type and are skipped.
-func (c *checker) orphanElements(x *syntax.CompositeLit) {
+// type is unknown (reported, or invalid for another reason), as orphans
+// (orphanValues; stage D1 fuzz triage, `with 0 { with wire { A: A{read} }
+// {} }`). A key is a field name of an unknown type and stays unchecked.
+func (c *checker) orphanElements(x *syntax.CompositeLit, mark int) {
 	for _, e := range x.Elts {
 		if kv, ok := e.(*syntax.KeyValueExpr); ok {
 			e = kv.Value
 		}
-		switch e := e.(type) {
-		case *syntax.FuncLit:
-			continue
-		case *syntax.CompositeLit:
-			if e.Type == nil {
-				continue
-			}
-		}
-		op := c.expr(e, nil)
-		if op.mode == modeType {
-			continue
-		}
-		c.needValue(&op)
-		c.handled(&op)
+		c.orphan(e, mark)
 	}
 }
 
 func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 	var t Type
+	mark := c.undiagSeq
 	switch {
 	case x.Type == nil:
 		if hint == nil || isInvalid(hint) {
 			if hint == nil {
 				c.errorf(x, CodeType, "a composite literal without a type needs one from its context")
+			} else {
+				// The invalid hint may come from an undiagnosed read
+				// earlier in the statement.
+				mark = c.stmtMark
 			}
+			c.orphanElements(x, mark)
 			return bad(x)
 		}
 		t = hint
 	default:
 		t = c.literalType(x, hint)
 		if t == nil {
-			c.orphanElements(x)
+			c.orphanElements(x, mark)
 			return bad(x)
 		}
 	}
 	if isInvalid(t) {
+		c.orphanElements(x, mark)
 		return bad(x)
 	}
 	if isZeroRecord(t) && len(x.Elts) == 0 {
@@ -1055,14 +1046,18 @@ func (c *checker) qualified(x *syntax.SelectorExpr, pn *PkgName) operand {
 // ---------------------------------------------------------------- index and slice
 
 func (c *checker) index(x *syntax.IndexExpr, hint Type) operand {
+	mark := c.undiagSeq
 	base := c.expr(x.X, nil)
 	switch base.mode {
 	case modeInvalid:
 		// The indices may be type arguments of a refused generic callee,
 		// so they are typed silently: their names resolve as the
-		// reference walk resolves them, and nothing cascades (D3).
+		// reference walk resolves them, and nothing cascades (D3). The
+		// frames among them are recorded first, outside the silence, so
+		// a refused-by-class-G frame is recorded in the reporting pass.
+		c.skipOrphanFrames(x.Indices, mark)
 		c.silent++
-		c.orphanValues(x.Indices)
+		c.orphanValues(x.Indices, mark)
 		c.silent--
 		return bad(x)
 	case modeGeneric:
@@ -1077,12 +1072,12 @@ func (c *checker) index(x *syntax.IndexExpr, hint Type) operand {
 	c.needValue(&base)
 	c.handled(&base)
 	if base.invalid() {
-		c.orphanValues(x.Indices)
+		c.orphanValues(x.Indices, mark)
 		return bad(x)
 	}
 	if len(x.Indices) != 1 {
 		c.errorf(x, CodeType, "one index expected")
-		c.orphanValues(x.Indices)
+		c.orphanValues(x.Indices, mark)
 		return bad(x)
 	}
 	t := base.typ
@@ -1108,7 +1103,7 @@ func (c *checker) index(x *syntax.IndexExpr, hint Type) operand {
 		}
 	}
 	c.errorf(x, CodeType, "cannot index %s", base.typ)
-	c.orphanValues(x.Indices)
+	c.orphanValues(x.Indices, mark)
 	return bad(x)
 }
 

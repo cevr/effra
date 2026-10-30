@@ -1,0 +1,2 @@
+go test fuzz v1
+string("func probe() int { Unknown{{0() { probe }}} }")

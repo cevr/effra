@@ -55,6 +55,7 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 		op.errs = nil
 		return op
 	}
+	pinnedMark := c.pinnedSeq
 	op := c.exprAs(x.X, hint, use)
 	if t != nil {
 		inner = t.tried
@@ -75,6 +76,11 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 		return op
 	}
 	if !op.fallible() {
+		if c.pinnedSeq != pinnedMark {
+			// The row read a refused member's pinned row: a follow-on.
+			op.addressable = false
+			return op
+		}
 		c.errorf(x, CodeType, "try on an expression that cannot fail (rows.md, Error rows 6)")
 		op.addressable = false
 		return op
@@ -109,12 +115,15 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 	if !wantValue {
 		use = useDiscard
 	}
+	pinnedMark := c.pinnedSeq
 	op := c.exprAs(x.X, hint, use)
 	valid := !op.invalid()
 	// open: the row may still grow in this component (rowWaits). operandOK:
 	// the caught expression is valid, so an arm its row lacks is not a
-	// cascade of its diagnostic.
-	open, operandOK := c.openRowSeq != openMark, valid
+	// cascade of its diagnostic. pinned: the row read a refused member's
+	// pinned row, a lower bound, so no absence check holds on it.
+	pinned := c.pinnedSeq != pinnedMark
+	open, operandOK := c.openRowSeq != openMark, valid && !pinned
 	if valid {
 		switch op.mode {
 		case modeValue, modeConst, modeNoValue:
@@ -132,7 +141,9 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 	// review M1).
 	hasValue := valid && op.mode != modeNoValue
 	if valid && row.Empty() {
-		c.errorf(x.X, CodeType, "catch on an expression that cannot fail (rows.md, Catch 1)")
+		if !pinned {
+			c.errorf(x.X, CodeType, "catch on an expression that cannot fail (rows.md, Catch 1)")
+		}
 		valid = false
 	}
 	var valueType Type
@@ -199,7 +210,7 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 			if it.t == nil || unreachable {
 				continue
 			}
-			cs.judge(it, row, valid)
+			cs.judge(it, row, valid && !pinned)
 		}
 		saved := c.fn.scope
 		c.fn.scope = newScope(saved)

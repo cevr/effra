@@ -27,12 +27,18 @@ import "ergo.local/prototype/internal/sketch/syntax"
 // prelude's exported names.
 var predeclaredNames = map[string]bool{"Map": true, "ordered": true, "number": true}
 
+// notPreludeNames are universe names outside D-D3's decided list: `any`
+// and `error` are stage E's (D-E2), `uintptr`, `complex64` and
+// `complex128` are not v1 types, `with` is a keyword and `go` names the
+// extern go package. Each keeps the treatment it had before D-D3.
+var notPreludeNames = map[string]bool{"any": true, "error": true, "uintptr": true, "complex64": true, "complex128": true, "with": true, "go": true}
+
 // isPreludeName reports whether name is predeclared for this package: a
-// universe name, an exported prelude name, or one of predeclaredNames. The
-// prelude package itself sees only the universe above it, so its own
-// declarations are not refused.
+// universe name of D-D3's list, an exported prelude name, or one of
+// predeclaredNames. The prelude package itself sees only the universe
+// above it, so its own declarations are not refused.
 func (c *checker) isPreludeName(name string) bool {
-	if name == "_" {
+	if name == "_" || notPreludeNames[name] {
 		return false
 	}
 	if predeclaredNames[name] {
@@ -176,15 +182,24 @@ func (c *checker) mutPattern(d *syntax.VarDecl) {
 	c.errorAt(d.Mut, d.Mut+3, CodeType, "let mut binds names, and a pattern's bindings are immutable: write let mut v = e, then destructure v with let or match (#196, 196v)")
 }
 
+// rootKind is what an assignment target or a borrow is rooted at.
+type rootKind int
+
+const (
+	rootName    rootKind = iota // an identifier, through fields and indexes
+	rootPointer                 // a write through a pointer
+	rootOther                   // a call's result, a literal, a conversion
+)
+
 // assignRoot returns the identifier an assignment target or a borrow is
-// rooted at, through parentheses, fields and indexes, or nil when the
-// target is rooted at another expression (a call's result, a literal) or
-// goes through a pointer: a write through a pointer changes the pointee,
-// not the value the root names, and taking that pointer was the borrow
-// the rule checks (D-D1; pointers are #222's). It reads the types typing
-// recorded, so the caller types x first; a pass that records no types
-// (a silent one) walks to the identifier and reports nothing.
-func (c *checker) assignRoot(x syntax.Expr) *syntax.Ident {
+// rooted at, through parentheses, fields and indexes (rootName). A target
+// that goes through a pointer is rootPointer: a write through a pointer
+// changes the pointee, not the value the root names, and taking that
+// pointer was the borrow the rule checks (D-D1; pointers are #222's). A
+// target rooted at any other expression is rootOther (Q2). It reads the
+// types typing recorded, so the caller types x first; a pass that records
+// no types (a silent one) walks to the identifier and reports nothing.
+func (c *checker) assignRoot(x syntax.Expr) (*syntax.Ident, rootKind) {
 	throughPointer := func(e syntax.Expr) bool {
 		_, ok := c.pkg.Info.Types[e].(*Pointer)
 		return ok
@@ -195,18 +210,20 @@ func (c *checker) assignRoot(x syntax.Expr) *syntax.Ident {
 			x = e.X
 		case *syntax.SelectorExpr:
 			if throughPointer(e.X) {
-				return nil
+				return nil, rootPointer
 			}
 			x = e.X
 		case *syntax.IndexExpr:
 			if throughPointer(e.X) {
-				return nil
+				return nil, rootPointer
 			}
 			x = e.X
+		case *syntax.StarExpr:
+			return nil, rootPointer
 		case *syntax.Ident:
-			return e
+			return e, rootName
 		default:
-			return nil
+			return nil, rootOther
 		}
 	}
 }
@@ -235,7 +252,7 @@ func (c *checker) borrowRoot(at syntax.Node, x syntax.Expr, fn string) {
 // markReassigned records an assignment to a target refused for another
 // reason: its let mut root counts as reassigned, with no diagnostic.
 func (c *checker) markReassigned(x syntax.Expr) {
-	if id := c.assignRoot(x); id != nil {
+	if id, _ := c.assignRoot(x); id != nil {
 		if v, ok := c.lookup(id.Name).(*Var); ok && v.mut {
 			v.reassigned = true
 		}
@@ -243,7 +260,14 @@ func (c *checker) markReassigned(x syntax.Expr) {
 }
 
 func (c *checker) checkRoot(at syntax.Node, x syntax.Expr, borrow string) {
-	id := c.assignRoot(x)
+	id, kind := c.assignRoot(x)
+	if kind == rootOther && borrow == "" {
+		// `xs()[0] = 5`, `[]int{1, 2}[0] = 3`: the write is lost or
+		// changes a value no let mut names (Q2). A borrow of a literal
+		// (`&R{N: 1}`) allocates, and typing judges a borrow's operand.
+		c.errorf(at, CodeType, "an assignment target is rooted at a let mut local, directly or through fields and indexes; this one is rooted at %s (#196, 196v)", rootText(x))
+		return
+	}
 	if id == nil || id.Name == "_" {
 		return
 	}
@@ -281,6 +305,26 @@ func (c *checker) checkRoot(at syntax.Node, x syntax.Expr, borrow string) {
 		c.errorf(at, CodeType, "%s %s; declare %s with let mut (#196, 196v)", id.Name, how, id.Name)
 	default:
 		c.errorf(at, CodeType, "the binding %s %s; copy it into a local: let mut %s = %s (#196, 196v)", id.Name, how, renamed(id.Name), id.Name)
+	}
+}
+
+// rootText names the expression a rootOther target starts from.
+func rootText(x syntax.Expr) string {
+	for {
+		switch e := x.(type) {
+		case *syntax.ParenExpr:
+			x = e.X
+		case *syntax.SelectorExpr:
+			x = e.X
+		case *syntax.IndexExpr:
+			x = e.X
+		case *syntax.CallExpr:
+			return "a call's result"
+		case *syntax.CompositeLit:
+			return "a literal"
+		default:
+			return "an expression that is not a local"
+		}
 	}
 }
 

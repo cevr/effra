@@ -519,17 +519,19 @@ func funcKey(f *Func) string {
 // (refused): in the reporting pass, every reference to a member whose
 // pinned row its body exceeds is invalid, so nothing cascades from it
 // (D3); the S108 is at the member's declaration (reportGroup). A reference
-// from outside the component, checked after it settled, is refused the
-// same way: the pinned row is no evidence for the caller either (stage D1:
-// classf/go-statement.ergo's caller F got a cascade "returns no value").
+// from outside the component, checked after it settled, keeps f's written
+// signature, so an arity or argument mistake there is still reported; only
+// its pinned rows are no evidence, so it counts a pinned read (pinnedSeq)
+// and the absence checks of the expression around it are skipped
+// (classf/go-statement.ergo's caller F got a cascade "returns no value";
+// stage D1 round 1 review M5).
 func (c *checker) groupRef(f *Func) bool {
 	if !f.inferErrors && !f.inferUses {
 		return false
 	}
 	if !c.group[f] {
 		if c.silent == 0 && c.refusedMembers[f] {
-			c.readUndiagnosed()
-			return true
+			c.pinnedSeq++
 		}
 		return false
 	}
@@ -1096,8 +1098,16 @@ func (c *checker) checkPkgVar(pv *pkgVar) {
 	defer func() { c.cur = saved }()
 	t := &target{name: "the initializer of " + pv.obj.Name, declErrors: newRow(), declUses: newRow(), resultKnown: true}
 	prev := c.fn
-	c.fn = &funcCtx{t: t, scope: newScope(c.pkg.Scope)}
+	fc := &funcCtx{t: t, scope: newScope(c.pkg.Scope)}
+	c.fn = fc
 	defer func() { c.fn = prev }()
+	// The locals of the initializer's function literals follow the
+	// function rules: unused, and never reassigned (Q3; stage D1 round 1
+	// review M4).
+	defer func() {
+		c.reportUnused(fc)
+		c.reportNeverReassigned(fc)
+	}()
 	if g := pv.group; g != nil {
 		c.pkgPatternCheck(g)
 		for _, m := range g.members {

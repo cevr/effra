@@ -208,6 +208,12 @@ type checker struct {
 	// counts the reads of a row that holds an unsolved variable of a
 	// member of the component being checked.
 	openRowSeq int
+	// pinnedSeq counts the references, from a later component, to a member
+	// class G refused (groupRef): its pinned rows are a lower bound, so an
+	// absence check (try or catch on an expression that cannot fail, Catch
+	// 2, a bare generic arm, a return of no value) over an expression that
+	// read one is a follow-on and is skipped (rows.md, Inference 6).
+	pinnedSeq int
 	// useGens, set only by a test, receives the body checks in which typing
 	// resolved each identifier (RefWalkProblems: an independent witness
 	// of which frames a check typed).

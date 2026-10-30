@@ -63,6 +63,12 @@ func (c *checker) catchAll(id *syntax.Ident) bool {
 		// the reuse is D-D2's S108 at the binder, not a type test. A local
 		// hides no package object, so the reference walk agrees.
 		return !o.pkg
+	case *Builtin, *Func:
+		// A prelude function or built-in names no error type: the arm
+		// binds the rest, and D-D3's S108 at the name is its one
+		// diagnostic. A prelude name hides no package object, so the
+		// reference walk agrees.
+		return c.isPreludeName(id.Name)
 	}
 	return false
 }
