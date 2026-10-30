@@ -95,7 +95,9 @@ var invalidRoutes = map[string][]route{
 		{name: "a record literal's field", decls: "type S { run task.Fn }\n", local: "let s = S{run: task.Go}", callee: "s.run"},
 	},
 	"KeyValueExpr": {
-		{name: "a map element", local: `let ms = Map[string, task.Fn]{"go": task.Go}`, callee: `ms["go"]`},
+		// A Map read is refused (stage D2 design ruling): the callee is
+		// invalid for that reason too, and the callback still checks.
+		{name: "a map element", local: `let ms = Map[string, task.Fn]{"go": task.Go}`, callee: `ms["go"]`, staged: "S108"},
 	},
 	"FuncLit": {
 		{name: "a function literal's result", local: "let mk = func() task.Fn { return task.Go }", callee: "mk()"},

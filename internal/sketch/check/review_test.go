@@ -299,11 +299,13 @@ func F(m Map[int, S], n Map[int, int]) {
 	let mut n2 = n
 	m2[0] = S{}
 	m2[1] = S{X: 2}
-	n2[3] += S{}.X
+	n2[3] = S{}.X
 }`},
 	{"M17", "map-index-field-increment", "S108", `type S { X int }
 func F(m Map[int, S]) { m[2].X += 1 }`},
-	{"M17", "map-value-increment", "", `func F(m Map[int, int]) {
+	// An op-assignment to a Map entry reads it first: a Map read is
+	// refused (stage D2 design ruling), once per site.
+	{"M17", "map-value-increment", "S108 S108", `func F(m Map[int, int]) {
 	let mut m2 = m
 	m2[0] += 1
 	m2[1] += 2

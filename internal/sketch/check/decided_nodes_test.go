@@ -521,11 +521,12 @@ func f() {
 func main() {}
 `, []string{"S108:3"}},
 	{"range value", "range value", `
-func f() {
+func f() int {
 	let r = 1..2
+	r.End
 }
 func main() {}
-`, []string{"S109:3"}},
+`, nil},
 	{"for condition", "for with a condition and for alone", `
 func f() int {
 	let mut n = 0
@@ -621,7 +622,7 @@ func f(xs []int, m Map[string, int]) int {
 	p.X = -(g(&p) + 1)
 	let ys = xs[1:2:3]
 	let zs = xs[:1]
-	let n = ys[0] + m["a"] + len(zs)
+	let n = ys[0] + len(m) + len(zs)
 	if n > 0 && !(n == 3) {
 		return n
 	} else if n < 0 {

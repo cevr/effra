@@ -1043,11 +1043,7 @@ func (c *checker) builtin(x *syntax.CallExpr, b *Builtin) operand {
 	if op.invalid() {
 		return bad(x)
 	}
-	t := op.typ
-	if p, ok := t.(*Pointer); ok {
-		t = p.Elem
-	}
-	switch u := under(t).(type) {
+	switch u := under(op.typ).(type) {
 	case *Basic:
 		if isString(u) {
 			if op.mode == modeConst {

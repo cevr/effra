@@ -73,7 +73,7 @@ func TestLetMutReassignment(t *testing.T) {
 		{"let-field", decls + "func f(r R) int {\n\tlet c = r\n\tc.N = 2\n\tc.N\n}\n", []string{"S108:9"}},
 		{"parameter-field", decls + "func f(r R) int {\n\tr.N = 2\n\tr.N\n}\n", []string{"S108:8"}},
 		{"parameter-element", decls + "func f(xs []int) int {\n\txs[0] = 2\n\txs[0]\n}\n", []string{"S108:8"}},
-		{"parameter-map-entry", decls + "func f(m Map[string, int]) int {\n\tm[\"a\"] = 2\n\tm[\"a\"]\n}\n", []string{"S108:8"}},
+		{"parameter-map-entry", decls + "func f(m Map[string, int]) int {\n\tm[\"a\"] = 2\n\tlen(m)\n}\n", []string{"S108:8"}},
 		{"loop-field", decls + "func f(rs []R) {\n\tfor r in rs {\n\t\tr.N = 1\n\t\tuse(r.N)\n\t}\n}\n", []string{"S108:9"}},
 		{"let-mut-field", decls + "func f(r R) int {\n\tlet mut c = r\n\tc.N = 2\n\tc.N\n}\n", nil},
 		{"let-mut-element", decls + "func f(xs []int) int {\n\tlet mut ys = xs\n\tys[0] += 2\n\tys[0]\n}\n", nil},

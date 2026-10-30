@@ -272,15 +272,15 @@ type Match struct {
 	Partial bool
 }
 
-// LoopDomain is what a for-in iterates.
+// LoopDomain is what a for-in iterates (D-D4): a slice, a Map, a prelude
+// Range[T] over an integer T, or a prelude Seq[T].
 type LoopDomain int
 
 const (
 	LoopSlice LoopDomain = iota + 1
 	LoopMap
 	LoopRange
-	LoopString
-	LoopInt
+	LoopSeq
 )
 
 // Loop is one for-in.

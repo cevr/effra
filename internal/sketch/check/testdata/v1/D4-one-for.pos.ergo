@@ -1,0 +1,32 @@
+// One `for` (fourth round) with the Map rule (#196 "for over a Map"): one
+// binding is the element (a Map's value), two are the position and the
+// element (a Map's key and value); `a..b` is a Range over one integer type.
+func loops(xs []int64, m Map[string, int64]) int64 {
+	let mut total int64 = 0
+	for x in xs {
+		total += x
+	}
+	for i, x in xs {
+		total += int64(i) * x
+	}
+	for v in m {
+		total += v
+	}
+	for k, v in m {
+		total += v + int64(len(k))
+	}
+	for i in 0..len(xs) {
+		total += xs[i]
+	}
+	let r = 0..3
+	for j in r {
+		total += int64(j)
+	}
+	for total < 100 {
+		total *= 2
+	}
+	for {
+		break
+	}
+	total
+}

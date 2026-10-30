@@ -226,6 +226,22 @@ func (c *checker) unusedValue(at syntax.Expr, op operand) {
 	}
 }
 
+// namePattern is the single-name binder rule, one for a `let` and a `for`
+// binder (stage B round 2 review, item 4): a single name that names a type
+// or a constant of the package is a pattern (a type test, a constant); a
+// prelude name is a binder that D-D3 refuses, binding with the value's
+// type (declareLocal); any other name binds.
+func (c *checker) namePattern(id *syntax.Ident) bool {
+	if c.isPreludeName(id.Name) {
+		return false
+	}
+	switch c.lookup(id.Name).(type) {
+	case *Const, *TypeName, *capBinding:
+		return true
+	}
+	return false
+}
+
 // varDecl checks a local var declaration. A var of a type with no zero
 // value needs a value (types.md, Zero values 3).
 func (c *checker) varDecl(d *syntax.VarDecl) {
@@ -242,14 +258,8 @@ func (c *checker) varDecl(d *syntax.VarDecl) {
 			c.mutPattern(d)
 		}
 		p := spec.Pattern
-		// A single name that names a type or a constant of the package is
-		// a pattern (a type test, a constant); a prelude name is a binder
-		// that D-D3 refuses, binding with the value's type (declareLocal).
-		if p == nil && len(spec.Names) == 1 && !c.isPreludeName(spec.Names[0].Name) {
-			switch c.lookup(spec.Names[0].Name).(type) {
-			case *Const, *TypeName, *capBinding:
-				p = spec.Names[0]
-			}
+		if p == nil && len(spec.Names) == 1 && c.namePattern(spec.Names[0]) {
+			p = spec.Names[0]
 		}
 		if p != nil {
 			patternSpec := *spec
@@ -453,7 +463,10 @@ func (c *checker) lhs(x syntax.Expr) operand {
 			return op
 		}
 	}
+	saved := c.writeTarget
+	c.writeTarget = unparen(x)
 	op := c.valueExpr(x, nil)
+	c.writeTarget = saved
 	if op.invalid() {
 		// A target that fails typing (`c.Cuont = 2`) carries its own
 		// diagnostic; its let mut root still counts as reassigned (D3).
@@ -658,116 +671,6 @@ func (c *checker) forStmt(s *syntax.ForStmt) {
 	done := c.openScope()
 	defer done()
 	c.condition(s.Cond)
-	pop := c.push(brLoop)
-	c.block(s.Body)
-	pop()
-}
-
-// countRange checks `for i in lo..hi { }` (grammar.md, One for): the
-// bounds are integers of one type, a literal bound takes the other's type
-// and two literals take int (196u rules 2 and 4), and the one binding
-// counts from lo up to hi, excluding hi, as Go's `for i := lo; i < hi;
-// i++` does.
-func (c *checker) countRange(s *syntax.RangeStmt, r *syntax.BinaryExpr) {
-	lo, hi := c.operands(r.X, r.Y, nil)
-	t := Type(invalid)
-	if !lo.invalid() && !hi.invalid() && c.matchTypes(r, &lo, &hi) {
-		t = c.typeOf(&lo)
-		if !isInvalid(t) && !isInteger(under(t)) {
-			c.errorf(r, CodeType, "a range's bounds are integers, not %s", t)
-			t = invalid
-		}
-	}
-	c.record(r, operand{mode: modeValue, typ: t})
-	if s.Key != nil {
-		c.errorf(s.Key, CodeType, "for over a range binds one name")
-	}
-	l := &Loop{Domain: LoopRange, Elem: t}
-	if id, ok := s.Value.(*syntax.Ident); ok {
-		if v := c.declareLocal(id, t); v != nil {
-			l.Bindings = append(l.Bindings, v)
-		}
-	} else if s.Value != nil {
-		c.forPattern(s.Value, t, l)
-	}
-	if !isInvalid(t) {
-		c.loop(s, l)
-	}
-	pop := c.push(brLoop)
-	c.block(s.Body)
-	pop()
-}
-
-// rangeStmt checks `for x in e` and `for i, x in e`. The decided parser
-// always declares the bindings (Tok DEFINE); an assignment form is not
-// produced by it (D-A5).
-func (c *checker) rangeStmt(s *syntax.RangeStmt) {
-	if s.Tok != syntax.DEFINE {
-		c.undecided(s, "a for header that assigns")
-		return
-	}
-	done := c.openScope()
-	defer done()
-	if r, ok := s.X.(*syntax.BinaryExpr); ok && r.Op == syntax.DOTDOT {
-		c.countRange(s, r)
-		return
-	}
-	x := c.valueExpr(s.X, nil)
-	var kt, vt Type = invalid, invalid
-	var domain LoopDomain
-	if !x.invalid() {
-		t := x.typ
-		if p, ok := t.(*Pointer); ok {
-			t = p.Elem
-		}
-		switch u := under(t).(type) {
-		case *Slice:
-			kt, vt, domain = Typ[Int], u.Elem, LoopSlice
-		case *Map:
-			kt, vt, domain = u.Key, u.Elem, LoopMap
-		case *Basic:
-			switch {
-			case isString(u):
-				kt, vt, domain = Typ[Int], Typ[Int32], LoopString
-			case isInteger(u):
-				kt, vt, domain = x.typ, nil, LoopInt
-			default:
-				c.errorf(s.X, CodeType, "cannot range over %s", x.typ)
-			}
-		default:
-			c.errorf(s.X, CodeType, "cannot range over %s", x.typ)
-		}
-	}
-	if vt == nil && s.Value != nil {
-		c.errorf(s.Value, CodeType, "range over %s permits only one iteration variable", x.typ)
-	}
-	// for x in xs binds the element; for i, x in xs the position first.
-	// A binding may be a pattern, matched irrefutably (spec D-B5).
-	l := &Loop{Domain: domain, Elem: vt, Pos: kt}
-	if vt == nil {
-		l.Elem, l.Pos = kt, nil
-	}
-	if id, ok := s.Key.(*syntax.Ident); ok {
-		if v := c.declareLocal(id, kt); v != nil {
-			l.Bindings = append(l.Bindings, v)
-		}
-	} else if s.Key != nil {
-		c.forPattern(s.Key, kt, l)
-	}
-	if id, ok := s.Value.(*syntax.Ident); ok && vt != nil {
-		if v := c.declareLocal(id, vt); v != nil {
-			l.Bindings = append(l.Bindings, v)
-		}
-	} else if s.Value != nil && !ok {
-		et := vt
-		if et == nil {
-			et = invalid
-		}
-		c.forPattern(s.Value, et, l)
-	}
-	if domain != 0 {
-		c.loop(s, l)
-	}
 	pop := c.push(brLoop)
 	c.block(s.Body)
 	pop()

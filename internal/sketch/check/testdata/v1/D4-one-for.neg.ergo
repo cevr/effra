@@ -1,0 +1,41 @@
+// The Map rule: `for k in m` binds the value, not the key, so k is int64
+// here (S108 on the string concatenation). A range has one binding (S108);
+// an int is not iterable (S108); a range's ends have one type (S108); a
+// loop binding is a `let` (S108 on assignment) and must be read (S110).
+func keys(m Map[string, int64]) string {
+	let mut out = ""
+	for k in m {
+		out = out + k // want S108
+	}
+	out
+}
+
+func pairs() int {
+	let mut n = 0
+	for i, x in 0..3 { // want S108
+		n += i + x
+	}
+	for x in 5 { // want S108
+		n += x
+	}
+	n
+}
+
+func ends(a int, b int64) int {
+	let mut n = 0
+	for i in a..b { // want S108
+		n += i
+	}
+	n
+}
+
+func bindings(xs []int) int {
+	let mut n = 0
+	for x in xs { // want S110
+		n += 1
+	}
+	for y in xs {
+		y = y + 1 // want S108
+	}
+	n
+}

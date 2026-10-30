@@ -219,18 +219,7 @@ func (c *checker) binary(x *syntax.BinaryExpr, hint Type) operand {
 		return c.shift(x, hint)
 	}
 	if x.Op == syntax.DOTDOT {
-		// A range outside a for header is stage D2's (D-D4). Its operands
-		// are typed first, each on its own, so their own errors show and
-		// their names resolve as the reference walk resolves them (class H;
-		// stage D1 fuzz triage, `with A { Store..Get() }`).
-		for _, e := range []syntax.Expr{x.X, x.Y} {
-			op := c.expr(e, nil)
-			if op.mode != modeType {
-				c.needValue(&op)
-				c.handled(&op)
-			}
-		}
-		return c.notYet(x)
+		return c.rangeExpr(x, hint)
 	}
 	if isComparison(x.Op) {
 		hint = nil // a comparison is bool; its operands take each other's type

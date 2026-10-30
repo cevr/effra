@@ -9,5 +9,5 @@ func bump(o Order, xs []int, m Map[string, int]) int {
 	ys[0] = 1
 	let mut n = m
 	n["a"] = 2
-	copy.Total + ys[0] + n["a"]
+	copy.Total + ys[0] + len(n)
 }

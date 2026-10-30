@@ -716,7 +716,12 @@ func (c *checker) typExpr0(x syntax.Expr, ctx *typeCtx) Type {
 			inner = *ctx
 		}
 		inner.field, inner.param = false, false
-		return c.signature(x, &inner)
+		sig := c.signature(x, &inner)
+		// A written function type's parameter names declare its
+		// parameters (Info.Defs), as an operation's do (defParams); a
+		// function literal's parameter of type func(v T) bool needs it.
+		c.defParams(x, sig)
+		return sig
 	case *syntax.StructType, *syntax.InterfaceType:
 		// The decided parser builds a record, an operation type or a union
 		// only as a type declaration's body (resolveNamed).

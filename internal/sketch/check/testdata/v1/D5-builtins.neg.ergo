@@ -1,0 +1,14 @@
+// Fourth round, item 2: make, new, cap, copy, close, print, println, append
+// and delete are not predeclared (S104, with a message naming the Ergo
+// form).
+func grow(xs []int) []int {
+	append(xs, 1) // want S104
+}
+
+func room(xs []int) int {
+	cap(xs) // want S104
+}
+
+func say() {
+	println("x") // want S104
+}

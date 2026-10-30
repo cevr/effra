@@ -327,7 +327,7 @@ func (c *checker) notYet(n syntax.Node) operand {
 
 // decidedNoun names a node for notYet, with the stage that decided it.
 func decidedNoun(n syntax.Node) string {
-	switch n := n.(type) {
+	switch n.(type) {
 	case *syntax.Ident:
 		return "a catch arm that binds the whole failure (196r, one catch)"
 	case *syntax.CompositeLit:
@@ -338,10 +338,6 @@ func decidedNoun(n syntax.Node) string {
 		return "a test declaration (196l, laws and tests)"
 	case *syntax.LawDecl:
 		return "a law (196l, laws and tests)"
-	case *syntax.BinaryExpr:
-		if n.Op == syntax.DOTDOT {
-			return "a range outside a for header (196 one for)"
-		}
 	}
 	return "this form"
 }
@@ -1128,13 +1124,24 @@ func (c *checker) index(x *syntax.IndexExpr, hint Type) operand {
 		return bad(x)
 	}
 	t := base.typ
-	if p, ok := t.(*Pointer); ok {
-		t = p.Elem
-	}
 	switch u := under(t).(type) {
+	case *Pointer:
+		// Go indexes through a pointer to an array only; Ergo has no
+		// arrays, so an index never sees through a pointer (as len and
+		// for do not, D-D4 and D-D5).
+		c.errorf(x, CodeType, "an index does not see through a pointer: write (*p)[i]")
+		c.orphanValues(x.Indices, mark)
+		return bad(x)
 	case *Map:
 		k := c.valueExpr(x.Indices[0], u.Key)
 		c.assign(&k, u.Key, "map key")
+		if c.writeTarget != syntax.Expr(x) {
+			// A read has no value for a missing key: not every type has a
+			// zero value (parse-v1 ruling 7), so m.Get(k) returns an
+			// Option (stdlib.md; D2 design ruling).
+			c.errorf(x, CodeType, "a Map read may miss; write m.Get(k), which returns an Option")
+			return bad(x)
+		}
 		return operand{mode: modeValue, typ: u.Elem, mapElem: true}
 	case *Slice:
 		c.intIndex(x.Indices[0])

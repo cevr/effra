@@ -363,8 +363,24 @@ func (fc *funcCtx) binary(x *syntax.BinaryExpr) string {
 		fc.line("}")
 		return result
 	}
+	if op == ".." {
+		return fc.rangeValue(x)
+	}
 	parts := fc.operands([]syntax.Expr{x.X, x.Y}, false)
 	return "(" + parts[0] + " " + op + " " + parts[1] + ")"
+}
+
+// rangeValue lowers a..b, which the checker types as the prelude's
+// Range[T]: a literal of its lowered record, Start then End.
+func (fc *funcCtx) rangeValue(x *syntax.BinaryExpr) string {
+	t := fc.typeOf(x)
+	n, ok := t.(*check.Named)
+	if !ok || !isPreludeType(t, "Range") {
+		ice(x, "a range typed %s, not the prelude's Range", t)
+	}
+	td := fc.l.typeDecl(n.Obj, x)
+	parts := fc.operands([]syntax.Expr{x.X, x.Y}, true)
+	return fc.goType(t) + "{" + td.fieldName["Start"] + ": " + parts[0] + ", " + td.fieldName["End"] + ": " + parts[1] + "}"
 }
 
 // unary lowers -x, +x, !x, ^x and &x.

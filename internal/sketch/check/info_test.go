@@ -257,7 +257,11 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 				at(n, "a for-in with no Loops entry")
 			}
 			for _, b := range []syntax.Expr{n.Key, n.Value} {
-				if _, plain := b.(*syntax.Ident); b != nil && !plain {
+				id, plain := b.(*syntax.Ident)
+				// A single name that names a type or a constant tests
+				// instead of binding (the one binder rule, stage D2), and
+				// has the facts of any pattern.
+				if b != nil && (!plain || (id.Name != "_" && info.Defs[id] == nil)) {
 					pattern(b)
 				}
 			}
@@ -266,6 +270,9 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 				at(n, "a call with no Calls entry")
 			} else if k := info.Calls[n].Kind; k == CallPrelude || k == CallLen {
 				notValue[n.Fun] = true // a built-in callee is no value
+			} else if _, inst := n.Fun.(*syntax.IndexExpr); inst && k == CallConversion {
+				// Seq[int](f): the callee is a type, which Calls holds.
+				skip(n.Fun, false)
 			}
 			if id, ok := n.Fun.(*syntax.Ident); ok && id.Name == "with" {
 				notObject[id] = true
