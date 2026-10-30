@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"debug/macho"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -21,9 +24,10 @@ import (
 // TestProducerSmoke: the producer identity follows the executing artifact
 // rather than its installed pathname, a running host never reports the
 // bytes that replaced it, dirty hosts are distinguished by digest, an
-// unavailable identity stays process-scoped, and building never
-// acquires an identity. Variant compilers are built from this package's
-// source with Go build overlays, each phase in its own workspace.
+// unavailable identity stays process-scoped, and building acquires an
+// identity only at the emission cache's key. Variant compilers are built
+// from this package's source with Go build overlays, each phase in its own
+// workspace.
 func TestProducerSmoke(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -217,25 +221,63 @@ func main(){bufio.NewReader(os.Stdin).ReadString('\n');json.NewEncoder(os.Stdout
 		}
 	})
 
-	// A causal sentinel proves build and run do not acquire an identity,
-	// while check and a build refusal, which print facts, do.
+	// A causal sentinel names every caller of producer.Current. Compilation
+	// and emission never acquire. build and run, which key the emission
+	// cache, acquire exactly once, at the cache key (build.CompilerIdentity),
+	// on a miss and on a hit. check, diagnostics and a build refusal, which
+	// print facts, acquire from the command, never from the cache.
 	t.Run("lazy-acquisition", func(t *testing.T) {
 		t.Parallel()
 		directory, file := workspace(t)
-		lazySource := strings.Replace(implementation, "func Current() Identity { return current() }", `func Current() Identity { panic("producer acquisition forbidden") }`, 1)
-		if lazySource == implementation {
-			t.Fatal("identity owner Current anchor is missing")
+		const anchor = "func Current() Identity { return current() }"
+		const imports = "\t\"runtime/debug\"\n"
+		traced := `func Current() Identity {
+	var pcs [1]uintptr
+	runtime.Callers(2, pcs[:])
+	frame, _ := runtime.CallersFrames(pcs[:]).Next()
+	fmt.Fprintln(os.Stderr, "producer acquisition by "+frame.Function)
+	return current()
+}`
+		lazySource := strings.Replace(strings.Replace(implementation, anchor, traced, 1), imports, "\t\"os\"\n\t\"runtime\"\n"+imports, 1)
+		if !strings.Contains(implementation, anchor) || !strings.Contains(implementation, imports) {
+			t.Fatal("identity owner Current or import anchor is missing")
 		}
 		lazy := producerSmokeOverlays(t, root, directory, ownerPath, map[string]string{"lazy": lazySource})["lazy"]
-		producerSmokeRun(t, directory, lazy, "build", file, "-o", filepath.Join(directory, "app"))
-		if got := producerSmokeRun(t, directory, lazy, "run", file); got != "ok\n" {
-			t.Fatalf("run printed %q", got)
+		acquisitions := func(stderr []byte) []string {
+			var callers []string
+			for _, line := range strings.Split(string(stderr), "\n") {
+				if caller, ok := strings.CutPrefix(line, "producer acquisition by "); ok {
+					callers = append(callers, caller)
+				}
+			}
+			return callers
+		}
+		const cacheKey = "ergo.local/prototype/internal/sketch/build.CompilerIdentity"
+		for _, phase := range []struct {
+			name string
+			args []string
+		}{
+			{"build, a miss", []string{"build", file, "-o", filepath.Join(directory, "app")}},
+			{"build, a hit", []string{"build", file, "-o", filepath.Join(directory, "app")}},
+			{"run", []string{"run", file}},
+		} {
+			stdout, stderr, code := runSmokeCLI(t, processDeadline, lazy, directory, "", phase.args...)
+			if code != 0 {
+				t.Fatalf("%s: exit %d\nstdout=%s\nstderr=%s", phase.name, code, stdout, stderr)
+			}
+			if phase.name == "run" && string(stdout) != "ok\n" {
+				t.Fatalf("run printed %q", stdout)
+			}
+			if callers := acquisitions(stderr); len(callers) != 1 || callers[0] != cacheKey {
+				t.Fatalf("%s acquired %v; want one acquisition, by %s", phase.name, callers, cacheKey)
+			}
 		}
 		bad := smokeWrite(t, directory, "bad.ergo", sketchMissingNeeds)
 		for _, args := range [][]string{{"check", file}, {"diagnostics", file}, {"build", bad}} {
-			_, stderr, code := runSmokeCLI(t, processDeadline, lazy, directory, "", args...)
-			if code == 0 || !strings.Contains(string(stderr), "producer acquisition forbidden") {
-				t.Fatalf("ergo %v did not acquire an identity: exit %d stderr=%s", args, code, stderr)
+			_, stderr, _ := runSmokeCLI(t, processDeadline, lazy, directory, "", args...)
+			callers := acquisitions(stderr)
+			if len(callers) == 0 || slices.Contains(callers, cacheKey) {
+				t.Fatalf("ergo %v acquired %v; want the command to acquire for its facts, and the cache never", args, callers)
 			}
 		}
 	})
@@ -306,10 +348,33 @@ func producerSmokeRun(t *testing.T, dir, program string, args ...string) string 
 	return string(stdout)
 }
 
+// producerSmokeDigest is the producer identity rule for the file at path,
+// written out as an independent oracle: on darwin, SHA-256 over the domain
+// tag and the authenticated code, the bytes below the offset
+// LC_CODE_SIGNATURE names; elsewhere, SHA-256 over the whole file.
 func producerSmokeDigest(t *testing.T, path string) string {
 	t.Helper()
-	sum := sha256.Sum256(smokeRead(t, path))
-	return "sha256:" + hex.EncodeToString(sum[:])
+	data := smokeRead(t, path)
+	h := sha256.New()
+	if runtime.GOOS == "darwin" {
+		file, err := macho.NewFile(bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		end := -1
+		for _, load := range file.Loads {
+			if raw := load.Raw(); len(raw) >= 16 && file.ByteOrder.Uint32(raw) == 0x1d { // LC_CODE_SIGNATURE
+				end = int(file.ByteOrder.Uint32(raw[8:]))
+			}
+		}
+		if end < 0 || end > len(data) {
+			t.Fatalf("%s has no code signature", path)
+		}
+		h.Write([]byte("ergo-producer-darwin-code-1\x00"))
+		data = data[:end]
+	}
+	h.Write(data)
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
 func producerSmokeInstall(t *testing.T, source, target string) {

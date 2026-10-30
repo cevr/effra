@@ -14,12 +14,20 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Cache is the emission cache rooted at Root. A published module lives at
 // Root/modules/KEY; builders stage under Root/staging, on the same file
-// system, so publication is one rename.
+// system, so publication is one rename. A module whose compiler identity is
+// process-scoped is built in the process's private root,
+// Root/private/ID/modules/KEY, and never published (CompilerIdentity).
 type Cache struct{ Root string }
+
+// privateLifetime is how long a private root stays after a build last took
+// it. A sweep, which a Module call runs at most once per sweepInterval,
+// removes an older root only when no build holds its lease (lease.go).
+const privateLifetime = 24 * time.Hour
 
 // DefaultRoot is $XDG_CACHE_HOME/ergo when XDG_CACHE_HOME is absolute,
 // else os.UserCacheDir()/ergo. The XDG base directory specification makes
@@ -62,15 +70,32 @@ type Manifest struct {
 	Complete bool         `json:"complete"`
 }
 
-// Module is a published generated module.
+// Module is a generated module: published, or private to the process.
 type Module struct {
-	// Dir is the module's stable absolute directory, Root/modules/KEY.
+	// Dir is the module's absolute directory: Root/modules/KEY when it is
+	// published, Root/private/ID/modules/KEY when it is private.
 	Dir string
 	Key string
 	// Reused reports that a complete, verified entry served the build and
 	// nothing was emitted or written.
-	Reused   bool
+	Reused bool
+	// Private reports that the compiler identity is process-scoped, so the
+	// module was built in the process's private root and not published.
+	Private  bool
 	Manifest Manifest
+	// release gives back the build's lease on a private root; nil for a
+	// published module.
+	release func()
+}
+
+// Release ends the build's hold on its module: a private module's root
+// keeps its lease, and so survives every sweep, from Module until Release.
+// Call it after the link that reads the module, on every path; it is safe
+// to call more than once, and a no-op for a published module.
+func (m Module) Release() {
+	if m.release != nil {
+		m.release()
+	}
 }
 
 // Emitter produces the generated files of a module, apart from the runtime
@@ -90,10 +115,59 @@ var testHookStaged func(staging string) error
 // non-regular file, or an unreadable or foreign manifest) is moved aside
 // and removed, then replaced. When builders race, the first rename wins and
 // every other builder verifies and uses the winner's entry.
+//
+// When in.Compiler is process-scoped, the same steps run in the process's
+// private root instead, and the module is never published: a key that only
+// one process can trust never names a shared entry. The build holds the
+// root's lease until the caller calls Release on the module, after its
+// link; on failure Module releases it before it returns.
 func (c Cache) Module(in Input, emit Emitter) (Module, error) {
 	if !filepath.IsAbs(c.Root) {
 		return Module{}, fmt.Errorf("build: cache root %q is not absolute", c.Root)
 	}
+	defer c.maybeSweep(time.Now())
+	if !processScoped(in.Compiler) {
+		return c.module(in, emit)
+	}
+	private, release, err := c.private(in.Compiler)
+	if err != nil {
+		return Module{}, err
+	}
+	held := false
+	defer func() {
+		if !held {
+			release() // a failed or panicking build holds nothing
+		}
+	}()
+	module, err := private.module(in, emit)
+	if err != nil {
+		return Module{}, err
+	}
+	module.Private, module.release, held = true, release, true
+	return module, nil
+}
+
+// private is the private root of the process whose identity is compiler.
+// The build takes one use of the root's lease, which keeps the root through
+// the build and its link (lease.go), and marks the root as just used. It
+// returns the lease's release.
+func (c Cache) private(compiler string) (Cache, func(), error) {
+	sum := sha256.Sum256([]byte(compiler))
+	own := filepath.Join(c.Root, "private", hex.EncodeToString(sum[:16]))
+	release, err := acquireLease(own)
+	if err != nil {
+		return Cache{}, nil, err
+	}
+	now := time.Now()
+	if err := os.Chtimes(own, now, now); err != nil {
+		release()
+		return Cache{}, nil, err
+	}
+	return Cache{Root: own}, release, nil
+}
+
+// module is Module in the root c, which publishes.
+func (c Cache) module(in Input, emit Emitter) (Module, error) {
 	summary, err := in.Summarize()
 	if err != nil {
 		return Module{}, err

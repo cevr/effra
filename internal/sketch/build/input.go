@@ -78,7 +78,9 @@ type Input struct {
 	// Dependencies summarise the packages it depends on.
 	Dependencies []Dependency
 	// Compiler identifies the executing compiler's content, so an edited
-	// compiler, dirty or not, never reuses another's output.
+	// compiler, dirty or not, never reuses another's output
+	// (CompilerIdentity). A process-scoped identity ("process:…") keys only
+	// the process's private modules; Cache.Module never publishes it.
 	Compiler string
 	// Emitter names the emitter and its revision.
 	Emitter string

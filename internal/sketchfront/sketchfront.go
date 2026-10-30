@@ -224,6 +224,11 @@ type BuildRequest struct {
 	Stderr io.Writer
 }
 
+// compilerIdentity is the compiler's producer identity for the emission
+// key. Tests replace it with a process-scoped identity, which Linux and
+// signed darwin hosts never report, to exercise private builds.
+var compilerIdentity = build.CompilerIdentity
+
 // Build emits the checked analysis into the emission cache, or reuses its
 // published module, and links the module to the request's output with the
 // go command. It returns the module whenever one is published, also when
@@ -238,7 +243,7 @@ func Build(a Analysis, req BuildRequest) (build.Module, error) {
 	if err := unit.Validate(); err != nil {
 		return build.Module{}, err
 	}
-	compiler, err := build.CompilerIdentity()
+	compiler, err := compilerIdentity()
 	if err != nil {
 		return build.Module{}, err
 	}
@@ -273,6 +278,9 @@ func Build(a Analysis, req BuildRequest) (build.Module, error) {
 	if err != nil {
 		return build.Module{}, err
 	}
+	// The build holds a private module's root until its link ends, on every
+	// path; then a long-lived host holds nothing between builds.
+	defer module.Release()
 	absolute, err := filepath.Abs(req.Output)
 	if err != nil {
 		return module, err

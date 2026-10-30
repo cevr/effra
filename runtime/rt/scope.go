@@ -168,6 +168,60 @@ func (s *Scope) runReleaseTraced(e entry, c *Cause) {
 	e.run.release(e.v)
 }
 
+// Release runs f as one release on t for a scope whose entries rt does not
+// hold, such as runtime/v1's frame list, and reports it as a Scope reports
+// its own releases (runReleaseTraced). The caller masks, as Scope.End does.
+// A panic of f is recovered and recorded into c, in causal order:
+//
+//  1. On a traced tree, the trace calls f opened and left open are closed,
+//     never an outer one (the release-local unwind).
+//  2. classify, called inside the recover while the panicking frame is still
+//     on the stack, returns the value of the fresh defect the panic is (nil
+//     when it carries an exit instead) and the exit it carries. c records
+//     the defect as raised in a release; its event links the innermost
+//     unwound call.
+//  3. after, when not nil, runs what the release ends after its body (the
+//     body's own frame, whose nested releases then report) with the carried
+//     exit, and returns the exits to add; with a nil after, the carried exit
+//     is added.
+//
+// A panic that escapes classify or after is recorded as one more defect of
+// the release, so the caller's later releases and its unmask still run.
+// When f ends, on every path, a traced tree raises the release event.
+func Release(t *Task, c *Cause, f func(), classify func(p any) (defect any, carried error), after func(carried error) error) {
+	floor := 0
+	if t.trace != nil {
+		floor = t.traceDepth()
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			var left uint64
+			if t.trace != nil {
+				left = t.traceUnwind(p, floor)
+			}
+			func() {
+				defer func() {
+					if q := recover(); q != nil {
+						c.recovered(t, q, true, floor)
+					}
+				}()
+				defect, carried := classify(p)
+				if defect != nil {
+					c.defect(t, defect, true, left)
+				}
+				if after != nil {
+					carried = after(carried)
+				}
+				c.Add(carried)
+			}()
+		}
+		if t.trace != nil {
+			t.traceTask(TraceRelease, nil)
+		}
+	}()
+	f()
+}
+
 // Scoped runs body with a fresh scope owned by t and ends the scope on every
 // exit, returning the body's value or the combined exit.
 func Scoped[T any](t *Task, body func(*Scope) (T, error)) (v T, err error) {

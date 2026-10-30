@@ -8,6 +8,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash"
+	"io"
+	"strings"
 )
 
 // A Mach-O image identifies itself to the Darwin kernel through its embedded
@@ -19,10 +21,51 @@ import (
 // image is then only a hint: bytes that differ from the executing image's
 // pages fail, wherever they were read. Layouts follow xnu's cs_blobs.h and
 // Go's cmd/internal/codesign.
+//
+// On Darwin the producer identity is the authenticated code, not the file:
+// the bytes [0, codeLimit) that the page hashes cover, which the cdhash
+// authenticates, are exactly the code that runs. The signature container
+// (its SuperBlob header, index, ignored blobs, padding) and any byte after
+// it are not authenticated by the cdhash, cannot change the running code,
+// and so are not part of the identity: two files with the same cdhash have
+// the same identity, whatever those bytes hold.
+//
+// The identity is one per code, not one per cdhash, by design: two signed
+// files with the same code and different signature data (entitlements,
+// CodeDirectory flags such as the hardened runtime, team ID, requirements)
+// have different cdhashes and one identity. Emission depends on the code
+// that runs, not on how it was signed.
 
 var (
 	errUnverified        = errors.New("executing image does not match the kernel's code signature record")
 	errNoSignatureRecord = errors.New("executing image has no kernel code signature record")
+	// A universal file's code may verify, but which slice the kernel ran is
+	// not recorded here, so it gets no artifact identity.
+	errUniversal = errors.New("executing image is a universal file, whose other slices the kernel check does not cover")
+	// A matching CodeDirectory whose page hashes are not full SHA-256 binds
+	// the code only as far as a weaker hash does.
+	errWeakDirectory = errors.New("executing image's code directory does not use full SHA-256 page hashes")
+)
+
+// darwinCodeTag separates the Darwin code digest from the Linux whole-file
+// digest: the two never name the same bytes in the same way.
+const darwinCodeTag = "ergo-producer-darwin-code-1\x00"
+
+// authenticatedCode is what the Darwin identity digests, given the file read
+// once and the kernel's cdhash: the domain tag, then the code that
+// verifyCodeSignature authenticates. A refused image returns its reason.
+func authenticatedCode(image, cdhash []byte) (io.ReadCloser, error) {
+	code, err := verifyCodeSignature(image, cdhash)
+	if err != nil {
+		return nil, err
+	}
+	return io.NopCloser(io.MultiReader(strings.NewReader(darwinCodeTag), bytes.NewReader(code))), nil
+}
+
+// fatMagic and fatMagic64 begin a universal (fat) file, big-endian.
+const (
+	fatMagic   = 0xcafebabe
+	fatMagic64 = 0xcafebabf
 )
 
 const (
@@ -38,25 +81,53 @@ const (
 	csVersionScatter      = 0x20100
 	csVersionCodeLimit64  = 0x20300
 	cdhashSize            = 20
+	csHashTypeSHA256      = 2
 )
 
 // verifyCodeSignature checks image, a thin 64-bit little-endian Mach-O file,
-// against cdhash, the kernel's record of the executing image.
-func verifyCodeSignature(image, cdhash []byte) error {
+// against cdhash, the kernel's record of the executing image, and returns the
+// authenticated code: image[:codeLimit], every page of which matches a
+// CodeDirectory with that cdhash, where codeLimit is the offset of the
+// signature that LC_CODE_SIGNATURE names. The directory fixes codeLimit and
+// every page hash, so two images that verify against one cdhash return the
+// same code (up to a SHA-256 collision). Bytes from codeLimit on are not
+// returned; a universal file is refused with its own reason. Only a
+// CodeDirectory of full SHA-256 page hashes (hash type 2, 32-byte hashes)
+// gives the code: under SHA-1, or SHA-256 cut to 20 bytes, a crafted file
+// could match the page hashes with code that does not run, so a matching
+// directory of another kind is refused with its own reason. Go's linker
+// writes SHA-256.
+func verifyCodeSignature(image, cdhash []byte) ([]byte, error) {
+	if len(image) >= 4 {
+		if magic := binary.BigEndian.Uint32(image); magic == fatMagic || magic == fatMagic64 {
+			return nil, errUniversal
+		}
+	}
 	if len(cdhash) != cdhashSize || len(image) < machoHeaderSize64 || binary.LittleEndian.Uint32(image) != machoMagic64 {
-		return errUnverified
+		return nil, errUnverified
 	}
 	signature, codeEnd, ok := codeSignature(image)
 	if !ok {
-		return errUnverified
+		return nil, errUnverified
 	}
+	weak := false
 	for _, directory := range codeDirectories(signature) {
 		sum, ok := directoryHash(directory)
-		if ok && bytes.Equal(sum[:cdhashSize], cdhash) && pagesMatch(image, directory, codeEnd) {
-			return nil
+		if !ok || !bytes.Equal(sum[:cdhashSize], cdhash) {
+			continue
+		}
+		if directory[37] != csHashTypeSHA256 || directory[36] != sha256.Size {
+			weak = true // the kernel's directory, but not full SHA-256
+			continue
+		}
+		if pagesMatch(image, directory, codeEnd) {
+			return image[:codeEnd:codeEnd], nil
 		}
 	}
-	return errUnverified
+	if weak {
+		return nil, errWeakDirectory
+	}
+	return nil, errUnverified
 }
 
 // codeSignature returns the embedded signature and its file offset, which

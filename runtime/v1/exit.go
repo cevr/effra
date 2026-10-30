@@ -49,23 +49,32 @@ type exit struct{ err error }
 // capture turns p, a panic recovered at a boundary of task t, into an exit
 // in canonical form: an interruption stays one, a carried exit is unpacked,
 // and anything else is a fresh defect with t's chain (G2) and the stack.
-func capture(t *rt.Task, p any) error { return captureIn(t, p, false) }
-
-// captureIn is capture; inRelease marks a fresh defect as raised by an
-// exit action, not by the body (rt.Reason.InRelease).
-func captureIn(t *rt.Task, p any, inRelease bool) error {
-	switch e := p.(type) {
-	case *exit:
-		return e.err
-	case error:
-		if e == rt.Interrupted {
-			return rt.Interrupted
-		}
+func capture(t *rt.Task, p any) error {
+	defect, carried := classify(p)
+	if defect == nil {
+		return carried
 	}
 	var c rt.Cause
-	c.AddDefect(t, &Panic{Value: p, Stack: debug.Stack()})
-	c.Reasons[len(c.Reasons)-1].InRelease = inRelease
+	c.AddDefect(t, defect)
 	return c.Err()
+}
+
+// classify sorts p, a recovered panic: a carried exit and an interruption
+// are returned as the exit they carry; anything else is a fresh defect,
+// returned as its *Panic with the Go stack at the panic. Call it inside the
+// recover, while the panicking frame is still on the stack. It is the
+// settle of rt.Release for a release that ends no frame of its own (a
+// task's drain).
+func classify(p any) (defect any, carried error) {
+	switch e := p.(type) {
+	case *exit:
+		return nil, e.err
+	case error:
+		if e == rt.Interrupted {
+			return nil, rt.Interrupted
+		}
+	}
+	return &Panic{Value: p, Stack: debug.Stack()}, nil
 }
 
 // join combines two exits, a's reasons first; nothing is dropped.

@@ -73,8 +73,19 @@ been atomically replaced. On Darwin it reads the file `os.Executable` names
 once, and accepts it only if its embedded code signature carries the cdhash the
 kernel records for the executing image (`csops` `CS_OPS_CDHASH`) and every page
 below the signature matches that CodeDirectory's page hashes; the pathname is a
-hint, never trusted. The Go linker signs every darwin/arm64 binary; an unsigned
-image (darwin/amd64) has no kernel record. SHA-256 content identity has
+hint, never trusted. The digest is the executing image's authenticated code on
+Darwin and the whole executing file on Linux: on Darwin it is SHA-256 over the
+domain tag `ergo-producer-darwin-code-1` and the bytes `[0, codeLimit)` that
+the page hashes cover, so the signature container and any trailing bytes,
+which the cdhash does not authenticate and which cannot change the running
+code, are not part of it; two files with one cdhash have one identity, and so
+do two signed files with the same code and different signature data (such as
+entitlements), by design. The matching CodeDirectory must hold full SHA-256
+page hashes (hash type 2, which the Go linker writes); SHA-1 or truncated
+hashes report `unavailable` with their reason. A
+universal (fat) file reports `unavailable`. The Go linker signs every
+darwin/arm64 binary; an unsigned image (darwin/amd64) has no kernel record.
+SHA-256 content identity has
 `executing-artifact` strength and `artifact` reuse scope. Unreadable,
 unsupported, unverified or over-256-MiB images report `unavailable`, with a
 random stable process qualifier and `process` reuse scope; if that qualifier
@@ -89,8 +100,11 @@ Formatter reports carry the same producer identity while retaining their
 independent style/schema version and input/output byte digests. `code.format`
 also accepts `expectedProducer`. Built-in lint and shared diagnostic reports
 carry the qualified semantic snapshot; external rule-pack analysis identities
-remain part of the unfinished custom-lint unit. Compilation, emission, build,
-run and raw `fmt --stdin` do not acquire inspection identity. LSP diagnostics
+remain part of the unfinished custom-lint unit. Compilation, emission and raw
+`fmt --stdin` do not acquire inspection identity. The emission cache acquires
+it once, lazily, when it first needs a cache key (`build`, and `run` when it
+builds): one running compiler has one identity, and a process-scoped one
+builds privately and never publishes (`internal/sketch/build`). LSP diagnostics
 still publish the finite diagnostics-only protocol and expose no reusable type
 references or new navigation capabilities.
 

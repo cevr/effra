@@ -3,7 +3,6 @@ package build
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,10 +16,12 @@ import (
 )
 
 // helperVariable selects a helper mode of the test binary; rootVariable
-// names the cache root a helper publishes into.
+// names the cache root a helper publishes into; stagedVariable names the
+// compiler the replace helper renames over its own path.
 const (
 	helperVariable = "ERGO_BUILD_TEST_HELPER"
 	rootVariable   = "ERGO_BUILD_TEST_ROOT"
+	stagedVariable = "ERGO_BUILD_TEST_STAGED"
 )
 
 // identityMarker is a string the test binary carries. The linker sets it
@@ -33,14 +34,21 @@ var identityMarker = "ergo-identity-marker-0"
 // status 3 once staging is complete and before the rename, as a builder
 // killed mid-publication would: no deferred cleanup runs. In mode
 // "identity" it prints the marker and CompilerIdentity. In mode "replace"
-// it renames other bytes over its own executable's path, as a reinstall
-// does, and then prints the digests of its original bytes and of the
-// replacement, CompilerIdentity, and the identity of the file the path
-// names after the reinstall.
+// it renames the compiler at $ERGO_BUILD_TEST_STAGED over its own
+// executable's path, as a reinstall does, then builds baseInput keyed by
+// CompilerIdentity and prints the identity, the module directory and
+// whether the module is private, as JSON; mode "replace-early" acquires
+// the identity before the replacement.
 func helperMain(mode string) int {
 	fail := func(err error) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
+	}
+	if mode == "sweep-stall" {
+		return sweepStallHelper()
+	}
+	if mode == "lease" {
+		return leaseHelper()
 	}
 	if mode == "identity" {
 		identity, err := CompilerIdentity()
@@ -50,40 +58,34 @@ func helperMain(mode string) int {
 		fmt.Println(identityMarker + " " + identity)
 		return 0
 	}
-	if mode == "replace" {
+	if mode == "replace" || mode == "replace-early" {
 		path, err := os.Executable()
 		if err != nil {
 			return fail(err)
 		}
-		original, err := os.ReadFile(path)
-		if err != nil {
-			return fail(err)
+		if mode == "replace-early" {
+			if _, err := CompilerIdentity(); err != nil {
+				return fail(err)
+			}
 		}
-		replacement := append(bytes.Clone(original), "reinstalled"...)
-		if err := os.WriteFile(path+".new", replacement, 0o755); err != nil {
-			return fail(err)
-		}
-		if err := os.Rename(path+".new", path); err != nil {
+		if err := os.Rename(os.Getenv(stagedVariable), path); err != nil {
 			return fail(err)
 		}
 		identity, err := CompilerIdentity()
 		if err != nil {
 			return fail(err)
 		}
-		late, err := os.Open(path)
+		in := baseInput()
+		in.Compiler = identity
+		module, err := Cache{Root: os.Getenv(rootVariable)}.Module(in, emitFor(in, nil))
 		if err != nil {
 			return fail(err)
 		}
-		defer late.Close()
-		lateIdentity, err := imageIdentity(late)
+		out, err := json.Marshal(replaced{Identity: identity, Dir: module.Dir, Private: module.Private})
 		if err != nil {
 			return fail(err)
 		}
-		digest := func(data []byte) string {
-			sum := sha256.Sum256(data)
-			return "sha256:" + hex.EncodeToString(sum[:])
-		}
-		fmt.Println(digest(original), digest(replacement), identity, lateIdentity)
+		fmt.Println(string(out))
 		return 0
 	}
 	if mode == "crash" {

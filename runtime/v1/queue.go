@@ -4,14 +4,17 @@ import (
 	"fmt"
 	"iter"
 	"sync"
+
+	"ergo.local/prototype/runtime/rt"
 )
 
 // Queue is queue.Queue[T], the body of the std package queue
 // (docs/spec/runtime.md, Queues): a FIFO of T between tasks with a fixed
-// capacity. Its methods take no task, so *Queue[T] is a value of the
-// operations interface the lowering emits for queue.Queue[T]:
-// Push(v T) fails Closed, Pop() T fails Closed, Values() Seq[T] and
-// Close(). The contract:
+// capacity. Push, Pop and Values take the caller's task as a hidden first
+// argument, which the lowering passes (gap 1 ruling, stage 3b): so
+// *Queue[T] is a value of the operations interface the lowering emits for
+// queue.Queue[T], Push(t, v) fails Closed, Pop(t) T fails Closed,
+// Values(t) Seq[T] and Close(). The contract:
 //
 //   - New(capacity) makes an open, empty queue. capacity is how many values
 //     it holds that no Pop has taken yet; 0 makes every Push wait for the
@@ -40,10 +43,16 @@ import (
 // may Push, Pop and iterate one queue at once; the order in which waiting
 // Pops are served is not specified.
 //
-// Not yet: a task stopped while it waits in Push or Pop keeps waiting until
-// the queue changes (a Pop, a Push or Close), because the queue does not
-// know the waiter's task; Close wakes every waiter. Interruption of these
-// waits (I1, rule 5) is #199.
+// Push, Pop and each step of Values are interruption points of the caller's
+// task (I1): when the task is stopped before the operation begins, or while
+// it waits, the operation raises rt.Interrupted, an interruption, not
+// Closed (a closed queue is a protocol outcome; a stop comes from outside).
+// A stopped Push's value never enters the queue; a stopped Pop takes no
+// value. A Push whose value entered at the moment of the stop returns
+// success, and the stop is seen at the next interruption point. Inside a
+// mask (I2) the waits are uninterruptible. Prior art: Go's select over a
+// channel and ctx.Done(); Kotlin's suspending send and receive, cancellable
+// while suspended; tokio's send and recv, dropped by a cancelled task.
 type Queue[T any] struct {
 	mu       sync.Mutex
 	capacity int
@@ -83,8 +92,11 @@ func New[T any](capacity int) *Queue[T] {
 	return &Queue[T]{capacity: capacity}
 }
 
-// Push is q.Push(v): nil when v entered the queue, Closed when it did not.
-func (q *Queue[T]) Push(v T) error {
+// Push is q.Push(v) on the caller's task t: nil when v entered the queue,
+// Closed when it did not. It raises rt.Interrupted, and v never enters the
+// queue, when t is stopped before it begins or while it waits.
+func (q *Queue[T]) Push(t *rt.Task, v T) error {
+	t.Check()
 	q.mu.Lock()
 	if q.closed {
 		q.mu.Unlock()
@@ -99,8 +111,14 @@ func (q *Queue[T]) Push(v T) error {
 	s := &sender[T]{v: v}
 	q.senders = append(q.senders, s)
 	q.signal() // with capacity 0, a waiting Pop takes v straight away
+	stop := t.Done()
 	for !s.accepted && !s.rejected {
-		q.wait()
+		if !q.wait(stop) && !s.accepted && !s.rejected {
+			// Stopped first: v leaves the line and never enters the queue.
+			q.dropSender(s)
+			q.mu.Unlock()
+			panic(rt.Interrupted)
+		}
 	}
 	rejected := s.rejected
 	q.mu.Unlock()
@@ -110,20 +128,25 @@ func (q *Queue[T]) Push(v T) error {
 	return nil
 }
 
-// Pop is q.Pop(): the front value, or Closed on a closed, empty queue.
-func (q *Queue[T]) Pop() (T, error) {
-	v, ok := q.take()
+// Pop is q.Pop() on the caller's task t: the front value, or Closed on a
+// closed, empty queue. It raises rt.Interrupted, and takes no value, when
+// t is stopped before it begins or while it waits.
+func (q *Queue[T]) Pop(t *rt.Task) (T, error) {
+	t.Check()
+	v, ok := q.take(t.Done())
 	if !ok {
 		return v, Closed{}
 	}
 	return v, nil
 }
 
-// Values is q.Values().
-func (q *Queue[T]) Values() iter.Seq[T] {
+// Values is q.Values() on the caller's task t. Each step is a Pop on t,
+// so a stop of t ends the loop with rt.Interrupted.
+func (q *Queue[T]) Values(t *rt.Task) iter.Seq[T] {
 	return func(yield func(T) bool) {
 		for {
-			v, ok := q.take()
+			t.Check()
+			v, ok := q.take(t.Done())
 			if !ok || !yield(v) {
 				return
 			}
@@ -147,10 +170,10 @@ func (q *Queue[T]) Close() {
 }
 
 // take removes the front value, waiting while the queue is open and empty;
-// ok is false on a closed, empty queue.
-func (q *Queue[T]) take() (v T, ok bool) {
+// ok is false on a closed, empty queue. When stop closes while it waits,
+// it raises rt.Interrupted, having taken nothing.
+func (q *Queue[T]) take(stop <-chan struct{}) (v T, ok bool) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	for {
 		if len(q.buf) > 0 {
 			v = q.buf[0]
@@ -164,6 +187,7 @@ func (q *Queue[T]) take() (v T, ok bool) {
 				s.accepted = true
 				q.signal()
 			}
+			q.mu.Unlock()
 			return v, true
 		}
 		if len(q.senders) > 0 {
@@ -171,12 +195,30 @@ func (q *Queue[T]) take() (v T, ok bool) {
 			s := q.popSender()
 			s.accepted = true
 			q.signal()
+			q.mu.Unlock()
 			return s.v, true
 		}
 		if q.closed {
+			q.mu.Unlock()
 			return v, false
 		}
-		q.wait()
+		if !q.wait(stop) {
+			q.mu.Unlock()
+			panic(rt.Interrupted)
+		}
+	}
+}
+
+// dropSender removes s, a Push that stopped waiting, from the line. q.mu
+// is held.
+func (q *Queue[T]) dropSender(s *sender[T]) {
+	for i, w := range q.senders {
+		if w == s {
+			copy(q.senders[i:], q.senders[i+1:])
+			q.senders[len(q.senders)-1] = nil
+			q.senders = q.senders[:len(q.senders)-1]
+			return
+		}
 	}
 }
 
@@ -188,17 +230,26 @@ func (q *Queue[T]) popSender() *sender[T] {
 	return s
 }
 
-// wait releases q.mu until the next change, then takes it again.
-func (q *Queue[T]) wait() {
+// wait releases q.mu until the next change or until stop closes, then takes
+// it again. It reports false when stop woke it; a nil stop (a masked task,
+// I2) never does. A Push whose value entered at the same moment keeps its
+// success; a Pop that stopped takes nothing, and the values stay queued.
+func (q *Queue[T]) wait(stop <-chan struct{}) bool {
 	if q.wake == nil {
 		q.wake = make(chan struct{})
 	}
 	ch := q.wake
 	q.parked++
 	q.mu.Unlock()
-	<-ch
+	woke := true
+	select {
+	case <-ch:
+	case <-stop:
+		woke = false
+	}
 	q.mu.Lock()
 	q.parked--
+	return woke
 }
 
 // signal wakes every waiter, which looks again. q.mu is held.

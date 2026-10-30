@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/binary"
+	"errors"
 	"hash"
 	"testing"
 )
@@ -120,13 +122,13 @@ var threePages = bytes.Repeat([]byte("compiler A "), 1000)
 
 func TestCodeSignatureAcceptsOnlyTheKernelsImage(t *testing.T) {
 	image, cdhashes := signedImage(threePages, 12, sha256Directory)
-	if err := verifyCodeSignature(image, cdhashes[0]); err != nil {
+	if err := verifies(image, cdhashes[0]); err != nil {
 		t.Fatalf("a signed image with the kernel's cdhash: %v", err)
 	}
 	// Another image's record, as when the installation pathname now names
 	// a different build.
 	other, otherHashes := signedImage(bytes.Repeat([]byte("compiler B "), 1000), 12, sha256Directory)
-	if verifyCodeSignature(other, cdhashes[0]) == nil || verifyCodeSignature(image, otherHashes[0]) == nil {
+	if verifies(other, cdhashes[0]) == nil || verifies(image, otherHashes[0]) == nil {
 		t.Fatal("an image verified against another image's cdhash")
 	}
 	// A byte rewritten in place on any page, with the signature kept, as an
@@ -134,50 +136,65 @@ func TestCodeSignatureAcceptsOnlyTheKernelsImage(t *testing.T) {
 	for _, at := range []int{0, 40, 4096, len(threePages)} {
 		tampered := bytes.Clone(image)
 		tampered[at]++
-		if verifyCodeSignature(tampered, cdhashes[0]) == nil {
+		if verifies(tampered, cdhashes[0]) == nil {
 			t.Fatalf("a rewrite at byte %d kept the image verified", at)
 		}
 	}
 	// One page covering the whole code range (page size zero).
 	whole, wholeHashes := signedImage(threePages, 0, sha256Directory)
-	if err := verifyCodeSignature(whole, wholeHashes[0]); err != nil {
+	if err := verifies(whole, wholeHashes[0]); err != nil {
 		t.Fatalf("a single-page signature: %v", err)
 	}
 }
 
-// Every hash type xnu names verifies by its own page hashes and cdhash; a
-// truncated SHA-256 directory keeps 20 bytes of each, and a directory may name
-// its limit in the 64-bit field alone.
+// A full SHA-256 directory verifies in each slot and limit form xnu names;
+// a directory may name its limit in the 64-bit field alone. A directory the
+// kernel recorded whose page hashes are not full SHA-256 (SHA-1, SHA-256
+// cut to 20 bytes, SHA-384, or SHA-256 page hashes cut short) is refused
+// with errWeakDirectory, even though its pages and cdhash match.
 func TestCodeSignatureReadsEachDirectoryForm(t *testing.T) {
 	forms := map[string]signedDirectory{
-		"sha1":              {slot: csSlotCodeDirectory, hashType: 1, newHash: sha1.New},
-		"sha256 truncated":  {slot: csSlotCodeDirectory, hashType: 3, newHash: sha256.New, hashSize: 20},
 		"64-bit code limit": {slot: csSlotCodeDirectory, hashType: 2, newHash: sha256.New, wide: true},
 		"last alternate":    {slot: csSlotAlternateLast, hashType: 2, newHash: sha256.New},
 	}
 	for name, form := range forms {
 		image, cdhashes := signedImage(threePages, 12, form)
-		if err := verifyCodeSignature(image, cdhashes[0]); err != nil {
+		if err := verifies(image, cdhashes[0]); err != nil {
 			t.Errorf("%s: %v", name, err)
+		}
+	}
+	weak := map[string]signedDirectory{
+		"sha1":                {slot: csSlotCodeDirectory, hashType: 1, newHash: sha1.New},
+		"sha256 truncated":    {slot: csSlotCodeDirectory, hashType: 3, newHash: sha256.New, hashSize: 20},
+		"sha384":              {slot: csSlotCodeDirectory, hashType: 4, newHash: sha512.New384},
+		"sha256 short hashes": {slot: csSlotCodeDirectory, hashType: 2, newHash: sha256.New, hashSize: 20},
+		"sha1 last alternate": {slot: csSlotAlternateLast, hashType: 1, newHash: sha1.New},
+	}
+	for name, form := range weak {
+		image, cdhashes := signedImage(threePages, 12, form)
+		if err := verifies(image, cdhashes[0]); !errors.Is(err, errWeakDirectory) {
+			t.Errorf("%s: %v, want errWeakDirectory", name, err)
 		}
 	}
 }
 
 // codesign(1) may write a SHA-1 primary directory with a SHA-256 alternate,
-// and the kernel records the alternate's cdhash. Any directory whose cdhash
-// matches verifies the image, by that directory's own page hashes.
+// and the kernel records the alternate's cdhash. The SHA-256 alternate
+// verifies the image by its own page hashes; a kernel record naming the
+// SHA-1 primary gives errWeakDirectory.
 func TestCodeSignatureMatchesAnAlternateDirectory(t *testing.T) {
 	sha1Directory := signedDirectory{slot: csSlotCodeDirectory, hashType: 1, newHash: sha1.New}
 	alternate := signedDirectory{slot: csSlotAlternateFirst, hashType: 2, newHash: sha256.New}
 	image, cdhashes := signedImage([]byte("compiler"), 12, sha1Directory, alternate)
-	for i, cdhash := range cdhashes {
-		if err := verifyCodeSignature(image, cdhash); err != nil {
-			t.Fatalf("directory %d: %v", i, err)
-		}
+	if err := verifies(image, cdhashes[0]); !errors.Is(err, errWeakDirectory) {
+		t.Fatalf("the SHA-1 primary: %v, want errWeakDirectory", err)
+	}
+	if err := verifies(image, cdhashes[1]); err != nil {
+		t.Fatalf("the SHA-256 alternate: %v", err)
 	}
 	ignored := signedDirectory{slot: 2, hashType: 2, newHash: sha256.New} // the requirements slot
 	image, cdhashes = signedImage([]byte("compiler"), 12, ignored)
-	if verifyCodeSignature(image, cdhashes[0]) == nil {
+	if verifies(image, cdhashes[0]) == nil {
 		t.Fatal("a CodeDirectory outside a directory slot verified the image")
 	}
 }
@@ -197,7 +214,7 @@ func TestCodeSignatureRefusesADirectoryThatLeavesBytesUnchecked(t *testing.T) {
 	}
 	for name, directory := range cases {
 		image, cdhashes := signedImage(threePages, 12, directory)
-		if verifyCodeSignature(image, cdhashes[0]) == nil {
+		if verifies(image, cdhashes[0]) == nil {
 			t.Errorf("%s: verified", name)
 		}
 	}
@@ -211,7 +228,7 @@ func TestCodeSignatureRefusesARepeatedDirectorySlot(t *testing.T) {
 	repeated := sha256Directory
 	repeated.repeat = 1 << 16
 	image, cdhashes := signedImage(threePages, 12, repeated)
-	if verifyCodeSignature(image, cdhashes[0]) == nil {
+	if verifies(image, cdhashes[0]) == nil {
 		t.Fatal("a signature that repeats the CodeDirectory slot verified the image")
 	}
 	if directories := codeDirectories(image[binary.LittleEndian.Uint32(image[40:]):]); directories != nil {
@@ -222,7 +239,7 @@ func TestCodeSignatureRefusesARepeatedDirectorySlot(t *testing.T) {
 		{slot: csSlotAlternateFirst, hashType: 1, newHash: sha1.New},
 	}
 	image, cdhashes = signedImage([]byte("compiler"), 12, alternates...)
-	if verifyCodeSignature(image, cdhashes[0]) == nil || verifyCodeSignature(image, cdhashes[1]) == nil {
+	if verifies(image, cdhashes[0]) == nil || verifies(image, cdhashes[1]) == nil {
 		t.Fatal("two directories in one alternate slot verified the image")
 	}
 }
@@ -250,11 +267,11 @@ func TestCodeSignatureRefusesMalformedImages(t *testing.T) {
 		"superblob magic": edit(func(b []byte) { b[signatureAt]++ }),
 	}
 	for name, candidate := range cases {
-		if verifyCodeSignature(candidate, cdhash) == nil {
+		if verifies(candidate, cdhash) == nil {
 			t.Errorf("%s: verified", name)
 		}
 	}
-	if verifyCodeSignature(image, cdhash[:19]) == nil {
+	if verifies(image, cdhash[:19]) == nil {
 		t.Error("a short cdhash verified the image")
 	}
 }

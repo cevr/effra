@@ -15,13 +15,18 @@ import (
 	"ergo.local/prototype/runtime/rt"
 )
 
-// The operations interface the lowering emits for queue.Queue[int].
+// The operations interface the lowering emits for queue.Queue[int]: the
+// waiting operations take the caller's task.
 var _ interface {
-	Push(int) error
-	Pop() (int, error)
+	Push(*rt.Task, int) error
+	Pop(*rt.Task) (int, error)
 	Close()
-	Values() iter.Seq[int]
+	Values(*rt.Task) iter.Seq[int]
 } = (*Queue[int])(nil)
+
+// bg is the task of the tests' plain goroutines. It is never stopped and
+// never masked, so the operations only read its state.
+var bg = rt.Root("queue test")
 
 // closed reports whether err is the queue.Closed failure, and fails the
 // test on any other error.
@@ -36,7 +41,7 @@ func closed(t *testing.T, err error) bool {
 // push pushes onto a queue that must take the value.
 func push[T any](t *testing.T, q *Queue[T], v T) {
 	t.Helper()
-	if err := q.Push(v); err != nil {
+	if err := q.Push(bg, v); err != nil {
 		t.Fatalf("Push(%v) failed with %v", v, err)
 	}
 }
@@ -44,7 +49,7 @@ func push[T any](t *testing.T, q *Queue[T], v T) {
 // pop pops from a queue that must hold a value.
 func pop[T any](t *testing.T, q *Queue[T]) T {
 	t.Helper()
-	v, err := q.Pop()
+	v, err := q.Pop(bg)
 	if err != nil {
 		t.Fatalf("Pop failed with %v", err)
 	}
@@ -69,7 +74,7 @@ func TestQueueContract(t *testing.T) {
 		q := New[int](1)
 		push(t, q, 1)
 		done := make(chan error, 1)
-		go func() { done <- q.Push(2) }()
+		go func() { done <- q.Push(bg, 2) }()
 		parked(t, q, 1) // Push into a full queue waits
 		if got := pop(t, q); got != 1 {
 			t.Fatalf("Pop() = %d; want 1", got)
@@ -84,7 +89,7 @@ func TestQueueContract(t *testing.T) {
 	t.Run("capacity 0 is a rendezvous", func(t *testing.T) {
 		q := New[string](0)
 		done := make(chan error, 1)
-		go func() { done <- q.Push("v") }()
+		go func() { done <- q.Push(bg, "v") }()
 		parked(t, q, 1) // the Push waits for the Pop that takes its value
 		if got := pop(t, q); got != "v" {
 			t.Fatalf("Pop() = %q; want v", got)
@@ -102,10 +107,10 @@ func TestQueueContract(t *testing.T) {
 	t.Run("Push after Close", func(t *testing.T) {
 		q := New[int](2)
 		q.Close()
-		if !closed(t, q.Push(1)) {
+		if !closed(t, q.Push(bg, 1)) {
 			t.Fatal("Push on a closed queue did not fail with queue.Closed")
 		}
-		if _, err := q.Pop(); !closed(t, err) {
+		if _, err := q.Pop(bg); !closed(t, err) {
 			t.Fatal("the rejected value entered the queue")
 		}
 	})
@@ -118,7 +123,7 @@ func TestQueueContract(t *testing.T) {
 		if a, b := pop(t, q), pop(t, q); a != 1 || b != 2 {
 			t.Fatalf("Pop, Pop = %d, %d; want 1, 2", a, b)
 		}
-		if _, err := q.Pop(); !closed(t, err) {
+		if _, err := q.Pop(bg); !closed(t, err) {
 			t.Fatal("Pop on a closed, empty queue did not fail with queue.Closed")
 		}
 		if (Closed{}).Error() != "queue.Closed" {
@@ -129,14 +134,14 @@ func TestQueueContract(t *testing.T) {
 		q := New[int](1)
 		push(t, q, 1)
 		done := make(chan error, 1)
-		go func() { done <- q.Push(2) }()
+		go func() { done <- q.Push(bg, 2) }()
 		parked(t, q, 1)
 		q.Close()
 		if err := result(t, done); err != (Closed{}) {
 			t.Fatalf("the waiting Push gave %v; want queue.Closed", err)
 		}
 		var got []int
-		for v := range q.Values() {
+		for v := range q.Values(bg) {
 			got = append(got, v)
 		}
 		if fmt.Sprint(got) != "[1]" {
@@ -147,7 +152,7 @@ func TestQueueContract(t *testing.T) {
 		q := New[int](1)
 		done := make(chan error, 1)
 		go func() {
-			_, err := q.Pop()
+			_, err := q.Pop(bg)
 			done <- err
 		}()
 		parked(t, q, 1)
@@ -163,12 +168,12 @@ func TestQueueContract(t *testing.T) {
 		go func() {
 			defer close(producer)
 			for i := range 100 {
-				_ = q.Push(i)
+				_ = q.Push(bg, i)
 			}
 			q.Close()
 		}()
 		n := 0
-		for v := range q.Values() {
+		for v := range q.Values(bg) {
 			if v != n {
 				t.Fatalf("value %d; want %d", v, n)
 			}
@@ -184,7 +189,7 @@ func TestQueueContract(t *testing.T) {
 			push(t, q, i)
 		}
 		var got []int
-		for v := range q.Values() {
+		for v := range q.Values(bg) {
 			got = append(got, v)
 			if len(got) == 2 {
 				break
@@ -197,7 +202,7 @@ func TestQueueContract(t *testing.T) {
 	t.Run("Close never waits", func(t *testing.T) {
 		q := New[int](0)
 		done := make(chan error, 1)
-		go func() { done <- q.Push(1) }()
+		go func() { done <- q.Push(bg, 1) }()
 		parked(t, q, 1)
 		q.Close() // returns while a Push waits: it never waits itself
 		if err := result(t, done); err != (Closed{}) {
@@ -212,7 +217,7 @@ func TestQueueContract(t *testing.T) {
 		q.Close()
 		err := runMain(func(root *rt.Task) error {
 			return frame(root, func(s *Scope) error {
-				c := Go(s, "consumer", func(*rt.Task) (int, error) { return q.Pop() })
+				c := Go(s, "consumer", func(ct *rt.Task) (int, error) { return q.Pop(ct) })
 				_, err := c.Wait()
 				return err
 			})
@@ -273,7 +278,7 @@ func TestQueueModel(t *testing.T) {
 			switch rng.IntN(5) {
 			case 0, 1:
 				if isClosed {
-					if !closed(t, q.Push(next)) {
+					if !closed(t, q.Push(bg, next)) {
 						t.Fatalf("seed %d step %d: Push on a closed queue did not fail with queue.Closed", seed, step)
 					}
 				} else if len(model) < capacity {
@@ -289,7 +294,7 @@ func TestQueueModel(t *testing.T) {
 					}
 					model = model[1:]
 				case isClosed:
-					if _, err := q.Pop(); !closed(t, err) {
+					if _, err := q.Pop(bg); !closed(t, err) {
 						t.Fatalf("seed %d step %d: Pop on a closed, empty queue did not fail with queue.Closed", seed, step)
 					}
 				}
@@ -302,7 +307,7 @@ func TestQueueModel(t *testing.T) {
 		}
 		q.Close()
 		var rest []int
-		for v := range q.Values() {
+		for v := range q.Values(bg) {
 			rest = append(rest, v)
 		}
 		if fmt.Sprint(rest) != fmt.Sprint(append([]int{}, model...)) && !(len(rest) == 0 && len(model) == 0) {
@@ -371,7 +376,7 @@ func TestQueueStress(t *testing.T) {
 				defer wg.Done()
 				for i := range per {
 					v := item{p, i}
-					if closedQuiet(q.Push(v)) {
+					if closedQuiet(q.Push(bg, v)) {
 						mu.Lock()
 						rejected[v] = true
 						mu.Unlock()
@@ -388,13 +393,13 @@ func TestQueueStress(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				if c%2 == 0 {
-					for v := range q.Values() {
+					for v := range q.Values(bg) {
 						taken[c] = append(taken[c], v)
 					}
 					return
 				}
 				for {
-					v, err := q.Pop()
+					v, err := q.Pop(bg)
 					if closedQuiet(err) {
 						return
 					}
@@ -416,7 +421,7 @@ func TestQueueStress(t *testing.T) {
 				last[v.p] = v.i
 			}
 		}
-		for v := range q.Values() {
+		for v := range q.Values(bg) {
 			seen[v]++
 		}
 		for v, n := range seen {
@@ -477,7 +482,7 @@ func interleave(t *testing.T, seed uint64) {
 			defer producersDone.Add(1)
 			for i := range perProducer {
 				it := item{p, i}
-				if closedQuiet(q.Push(it)) {
+				if closedQuiet(q.Push(bg, it)) {
 					mu.Lock()
 					rejected[it] = true
 					mu.Unlock()
@@ -506,7 +511,7 @@ func interleave(t *testing.T, seed uint64) {
 				return
 			}
 			if consumerByValues[c] {
-				for it := range q.Values() {
+				for it := range q.Values(bg) {
 					if !keep(it) {
 						return
 					}
@@ -514,7 +519,7 @@ func interleave(t *testing.T, seed uint64) {
 				return
 			}
 			for {
-				it, err := q.Pop()
+				it, err := q.Pop(bg)
 				if closedQuiet(err) {
 					return
 				}
@@ -535,7 +540,7 @@ func interleave(t *testing.T, seed uint64) {
 	wg.Wait()
 
 	var rest []item
-	for it := range q.Values() {
+	for it := range q.Values(bg) {
 		rest = append(rest, it)
 	}
 

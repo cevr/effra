@@ -1,7 +1,9 @@
 package producer
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"debug/macho"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -53,7 +55,7 @@ func TestUnavailableQualificationAndBoundedDeclarations(t *testing.T) {
 	fails := func(err error) func() (io.ReadCloser, error) {
 		return func() (io.ReadCloser, error) { return nil, err }
 	}
-	for _, open := range []func() (io.ReadCloser, error){fails(errors.New("private path")), func() (io.ReadCloser, error) { return brokenReader{}, nil }, fails(errUnsupported), fails(errUnverified), fails(errNoSignatureRecord), fails(errImageTooLarge)} {
+	for _, open := range []func() (io.ReadCloser, error){fails(errors.New("private path")), func() (io.ReadCloser, error) { return brokenReader{}, nil }, fails(errUnsupported), fails(errUnverified), fails(errNoSignatureRecord), fails(errUniversal), fails(errWeakDirectory), fails(errImageTooLarge)} {
 		var count atomic.Int32
 		get := acquireOnce(func() (io.ReadCloser, error) { count.Add(1); return open() }, func() (*debug.BuildInfo, bool) { return nil, false }, func() (string, error) { return "nonce-A", nil })
 		first, second := get(), get()
@@ -67,6 +69,8 @@ func TestUnavailableQualificationAndBoundedDeclarations(t *testing.T) {
 		errUnsupported:        "executing image identity is unsupported on this platform",
 		errUnverified:         "executing image does not match the kernel's code signature record",
 		errNoSignatureRecord:  "executing image has no kernel code signature record",
+		errUniversal:          "executing image is a universal file, whose other slices the kernel check does not cover",
+		errWeakDirectory:      "executing image's code directory does not use full SHA-256 page hashes",
 		errImageTooLarge:      "executing image cannot be read within its byte limit",
 		errors.New("private"): "executing image cannot be opened",
 	} {
@@ -86,8 +90,11 @@ func TestUnavailableQualificationAndBoundedDeclarations(t *testing.T) {
 	}
 }
 
-// The test binary is the embedding host. On Linux, and on darwin/arm64, where
-// the Go linker always signs, its identity is the digest of its own bytes.
+// The test binary is the embedding host. On Linux its identity is the digest
+// of its own bytes; on darwin/arm64, where the Go linker always signs, it is
+// the digest of the domain tag and its code below the signature. The darwin
+// expectation is computed here independently of the producer's parser:
+// debug/macho finds LC_CODE_SIGNATURE and its data offset bounds the code.
 func TestCurrentIdentifiesEmbeddingHost(t *testing.T) {
 	id := Current()
 	if id != Current() {
@@ -107,8 +114,26 @@ func TestCurrentIdentifiesEmbeddingHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sum := sha256.Sum256(content)
-	if id.Strength != "executing-artifact" || id.Digest != "sha256:"+hex.EncodeToString(sum[:]) || id.Reason != "" {
+	h := sha256.New()
+	if runtime.GOOS == "darwin" {
+		file, err := macho.NewFile(bytes.NewReader(content))
+		if err != nil {
+			t.Fatal(err)
+		}
+		end := -1
+		for _, load := range file.Loads {
+			if raw := load.Raw(); len(raw) >= 16 && file.ByteOrder.Uint32(raw) == 0x1d { // LC_CODE_SIGNATURE
+				end = int(file.ByteOrder.Uint32(raw[8:])) // dataoff
+			}
+		}
+		if end < 0 || end > len(content) {
+			t.Fatal("the test binary has no code signature")
+		}
+		h.Write([]byte("ergo-producer-darwin-code-1\x00"))
+		content = content[:end]
+	}
+	h.Write(content)
+	if id.Strength != "executing-artifact" || id.Digest != "sha256:"+hex.EncodeToString(h.Sum(nil)) || id.Reason != "" {
 		t.Fatal(id)
 	}
 }
