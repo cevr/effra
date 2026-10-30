@@ -17,32 +17,38 @@ import (
 
 // The operations interface the lowering emits for queue.Queue[int].
 var _ interface {
-	Push(int)
-	Pop() int
+	Push(int) error
+	Pop() (int, error)
 	Close()
 	Values() iter.Seq[int]
 } = (*Queue[int])(nil)
 
-// interrupts reports whether f raises the interruption, and fails the test
-// on any other panic.
-func interrupts(t *testing.T, f func()) bool {
+// closed reports whether err is the queue.Closed failure, and fails the
+// test on any other error.
+func closed(t *testing.T, err error) bool {
 	t.Helper()
-	p := recovered(f)
-	if p != nil && p != rt.Interrupted {
-		t.Fatalf("raised %#v; want rt.Interrupted or nothing", p)
+	if err != nil && err != (Closed{}) {
+		t.Fatalf("failed with %#v; want queue.Closed or nothing", err)
 	}
-	return p == rt.Interrupted
+	return err == (Closed{})
 }
 
-// blocked reports whether done is still open after a moment: the operation
-// that closes it is waiting.
-func blocked(done <-chan struct{}) bool {
-	select {
-	case <-done:
-		return false
-	case <-time.After(20 * time.Millisecond):
-		return true
+// push pushes onto a queue that must take the value.
+func push[T any](t *testing.T, q *Queue[T], v T) {
+	t.Helper()
+	if err := q.Push(v); err != nil {
+		t.Fatalf("Push(%v) failed with %v", v, err)
 	}
+}
+
+// pop pops from a queue that must hold a value.
+func pop[T any](t *testing.T, q *Queue[T]) T {
+	t.Helper()
+	v, err := q.Pop()
+	if err != nil {
+		t.Fatalf("Pop failed with %v", err)
+	}
+	return v
 }
 
 // TestQueueContract walks each rule of the queue contract (runtime.md,
@@ -50,42 +56,46 @@ func blocked(done <-chan struct{}) bool {
 func TestQueueContract(t *testing.T) {
 	t.Run("FIFO", func(t *testing.T) {
 		q := New[int](3)
-		q.Push(1)
-		q.Push(2)
-		q.Push(3)
+		push(t, q, 1)
+		push(t, q, 2)
+		push(t, q, 3)
 		for want := 1; want <= 3; want++ {
-			if got := q.Pop(); got != want {
+			if got := pop(t, q); got != want {
 				t.Fatalf("Pop() = %d; want %d", got, want)
 			}
 		}
 	})
 	t.Run("backpressure", func(t *testing.T) {
 		q := New[int](1)
-		q.Push(1)
-		done := make(chan struct{})
-		go func() { q.Push(2); close(done) }()
-		if !blocked(done) {
+		push(t, q, 1)
+		done := make(chan error, 1)
+		go func() { done <- q.Push(2) }()
+		if !blockedErr(done) {
 			t.Fatal("Push into a full queue did not wait")
 		}
-		if got := q.Pop(); got != 1 {
+		if got := pop(t, q); got != 1 {
 			t.Fatalf("Pop() = %d; want 1", got)
 		}
-		<-done
-		if got := q.Pop(); got != 2 {
+		if err := <-done; err != nil {
+			t.Fatalf("the waiting Push failed with %v", err)
+		}
+		if got := pop(t, q); got != 2 {
 			t.Fatalf("Pop() = %d; want 2", got)
 		}
 	})
 	t.Run("capacity 0 is a rendezvous", func(t *testing.T) {
 		q := New[string](0)
-		done := make(chan struct{})
-		go func() { q.Push("v"); close(done) }()
-		if !blocked(done) {
+		done := make(chan error, 1)
+		go func() { done <- q.Push("v") }()
+		if !blockedErr(done) {
 			t.Fatal("Push into a capacity-0 queue returned before a Pop took the value")
 		}
-		if got := q.Pop(); got != "v" {
+		if got := pop(t, q); got != "v" {
 			t.Fatalf("Pop() = %q; want v", got)
 		}
-		<-done
+		if err := <-done; err != nil {
+			t.Fatalf("the Push failed with %v", err)
+		}
 	})
 	t.Run("negative capacity", func(t *testing.T) {
 		p := recovered(func() { New[int](-1) })
@@ -96,73 +106,69 @@ func TestQueueContract(t *testing.T) {
 	t.Run("Push after Close", func(t *testing.T) {
 		q := New[int](2)
 		q.Close()
-		if !interrupts(t, func() { q.Push(1) }) {
-			t.Fatal("Push on a closed queue did not interrupt")
+		if !closed(t, q.Push(1)) {
+			t.Fatal("Push on a closed queue did not fail with queue.Closed")
 		}
-		if !interrupts(t, func() { q.Pop() }) {
+		if _, err := q.Pop(); !closed(t, err) {
 			t.Fatal("the rejected value entered the queue")
 		}
 	})
-	t.Run("Pop drains, then interrupts", func(t *testing.T) {
+	t.Run("Pop drains, then fails", func(t *testing.T) {
 		q := New[int](2)
-		q.Push(1)
-		q.Push(2)
+		push(t, q, 1)
+		push(t, q, 2)
 		q.Close()
 		q.Close() // idempotent
-		if a, b := q.Pop(), q.Pop(); a != 1 || b != 2 {
+		if a, b := pop(t, q), pop(t, q); a != 1 || b != 2 {
 			t.Fatalf("Pop, Pop = %d, %d; want 1, 2", a, b)
 		}
-		if !interrupts(t, func() { q.Pop() }) {
-			t.Fatal("Pop on a closed, empty queue did not interrupt")
+		if _, err := q.Pop(); !closed(t, err) {
+			t.Fatal("Pop on a closed, empty queue did not fail with queue.Closed")
+		}
+		if (Closed{}).Error() != "queue.Closed" {
+			t.Fatalf("the failure's text is %q", Closed{}.Error())
 		}
 	})
-	t.Run("a waiting Push interrupts at Close", func(t *testing.T) {
+	t.Run("a waiting Push fails at Close", func(t *testing.T) {
 		q := New[int](1)
-		q.Push(1)
-		var interrupted atomic.Bool
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			interrupted.Store(recovered(func() { q.Push(2) }) == rt.Interrupted)
-		}()
-		if !blocked(done) {
+		push(t, q, 1)
+		done := make(chan error, 1)
+		go func() { done <- q.Push(2) }()
+		if !blockedErr(done) {
 			t.Fatal("Push did not wait")
 		}
 		q.Close()
-		<-done
-		if !interrupted.Load() {
-			t.Fatal("the waiting Push did not interrupt")
+		if err := <-done; err != (Closed{}) {
+			t.Fatalf("the waiting Push gave %v; want queue.Closed", err)
 		}
 		var got []int
 		for v := range q.Values() {
 			got = append(got, v)
 		}
 		if fmt.Sprint(got) != "[1]" {
-			t.Fatalf("drained %v; want [1]: the interrupted Push's value never enters", got)
+			t.Fatalf("drained %v; want [1]: the failed Push's value never enters", got)
 		}
 	})
-	t.Run("a waiting Pop interrupts at Close", func(t *testing.T) {
+	t.Run("a waiting Pop fails at Close", func(t *testing.T) {
 		q := New[int](1)
-		var interrupted atomic.Bool
-		done := make(chan struct{})
+		done := make(chan error, 1)
 		go func() {
-			defer close(done)
-			interrupted.Store(recovered(func() { q.Pop() }) == rt.Interrupted)
+			_, err := q.Pop()
+			done <- err
 		}()
-		if !blocked(done) {
+		if !blockedErr(done) {
 			t.Fatal("Pop did not wait")
 		}
 		q.Close()
-		<-done
-		if !interrupted.Load() {
-			t.Fatal("the waiting Pop did not interrupt")
+		if err := <-done; err != (Closed{}) {
+			t.Fatalf("the waiting Pop gave %v; want queue.Closed", err)
 		}
 	})
 	t.Run("Values drains and ends at Close", func(t *testing.T) {
 		q := New[int](4)
 		go func() {
 			for i := range 100 {
-				q.Push(i)
+				_ = q.Push(i)
 			}
 			q.Close()
 		}()
@@ -180,7 +186,7 @@ func TestQueueContract(t *testing.T) {
 	t.Run("Values stops early", func(t *testing.T) {
 		q := New[int](4)
 		for i := 1; i <= 4; i++ {
-			q.Push(i)
+			push(t, q, i)
 		}
 		var got []int
 		for v := range q.Values() {
@@ -189,16 +195,46 @@ func TestQueueContract(t *testing.T) {
 				break
 			}
 		}
-		if fmt.Sprint(got) != "[1 2]" || q.Pop() != 3 {
+		if fmt.Sprint(got) != "[1 2]" || pop(t, q) != 3 {
 			t.Fatalf("took %v; want [1 2], then 3 still queued", got)
 		}
 	})
 	t.Run("Close never waits", func(t *testing.T) {
 		q := New[int](0)
-		go func() { recovered(func() { q.Push(1) }) }()
+		go func() { _ = q.Push(1) }()
 		time.Sleep(time.Millisecond)
 		q.Close()
 	})
+	t.Run("a closed queue is a typed failure, not an interruption", func(t *testing.T) {
+		// The review's case (stage 3a round 1, m1): a child that pops a
+		// closed, empty queue fails with queue.Closed; its owner receives
+		// it from Wait as a typed failure, and main exits 1, not 130.
+		q := New[int](1)
+		q.Close()
+		err := runMain(func(root *rt.Task) error {
+			return frame(root, func(s *Scope) error {
+				c := Go(s, "consumer", func(*rt.Task) (int, error) { return q.Pop() })
+				_, err := c.Wait()
+				return err
+			})
+		})
+		var out strings.Builder
+		if code := report(&out, err); err != (Closed{}) || code != 1 || out.String() != "error: queue.Closed\n" {
+			t.Errorf("exit %v, status %d, report %q; want queue.Closed, 1", err, code, out.String())
+		}
+	})
+}
+
+// blockedErr reports whether done is still empty after a moment: the
+// operation that sends on it is waiting. When it is not, the test fails,
+// so the value it took is not needed.
+func blockedErr(done <-chan error) bool {
+	select {
+	case <-done:
+		return false
+	case <-time.After(20 * time.Millisecond):
+		return true
+	}
 }
 
 // TestQueueModel compares the queue with a model on random sequences of
@@ -210,36 +246,36 @@ func TestQueueModel(t *testing.T) {
 		capacity := rng.IntN(4)
 		q := New[int](capacity)
 		var model []int
-		closed := false
+		isClosed := false
 		next := 0
 		for step := range 40 {
 			switch rng.IntN(5) {
 			case 0, 1:
-				if closed {
-					if !interrupts(t, func() { q.Push(next) }) {
-						t.Fatalf("seed %d step %d: Push on a closed queue did not interrupt", seed, step)
+				if isClosed {
+					if !closed(t, q.Push(next)) {
+						t.Fatalf("seed %d step %d: Push on a closed queue did not fail with queue.Closed", seed, step)
 					}
 				} else if len(model) < capacity {
-					q.Push(next)
+					push(t, q, next)
 					model = append(model, next)
 				}
 				next++
 			case 2, 3:
 				switch {
 				case len(model) > 0:
-					if got := q.Pop(); got != model[0] {
+					if got := pop(t, q); got != model[0] {
 						t.Fatalf("seed %d step %d: Pop() = %d; want %d", seed, step, got, model[0])
 					}
 					model = model[1:]
-				case closed:
-					if !interrupts(t, func() { q.Pop() }) {
-						t.Fatalf("seed %d step %d: Pop on a closed, empty queue did not interrupt", seed, step)
+				case isClosed:
+					if _, err := q.Pop(); !closed(t, err) {
+						t.Fatalf("seed %d step %d: Pop on a closed, empty queue did not fail with queue.Closed", seed, step)
 					}
 				}
 			case 4:
 				if rng.IntN(4) == 0 {
 					q.Close()
-					closed = true
+					isClosed = true
 				}
 			}
 		}
@@ -260,7 +296,7 @@ type item struct{ p, i int }
 // TestQueueInterleavings is the generated interleaving test: for each seed,
 // random capacity, producers, consumers (by Pop or by Values, some stopping
 // early) and a Close at a random point run concurrently. Every value whose
-// Push returned is taken exactly once; no value whose Push interrupted is
+// Push returned is taken exactly once; no value whose Push failed is
 // ever taken; each consumer sees each producer's values in push order (FIFO),
 // and the values left after every consumer stopped come after all of them.
 func TestQueueInterleavings(t *testing.T) {
@@ -283,6 +319,99 @@ func TestQueueInterleavings(t *testing.T) {
 		}
 		if t.Failed() {
 			return
+		}
+	}
+	waitForGoroutines(t, base)
+}
+
+// TestQueueStress is the stage 3a round 1 review's stress test: more
+// producers and consumers and more values than the interleavings test, with
+// a Close at a random moment. Every value whose Push returned nil is taken
+// exactly once, by a consumer or the final drain; no value whose Push failed
+// is taken; each consumer sees each producer's values in order.
+func TestQueueStress(t *testing.T) {
+	base := runtime.NumGoroutine()
+	seeds := uint64(60)
+	if testing.Short() {
+		seeds = 10
+	}
+	for seed := uint64(1); seed <= seeds; seed++ {
+		rng := rand.New(rand.NewPCG(seed, 9))
+		capacity := []int{0, 1, 2, 8}[rng.IntN(4)]
+		producers, consumers, per := 2+rng.IntN(5), 2+rng.IntN(5), 50+rng.IntN(300)
+		q := New[item](capacity)
+		var mu sync.Mutex
+		accepted, rejected := map[item]bool{}, map[item]bool{}
+		taken := make([][]item, consumers)
+		var wg sync.WaitGroup
+		for p := range producers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := range per {
+					v := item{p, i}
+					if closedQuiet(q.Push(v)) {
+						mu.Lock()
+						rejected[v] = true
+						mu.Unlock()
+						return
+					}
+					mu.Lock()
+					accepted[v] = true
+					mu.Unlock()
+				}
+			}()
+		}
+		for c := range consumers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if c%2 == 0 {
+					for v := range q.Values() {
+						taken[c] = append(taken[c], v)
+					}
+					return
+				}
+				for {
+					v, err := q.Pop()
+					if closedQuiet(err) {
+						return
+					}
+					taken[c] = append(taken[c], v)
+				}
+			}()
+		}
+		time.Sleep(time.Duration(rng.IntN(3000)) * time.Microsecond)
+		q.Close()
+		wg.Wait()
+		seen := map[item]int{}
+		for c, list := range taken {
+			last := map[int]int{}
+			for _, v := range list {
+				seen[v]++
+				if l, ok := last[v.p]; ok && v.i <= l {
+					t.Fatalf("seed %d: consumer %d took %v after %d (FIFO)", seed, c, v, l)
+				}
+				last[v.p] = v.i
+			}
+		}
+		for v := range q.Values() {
+			seen[v]++
+		}
+		for v, n := range seen {
+			switch {
+			case n != 1:
+				t.Fatalf("seed %d: %v taken %d times", seed, v, n)
+			case rejected[v]:
+				t.Fatalf("seed %d: %v was taken, but its Push failed", seed, v)
+			case !accepted[v]:
+				t.Fatalf("seed %d: %v was taken, but no Push of it returned", seed, v)
+			}
+		}
+		for v := range accepted {
+			if seen[v] != 1 {
+				t.Fatalf("seed %d: delivered %v was taken %d times", seed, v, seen[v])
+			}
 		}
 	}
 	waitForGoroutines(t, base)
@@ -327,7 +456,7 @@ func interleave(t *testing.T, seed uint64) {
 			defer producersDone.Add(1)
 			for i := range perProducer {
 				it := item{p, i}
-				if interruptsQuiet(func() { q.Push(it) }) {
+				if closedQuiet(q.Push(it)) {
 					mu.Lock()
 					rejected[it] = true
 					mu.Unlock()
@@ -364,8 +493,8 @@ func interleave(t *testing.T, seed uint64) {
 				return
 			}
 			for {
-				var it item
-				if interruptsQuiet(func() { it = q.Pop() }) {
+				it, err := q.Pop()
+				if closedQuiet(err) {
 					return
 				}
 				if !keep(it) {
@@ -422,7 +551,7 @@ func interleave(t *testing.T, seed uint64) {
 		case n > 1:
 			t.Errorf("seed %d: %v was taken %d times", seed, it, n)
 		case rejected[it]:
-			t.Errorf("seed %d: %v was taken, but its Push interrupted", seed, it)
+			t.Errorf("seed %d: %v was taken, but its Push failed with queue.Closed", seed, it)
 		case !accepted[it]:
 			t.Errorf("seed %d: %v was taken, but no Push of it returned", seed, it)
 		}
@@ -439,12 +568,11 @@ func interleave(t *testing.T, seed uint64) {
 	}
 }
 
-// interruptsQuiet is interrupts for another goroutine: it re-raises any
-// other panic.
-func interruptsQuiet(f func()) bool {
-	p := recovered(f)
-	if p != nil && p != rt.Interrupted {
-		panic(p)
+// closedQuiet is closed for another goroutine, where t.Fatalf may not run:
+// any error other than queue.Closed panics.
+func closedQuiet(err error) bool {
+	if err != nil && err != (Closed{}) {
+		panic(fmt.Sprintf("queue failed with %#v; want queue.Closed or nothing", err))
 	}
-	return p == rt.Interrupted
+	return err != nil
 }

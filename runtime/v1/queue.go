@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"iter"
 	"sync"
-
-	"ergo.local/prototype/runtime/rt"
 )
 
 // Queue is queue.Queue[T], the body of the std package queue
 // (docs/spec/runtime.md, Queues): a FIFO of T between tasks with a fixed
 // capacity. Its methods take no task, so *Queue[T] is a value of the
-// operations interface the lowering emits for queue.Queue[T]. The contract:
+// operations interface the lowering emits for queue.Queue[T]:
+// Push(v T) fails Closed, Pop() T fails Closed, Values() Seq[T] and
+// Close(). The contract:
 //
 //   - New(capacity) makes an open, empty queue. capacity is how many values
 //     it holds that no Pop has taken yet; 0 makes every Push wait for the
@@ -20,25 +20,25 @@ import (
 //   - Push(v) adds v at the back. While the queue holds capacity values it
 //     waits (backpressure); waiting pushes enter in the order they began.
 //     Push on a closed queue, and a Push still waiting when the queue
-//     closes, interrupt the caller, and v never enters the queue.
+//     closes, fail with Closed, and v never enters the queue.
 //   - Pop() takes the value at the front, waiting while the queue is open
 //     and empty. On a closed queue it still takes each value that entered
-//     before the close; on a closed, empty queue it interrupts the caller,
-//     because it has no value to return (no zero value is invented,
-//     types.md, Zero values 4).
+//     before the close; on a closed, empty queue it fails with Closed. Its
+//     Go value is then the zero value, which the failure makes unreachable
+//     to Ergo code: no value is invented (types.md, Zero values 4).
 //   - Values() is the queue as a Seq[T] (Go's iter.Seq): each step is a
-//     Pop, so it drains the queue in FIFO order and ends, without an
-//     interruption, when the queue is closed and empty. A loop that stops
-//     early (break, return, try) takes no further value: the rest stay in
-//     the queue for the next Pop or Values.
+//     Pop, so it drains the queue in FIFO order and ends normally when the
+//     queue is closed and empty. A loop that stops early (break, return,
+//     try) takes no further value: the rest stay in the queue for the next
+//     Pop or Values.
 //   - Close() ends admission. It is idempotent, never waits and never
-//     interrupts. Values already in the queue stay for Pop and Values.
+//     fails. Values already in the queue stay for Pop and Values.
 //
-// Every value that a Push delivered (the Push returned) is taken exactly
-// once, by one Pop or one step of Values, in the order the values entered;
-// a value whose Push interrupted is never taken. Several tasks may Push,
-// Pop and iterate one queue at once; the order in which waiting Pops are
-// served is not specified.
+// Every value that a Push delivered (the Push returned no failure) is
+// taken exactly once, by one Pop or one step of Values, in the order the
+// values entered; a value whose Push failed is never taken. Several tasks
+// may Push, Pop and iterate one queue at once; the order in which waiting
+// Pops are served is not specified.
 //
 // Not yet: a task stopped while it waits in Push or Pop keeps waiting until
 // the queue changes (a Pop, a Push or Close), because the queue does not
@@ -56,6 +56,15 @@ type Queue[T any] struct {
 	wake chan struct{}
 }
 
+// Closed is queue.Closed, the typed failure of Push on a closed queue and
+// of Pop on a closed, empty one. A closed queue is a normal end of the
+// protocol, so it is in the operations' error rows, and a catch handles
+// it; an interruption stays a stop from outside.
+type Closed struct{}
+
+// Error is the failure's text, its Ergo name.
+func (Closed) Error() string { return "queue.Closed" }
+
 // sender is a Push waiting for room.
 type sender[T any] struct {
 	v        T
@@ -71,18 +80,18 @@ func New[T any](capacity int) *Queue[T] {
 	return &Queue[T]{capacity: capacity}
 }
 
-// Push is q.Push(v).
-func (q *Queue[T]) Push(v T) {
+// Push is q.Push(v): nil when v entered the queue, Closed when it did not.
+func (q *Queue[T]) Push(v T) error {
 	q.mu.Lock()
 	if q.closed {
 		q.mu.Unlock()
-		panic(rt.Interrupted)
+		return Closed{}
 	}
 	if len(q.senders) == 0 && len(q.buf) < q.capacity {
 		q.buf = append(q.buf, v)
 		q.signal()
 		q.mu.Unlock()
-		return
+		return nil
 	}
 	s := &sender[T]{v: v}
 	q.senders = append(q.senders, s)
@@ -93,17 +102,18 @@ func (q *Queue[T]) Push(v T) {
 	rejected := s.rejected
 	q.mu.Unlock()
 	if rejected {
-		panic(rt.Interrupted)
+		return Closed{}
 	}
+	return nil
 }
 
-// Pop is q.Pop().
-func (q *Queue[T]) Pop() T {
+// Pop is q.Pop(): the front value, or Closed on a closed, empty queue.
+func (q *Queue[T]) Pop() (T, error) {
 	v, ok := q.take()
 	if !ok {
-		panic(rt.Interrupted)
+		return v, Closed{}
 	}
-	return v
+	return v, nil
 }
 
 // Values is q.Values().

@@ -44,7 +44,7 @@ Language v1 ([#196](https://github.com/cevr/ergo/issues/196)) has four small std
 | --- | --- | --- | --- |
 | `task` | `task.Go() { … }` yields a `Task[T, E]`; the prelude's `Task` has `Wait() T fails E` and `Stop()` | [runtime.md, Tasks](runtime.md#tasks) rules 7 to 12 | `Go`, `Task` (task.go) |
 | `scope` | `scope.OnExit() { … }` | [runtime.md, Exit actions](runtime.md#exit-actions) | `Scope.OnExit` (task.go) |
-| `queue` | `queue.New[T](capacity)`, `Push`, `Pop`, `Values` (a `Seq[T]`), `Close` | [runtime.md, Queues](runtime.md#queues) | `New`, `Queue` (queue.go) |
+| `queue` | `queue.New[T](capacity)`, `Push` (fails `queue.Closed`), `Pop` (fails `queue.Closed`), `Values` (a `Seq[T]`), `Close`; the failure `Closed` | [runtime.md, Queues](runtime.md#queues) | `New`, `Queue`, `Closed` (queue.go) |
 | `slice` | `slice.WithCapacity[T](n)` | below | `WithCapacity` (data.go) |
 
 **Slices and Maps.** `slice.WithCapacity[T](n)` is an empty slice with room for `n` elements; it makes no element, and a negative `n` is a defect, as Go's `make` panics. There is no `slice.Repeat`: not every type has a zero value (parse-v1 ruling 7). The prelude's `xs.Append(x)` returns the slice with `x` at the end, `m.Get(k)` returns `Option[V]` and `m.Delete(k)` returns the Map without `k` (check-v1 D-D6). `Append` and `Delete` have Go bodies in data.go. `Get` builds the program's own `Option`, so its body is lowered at the call. A slice and a Map alias as in Go in v1: `Append` may share the array, and `Delete` changes the Map it is given ([#222](https://github.com/cevr/ergo/issues/222), [#197](https://github.com/cevr/ergo/issues/197)). *Prior art:* Go `make([]T, 0, n)` and `append`; Gleam's `list` module and Elixir's `Enum` keep collection functions out of the prelude.
