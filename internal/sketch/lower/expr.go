@@ -406,6 +406,7 @@ func (fc *funcCtx) composite(x *syntax.CompositeLit, t check.Type) string {
 		}
 		var keys []string
 		var values []syntax.Expr
+		set := map[string]bool{}
 		for i, e := range x.Elts {
 			if kv, ok := e.(*syntax.KeyValueExpr); ok {
 				id, ok := kv.Key.(*syntax.Ident)
@@ -418,6 +419,7 @@ func (fc *funcCtx) composite(x *syntax.CompositeLit, t check.Type) string {
 				}
 				keys = append(keys, name)
 				values = append(values, kv.Value)
+				set[id.Name] = true
 				continue
 			}
 			if i >= len(td.fields) {
@@ -425,11 +427,16 @@ func (fc *funcCtx) composite(x *syntax.CompositeLit, t check.Type) string {
 			}
 			keys = append(keys, td.fieldName[td.fields[i].Name])
 			values = append(values, e)
+			set[td.fields[i].Name] = true
 		}
 		vals := fc.operands(values, true)
 		parts := make([]string, len(keys))
 		for i := range keys {
 			parts[i] = keys[i] + ": " + vals[i]
+		}
+		// An omitted field takes its default: a Map field is an empty Map.
+		if s, ok := u.Underlying().(*check.Struct); ok {
+			parts = append(parts, fc.fieldDefaults(td, s, set)...)
 		}
 		return goType + "{" + strings.Join(parts, ", ") + "}"
 	case *check.Slice:

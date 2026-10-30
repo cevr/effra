@@ -151,6 +151,99 @@ func (tc *typeCtx) zero(t check.Type) string {
 	return "*new(" + tc.goType(t) + ")"
 }
 
+// defaultValue is the default of t in Go, for a let without a value and for
+// a record field a literal omits (types.md, Zero values): Go's zero value,
+// except that a Map is an empty, writable Map, never Go's nil map, which
+// panics on a write. A Map inside a record or a tuple is one too, at any
+// depth. The empty value is "" when Go's zero value is the default, so a
+// declaration can omit it.
+func (tc *typeCtx) defaultValue(t check.Type) string {
+	if !holdsMap(t, map[*check.Named]bool{}) {
+		return ""
+	}
+	return tc.emptyValue(t)
+}
+
+// emptyValue is defaultValue's Go text for a type that holds a Map.
+func (tc *typeCtx) emptyValue(t check.Type) string {
+	goType := tc.goType(t)
+	switch u := t.(type) {
+	case *check.Map:
+		return goType + "{}"
+	case *check.Tuple:
+		var parts []string
+		for i, e := range u.Types {
+			if v := tc.defaultValue(e); v != "" {
+				parts = append(parts, tupleField(i)+": "+v)
+			}
+		}
+		return goType + "{" + strings.Join(parts, ", ") + "}"
+	case *check.Named:
+		switch under := u.Underlying().(type) {
+		case *check.Map:
+			return goType + "{}"
+		case *check.Struct:
+			td := tc.l.typeDecl(u.Obj, tc.site)
+			parts := tc.fieldDefaults(td, under, nil)
+			return goType + "{" + strings.Join(parts, ", ") + "}"
+		}
+	}
+	ice(tc.site, "the type %s holds a Map but has no empty value", t)
+	return ""
+}
+
+// fieldDefaults is the keyed Go elements that set each field of the record
+// s, not in set, whose default is not Go's zero value.
+func (tc *typeCtx) fieldDefaults(td *typeDecl, s *check.Struct, set map[string]bool) []string {
+	var parts []string
+	for _, f := range s.Fields {
+		if set[f.Name] {
+			continue
+		}
+		if v := tc.defaultValue(f.Type); v != "" {
+			name, ok := td.fieldName[f.Name]
+			if !ok {
+				ice(tc.site, "%s has no field %s", td.name, f.Name)
+			}
+			parts = append(parts, name+": "+v)
+		}
+	}
+	return parts
+}
+
+// holdsMap reports whether t's default holds a Map: t is a Map, or a record
+// or tuple with a field that holds one. A slice's default is empty, so its
+// elements hold nothing. A type parameter has no default (the checker
+// refuses it).
+func holdsMap(t check.Type, seen map[*check.Named]bool) bool {
+	switch u := t.(type) {
+	case *check.Map:
+		return true
+	case *check.Tuple:
+		for _, e := range u.Types {
+			if holdsMap(e, seen) {
+				return true
+			}
+		}
+	case *check.Named:
+		if seen[u] {
+			return false
+		}
+		seen[u] = true
+		switch under := u.Underlying().(type) {
+		case *check.Map:
+			return true
+		case *check.Struct:
+			for _, f := range under.Fields {
+				if holdsMap(f.Type, seen) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // constant is a checked constant of type t in Go: the exact value, converted
 // to t's Go type, so no Go untyped-constant rule picks another type (196u,
 // spec D4). A float is written as an exact fraction, so float32 rounds once,

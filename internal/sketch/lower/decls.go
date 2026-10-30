@@ -831,7 +831,11 @@ func (l *lowerer) packageVar(spec *syntax.VarSpec, id *syntax.Ident, x syntax.Ex
 	l.recordDecl(fc.owner, spec)
 	if x == nil {
 		l.user.WriteString(l.directive(id.Pos()))
-		l.user.WriteString("var " + name + " " + goType + "\n\n")
+		if def := fc.defaultValue(v.Type); def != "" {
+			l.user.WriteString("var " + name + " " + goType + " = " + def + "\n\n")
+		} else {
+			l.user.WriteString("var " + name + " " + goType + "\n\n")
+		}
 		return
 	}
 	val := fc.assigned(x)

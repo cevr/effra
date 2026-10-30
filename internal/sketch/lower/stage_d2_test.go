@@ -253,6 +253,115 @@ func TestErgoRunMapWriteAndLen(t *testing.T) {
 `, "map write\nlen\n")
 }
 
+// TestErgoRunDefaultMapIsWritable: the default of a Map is an empty,
+// writable Map wherever the lowering produces a default (D-D4, the Map
+// rule): a local and a package let with a Map type and no value, a field a
+// record literal omits, a Map inside a defaulted record at any depth, an
+// elided record in a literal, a generic record's Map field, a defined type
+// over a Map, a tuple's Map and a record that holds itself through a Map.
+// Each is written, then counted with len. Go's nil map panics on the first
+// write.
+func TestErgoRunDefaultMapIsWritable(t *testing.T) {
+	wantRun(t, `type R { N int, M Map[string, int] }
+type O { I R, K int }
+type Box[T] { V T, M Map[string, T] }
+type Bag Map[string, int]
+type L { Next Map[string, L], Kids []L, N int }
+
+let pm Map[string, int]
+
+func report(name string, ok bool) needs Console {
+	if ok {
+		Console.Println(name)
+	}
+}
+
+func main() needs Console {
+	let mut m Map[string, int]
+	m["a"] = 1
+	report("local let", len(m) == 1)
+
+	let mut w = pm
+	w["a"] = 1
+	report("package let", len(w) == 1)
+
+	let mut r = R{N: 1}
+	r.M["a"] = 1
+	report("omitted field", len(r.M) == 1 && r.N == 1)
+
+	let mut o = O{K: 2}
+	o.I.M["k"] = 1
+	report("nested omitted field", len(o.I.M) == 1)
+
+	let mut d O
+	d.I.M["k"] = 1
+	d.I.M["j"] = 2
+	report("let of a record", len(d.I.M) == 2)
+
+	let mut e = []O{{I: R{N: 3}}}
+	e[0].I.M["k"] = 1
+	report("elided record", len(e[0].I.M) == 1 && e[0].I.N == 3)
+
+	let mut b Box[int]
+	b.M["a"] = b.V + 1
+	report("generic record", len(b.M) == 1)
+
+	let mut g Bag
+	g["x"] = 1
+	report("defined Map", len(g) == 1)
+
+	let tup (int, Map[string, int])
+	let n, tm = tup
+	let mut tw = tm
+	tw["a"] = n
+	report("tuple", len(tw) == 1)
+
+	let mut l L
+	l.Next["x"] = L{N: 1}
+	report("recursive record", len(l.Next) == 1)
+}
+`, "local let\npackage let\nomitted field\nnested omitted field\nlet of a record\nelided record\ngeneric record\ndefined Map\ntuple\nrecursive record\n")
+}
+
+// TestErgoRunMapWriteTargets: a Map write fixes its Map, left to right,
+// before a key whose evaluation writes statements (spec D4): when the key
+// reassigns the Map variable, the write still reaches the Map the variable
+// held, which a copy shares. A Map in a record field and in a slice element
+// is a write target too.
+func TestErgoRunMapWriteTargets(t *testing.T) {
+	wantRun(t, `type Failed { Code int }
+type R { M Map[string, int] }
+
+func key(ok bool) string fails Failed needs Console {
+	Console.Println("key")
+	if ok {
+		return "k"
+	}
+	Failed{Code: 1}
+}
+
+func main() needs Console {
+	let mut m = Map[string, int]{"x": 0}
+	let held = m
+	m[key(false) catch {
+	case Failed:
+		m = Map[string, int]{}
+		"z"
+	}] = 1
+	if len(held) == 2 && len(m) == 0 {
+		Console.Println("map fixed first")
+	}
+	let mut r = R{}
+	r.M[key(true) catch { case Failed: "z" }] = 2
+	let mut rs = []R{R{}, R{}}
+	rs[1].M["a"] = 3
+	if len(r.M) == 1 && len(rs[0].M) == 0 && len(rs[1].M) == 1 {
+		Console.Println("field and element")
+	}
+}
+`, "key\nmap fixed first\nkey\nfield and element\n")
+}
+
 // TestQueueValuesRefusedNamingD3: queue.Values() returns a Seq[T] and a for
 // over it checks clean, but a call of a std operation, with the caller's
 // task as its hidden argument, is lowered by stage D3 (the Info requests

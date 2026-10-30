@@ -190,7 +190,11 @@ func (fc *funcCtx) let(d *syntax.VarDecl) {
 		goType := fc.goType(v.Type)
 		if len(spec.Values) == 0 {
 			name := fc.declare(v)
-			fc.line("var " + name + " " + goType)
+			if def := fc.defaultValue(v.Type); def != "" {
+				fc.line("var " + name + " " + goType + " = " + def)
+			} else {
+				fc.line("var " + name + " " + goType)
+			}
 		} else {
 			val := fc.assigned(spec.Values[0])
 			name := fc.declare(v)
