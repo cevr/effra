@@ -33,8 +33,8 @@ type interpolation struct {
 // scanner splits a source into tokens with Go's semicolon insertion. It
 // collects comments apart from the tokens, as go/scanner with ScanComments
 // does for go/parser. The first lexical error ends the token stream with an
-// ILLEGAL token at the error's position, so the parser reports whichever
-// error comes first in the source.
+// ILLEGAL token and an EOF (see fail), so the parser reports whichever
+// error comes first in the source, and every stream ends with EOF.
 //
 // Two contexts change how words lex. After `import` (and its optional `go`)
 // up to two words on the line are PATH tokens, the alias and the unquoted
@@ -103,9 +103,23 @@ func (s *scanner) insertSemi(pos int) {
 	}
 }
 
+// fail records the first lexical error, at pos, and ends the token stream
+// with an ILLEGAL token and an EOF. The error stays where the source is
+// wrong; the two tokens keep the stream's invariant, which every lookahead
+// of the parser relies on to stop and to slice the source between tokens
+// (#226): the stream ends with its one EOF, which peek returns past the
+// end, and each token starts at or after the end of the one before it
+// (checkStream in the tests). The ILLEGAL token covers the error's span
+// unless a token already emitted ends past pos: an open interpolation is
+// reported at its string's opening quote, behind the interpolation's
+// tokens, and there the ILLEGAL token is empty at the last token's end.
 func (s *scanner) fail(pos, length int, format string, args ...any) {
 	s.err = newError(s.src, s.lines, Pos(pos), length, fmt.Sprintf(format, args...))
-	s.toks = append(s.toks, token{ILLEGAL, Pos(pos), Pos(pos + length), ""})
+	start, end := Pos(s.err.Offset), Pos(s.err.Offset+s.err.Length)
+	if n := len(s.toks); n > 0 && s.toks[n-1].end > start {
+		start, end = s.toks[n-1].end, s.toks[n-1].end
+	}
+	s.toks = append(s.toks, token{ILLEGAL, start, end, ""}, token{EOF, end, end, ""})
 }
 
 func (s *scanner) run() {
