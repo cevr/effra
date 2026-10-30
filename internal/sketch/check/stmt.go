@@ -509,11 +509,12 @@ func (c *checker) returnStmt(s *syntax.ReturnStmt) {
 		if len(results) == 1 {
 			hint = results[0]
 		}
-		pinnedMark := c.pinnedSeq
 		op := c.expr(s.Results[0], hint)
 		if op.invalid() {
 			return
 		}
+		// The row is returned: a pinned one may hold more than it shows.
+		c.pinTarget(&op)
 		switch op.mode {
 		case modeValue, modeConst, modeNoValue:
 		default:
@@ -540,7 +541,7 @@ func (c *checker) returnStmt(s *syntax.ReturnStmt) {
 			return
 		}
 		switch {
-		case len(results) == 0 && op.mode == modeNoValue && c.pinnedSeq != pinnedMark:
+		case len(results) == 0 && op.mode == modeNoValue && op.pinned:
 			// `return b()` over a refused member's pinned row: with its
 			// real row it may pass failures on, so this is a follow-on.
 		case len(results) == 0:

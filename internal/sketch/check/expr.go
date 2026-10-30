@@ -47,6 +47,16 @@ type operand struct {
 	// method is the operation an operation-type or capability selector
 	// names (Info.Calls).
 	method *Method
+	// pinned marks errs as a lower bound: the expression executes a call
+	// of a member class G refused, from a later component, whose pinned
+	// rows are no evidence (groupRef). An absence check on it (try or
+	// catch on an expression that cannot fail, Catch 2, a return of no
+	// value) is a follow-on and is skipped (rows.md, Inference 6).
+	// pinnedSig marks a function value whose rows are such a lower bound:
+	// the refused member itself, or a literal whose inferred row took a
+	// pinned row. Calling it gives a pinned result; creating or passing it
+	// runs nothing, so it pins nothing (stage D1 round 2 review M1).
+	pinned, pinnedSig bool
 }
 
 func (o *operand) invalid() bool { return o.mode == modeInvalid }
@@ -89,18 +99,31 @@ func (c *checker) valueExpr(x syntax.Expr, hint Type) operand {
 
 // handled reports an unhandled failure in a value position (S105).
 func (c *checker) handled(op *operand) {
-	if op.invalid() || !op.fallible() {
+	if op.invalid() || !op.fallible() && !op.pinned {
 		return
 	}
 	if c.fn != nil && c.fn.t != nil && c.fn.t.tries > 0 {
-		// Under try, the failure escapes as try's own does.
+		// Under try, the failure escapes as try's own does. A pinned row
+		// may hold more than it shows, so it may have propagated too.
 		c.escape(op.expr, op.errs)
-		op.errs = nil
+		c.pinTarget(op)
+		op.errs, op.pinned = nil, false
 		c.fn.t.tried = true
 		return
 	}
-	c.errorf(op.expr, CodeUnhandled, "the failure %s of this expression is not handled: use try, catch or return (rows.md, Error rows 3)", rowText(op.errs))
-	op.errs = nil
+	if op.fallible() {
+		c.errorf(op.expr, CodeUnhandled, "the failure %s of this expression is not handled: use try, catch or return (rows.md, Error rows 3)", rowText(op.errs))
+	}
+	op.errs, op.pinned = nil, false
+}
+
+// pinTarget notes that op's row reaches the current target (it escapes, is
+// returned or is the body's result): when that row is a lower bound
+// (pinned), so is the target's inferred row.
+func (c *checker) pinTarget(op *operand) {
+	if op.pinned && c.fn != nil && c.fn.t != nil {
+		c.fn.t.pinned = true
+	}
 }
 
 // needValue requires a value: not a type, a package, a capability or no
@@ -433,13 +456,14 @@ func (c *checker) ident(x *syntax.Ident) operand {
 		if c.fn != nil && c.fn.reach != nil {
 			c.fn.reach.funcs = append(c.fn.reach.funcs, o)
 		}
-		if c.groupRef(o) {
+		refused, pinned := c.groupRef(o)
+		if refused {
 			return bad(x)
 		}
 		if len(sig.TParams) > 0 {
-			return operand{mode: modeGeneric, typ: sig, fn: o}
+			return operand{mode: modeGeneric, typ: sig, fn: o, pinnedSig: pinned}
 		}
-		return operand{mode: modeValue, typ: sig, fn: o}
+		return operand{mode: modeValue, typ: sig, fn: o, pinnedSig: pinned}
 	case *TypeName:
 		if n, ok := o.Type.(*Named); ok {
 			c.resolveNamed(n)
@@ -974,7 +998,8 @@ func (c *checker) selfCall(x *syntax.SelectorExpr, base operand, sig *Signature,
 	if c.fn != nil && c.fn.reach != nil {
 		c.fn.reach.funcs = append(c.fn.reach.funcs, fn)
 	}
-	if c.groupRef(fn) {
+	refused, pinned := c.groupRef(fn)
+	if refused {
 		return bad(x)
 	}
 	t := base.typ
@@ -993,9 +1018,9 @@ func (c *checker) selfCall(x *syntax.SelectorExpr, base operand, sig *Signature,
 		c.recordInstantiation(fn.Name, tps, targs, x)
 	}
 	if len(sig.TParams) > 0 {
-		return operand{mode: modeGeneric, typ: sig, fn: fn}
+		return operand{mode: modeGeneric, typ: sig, fn: fn, pinnedSig: pinned}
 	}
-	return operand{mode: modeValue, typ: sig, fn: fn}
+	return operand{mode: modeValue, typ: sig, fn: fn, pinnedSig: pinned}
 }
 
 // overloadedText is the S108 of a plain reference to a name several package

@@ -35,6 +35,10 @@ type target struct {
 	// the whole expression to its right); tried records that one did.
 	tries int
 	tried bool
+	// pinned: a pinned row (operand.pinned) reached this target, so its
+	// inferred row is a lower bound too; a literal's value then has
+	// pinnedSig (funcLit, blockLit).
+	pinned bool
 }
 
 func (t *target) row(declared, inferred *Row) *Row {
@@ -521,19 +525,18 @@ func funcKey(f *Func) string {
 // (D3); the S108 is at the member's declaration (reportGroup). A reference
 // from outside the component, checked after it settled, keeps f's written
 // signature, so an arity or argument mistake there is still reported; only
-// its pinned rows are no evidence, so it counts a pinned read (pinnedSeq)
-// and the absence checks of the expression around it are skipped
-// (classf/go-statement.ergo's caller F got a cascade "returns no value";
-// stage D1 round 1 review M5).
-func (c *checker) groupRef(f *Func) bool {
+// its pinned rows are no evidence, so the reference is pinned: its value
+// has pinnedSig, a call of it has a pinned row, and the absence checks on
+// that row are skipped (classf/go-statement.ergo's caller F got a cascade
+// "returns no value"; stage D1 round 1 review M5). The provenance rides on
+// the operand, so a callback body that calls f pins only what invokes the
+// callback (stage D1 round 2 review M1).
+func (c *checker) groupRef(f *Func) (refused, pinned bool) {
 	if !f.inferErrors && !f.inferUses {
-		return false
+		return false, false
 	}
 	if !c.group[f] {
-		if c.silent == 0 && c.refusedMembers[f] {
-			c.pinnedSeq++
-		}
-		return false
+		return false, c.silent == 0 && c.refusedMembers[f]
 	}
 	for _, l := range c.lits {
 		if !slices.Contains(l.refs, f) {
@@ -543,9 +546,9 @@ func (c *checker) groupRef(f *Func) bool {
 	if c.refused(f) {
 		// An undiagnosed value: its S108 is decided last (reportGroup).
 		c.readUndiagnosed()
-		return true
+		return true, false
 	}
-	return false
+	return false, false
 }
 
 // exceeded returns which of f's pinned rows (errors, capabilities) its body

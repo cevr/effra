@@ -66,8 +66,8 @@ type sink struct {
 	// ret marks a function body: return e means the same as a tail e, so a
 	// fallible tail's failures escape and an error value is a failure.
 	ret bool
-	// pass receives a fallible tail when the sink is not a function body; nil
-	// reports S105 (the failure must be handled).
+	// pass receives a fallible or pinned tail when the sink is not a
+	// function body; nil reports S105 (the failure must be handled).
 	pass func(*operand)
 	// what names the value in an assignment mismatch.
 	what string
@@ -239,15 +239,18 @@ func (c *checker) yieldExpr(last *syntax.ExprStmt, k *sink, end syntax.Pos) {
 			return
 		}
 	}
+	// A pinned row may hold more than it shows, so it goes where a failure
+	// would (operand.pinned).
 	fallible := op.fallible()
 	switch {
-	case !fallible:
+	case !fallible && !op.pinned:
 	case k.ret:
 		c.escape(last.X, op.errs)
-		op.errs = nil
+		c.pinTarget(&op)
+		op.errs, op.pinned = nil, false
 	case k.pass != nil:
 		k.pass(&op)
-		op.errs = nil
+		op.errs, op.pinned = nil, false
 	default:
 		c.handled(&op)
 	}
@@ -367,7 +370,10 @@ func (c *checker) branches(x syntax.Expr, hint Type) operand {
 	// A fallible branch tail passes its failures to the expression, as a
 	// with block's does: an enclosing catch or try handles them (review O2).
 	var errs *Row
-	k := &sink{want: hint, what: "the branch's value", pass: func(op *operand) { errs = errs.union(c.types, op.errs) }}
+	pinned := false
+	k := &sink{want: hint, what: "the branch's value", pass: func(op *operand) {
+		errs, pinned = errs.union(c.types, op.errs), pinned || op.pinned
+	}}
 	k.missing = func(end syntax.Pos) {
 		c.errorAt(end, end+1, CodeMissingRet, "this branch can reach its end without a value; a value if or match yields a value from every branch (D-C1)")
 	}
@@ -396,10 +402,10 @@ func (c *checker) branches(x syntax.Expr, hint Type) operand {
 		// The inferred type is not every branch's (reported, D3).
 		return bad(x)
 	case t != nil:
-		return operand{mode: modeValue, typ: t, errs: errs}
+		return operand{mode: modeValue, typ: t, errs: errs, pinned: pinned}
 	case k.bad:
 		return bad(x)
 	}
 	// Every branch leaves (return, break or continue): no value.
-	return operand{mode: modeNoValue, typ: NoValue, errs: errs}
+	return operand{mode: modeNoValue, typ: NoValue, errs: errs, pinned: pinned}
 }

@@ -53,7 +53,10 @@ func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
 		expect = nil
 	}
 	c.typedFrame(x.Trailing)
-	res := c.yieldingBlock(x.Trailing, x.Trailing.List, expect, yieldKnown, use == useValue, func(op *operand) { errs = errs.union(c.types, op.errs) })
+	pinned := false // a pinned tail (operand.pinned): the with runs its block
+	res := c.yieldingBlock(x.Trailing, x.Trailing.List, expect, yieldKnown, use == useValue, func(op *operand) {
+		errs, pinned = errs.union(c.types, op.errs), pinned || op.pinned
+	})
 	c.fn.branches = c.fn.branches[:len(c.fn.branches)-1]
 	done()
 	t.withs = t.withs[:len(t.withs)-1]
@@ -64,9 +67,9 @@ func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
 		return bad(x)
 	}
 	if res == NoValue {
-		return operand{mode: modeNoValue, typ: NoValue, errs: errs}
+		return operand{mode: modeNoValue, typ: NoValue, errs: errs, pinned: pinned}
 	}
-	op := operand{mode: modeValue, typ: res, errs: errs}
+	op := operand{mode: modeValue, typ: res, errs: errs, pinned: pinned}
 	return op
 }
 
