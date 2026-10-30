@@ -1,6 +1,6 @@
 type Fault {}
 
-func fail() fails Fault { return Fault{} }
+func fail() fails Fault { return Fault }
 func run(f func())      { f() }
 
 func Run() {

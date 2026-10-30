@@ -281,9 +281,8 @@ func main() needs Console {
 //   - M4: an extern intrinsic is bound to the prelude declaration it
 //     implements; a user extern with the same target, whatever its
 //     signature, is refused at its declaration (p06, p11).
-//   - M5: two value arms with one value in their type are refused at the
-//     second arm, so Go never sees a duplicate case (p19, p20). Two catch
-//     or type arms with one type are the checker's S108 today.
+//   - M5: float patterns and repeated value, type or catch arms are the
+//     checker's S108, so Go never sees a duplicate case (p19, p20).
 //   - m1: an error type with a field whose type is a type parameter is
 //     refused at the type.
 //
@@ -296,6 +295,7 @@ func TestRefusalsBeforeGo(t *testing.T) {
 		code         string
 		line, column int
 		message      string
+		alsoLines    []int // further checker diagnostics with this code, column and message
 	}{{
 		name: "extern-arity",
 		src: `extern go ergo.local/prototype/runtime/rt.Sleep func nap(d duration)
@@ -345,7 +345,7 @@ func main() needs Console {
 	Console.Println(kind(0.1))
 }
 `,
-		code: "S109", line: 5, column: 7, message: "this case value equals an earlier case's value in its type, so this arm never runs; check-v1 stage B reports such an arm as unreachable (D-B4)",
+		code: "S108", line: 3, column: 7, message: "a float pattern compares for equality, a trap for floats and durations; test with if (rows.md, Totality 1)", alsoLines: []int{5},
 	}, {
 		name: "int-cases",
 		src: `func kind(x int) string {
@@ -363,7 +363,7 @@ func main() needs Console {
 	Console.Println(kind(1))
 }
 `,
-		code: "S109", line: 5, column: 10, message: "this case value equals an earlier case's value in its type, so this arm never runs; check-v1 stage B reports such an arm as unreachable (D-B4)",
+		code: "S108", line: 5, column: 10, message: "this case is already covered by the earlier case `2` (unreachable)",
 	}, {
 		name: "catch-arms",
 		src: `type A { n int }
@@ -412,7 +412,7 @@ func main() needs Console {
 	Console.Println(kind(A{n: 1}))
 }
 `,
-		code: "S108", line: 13, column: 7, message: "this case is already covered by the cases before it (unreachable)",
+		code: "S108", line: 13, column: 7, message: "this case is already covered by the earlier case `A` (unreachable)",
 	}, {
 		name: "generic-error-field",
 		src: `type Fault[T] { F T }
@@ -439,8 +439,16 @@ func main() fails Fault[int] needs Console {
 			}
 			continue
 		}
-		if len(o.diags) != 1 || o.diags[0].Code != c.code || o.diags[0].Line != c.line || o.diags[0].Column != c.column || o.diags[0].Message != c.message {
-			t.Errorf("%s: diagnostics %v; want one %s at %d:%d: %s", c.name, o.diags, c.code, c.line, c.column, c.message)
+		lines := append([]int{c.line}, c.alsoLines...)
+		if len(o.diags) != len(lines) || len(o.refused) != 0 {
+			t.Errorf("%s: diagnostics %v, refusals %+v; want %s at lines %v, column %d: %s", c.name, o.diags, o.refused, c.code, lines, c.column, c.message)
+			continue
+		}
+		for i, line := range lines {
+			d := o.diags[i]
+			if d.Code != c.code || d.Line != line || d.Column != c.column || d.Message != c.message {
+				t.Errorf("%s: diagnostic %v; want %s at %d:%d: %s", c.name, d, c.code, line, c.column, c.message)
+			}
 		}
 	}
 }

@@ -65,7 +65,15 @@ type funcDecl struct {
 // Go name before anything else is named, in source order, so a source name
 // keeps its spelling unless Go reserves it.
 func (l *lowerer) declareNames() {
+	// Package.Types includes the synthetic declarations of inline variants,
+	// immediately after their union. Merge that order with the source's
+	// other declarations before reserving any generated names.
+	nextType := 0
 	for _, d := range l.file.Decls {
+		for nextType < len(l.pkg.Types) && l.pkg.Types[nextType].Pos < d.End() {
+			l.typeName(l.pkg.Types[nextType])
+			nextType++
+		}
 		l.guard(func() { l.declareName(d) })
 	}
 }
@@ -144,8 +152,8 @@ func (l *lowerer) typeName(tn *check.TypeName) string {
 
 // typeDecl is the lowered declaration of tn, its structure read from the
 // declaring package's Info: a record's fields and an operation type's
-// operations are Defs of its declaring names, a union's variants the Uses of
-// its variant names. It queues nothing (useType).
+// operations are Defs of its declaring names, a union's variants its
+// checked underlying type. It queues nothing (useType).
 func (l *lowerer) typeDecl(tn *check.TypeName, site syntax.Node) *typeDecl {
 	l.typeName(tn)
 	td := l.types[tn]
@@ -193,20 +201,16 @@ func (l *lowerer) typeDecl(tn *check.TypeName, site syntax.Node) *typeDecl {
 	case *syntax.InterfaceType:
 		if len(spec.Union) > 0 {
 			td.kind = kindUnion
-			for _, v := range spec.Union {
-				head := v
-				if ix, ok := head.(*syntax.IndexExpr); ok {
-					head = ix.X
-				}
-				id, ok := head.(*syntax.Ident)
+			union, ok := named.Underlying().(*check.Union)
+			if !ok {
+				ice(site, "the union %s has no checked variants", tn.Name)
+			}
+			for _, v := range union.Variants {
+				variant, ok := v.(*check.Named)
 				if !ok {
-					refuse(v, "an inline or qualified variant is lowered after check-v1 stage B (196p)")
+					ice(site, "the variant %s of %s is not named", v, tn.Name)
 				}
-				vt, ok := info.Uses[id].(*check.TypeName)
-				if !ok {
-					ice(id, "the variant %s of %s has no Uses entry", id.Name, tn.Name)
-				}
-				td.variants = append(td.variants, vt)
+				td.variants = append(td.variants, variant.Obj)
 			}
 			break
 		}
@@ -309,6 +313,7 @@ func (l *lowerer) emitType(td *typeDecl) {
 			if vd.kind != kindRecord {
 				refuse(site, "the variant %s of %s is not a record", v.Name, td.tn.Name)
 			}
+			l.emitType(vd)
 			b.WriteString("func (" + l.recvType(vd) + ") " + td.marker + "() {}\n")
 		}
 		b.WriteString("\n")

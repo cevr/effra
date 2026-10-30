@@ -1,0 +1,19 @@
+// 196p rule 3: constant patterns never cover int (S103); a constant pattern
+// of another type than the subject is S108.
+func status(code int) string {
+	match code { // want S103
+	case 200:
+		return "ok"
+	case 404:
+		return "missing"
+	}
+}
+
+func kind(code int) int {
+	match code {
+	case "card": // want S108
+		return 1
+	case _:
+		return 0
+	}
+}

@@ -518,8 +518,8 @@ type pendingSelf struct {
 	guard *guardNode
 }
 
-// pattern walks a let or for pattern (196p, 196t; the checker reports it
-// S109): the names it binds (patternNames) become locals after it, and
+// pattern walks a pattern of a match case, a let or a for (196p, 196t):
+// the names it binds (patternNames) become locals after it, and
 // every other node is a name, not a value reference (a type that tests
 // the variant, a field key, a literal).
 func (w *refWalker) pattern(p syntax.Expr) {
@@ -662,7 +662,8 @@ func ownBrackets(f *Func) int {
 //   - a function of an imported package;
 //   - a method, or a field of function type, selected from a receiver whose
 //     type is written: a parameter, a receiver, a typed local or one bound
-//     to a composite literal, or a composite literal itself (round 17 m1).
+//     to a composite literal, a composite literal itself (round 17 m1), or
+//     a bare record with no fields (D-B2).
 //
 // Any other callee (a value whose type is inferred) gives nil, and the
 // round-15 rule stays: conservative.
@@ -681,6 +682,9 @@ func (w *refWalker) calleeSig(fun syntax.Expr) *Signature {
 		if id, ok := x.X.(*syntax.Ident); ok && !w.local(id.Name) {
 			if pn, ok := w.c.typeObject(id.Name, w.c.cur).(*PkgName); ok && !pn.broken {
 				return declaredSig(pn.Pkg.Scope.names[x.Sel.Name])
+			}
+			if t := w.bareRecord(id); t != nil {
+				return memberSig(t, x.Sel.Name) // Runner.Each(…) on the bare record (D-B2)
 			}
 			return nil
 		}
@@ -710,6 +714,9 @@ func (w *refWalker) initBinding(e syntax.Expr) *localBinding {
 		if sig := declaredSig(w.c.typeObject(e.Name, w.c.cur)); sig != nil && len(sig.TParams) == 0 {
 			return &localBinding{sig: sig}
 		}
+		if t := w.bareRecord(e); t != nil {
+			return &localBinding{rt: t}
+		}
 	case *syntax.SelectorExpr:
 		if id, ok := e.X.(*syntax.Ident); ok && !w.local(id.Name) {
 			if pn, ok := w.c.typeObject(id.Name, w.c.cur).(*PkgName); ok && !pn.broken {
@@ -733,8 +740,21 @@ func (w *refWalker) staticType(e syntax.Expr) Type {
 		if b := w.lookupLocal(e.Name); b != nil {
 			return b.rt
 		}
+		return w.bareRecord(e)
 	case *syntax.CompositeLit:
 		return w.writtenType(e.Type)
+	}
+	return nil
+}
+
+// bareRecord is the type of a bare record with no fields written as a
+// value, `Runner` (D-B2), or nil.
+func (w *refWalker) bareRecord(id *syntax.Ident) Type {
+	if w.tparams[id.Name] || w.local(id.Name) {
+		return nil
+	}
+	if tn, ok := w.c.typeObject(id.Name, w.c.cur).(*TypeName); ok && isZeroRecord(tn.Type) {
+		return tn.Type
 	}
 	return nil
 }
@@ -1129,11 +1149,12 @@ func (w *refWalker) stmt(s syntax.Stmt) {
 		}
 		for _, cl := range s.Clauses {
 			w.visit(cl)
-			for _, t := range cl.List {
-				w.typ(t)
-			}
+			// A case's patterns bind their names in its arm (196p): a
+			// read of one there is a local, never a package object.
 			w.push()
-			w.bindPatterns(cl.List)
+			for _, p := range cl.List {
+				w.pattern(p)
+			}
 			w.list(cl.Body)
 			w.pop()
 		}

@@ -194,6 +194,9 @@ func (fc *funcCtx) expr(x syntax.Expr) operand {
 	if v, ok := fc.l.info.Values[x]; ok {
 		return operand{val: fc.constant(fc.typeOf(x), v, x)}
 	}
+	if val, ok := fc.bareRecord(x); ok {
+		return operand{val: val}
+	}
 	switch x := x.(type) {
 	case *syntax.ParenExpr:
 		return fc.expr(x.X)
@@ -234,6 +237,43 @@ func (fc *funcCtx) expr(x syntax.Expr) operand {
 	}
 	refuse(x, "this expression is not lowered yet")
 	return operand{}
+}
+
+// bareRecord reads the TypeName use of a bare record value. Its checked
+// type holds any type arguments; those arguments are never value indices.
+func (fc *funcCtx) bareRecord(x syntax.Expr) (string, bool) {
+	head := x
+	if ix, ok := head.(*syntax.IndexExpr); ok {
+		head = unparen(ix.X)
+	}
+	var tn *check.TypeName
+	switch head := head.(type) {
+	case *syntax.Ident:
+		tn, _ = fc.l.info.Uses[head].(*check.TypeName)
+	case *syntax.SelectorExpr:
+		id, ok := unparen(head.X).(*syntax.Ident)
+		if !ok {
+			return "", false
+		}
+		pn, ok := fc.l.info.Uses[id].(*check.PkgName)
+		named, isNamed := fc.typeOf(x).(*check.Named)
+		if !ok || !isNamed || named.Obj.Pkg != pn.Pkg || named.Obj.Name != head.Sel.Name {
+			return "", false
+		}
+		// A qualified expression records its package use and final type;
+		// the Named's object is the selected TypeName.
+		tn = named.Obj
+	default:
+		return "", false
+	}
+	if tn == nil {
+		return "", false
+	}
+	td := fc.l.typeDecl(tn, x)
+	if td.kind != kindRecord || len(td.fields) != 0 {
+		ice(x, "a bare value of %s is not a record with no fields", tn.Name)
+	}
+	return fc.goType(fc.typeOf(x)) + "{}", true
 }
 
 // ident lowers a name: a local, a package let or a function value.

@@ -1,11 +1,11 @@
 // out: handled
 import timeout
 type Fault {}
-func fail() fails Fault { return Fault{} }
+func fail() fails Fault { return Fault }
 func main() needs Console {
-	with wire { Scheduler: LiveScheduler{} } {
+	with wire { Scheduler: LiveScheduler } {
 		timeout.After(1s) {
-			with wire { Scheduler: LiveScheduler{} } {
+			with wire { Scheduler: LiveScheduler } {
 				try timeout.After(1s) {
 					try fail()
 					Console.Println("wrong")

@@ -354,7 +354,7 @@ These are rules of the designed language. The parser enforces the syntax rules t
 | --- | --- |
 | Parser and `ergo fmt` | In the main compiler ([#195](https://github.com/cevr/ergo/issues/195)) |
 | `ergo check`, `diagnostics`, `build` and `run` | Accept the prototype subset: rows, `try`, `catch`, closed wires and `timeout.After` ([example](examples/editions/sketch/main.ergo)) |
-| Checker: types, generics, error and needs rows | In progress ([#196](https://github.com/cevr/ergo/issues/196)) |
+| Checker: types, generics, error and needs rows | In progress ([#196](https://github.com/cevr/ergo/issues/196)): v1 stages A (typed literals) and B (type shapes, bare records, patterns and totality, tuples, conversions) are checked |
 | Linearity, borrows and captures | Designed ([#197](https://github.com/cevr/ergo/issues/197)) |
 | Lowering to Go in the main compiler | Open ([#50](https://github.com/cevr/ergo/issues/50)); prototype in [`prototypes/sketch9`](prototypes/sketch9/README.md) |
 | Task runtime `runtime/rt` | In the main tree, with tracing ([#198](https://github.com/cevr/ergo/issues/198), [#188](https://github.com/cevr/ergo/issues/188)) |

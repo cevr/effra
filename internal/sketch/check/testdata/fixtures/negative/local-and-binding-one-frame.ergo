@@ -1,7 +1,7 @@
 type Store { Get() string }
 
 func run() string needs Store {
-	let Store = "local" // want S104
+	let _ as Store = "local" // want S104
 	return Store
 }
 

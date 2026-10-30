@@ -112,7 +112,7 @@ func TestRowGraphDomain(t *testing.T) {
 		name := func(j int) string {
 			switch kind[j] {
 			case kMethod:
-				return fmt.Sprintf("R%d{}.m%d", j, j%2)
+				return fmt.Sprintf("R%d.m%d", j, j%2)
 			case kExported:
 				return fmt.Sprintf("P%d", j)
 			}
@@ -123,7 +123,7 @@ func TestRowGraphDomain(t *testing.T) {
 		for i := range n {
 			if kind[i] == kMethod {
 				fmt.Fprintf(&b, "type R%d {}\n", i)
-				fmt.Fprintf(&b, "func MkR%d() R%d { return R%d{} }\n", i, i, i)
+				fmt.Fprintf(&b, "func MkR%d() R%d { return R%d }\n", i, i, i)
 			}
 		}
 		for i := range n {
@@ -164,7 +164,7 @@ func TestRowGraphDomain(t *testing.T) {
 				if r == 0 {
 					fmt.Fprintf(&b, "\tfunc(%s func()) { %s() }(func() {})\n", id, id)
 				} else {
-					fmt.Fprintf(&b, "\tfunc() { let %s = func() {}; %s() }()\n", id, id)
+					fmt.Fprintf(&b, "\tfunc() { let _ as %s = func() {}; %s() }()\n", id, id)
 				}
 				shadowed++
 			}
@@ -570,8 +570,9 @@ func TestTotalityPermutations(t *testing.T) {
 			default:
 				t.Errorf("n=%d %s: want total or refused, got %s", n, name, describe(diags))
 			}
-			if steps[0] > check.TotalityBudget/8 {
-				t.Errorf("n=%d %s: %d solver steps, want at most %d", n, name, steps[0], check.TotalityBudget/8)
+			budget := check.TotalityBudgets(src)[0]
+			if steps[0] > budget/8 {
+				t.Errorf("n=%d %s: %d solver steps, want at most %d", n, name, steps[0], budget/8)
 			}
 			if first < 0 {
 				first = steps[0]
@@ -701,9 +702,9 @@ func totalityVerdict(diags []check.Diagnostic) string {
 func TestTotalityEmptySubject(t *testing.T) {
 	for _, sw := range []string{
 		`match c {}`,
-		`match c { case _: return A{} }`,
+		`match c { case _: return A }`,
 		`match (c, d) {}`,
-		`match (d, c) { case (A, _): return A{} }`,
+		`match (d, c) { case (A, _): return A }`,
 	} {
 		src := "type A {}\ntype B {}\ntype Choice = A00\ntype Full = A | B\nfunc F(c Choice, d Full) A {" + sw + "}\n"
 		_, diags := checkWithin(t, check.Decided(src), 2*time.Second)
@@ -724,15 +725,18 @@ func TestTotalityBudget(t *testing.T) {
 			want = "total"
 		}
 		if got != want {
-			t.Fatalf("16 subjects, instance %d: verdict %s, enumeration says %s\n%s", k, got, want, src)
+			costs, _ := check.SolverCosts(src)
+			t.Fatalf("16 subjects, instance %d: verdict %s, enumeration says %s; costs %+v\n%s", k, got, want, costs, src)
 		}
 	}
 	refused := 0
 	for k := 0; k < 4; k++ {
 		src, _ := cnfSwitch(rng, 60, 60*43/10)
 		steps, diags := check.TotalitySteps(src)
-		if len(steps) != 1 || steps[0] > check.TotalityBudget+60*43/10*4 {
-			t.Errorf("60 subjects, instance %d: solver steps %v, want at most the budget %d and one matrix", k, steps, check.TotalityBudget)
+		budgets := check.TotalityBudgets(src)
+		// One charge may pass the budget by at most one matrix scan.
+		if len(steps) != 1 || len(budgets) != 1 || steps[0] > budgets[0]+60*43/10*61 {
+			t.Errorf("60 subjects, instance %d: solver steps %v, want at most the budget %v and one matrix", k, steps, budgets)
 		}
 		if os.Getenv("ERGO_TIMING") == "1" {
 			start := time.Now()
@@ -775,12 +779,12 @@ func Head[T, E](l List[T, E]) fails E { return l.Run() }`},
 type S {}
 func M(_ S, x int) {}
 type Box[T comparable, V I[T]] { X T, Y V }
-func F() { _ = Box{1, S{}} }`},
+func F() { _ = Box{1, S} }`},
 	{"dependent-constraint-explicit", "", `type I[T] { M(T) }
 type S {}
 func M(_ S, x int) {}
 type Box[T comparable, V I[T]] { X T, Y V }
-func F() { _ = Box[int, S]{1, S{}} }`},
+func F() { _ = Box[int, S]{1, S} }`},
 	// T is bound only by a literal and V's constraint mentions it: the
 	// literal's default binds T (196u rule 6), and S satisfies I[int]; a
 	// string literal binds T to string, which S does not satisfy. T is
@@ -790,17 +794,17 @@ func F() { _ = Box[int, S]{1, S{}} }`},
 type S {}
 func M(_ S, x int) {}
 func Use[T comparable, V I[T]](x T, v V) {}
-func F() { Use(1, S{}) }`},
+func F() { Use(1, S) }`},
 	{"dependent-constraint-call-typed", "", `type I[T] { M(T) }
 type S {}
 func M(_ S, x int) {}
 func Use[T comparable, V I[T]](x T, v V) {}
-func F(n int) { Use(n, S{}) }`},
+func F(n int) { Use(n, S) }`},
 	{"dependent-constraint-call-explicit", "", `type I[T] { M(T) }
 type S {}
 func M(_ S, x int) {}
 func Use[T comparable, V I[T]](x T, v V) {}
-func F() { Use[int](1, S{}) }`},
+func F() { Use[int](1, S) }`},
 	{"dependent-constraint-value", "", `type I[T] { M(T) }
 type S {}
 func M(_ S, x int) {}
@@ -810,12 +814,12 @@ func F() func(int, S) { return Use[int, S] }`},
 type S {}
 func M(_ S, x int) {}
 type Box[T comparable, V I[T]] { X T, Y V }
-func F() { _ = Box{"s", S{}} }`},
+func F() { _ = Box{"s", S} }`},
 	{"dependent-constraint-call-unsatisfied", "S108", `type I[T] { M(T) }
 type S {}
 func M(_ S, x int) {}
 func Use[T comparable, V I[T]](x T, v V) {}
-func F() { Use("s", S{}) }`},
+func F() { Use("s", S) }`},
 }
 
 func TestKindAndConstraintDomain(t *testing.T) {

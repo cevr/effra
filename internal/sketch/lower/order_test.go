@@ -442,7 +442,7 @@ type Seven {}
 func Get(_ Seven) int { return 7 }
 
 let Fixed = wire {
-	Num: Seven{},
+	Num: Seven,
 }
 
 func t(tag string, v int) int needs Console {

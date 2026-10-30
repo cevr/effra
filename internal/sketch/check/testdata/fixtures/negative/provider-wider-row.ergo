@@ -2,9 +2,9 @@ type Fault {}
 type Store { Get() string }
 type Mem {}
 
-func Get(_ Mem) string fails Fault { return Fault{} }
+func Get(_ Mem) string fails Fault { return Fault }
 
 func main() needs Console {
-	let v = with wire { Store: Mem{} } { Store.Get() } // want S106
+	let v = with wire { Store: Mem } { Store.Get() } // want S106
 	Console.Println("\(v)")
 }

@@ -4,5 +4,5 @@ type Bang {}
 extern go fixture.mark func mark() fails Bang
 extern go fixture.newHold func newHold[T](x T) Hold[T]
 let old = newHold(f).F
-func f() { return Bang{} }
+func f() { return Bang }
 func F() { _ = Hold[func()]{func() fails Fault[func()] {}} }

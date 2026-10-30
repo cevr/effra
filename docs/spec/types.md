@@ -37,7 +37,7 @@ Status: **implemented in prototype** for struct literals; **designed** for the r
    type Running { Since int64 }
    type Box { state State }
 
-   func newBox() Box { return Box{state: Idle{}} } // allowed: a literal inside the package
+   func newBox() Box { return Box{state: Idle} } // allowed: a literal inside the package
    func zeroBox() Box {
    	let b Box // error even inside the package: State is a union, so Box is not defaultable (rule 3)
    	return b
@@ -61,30 +61,61 @@ let same = Order{"42", 1999}
 ```
 
 1. Field names in one struct are distinct (S108). A field and a function on the type (see [Methods](#methods)) may share a name: `x.f` is the field first (196m).
-2. A composite literal is all keyed or all positional (S001). A positional literal lists every field in order (S108). A keyed literal sets each field at most once (S108) and names only declared fields (S104).
+2. A composite literal is all keyed or all positional (S001). A positional literal lists every field in order (S108). A keyed literal sets each field at most once (S108) and names only declared fields (S104). **A record with no fields is written bare** (check-v1 D-B2): its name is its one value, `return Pending`, and `Pending{}` is S108 "a record with no fields is written bare: Pending"; a bare name of a record with fields is S108 "Paid has fields; write Paid{…}". A function on such a record is called on the bare name, `Runner.Each(f)`: there are no method expressions to confuse it with. In a pattern the bare name tests the type ([rows.md](rows.md#totality), Totality 1). *Principle:* one form per job. *Prior art:* Rust unit structs, Gleam fieldless constructors and ReScript constant constructors are bare.
 3. Each field value must be assignable to the field's type (S108). A field value whose failure is not handled is S105. A field value that is a composite literal writes its type, keyed or positional: `Wrap[S]{value: {h: 1}}` is S108 "missing type in composite literal; write S{h: 1}" (the literal's source is `{…}` past 40 characters or across a line). As in Go, a composite literal may elide its type only as an element of an array, slice or map literal or as a map literal's key (Go spec, "Composite literals"; #196 round 17 C1). *Prior art:* go/types reports "missing type in composite literal" there, and Ergo adds the fix; Rust and Gleam always name a record's constructor.
-4. A struct must not contain itself by value, directly or through other structs (S108). Recursion behind a union is allowed, because a union value is a reference in the lowered Go. *Prior art:* Swift's `indirect enum` boxes recursion; Go rejects an invalid recursive type.
+4. A struct must not contain itself by value, directly or through other structs or tuple elements (S108). Recursion behind a union is allowed, because a union value is a reference in the lowered Go. *Prior art:* Swift's `indirect enum` boxes recursion; Go rejects an invalid recursive type.
 5. A struct with a resource field is itself a resource ([resources.md](resources.md#what-is-a-resource)).
 6. Designed: struct embedding is allowed only in `wire` and in interfaces. Value semantics hold: a copy is a snapshot, and move-on-last-use keeps it cheap.
 
 ## Unions
 
-Status: **implemented in prototype**.
+Status: **checked** by `internal/sketch/check` (check-v1 stage B); **implemented in prototype** for bare-name variants declared in the same file.
 
 ```go
-type Payment = Pending | Authorized | Declined
+type Payment = Pending | Authorized | Declined{ Reason string }
 
 type Pending {}
 type Authorized { AuthID string }
-type Declined { Reason string }
+
+type Option[T] = Some[T]{ Value T } | None{}
 ```
 
-1. A union lists one or more variants. Each variant must be a struct type declared in the package (S108); the prototype requires the same file. A variant may not be listed twice (S108).
+1. **Types by member shape** (check-v1 D-B1). Fields make a record, operations and laws an operation type, `=` a union, and `type N T` a defined type ([Defined types](#defined-types)); a type has one kind. A union lists one or more variants, each a record of this package. A bare-name variant names a record declared in the package: a basic, operation, union or defined type there is S108 "a union variant is a record declared in this package; main.Store is an operation type", and a record from another package is S109 naming 196b (packages). An inline variant `Declined{ Reason string }` declares that record in the package scope, usable as a type anywhere in the package; `Name{}` declares one with no fields. An inline variant of a generic union takes exactly the union's type parameters its fields mention, in the union's order (`Some[T]`, `None`). A variant may not be listed twice (S108). There are no type aliases: `type X = Y` is a one-variant union. *Prior art:* Gleam custom types and ReScript variants declare constructors inside the type, but those constructors are not types; Ergo's variants are record types so rows can share them (Koka, Effekt).
 2. A value of a variant type is assignable to every union that lists it. A struct may be a variant of several unions (fixture `multiple-unions`).
 3. A union has no zero value.
-4. A type switch narrows a union value to its variants ([rows.md](rows.md#totality)).
+4. A `match` narrows a union value to its variants, nested through record patterns ([rows.md](rows.md#totality)).
 5. The emitter generates a marker method per union on each variant, so a source method with that marker's name is an error in the prototype (fixture `marker-method`, S109).
 6. **Lowering.** A union becomes a sealed Go interface with an unexported marker method, and each variant keeps its own struct fields. *Prior art:* Borgo lowers an enum to a tagged struct and matches on the tag; ReScript picks a representation per variant; Ergo keeps the interface form so a Go type switch narrows and each variant keeps its fields. The size trade-off between the two forms is not measured.
+
+## Defined types
+
+Status: **checked** by `internal/sketch/check` (check-v1 stage B).
+
+```go
+type Celsius float64
+type Span (int, int)
+```
+
+1. `type N T` defines a new nominal type over `T`, a basic, slice, map, function, tuple or record type; `N` is not identical to `T`, and a value crosses between them only by conversion ([Conversions](#conversions)). A defined type over a type parameter or over itself is S108.
+2. A defined type over a tuple destructures like its tuple (`let (lo, hi) = span`); a defined type over a record keeps its braces, even with no fields.
+3. Its operations are those of `T`: arithmetic on `Celsius`, comparison where `T` is comparable.
+
+## Tuples
+
+Status: **checked** by `internal/sketch/check` (check-v1 D-B6, 196t).
+
+```go
+func DivMod(a, b int) (int, int) { return (a / b, a % b) }
+
+let (q, r) = DivMod(7, 2)
+let pair (int, string) = (q, "x")
+```
+
+1. A tuple type `(A, B, …)` has two or more elements and is structural: two tuple types are identical when their elements are. A tuple value is `(a, b)`.
+2. A tuple is read only through a pattern ([rows.md](rows.md#totality)): `let (a, b) = t`, `for (k, v) in …`, `case (A, _):`. There is no `.0`.
+3. A function has one result, which may be a tuple; a call is one value, so `f(g())` passes `g`'s tuple as one argument. `let q, r = e` destructures a tuple result.
+4. A tuple is comparable when its elements are, and defaultable when they are. It has no operations, so it implements no operation type.
+5. *Prior art:* Gleam, ReScript and MoonBit tuples with pattern access; Elixir tuples; Go's several results exist mostly for `(T, error)`, which `fails` replaces.
 
 ## Capabilities
 
@@ -161,6 +192,14 @@ Status: **checked** (#196); the build refuses operators other than `==` and `+` 
 3. **Shifts and conversions** (spec D-A3). A shift's left literal takes the expected type when that is an integer type, else `int`; any other expected type is S108 "the left operand of a shift is an integer, and float64 is expected here; write int(1) << n, then convert the result". The count is any integer type. A conversion `T(x)` gives a literal `x` no expected type: `x` is typed on its own, then converted, so `float64(1 << n)` converts an `int` shift (in Go it is invalid, a known trap). *Prior art:* Rust's `as` never types its operand from the target; Gleam and MoonBit shift through library functions on one integer type; Zig requires a fixed-width left operand unless the count is comptime-known.
 4. `duration` takes `+`, `-`, ordering and `==` between durations; an integer literal is never a `duration` (S108). Its other arithmetic is [#175](https://github.com/cevr/ergo/issues/175)'s.
 3. `&&` and `||` short-circuit (README Gap 10). `comparable` is a constraint; ordering constraints such as `cmp.Ordered` are [#211](https://github.com/cevr/ergo/issues/211)'s.
+
+## Conversions
+
+Status: **checked** by `internal/sketch/check` (check-v1 D-B7).
+
+1. `T(x)` converts between numeric types by Go's rules (an integer or float to an integer or float, a complex to a complex, and a numeric constant to any numeric type that represents it), between `duration` and `int64`, and between a defined type and the type it is defined over, in both directions. A value converts to its own type.
+2. Nothing else converts (S108): not two defined types over one type (one hop is visible: `int(c)` of a `Celsius` over `float64` is S108 "convert through the type it is defined over: int(float64(c))"), not two records, not an integer to `string` (S108 "an integer does not convert to string; write \"\\(n)\" for its decimal text"), not a variant to its union or a value to an operation type (assignment does those: `let u Payment = p`).
+3. *Principle:* nominal types, one visible hop. *Prior art:* Gleam and ReScript convert only through functions (`int.to_float`); Elixir uses functions; MoonBit uses `to_int64()` style methods; Go converts between any types with one underlying type, and `string(65)` is a vet warning.
 
 ## Function values
 

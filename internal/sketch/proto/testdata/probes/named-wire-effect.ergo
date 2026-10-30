@@ -4,7 +4,7 @@ type Store { Get() string }
 type Holder { Value string }
 func Get(h Holder) string { return h.Value }
 func build() string {
-	return with wire { Scheduler: LiveScheduler{} } {
+	return with wire { Scheduler: LiveScheduler } {
 		timeout.After(1s) { "ok" }
 	} catch {
 	case timeout.Expired:

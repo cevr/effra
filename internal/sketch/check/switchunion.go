@@ -142,7 +142,7 @@ func (s *switchUnion) bind(tp *TypeParam) Type {
 }
 
 // caseVariant resolves a case type to its variant index in the union, -1
-// for _, -2 on an error (reported), or variantOver when the switch's step
+// for _ or the subject's own type, -2 on an error (reported), or variantOver when the switch's step
 // counter ran out (reported once by the switch). It is a keyed lookup, not a scan:
 // resolving the cases stays linear before the solvers' counters (round-5
 // M2; D16 as amended in round 5).
@@ -150,13 +150,17 @@ func (c *checker) caseVariant(e syntax.Expr, u *switchUnion, subj Type, b *looku
 	if id, ok := e.(*syntax.Ident); ok && id.Name == "_" {
 		return -1
 	}
-	if _, ok := e.(*syntax.CompositeLit); ok {
-		c.notYet(e) // a record pattern, 196p
-		return -2
-	}
 	t := c.typExpr0(e, c.localTypeCtx())
 	if isInvalid(t) {
 		return -2
+	}
+	if c.identical(t, subj) {
+		return -1 // The subject's own union type covers all its values.
+	}
+	if n, ok := t.(*Named); ok && n.Orig == nil && len(n.TParams) > 0 {
+		if sn, ok := subj.(*Named); ok && sn.origin() == n {
+			return -1 // A generic own type may omit its subject's arguments.
+		}
 	}
 	i := u.lookup(t, b)
 	if i >= 0 || i == variantOver {

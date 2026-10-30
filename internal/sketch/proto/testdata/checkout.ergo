@@ -51,9 +51,9 @@ func Authorize(g FakeGateway, order Order) Payment fails GatewayDown {
 }
 
 let Live = wire {
-	Orders:    MemoryOrders{},
+	Orders:    MemoryOrders,
 	Gateway:   FakeGateway{AuthID: "auth-7"},
-	Scheduler: LiveScheduler{},
+	Scheduler: LiveScheduler,
 }
 
 func report(id string) needs Console {

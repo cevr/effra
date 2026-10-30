@@ -1,7 +1,7 @@
 type C34 { M() }
 
 let B1 = wire {
-	C45: P{},
+	C45: P,
 	B0,
 }
 
@@ -21,12 +21,12 @@ type C52 { M() }
 type C25 { M() }
 
 let B16 = wire {
-	C60: P{},
+	C60: P,
 	B15,
 }
 
 let B20 = wire {
-	C64: P{},
+	C64: P,
 	B19,
 }
 
@@ -45,22 +45,22 @@ let W36 = wire {
 type C36 { M() }
 
 let B14 = wire {
-	C58: P{},
+	C58: P,
 	B13,
 }
 
 let A10 = wire {
-	C10: P{},
+	C10: P,
 	A9,
 }
 
 let B28 = wire {
-	C72: P{},
+	C72: P,
 	B27,
 }
 
 let B17 = wire {
-	C61: P{},
+	C61: P,
 	B16,
 }
 
@@ -78,7 +78,7 @@ type C21 { M() }
 type C86 { M() }
 
 let B6 = wire {
-	C50: P{},
+	C50: P,
 	B5,
 }
 
@@ -88,7 +88,7 @@ let W7 = wire {
 }
 
 let A0 = wire {
-	C0: P{},
+	C0: P,
 }
 
 let W24 = wire {
@@ -97,7 +97,7 @@ let W24 = wire {
 }
 
 let A21 = wire {
-	C21: P{},
+	C21: P,
 	A20,
 }
 
@@ -107,7 +107,7 @@ let W29 = wire {
 }
 
 let A30 = wire {
-	C30: P{},
+	C30: P,
 	A29,
 }
 
@@ -117,39 +117,39 @@ let W19 = wire {
 }
 
 let B2 = wire {
-	C46: P{},
+	C46: P,
 	B1,
 }
 
 let A38 = wire {
-	C38: P{},
+	C38: P,
 	A37,
 }
 
 let A33 = wire {
-	C33: P{},
+	C33: P,
 	A32,
 }
 
 let A16 = wire {
-	C16: P{},
+	C16: P,
 	A15,
 }
 
 type C7 { M() }
 
 let B32 = wire {
-	C76: P{},
+	C76: P,
 	B31,
 }
 
 let A36 = wire {
-	C36: P{},
+	C36: P,
 	A35,
 }
 
 let B23 = wire {
-	C67: P{},
+	C67: P,
 	B22,
 }
 
@@ -159,14 +159,14 @@ let W9 = wire {
 }
 
 let A27 = wire {
-	C27: P{},
+	C27: P,
 	A26,
 }
 
 type C76 { M() }
 
 let B31 = wire {
-	C75: P{},
+	C75: P,
 	B30,
 }
 
@@ -185,7 +185,7 @@ let W41 = wire {
 }
 
 let B7 = wire {
-	C51: P{},
+	C51: P,
 	B6,
 }
 
@@ -195,26 +195,26 @@ let W37 = wire {
 }
 
 let A14 = wire {
-	C14: P{},
+	C14: P,
 	A13,
 }
 
 let A34 = wire {
-	C34: P{},
+	C34: P,
 	A33,
 }
 
 type C26 { M() }
 
 let A11 = wire {
-	C11: P{},
+	C11: P,
 	A10,
 }
 
 type C81 { M() }
 
 let B25 = wire {
-	C69: P{},
+	C69: P,
 	B24,
 }
 
@@ -233,7 +233,7 @@ let W13 = wire {
 }
 
 let A20 = wire {
-	C20: P{},
+	C20: P,
 	A19,
 }
 
@@ -251,14 +251,14 @@ let W42 = wire {
 type C6 { M() }
 
 let B21 = wire {
-	C65: P{},
+	C65: P,
 	B20,
 }
 
 type C50 { M() }
 
 let A18 = wire {
-	C18: P{},
+	C18: P,
 	A17,
 }
 
@@ -268,14 +268,14 @@ let W5 = wire {
 }
 
 let B33 = wire {
-	C77: P{},
+	C77: P,
 	B32,
 }
 
 type C32 { M() }
 
 let A37 = wire {
-	C37: P{},
+	C37: P,
 	A36,
 }
 
@@ -293,7 +293,7 @@ let W8 = wire {
 }
 
 let B4 = wire {
-	C48: P{},
+	C48: P,
 	B3,
 }
 
@@ -314,17 +314,17 @@ let W18 = wire {
 type C17 { M() }
 
 let B19 = wire {
-	C63: P{},
+	C63: P,
 	B18,
 }
 
 let B18 = wire {
-	C62: P{},
+	C62: P,
 	B17,
 }
 
 let B38 = wire {
-	C82: P{},
+	C82: P,
 	B37,
 }
 
@@ -333,7 +333,7 @@ type C63 { M() }
 type C23 { M() }
 
 let B35 = wire {
-	C79: P{},
+	C79: P,
 	B34,
 }
 
@@ -343,12 +343,12 @@ let W15 = wire {
 }
 
 let B42 = wire {
-	C86: P{},
+	C86: P,
 	B41,
 }
 
 let A5 = wire {
-	C5: P{},
+	C5: P,
 	A4,
 }
 
@@ -358,7 +358,7 @@ let W35 = wire {
 }
 
 let B15 = wire {
-	C59: P{},
+	C59: P,
 	B14,
 }
 
@@ -368,22 +368,22 @@ let W16 = wire {
 }
 
 let B39 = wire {
-	C83: P{},
+	C83: P,
 	B38,
 }
 
 let B8 = wire {
-	C52: P{},
+	C52: P,
 	B7,
 }
 
 let B41 = wire {
-	C85: P{},
+	C85: P,
 	B40,
 }
 
 let A35 = wire {
-	C35: P{},
+	C35: P,
 	A34,
 }
 
@@ -396,7 +396,7 @@ type C59 { M() }
 type C45 { M() }
 
 let B0 = wire {
-	C44: P{},
+	C44: P,
 }
 
 let W11 = wire {
@@ -409,7 +409,7 @@ type C57 { M() }
 type C61 { M() }
 
 let B13 = wire {
-	C57: P{},
+	C57: P,
 	B12,
 }
 
@@ -419,7 +419,7 @@ let W34 = wire {
 }
 
 let B34 = wire {
-	C78: P{},
+	C78: P,
 	B33,
 }
 
@@ -444,14 +444,14 @@ type C83 { M() }
 type P {}
 
 let A23 = wire {
-	C23: P{},
+	C23: P,
 	A22,
 }
 
 type C84 { M() }
 
 let A32 = wire {
-	C32: P{},
+	C32: P,
 	A31,
 }
 
@@ -495,7 +495,7 @@ let W4 = wire {
 type C46 { M() }
 
 let B27 = wire {
-	C71: P{},
+	C71: P,
 	B26,
 }
 
@@ -511,17 +511,17 @@ let W2 = wire {
 }
 
 let A43 = wire {
-	C43: P{},
+	C43: P,
 	A42,
 }
 
 let A17 = wire {
-	C17: P{},
+	C17: P,
 	A16,
 }
 
 let A42 = wire {
-	C42: P{},
+	C42: P,
 	A41,
 }
 
@@ -530,7 +530,7 @@ type C16 { M() }
 type C55 { M() }
 
 let A9 = wire {
-	C9: P{},
+	C9: P,
 	A8,
 }
 
@@ -540,29 +540,29 @@ let W31 = wire {
 }
 
 let B43 = wire {
-	C87: P{},
+	C87: P,
 	B42,
 }
 
 type C80 { M() }
 
 let A7 = wire {
-	C7: P{},
+	C7: P,
 	A6,
 }
 
 let A6 = wire {
-	C6: P{},
+	C6: P,
 	A5,
 }
 
 let B36 = wire {
-	C80: P{},
+	C80: P,
 	B35,
 }
 
 let B26 = wire {
-	C70: P{},
+	C70: P,
 	B25,
 }
 
@@ -576,22 +576,22 @@ type C72 { M() }
 type C11 { M() }
 
 let A26 = wire {
-	C26: P{},
+	C26: P,
 	A25,
 }
 
 let B30 = wire {
-	C74: P{},
+	C74: P,
 	B29,
 }
 
 let A8 = wire {
-	C8: P{},
+	C8: P,
 	A7,
 }
 
 let A25 = wire {
-	C25: P{},
+	C25: P,
 	A24,
 }
 
@@ -600,7 +600,7 @@ type C65 { M() }
 type C27 { M() }
 
 let A13 = wire {
-	C13: P{},
+	C13: P,
 	A12,
 }
 
@@ -610,24 +610,24 @@ let W10 = wire {
 }
 
 let A15 = wire {
-	C15: P{},
+	C15: P,
 	A14,
 }
 
 let A40 = wire {
-	C40: P{},
+	C40: P,
 	A39,
 }
 
 let B40 = wire {
-	C84: P{},
+	C84: P,
 	B39,
 }
 
 type C37 { M() }
 
 let B11 = wire {
-	C55: P{},
+	C55: P,
 	B10,
 }
 
@@ -636,7 +636,7 @@ type C35 { M() }
 type C10 { M() }
 
 let B37 = wire {
-	C81: P{},
+	C81: P,
 	B36,
 }
 
@@ -650,14 +650,14 @@ let W21 = wire {
 type C49 { M() }
 
 let A31 = wire {
-	C31: P{},
+	C31: P,
 	A30,
 }
 
 type C60 { M() }
 
 let A24 = wire {
-	C24: P{},
+	C24: P,
 	A23,
 }
 
@@ -669,7 +669,7 @@ let W25 = wire {
 }
 
 let A2 = wire {
-	C2: P{},
+	C2: P,
 	A1,
 }
 
@@ -683,7 +683,7 @@ let W3 = wire {
 }
 
 let A4 = wire {
-	C4: P{},
+	C4: P,
 	A3,
 }
 
@@ -692,14 +692,14 @@ type C29 { M() }
 type C53 { M() }
 
 let A19 = wire {
-	C19: P{},
+	C19: P,
 	A18,
 }
 
 type C8 { M() }
 
 let B10 = wire {
-	C54: P{},
+	C54: P,
 	B9,
 }
 
@@ -714,7 +714,7 @@ let W6 = wire {
 }
 
 let B12 = wire {
-	C56: P{},
+	C56: P,
 	B11,
 }
 
@@ -723,24 +723,24 @@ type C28 { M() }
 type C3 { M() }
 
 let B5 = wire {
-	C49: P{},
+	C49: P,
 	B4,
 }
 
 let B22 = wire {
-	C66: P{},
+	C66: P,
 	B21,
 }
 
 let A39 = wire {
-	C39: P{},
+	C39: P,
 	A38,
 }
 
 type C38 { M() }
 
 let A29 = wire {
-	C29: P{},
+	C29: P,
 	A28,
 }
 
@@ -760,7 +760,7 @@ let W33 = wire {
 }
 
 let A12 = wire {
-	C12: P{},
+	C12: P,
 	A11,
 }
 
@@ -771,7 +771,7 @@ type C39 { M() }
 type C42 { M() }
 
 let B24 = wire {
-	C68: P{},
+	C68: P,
 	B23,
 }
 
@@ -780,7 +780,7 @@ type C58 { M() }
 type C56 { M() }
 
 let B3 = wire {
-	C47: P{},
+	C47: P,
 	B2,
 }
 
@@ -791,12 +791,12 @@ type C77 { M() }
 type C43 { M() }
 
 let A41 = wire {
-	C41: P{},
+	C41: P,
 	A40,
 }
 
 let B9 = wire {
-	C53: P{},
+	C53: P,
 	B8,
 }
 
@@ -809,22 +809,22 @@ type C31 { M() }
 type C12 { M() }
 
 let B29 = wire {
-	C73: P{},
+	C73: P,
 	B28,
 }
 
 let A1 = wire {
-	C1: P{},
+	C1: P,
 	A0,
 }
 
 let A3 = wire {
-	C3: P{},
+	C3: P,
 	A2,
 }
 
 let A28 = wire {
-	C28: P{},
+	C28: P,
 	A27,
 }
 
@@ -834,6 +834,6 @@ let W30 = wire {
 }
 
 let A22 = wire {
-	C22: P{},
+	C22: P,
 	A21,
 }

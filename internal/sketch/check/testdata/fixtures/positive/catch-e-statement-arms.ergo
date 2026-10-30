@@ -3,7 +3,7 @@ type Down {}
 
 func find(id string) string fails NotFound | Down {
 	if id == "" {
-		return Down{}
+		return Down
 	}
 	return NotFound{ID: id}
 }

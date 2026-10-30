@@ -1,6 +1,6 @@
 type Fault {}
 
-func fail() string fails Fault { return Fault{} }
+func fail() string fails Fault { return Fault }
 
 func main() needs Console {
 	Console.Println("\(fail())") // want S105

@@ -1,0 +1,42 @@
+// 196p (fifth round): the members decide the kind. Fields make a record,
+// operations make an operation type, `=` makes a union (inline variants
+// and bare names of records declared elsewhere), and `type Name Type` is a
+// defined type.
+type Card {
+	Number string,
+	Expiry int,
+}
+
+type Point { X, Y int }
+
+type Frozen {}
+
+type Payment =
+	| Pending{}
+	| Authorized{AuthID string}
+	| Frozen
+
+type Only = Frozen
+
+type Store {
+	Find(id string) Card,
+}
+
+type Celsius float64
+
+type Pair[A, B] { First A, Second B }
+
+func label(p Payment, s Store, c Celsius, q Pair[Point, Only]) string {
+	let card = s.Find("1")
+	if c > 0.0 && q.First.X == q.First.Y && card.Expiry > 0 {
+		return card.Number
+	}
+	match p {
+	case Pending:
+		return "waiting"
+	case Authorized{AuthID: id}:
+		return id
+	case Frozen:
+		return "frozen"
+	}
+}

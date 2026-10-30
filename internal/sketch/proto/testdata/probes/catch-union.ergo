@@ -4,7 +4,7 @@ type A { Value string }
 type B {}
 type Sum = A | B
 func a() Sum                   { return A{Value: "a"} }
-func fail() string fails Fault { return Fault{} }
+func fail() string fails Fault { return Fault }
 func main() needs Console {
 	let x = fail() catch {
 	case Fault:

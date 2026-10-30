@@ -57,6 +57,7 @@ type Named struct {
 	TParams []*TypeParam
 
 	under   Type
+	def     Type             // origin only: the type a defined type `type N T` is defined over
 	methods map[string]*Func // origin only, keyed: method sets are linear (#122)
 	mlist   []*Func
 	state   int // 0 unresolved, 1 resolving, 2 resolved

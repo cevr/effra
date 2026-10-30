@@ -1,6 +1,6 @@
 type Cap { M() }
 func a() {
-	let b = func() {}
+	let _ as b = func() {}
 	b()
 	Cap.M()
 }

@@ -2,7 +2,7 @@ type Store { Get() string }
 type Mem {}
 
 func Get(_ Mem) string { return "m" }
-func open() Mem        { return Mem{} }
+func open() Mem        { return Mem }
 
 let W = wire {
 	Store: open, // want S109

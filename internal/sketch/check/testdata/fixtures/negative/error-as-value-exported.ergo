@@ -1,6 +1,6 @@
 type Fault {}
 
-func fallible() fails Fault { return Fault{} }
+func fallible() fails Fault { return Fault }
 
 func Identity(v Fault) Fault {
 	return v // want S101

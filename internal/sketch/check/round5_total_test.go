@@ -128,11 +128,16 @@ func soundSwitch(t *testing.T, name, src string, rows [][]int, sizes []int, hasD
 	t.Helper()
 	_, diags := check.CheckSource(src)
 	caseLine := map[int]int{}
+	defaultLine := 0
 	for i, line := range strings.Split(src, "\n") {
-		if l := strings.TrimSpace(line); strings.HasPrefix(l, "case ") && l != "case _:" {
+		l := strings.TrimSpace(line)
+		if l == "case _:" {
+			defaultLine = i + 1
+		} else if strings.HasPrefix(l, "case ") {
 			caseLine[i+1] = len(caseLine)
 		}
 	}
+	deadDefault := false
 	if len(caseLine) != len(rows) {
 		t.Fatalf("%s: %d case lines for %d rows", name, len(caseLine), len(rows))
 	}
@@ -141,6 +146,8 @@ func soundSwitch(t *testing.T, name, src string, rows [][]int, sizes []int, hasD
 	var missing string
 	for _, d := range diags {
 		switch {
+		case strings.Contains(d.Message, "already covered") && d.Line == defaultLine:
+			deadDefault = true // D-B4: a case _ the cases before it cover
 		case strings.Contains(d.Message, "already covered"):
 			k, ok := caseLine[d.Line]
 			if !ok {
@@ -169,13 +176,16 @@ func soundSwitch(t *testing.T, name, src string, rows [][]int, sizes []int, hasD
 	if refusedReach {
 		return "refused-reachability"
 	}
+	escapes := dpllMissing(rows, wildRow(len(sizes)), sizes)
 	if hasDefault {
 		if refusedTotal || missing != "" {
 			t.Fatalf("%s: a switch with default got a totality diagnostic: %s", name, describe(diags))
 		}
+		if deadDefault == escapes {
+			t.Fatalf("%s: case _ reported dead = %v, but the cases before it miss a value = %v\n%s", name, deadDefault, escapes, src)
+		}
 		return "total"
 	}
-	escapes := dpllMissing(rows, wildRow(len(sizes)), sizes)
 	switch {
 	case refusedTotal:
 		return "refused"
@@ -493,8 +503,9 @@ func TestTotalityDeterminism(t *testing.T) {
 }
 
 // TestDefaultSwitchLinear: a switch over n subjects whose only arm is
-// default needs no proof: both solvers count zero steps, and the bytes
-// the whole check allocates grow linearly with n, counted by the runtime,
+// default proves its usefulness with work linear in n, including the
+// initial columns. The bytes the whole check allocates also grow linearly,
+// counted by the runtime,
 // not timed (round-4 M4; D16 as amended in round 5: nothing before the
 // counters is superlinear). Round 4's column canonicalization ran here,
 // quadratic in n.
@@ -517,7 +528,7 @@ func TestDefaultSwitchLinear(t *testing.T) {
 	}
 	for _, n := range []int{1000, 4000} {
 		ts, us, d := check.SolverSteps(src(n))
-		if len(d) > 0 || len(ts) != 1 || ts[0] != 0 || us[0] != 0 {
+		if len(d) > 0 || len(ts) != 1 || len(us) != 1 || ts[0] > 8*n || us[0] > 8*n {
 			t.Fatalf("n=%d: steps %v/%v, diagnostics %s", n, ts, us, describe(d))
 		}
 	}

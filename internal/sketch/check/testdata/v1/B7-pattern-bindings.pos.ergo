@@ -1,0 +1,21 @@
+// 196p and the ninth round: a field pattern binds the field's value, `as`
+// binds the matched value narrowed to the pattern's type, a one-field
+// record may omit the key, and a tuple subject takes tuple patterns.
+type State = Closed{Failures int} | Open{Endpoint string} | HalfOpen{}
+type Signal = Failure{Endpoint string} | Success{} | Retry{}
+
+func step(s State, sig Signal) State {
+	match (s, sig) {
+	case (Closed{n}, Failure{e}):
+		if n > 3 {
+			return Open{e}
+		}
+		return Closed{n + 1}
+	case (HalfOpen, Success):
+		return Closed{0}
+	case (Open as o, Retry):
+		return Open{o.Endpoint}
+	case _:
+		return s
+	}
+}

@@ -66,7 +66,7 @@ func wrap[T](ok bool, v T) Maybe[T] {
 	if ok {
 		return Just[T]{Value: v}
 	}
-	return Nothing{}
+	return Nothing
 }
 
 func main() needs Console {
@@ -162,7 +162,7 @@ type Fixed {}
 func Get(_ Fixed) int { return 5 }
 
 let W = wire {
-	Num: Fixed{},
+	Num: Fixed,
 }
 
 func main_1() int { return 9 }

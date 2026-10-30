@@ -1,6 +1,6 @@
 // out: recovered
 type Fault {}
-func fail() string fails Fault { return Fault{} }
+func fail() string fails Fault { return Fault }
 func handled() string fails Fault {
 	return fail() catch {
 	case Fault:

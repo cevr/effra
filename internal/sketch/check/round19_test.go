@@ -42,13 +42,13 @@ func wireFamily(shape string, n int) string {
 	last := fmt.Sprintf("W%d", n-1)
 	switch shape {
 	case "entry chain": // every wire adds an entry
-		b.WriteString("let W0 = wire {\n\tC0: P{},\n}\n")
+		b.WriteString("let W0 = wire {\n\tC0: P,\n}\n")
 		for i := 1; i < n; i++ {
-			fmt.Fprintf(&b, "let W%d = wire {\n\tC%d: P{},\n\tW%d,\n}\n", i, i, i-1)
+			fmt.Fprintf(&b, "let W%d = wire {\n\tC%d: P,\n\tW%d,\n}\n", i, i, i-1)
 		}
 	case "wide fan-in": // one wire embeds n one-entry wires
 		for i := range n {
-			fmt.Fprintf(&b, "let X%d = wire {\n\tC%d: P{},\n}\n", i, i)
+			fmt.Fprintf(&b, "let X%d = wire {\n\tC%d: P,\n}\n", i, i)
 		}
 		b.WriteString("let W = wire {\n")
 		for i := range n {
@@ -57,10 +57,10 @@ func wireFamily(shape string, n int) string {
 		b.WriteString("}\n")
 		last = "W"
 	case "disjoint": // the reviewer's ladder: W_i embeds two disjoint chains
-		b.WriteString("let A0 = wire {\n\tC0: P{},\n}\n")
-		fmt.Fprintf(&b, "let B0 = wire {\n\tC%d: P{},\n}\n", n)
+		b.WriteString("let A0 = wire {\n\tC0: P,\n}\n")
+		fmt.Fprintf(&b, "let B0 = wire {\n\tC%d: P,\n}\n", n)
 		for i := 1; i < n; i++ {
-			fmt.Fprintf(&b, "let A%d = wire {\n\tC%d: P{},\n\tA%d,\n}\nlet B%d = wire {\n\tC%d: P{},\n\tB%d,\n}\n", i, i, i-1, i, n+i, i-1)
+			fmt.Fprintf(&b, "let A%d = wire {\n\tC%d: P,\n\tA%d,\n}\nlet B%d = wire {\n\tC%d: P,\n\tB%d,\n}\n", i, i, i-1, i, n+i, i-1)
 		}
 		for i := range n {
 			fmt.Fprintf(&b, "let W%d = wire {\n\tA%d,\n\tB%d,\n}\n", i, i, i)
@@ -68,28 +68,28 @@ func wireFamily(shape string, n int) string {
 	case "large-base chain": // one large wire, then a chain adding one entry each
 		b.WriteString("let W0 = wire {\n")
 		for i := range n {
-			fmt.Fprintf(&b, "\tC%d: P{},\n", i)
+			fmt.Fprintf(&b, "\tC%d: P,\n", i)
 		}
 		b.WriteString("}\n")
 		for i := 1; i < n; i++ {
-			fmt.Fprintf(&b, "let W%d = wire {\n\tC%d: P{},\n\tW%d,\n}\n", i, n+i-1, i-1)
+			fmt.Fprintf(&b, "let W%d = wire {\n\tC%d: P,\n\tW%d,\n}\n", i, n+i-1, i-1)
 		}
 	case "replace diamond": // each layer joins two branches and replaces the repeated entry
-		b.WriteString("let W0 = wire {\n\tC0: P{},\n}\n")
+		b.WriteString("let W0 = wire {\n\tC0: P,\n}\n")
 		for i := 1; i < n; i++ {
-			fmt.Fprintf(&b, "let L%d = wire { W%d }\nlet R%d = wire { W%d }\nlet W%d = wire {\n\treplace C0: P{},\n\tL%d,\n\tR%d,\n}\n", i, i-1, i, i-1, i, i, i)
+			fmt.Fprintf(&b, "let L%d = wire { W%d }\nlet R%d = wire { W%d }\nlet W%d = wire {\n\treplace C0: P,\n\tL%d,\n\tR%d,\n}\n", i, i-1, i, i-1, i, i, i)
 		}
 	case "empty independent": // n wires with nothing in them (round 19 M1)
 		for i := range n {
 			fmt.Fprintf(&b, "let W%d = wire {}\n", i)
 		}
-		b.WriteString("func F() { with wire { C0: P{} } { C0.M() } }\n")
+		b.WriteString("func F() { with wire { C0: P } { C0.M() } }\n")
 		return decided(b.String())
 	case "inline fan-in": // an inline wire embeds n one-entry wires and replaces one
 		for i := range n {
-			fmt.Fprintf(&b, "let X%d = wire {\n\tC%d: P{},\n}\n", i, i)
+			fmt.Fprintf(&b, "let X%d = wire {\n\tC%d: P,\n}\n", i, i)
 		}
-		b.WriteString("func F() {\n\twith wire {\n\t\treplace C0: P{},\n")
+		b.WriteString("func F() {\n\twith wire {\n\t\treplace C0: P,\n")
 		for i := range n {
 			fmt.Fprintf(&b, "\t\tX%d,\n", i)
 		}
@@ -103,7 +103,7 @@ func wireFamily(shape string, n int) string {
 			}
 			fmt.Fprintf(&b, "C%d", i)
 		}
-		b.WriteString(": P{},\n}\n")
+		b.WriteString(": P,\n}\n")
 		last = "W"
 	case "inline embeddings": // an inline wire of n empty embeddings and no entry (round 20)
 		b.WriteString("let Empty = wire {}\nfunc F() {\n\twith wire {\n")

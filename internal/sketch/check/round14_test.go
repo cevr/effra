@@ -244,7 +244,7 @@ func recursiveAdmission(seed uint64, errors bool) admissionGroup {
 			if r == 0 {
 				emit("\tfunc(%s func()) { %s() }(func() {})", id, id)
 			} else {
-				emit("\tfunc() { let %s = func() {}; %s() }()", id, id)
+				emit("\tfunc() { let _ as %s = func() {}; %s() }()", id, id)
 			}
 		}
 		emit("}")

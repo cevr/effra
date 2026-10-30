@@ -57,7 +57,7 @@ func variableUnionText(k int, oneCase, collapse bool) string {
 	case oneCase:
 		fmt.Fprintf(&b, "\tcase V[A%d]:\n\t\treturn 1\n", k-1)
 	default:
-		for i := range k {
+		for i := range k - 1 { // Leave a variant for the default arm.
 			fmt.Fprintf(&b, "\tcase V[A%d]:\n\t\treturn %d\n", i, i)
 		}
 	}
@@ -86,7 +86,7 @@ func signatureUnion(n int, oneCase bool) string {
 	if oneCase {
 		fmt.Fprintf(&b, "\tcase V[func(A%d) fails Fault]:\n\t\treturn 1\n", n-1)
 	} else {
-		for i := range n {
+		for i := range n - 1 { // Leave a variant for the default arm.
 			fmt.Fprintf(&b, "\tcase V[func(A%d) fails Fault]:\n\t\treturn %d\n", i, i)
 		}
 	}

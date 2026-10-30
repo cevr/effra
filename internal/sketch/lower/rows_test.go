@@ -179,7 +179,7 @@ type One {}
 func Get(_ One) int { return 1 }
 
 let W = wire {
-	Num: One{},
+	Num: One,
 }
 
 func f(fail bool) int fails Bad {

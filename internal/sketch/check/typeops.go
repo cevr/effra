@@ -206,8 +206,8 @@ func (c *checker) assignable(v, t Type) (bool, string) {
 		}
 	}
 	if it := asInterface(t); it != nil {
-		if _, isTuple := v.(*Tuple); isTuple {
-			return false, "it is several values"
+		if _, isTuple := under(v).(*Tuple); isTuple {
+			return false, "a tuple has no operations"
 		}
 		if it.Comparable {
 			return false, "comparable is a constraint only"
@@ -418,6 +418,14 @@ func comparableSeen(t Type, seen map[Type]bool) bool {
 			}
 		}
 		return true
+	case *Tuple:
+		// A tuple compares when its elements do (196t).
+		for _, e := range u.Types {
+			if !comparableSeen(e, seen) {
+				return false
+			}
+		}
+		return true
 	case *Interface, *Union, *Pointer:
 		return true
 	case *TypeParam:
@@ -458,6 +466,13 @@ func defaultableSeen(t Type, seen map[Type]bool) bool {
 	case *Basic:
 		return true
 	case *Slice, *Map:
+		return true
+	case *Tuple:
+		for _, e := range u.Types {
+			if !defaultableSeen(e, seen) {
+				return false
+			}
+		}
 		return true
 	case *Struct:
 		// A recursive struct reaches itself through a named type, the same

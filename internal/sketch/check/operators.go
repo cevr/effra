@@ -1,6 +1,7 @@
 package check
 
 import (
+	"fmt"
 	"go/constant"
 	"go/token"
 	"math"
@@ -437,25 +438,15 @@ func (c *checker) conversion(x *syntax.CallExpr, t Type) operand {
 	if op.invalid() || isInvalid(t) {
 		return bad(x)
 	}
+	if !c.convertible(op.typ, t) && !constNumeric(op, t) {
+		c.errorf(x, CodeType, "%s", c.conversionRefusal(x.Args[0], op.typ, t))
+		return bad(x)
+	}
 	if op.mode == modeConst {
 		if tb, ok := under(t).(*Basic); ok {
-			ob := under(op.typ).(*Basic)
-			okConv := false
-			switch {
-			case isNumeric(tb) && (isNumeric(ob) || ob.Kind == Duration):
-				okConv = true
-			case tb.Kind == Duration && isInteger(ob):
-				okConv = true
-			case isString(tb) && isString(ob):
-				okConv = true
-			case isString(tb) && isInteger(ob):
+			ob, _ := under(op.typ).(*Basic)
+			if ob == nil {
 				return operand{mode: modeValue, typ: t}
-			case isBoolean(tb) && isBoolean(ob):
-				okConv = true
-			}
-			if !okConv {
-				c.errorf(x, CodeType, "cannot convert %s to %s", op.typ, t)
-				return bad(x)
 			}
 			res := operand{mode: modeConst, typ: t, val: op.val, expr: x}
 			if isInteger(tb) && isFloat(ob) {
@@ -470,11 +461,7 @@ func (c *checker) conversion(x *syntax.CallExpr, t Type) operand {
 			return res
 		}
 	}
-	if c.convertible(op.typ, t) {
-		return operand{mode: modeValue, typ: t}
-	}
-	c.errorf(x, CodeType, "cannot convert %s to %s", op.typ, t)
-	return bad(x)
+	return operand{mode: modeValue, typ: t}
 }
 
 // convertedLiteralOverflow is the S108 message for an integer literal,
@@ -510,35 +497,88 @@ func convertedLiteralOverflow(x syntax.Expr, t Type) string {
 	return "the constant " + v.ExactString() + " overflows int, the type a conversion's literal takes; write it where " + t.String() + " is expected: let x " + t.String() + " = " + v.ExactString()
 }
 
+// convertible reports whether T(x) converts a value of type v to t (spec
+// D-B7, parse-v1's round-4 ruling): between numeric types (Go's rules: an
+// integer or float to an integer or float, a complex to a complex),
+// between duration and int64, and between a defined type and the type it
+// is defined over, in both directions; and a value to its own type.
+// Nothing else converts: not two defined types over one type (convert
+// through the base), not two records, not an integer to string, not a
+// variant to its union or a value to an operation type (assignment does
+// those). One hop is visible: `int(c)` of a Celsius over float64 is
+// `int(float64(c))`.
+//
+// Prior art: Gleam and ReScript convert only through functions
+// (int.to_float); MoonBit uses to_int64() style methods; Go converts
+// between any types with one underlying type, and string(65) is a vet
+// warning.
 func (c *checker) convertible(v, t Type) bool {
-	if ok, _ := c.assignable(v, t); ok {
+	if c.identical(v, t) {
 		return true
 	}
-	vu, tu := under(v), under(t)
-	if c.identical(vu, tu) {
-		return true
-	}
-	vb, vok := vu.(*Basic)
-	tb, tok := tu.(*Basic)
+	vb, vok := v.(*Basic)
+	tb, tok := t.(*Basic)
 	if vok && tok {
 		switch {
 		case isNumeric(vb) && isNumeric(tb) && isComplex(vb) == isComplex(tb):
 			return true
-		case vb.Kind == Duration && isInteger(tb), tb.Kind == Duration && isInteger(vb):
+		case vb.Kind == Duration && tb.Kind == Int64, tb.Kind == Duration && vb.Kind == Int64:
 			return true
-		case isString(tb) && (isInteger(vb) || isString(vb)):
+		}
+		return false
+	}
+	if n, ok := t.(*Named); ok {
+		if base := n.Defined(); base != nil && c.identical(base, v) {
 			return true
 		}
 	}
-	if tok && isString(tb) {
-		if s, ok := vu.(*Slice); ok && (isBasic(s.Elem, Uint8) || isBasic(s.Elem, Int32)) {
-			return true
-		}
-	}
-	if vok && isString(vb) {
-		if s, ok := tu.(*Slice); ok && (isBasic(s.Elem, Uint8) || isBasic(s.Elem, Int32)) {
+	if n, ok := v.(*Named); ok {
+		if base := n.Defined(); base != nil && c.identical(base, t) {
 			return true
 		}
 	}
 	return false
+}
+
+// constNumeric reports a constant of a numeric basic type converted to a
+// numeric basic type: Go converts a constant to any numeric type that
+// represents it, complex128(1) included (the representability check
+// follows in conversion).
+func constNumeric(op operand, t Type) bool {
+	vb, vok := op.typ.(*Basic)
+	tb, tok := t.(*Basic)
+	return op.mode == modeConst && vok && tok && isNumeric(vb) && isNumeric(tb)
+}
+
+// conversionRefusal is the S108 message for a conversion convertible
+// refuses, naming the Ergo form to write instead.
+func (c *checker) conversionRefusal(arg syntax.Expr, v, t Type) string {
+	name := exprText(arg)
+	if lit, sign, ok := signedLit(arg); ok {
+		name = sign + lit.Value
+	}
+	if name == "this expression" {
+		name = "x"
+	}
+	switch {
+	case isString(t) && isInteger(v):
+		return fmt.Sprintf("an integer does not convert to string; write \"\\(%s)\" for its decimal text (types.md, Conversions)", name)
+	case isUnion(t) && !isUnion(v):
+		return fmt.Sprintf("%s is not converted to %s: assignment puts a variant into its union (let u %s = %s) (types.md, Conversions)", v, t, c.localTypeText(t), name)
+	case asInterface(t) != nil && asInterface(v) == nil:
+		return fmt.Sprintf("%s is not converted to %s: assignment puts a value into an operation type (let s %s = %s) (types.md, Conversions)", v, t, c.localTypeText(t), name)
+	}
+	vn, _ := v.(*Named)
+	tn, _ := t.(*Named)
+	if vn != nil && vn.Defined() != nil {
+		if base := vn.Defined(); c.convertible(base, t) {
+			return fmt.Sprintf("cannot convert %s to %s in one step; convert through the type it is defined over: %s(%s(%s)) (types.md, Conversions)", v, t, c.localTypeText(t), c.localTypeText(base), name)
+		}
+	}
+	if tn != nil && tn.Defined() != nil {
+		if base := tn.Defined(); c.convertible(v, base) {
+			return fmt.Sprintf("cannot convert %s to %s in one step; convert through the type it is defined over: %s(%s(%s)) (types.md, Conversions)", v, t, c.localTypeText(t), c.localTypeText(base), name)
+		}
+	}
+	return fmt.Sprintf("cannot convert %s to %s: a conversion is between numeric types, between duration and int64, or between a defined type and the type it is defined over (types.md, Conversions)", v, t)
 }

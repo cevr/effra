@@ -19,5 +19,5 @@ func pair(p AB, q XY) string {
 }
 
 func main() needs Console {
-	Console.Println("\(pair(A{}, X{}))")
+	Console.Println("\(pair(A, X))")
 }

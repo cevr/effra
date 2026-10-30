@@ -1,0 +1,21 @@
+// 196p (fourth round, item 1): a constant pattern covers Go's value switch;
+// a constant never covers its type, so the match needs `case _:`.
+func status(code int) string {
+	match code {
+	case 200, 204:
+		return "ok"
+	case -1:
+		return "unknown"
+	case _:
+		return "error"
+	}
+}
+
+func kind(s string) int {
+	match s {
+	case "card":
+		return 1
+	case _:
+		return 0
+	}
+}

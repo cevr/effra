@@ -1,0 +1,14 @@
+// 196t: a destructuring pattern has the tuple's arity, and each element
+// matches its element type (S108).
+func DivMod(a, b int) (int, int) {
+	return (a / b, a % b)
+}
+
+func three() int {
+	let a, b, c = DivMod(7, 2) // want S108
+	return a + b + c
+}
+
+func pair() (int, string) {
+	return (1, 2) // want S108
+}

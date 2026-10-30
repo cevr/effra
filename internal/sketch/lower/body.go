@@ -145,6 +145,12 @@ func (fc *funcCtx) let(d *syntax.VarDecl) {
 			refuse(d, "a let with a pattern or several names is lowered after check-v1 stage B (196p, 196t)")
 		}
 		id := spec.Names[0]
+		if p := fc.l.info.Patterns[id]; p != nil && p.Kind == check.PatTypeTest {
+			// A known single name remains in Names in the frozen syntax,
+			// but has no binder. The checker proved this test irrefutable.
+			fc.discard(spec.Values[0])
+			continue
+		}
 		v, ok := fc.l.info.Defs[id].(*check.Var)
 		if id.Name == "_" {
 			if len(spec.Values) == 1 {

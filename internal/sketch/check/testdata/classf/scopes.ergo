@@ -34,8 +34,8 @@ func catches() {
 	}
 }
 func blocks() int {
-	let x = 1
-	let y = x
+	let _ as x = 1
+	let _ as y = x
 	if y > 0 {
 		return y
 	}
@@ -49,5 +49,5 @@ func literals() int {
 	return f(1)
 }
 func F() needs Cap { h(); k(); r(); s(); x(); y(); e() }
-func G() int { return g(1) + ranges([]int{1}) + switches(Bang{}) + blocks() + literals() }
+func G() int { return g(1) + ranges([]int{1}) + switches(Bang) + blocks() + literals() }
 func C() { catches() }

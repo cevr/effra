@@ -124,7 +124,7 @@ func TestBodyGraphScale(t *testing.T) {
 	for _, n := range []int{10, 500, 2000} {
 		var b strings.Builder
 		for i := 0; i < n; i++ {
-			fmt.Fprintf(&b, "type R%d {}\nfunc M(_ R%d) { R%d{}.M() }\n", i, i, i)
+			fmt.Fprintf(&b, "type R%d {}\nfunc M(_ R%d) { R%d.M() }\n", i, i, i)
 		}
 		edges, diags := check.BodyGraphEdges(check.Decided(b.String()))
 		if len(diags) != 0 || edges < 0 || edges > n {
@@ -133,7 +133,7 @@ func TestBodyGraphScale(t *testing.T) {
 		b.Reset()
 		b.WriteString("type C { M() }\n")
 		for i := 0; i < n; i++ {
-			fmt.Fprintf(&b, "type R%d {}\nfunc M(_ R%d) { f%d() }\nfunc f%d() { R%d{}.M(); f%d() }\n", i, i, i, i, i, (i+1)%n)
+			fmt.Fprintf(&b, "type R%d {}\nfunc M(_ R%d) { f%d() }\nfunc f%d() { R%d.M(); f%d() }\n", i, i, i, i, i, (i+1)%n)
 		}
 		edges, diags = check.BodyGraphEdges(check.Decided(b.String()))
 		if len(diags) != 0 || edges < 0 || edges > 2*n {
@@ -141,7 +141,7 @@ func TestBodyGraphScale(t *testing.T) {
 		}
 		b.Reset()
 		for i := 0; i < n; i++ {
-			fmt.Fprintf(&b, "type R%d {}\nlet v%d = func() { R%d{}.M() }\nfunc M(_ R%d) { _ = v%d }\n", i, i, i, i, i)
+			fmt.Fprintf(&b, "type R%d {}\nlet v%d = func() { R%d.M() }\nfunc M(_ R%d) { _ = v%d }\n", i, i, i, i, i)
 		}
 		edges, diags = check.BodyGraphEdges(check.Decided(b.String()))
 		cycles := 0
@@ -206,11 +206,11 @@ func Run[E](_ Job[E]) fails E {}`},
 // adds no case diagnostic, in any subject position (D3; round-3 N1).
 func TestInvalidUnionCases(t *testing.T) {
 	for _, sw := range []string{
-		"match c {\n\tcase A:\n\t\treturn A{}\n\t}",
-		"match c {\n\tcase B:\n\t\treturn A{}\n\t}",
-		"match (c, d) {\n\tcase (A, A):\n\t\treturn A{}\n\t}",
-		"match (d, c) {\n\tcase (A, A):\n\t\treturn A{}\n\t}",
-		"match (d, c) {\n\tcase (A, B):\n\t\treturn A{}\n\t}",
+		"match c {\n\tcase A:\n\t\treturn A\n\t}",
+		"match c {\n\tcase B:\n\t\treturn A\n\t}",
+		"match (c, d) {\n\tcase (A, A):\n\t\treturn A\n\t}",
+		"match (d, c) {\n\tcase (A, A):\n\t\treturn A\n\t}",
+		"match (d, c) {\n\tcase (A, B):\n\t\treturn A\n\t}",
 	} {
 		src := "type A {}\ntype B {}\ntype Choice = Missing\ntype Full = A | B\nfunc F(c Choice, d Full) A {\n\t" + sw + "\n}\n"
 		_, diags := check.CheckSource(check.Decided(src))

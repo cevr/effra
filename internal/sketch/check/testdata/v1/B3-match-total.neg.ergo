@@ -1,0 +1,12 @@
+// 196p: a match that omits a variant and has no `case _:` is S103, at the
+// match, naming one missing case; no S107 follows for the same match.
+type Payment = Pending{} | Authorized{AuthID string} | Declined{Reason string}
+
+func label(p Payment) string {
+	match p { // want S103
+	case Pending:
+		return "waiting"
+	case Authorized:
+		return "ok"
+	}
+}

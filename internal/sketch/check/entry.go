@@ -54,12 +54,18 @@ func (c *checker) checkRecursiveStructs() {
 			if c.monoBad(t.origin().TParams) {
 				return // on an instantiation cycle: reported
 			}
-			if _, ok := t.underlying().(*Struct); ok {
+			switch t.underlying().(type) {
+			case *Struct, *Tuple:
 				*out = append(*out, t)
 			}
 		case *Struct:
 			for _, f := range t.Fields {
 				fields(f.Type, out)
+			}
+		case *Tuple:
+			// A tuple holds its elements by value (196t).
+			for _, e := range t.Types {
+				fields(e, out)
 			}
 		}
 	}
@@ -76,10 +82,13 @@ func (c *checker) checkRecursiveStructs() {
 			colour[n] = grey
 			stack = append(stack, n)
 			var next []*Named
-			if s, ok := n.underlying().(*Struct); ok {
-				for _, f := range s.Fields {
+			switch u := n.underlying().(type) {
+			case *Struct:
+				for _, f := range u.Fields {
 					fields(f.Type, &next)
 				}
+			case *Tuple:
+				fields(u, &next)
 			}
 			work = append(work, frame{n: n, next: next})
 		}
@@ -137,7 +146,7 @@ func (c *checker) checkRecursiveStructs() {
 			continue
 		}
 		c.cur = first.Obj.file
-		c.errorf(first.Obj.Decl.Name, CodeType, "struct %s contains itself by value; its size would be infinite (types.md, Structs 4)", first.Obj.Name)
+		c.errorf(first.Obj.Decl.Name, CodeType, "%s contains itself by value, through its fields or tuple elements; its size would be infinite (types.md, Structs 4)", first.Obj.Name)
 	}
 }
 

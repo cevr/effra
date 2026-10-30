@@ -104,26 +104,22 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 	covered, seen := map[int32]bool{}, map[int32]bool{}
 	for _, arm := range x.Arms {
 		var types []Type
-		var asName *syntax.Ident
+		// The `as` name of each pattern of the arm, with its type: with
+		// several patterns, each binds the same name with one type (rule 6
+		// of the pattern language, D-B3), else S108.
+		var asNames []*syntax.Ident
+		var asTypes []Type
 		for _, te := range arm.Types {
 			core, name := asParts(te)
-			if name != nil {
-				if len(arm.Types) > 1 {
-					// A binding in an arm with several types is
-					// check-v1's (196p).
-					c.notYet(te)
-					valid = false // no verdict over an unchecked arm
-					continue
-				}
-				asName = name
-			}
+			asNames = append(asNames, name)
+			asTypes = append(asTypes, nil)
 			if _, ok := core.(*syntax.CompositeLit); ok {
-				c.notYet(core) // a record pattern, 196p
+				c.notYet(core) // a record pattern in a catch arm, 196r
 				valid = false
 				continue
 			}
 			if id, ok := core.(*syntax.Ident); ok && c.catchAll(id) {
-				c.notYet(id) // `case err:`, 196p
+				c.notYet(id) // `case err:`, 196r
 				valid = false
 				continue
 			}
@@ -133,6 +129,7 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 			if t == nil {
 				continue
 			}
+			asTypes[len(asTypes)-1] = t
 			types = append(types, t)
 			if p := c.pattern(core, &Pattern{Kind: PatTypeTest, Type: t}); name != nil {
 				c.asPattern(orig, p, name)
@@ -159,13 +156,15 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 		saved := c.fn.scope
 		c.fn.scope = newScope(saved)
 		var asBinds []asBinding
-		if asName != nil {
-			bt := Type(invalid)
-			if len(types) == 1 {
-				bt = types[0]
-			}
-			if b, ok := c.declareAs(asName, bt); ok {
+		if name, bt := c.armBinding(asNames, asTypes); name != nil {
+			if b, ok := c.declareAs(name, bt); ok {
 				asBinds = append(asBinds, b)
+				v, _ := c.fn.scope.names[name.Name].(*Var)
+				for _, other := range asNames[1:] {
+					if other != nil && other.Name == name.Name && v != nil {
+						c.def(other, v)
+					}
+				}
 			}
 		}
 		c.catchArm(arm, valueType, hasValue, wantValue && hasValue, valid)
@@ -195,6 +194,53 @@ func (c *checker) catch(x *syntax.CatchExpr, hint Type, wantValue, partial bool)
 		res.errs = rest
 	}
 	return res
+}
+
+// armBinding returns the name a catch arm binds and its type, from the
+// `as` name and the type of each of its patterns (nil where a pattern
+// names none or did not resolve). With several patterns, each binds the
+// same name with one type (rule 6 of the pattern language, D-B3): a
+// pattern that binds no name or another type is S108, and the name then
+// binds with the invalid type, so its reads add nothing (D3).
+func (c *checker) armBinding(names []*syntax.Ident, types []Type) (*syntax.Ident, Type) {
+	var first *syntax.Ident
+	for _, n := range names {
+		if n != nil && n.Name != "_" {
+			first = n
+			break
+		}
+	}
+	if first == nil {
+		return nil, nil
+	}
+	if len(names) == 1 {
+		if types[0] == nil {
+			return first, invalid
+		}
+		return first, types[0]
+	}
+	t := types[0]
+	ok := true
+	for i, n := range names {
+		switch {
+		case n == nil || n.Name != first.Name:
+			at := syntax.Node(first)
+			if n != nil {
+				at = n
+			}
+			c.errorf(at, CodeType, "%s is bound by one pattern of this arm and not by another; every pattern of an arm binds the same names (rows.md, Totality 1)", first.Name)
+			return first, invalid
+		case types[i] == nil || t == nil:
+			ok = false
+		case !c.identical(types[i], t):
+			c.errorf(n, CodeType, "%s is bound as %s by the first pattern of its arm and as %s here; every pattern of an arm binds each name with one type (rows.md, Totality 1)", n.Name, t, types[i])
+			return first, invalid
+		}
+	}
+	if !ok {
+		return first, invalid
+	}
+	return first, t
 }
 
 // catchType resolves an arm's type. A generic error type written without

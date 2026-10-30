@@ -1,0 +1,14 @@
+// 196p rule 2 and 196t: `let` destructures with an irrefutable pattern: a
+// record pattern of the value's own type, or a tuple.
+type Order { ID string, Total int }
+
+func DivMod(a, b int) (int, int) {
+	return (a / b, a % b)
+}
+
+func use(order Order) int {
+	let Order{Total: base} = order
+	let q, r = DivMod(7, 2)
+	let (n, d) = DivMod(9, 4)
+	return base + q + r + n + d
+}

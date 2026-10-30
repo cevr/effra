@@ -41,7 +41,7 @@ func word(n int) string {
 
 func expire(fail bool) int fails timeout.Expired {
 	if fail {
-		return timeout.Expired{}
+		return timeout.Expired
 	}
 	return 1
 }
@@ -91,7 +91,7 @@ func widths() bool {
 }
 
 func main() needs Console {
-	let shapes = []Shape{Circle{R: 2}, Square{S: 1}, Dot{}}
+	let shapes = []Shape{Circle{R: 2}, Square{S: 1}, Dot}
 	Console.Println(classify(shapes[0]) + ", " + classify(shapes[1]) + ", " + classify(Circle{R: 1}))
 	Console.Println(word(0) + " " + word(2) + " " + word(limit))
 	let half = shapes[1:]
@@ -108,7 +108,7 @@ func main() needs Console {
 	if pick(4) == -4 && !(pick(1) > 0) && ^0 == -1 {
 		Console.Println("function values and unary operators")
 	}
-	if int64(7)/2 == 3 && float64(int32(3)) == 3.0 && string('a') == "a" {
+	if int64(7)/2 == 3 && float64(int32(3)) == 3.0 && int('a') == 97 {
 		Console.Println("conversions")
 	}
 	let v = expire(true) catch {

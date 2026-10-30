@@ -3,7 +3,7 @@ type Idle {}
 type Running { Since int64 }
 type Box { state State }
 
-func newBox() Box { return Box{state: Idle{}} } // allowed: a literal inside the package
+func newBox() Box { return Box{state: Idle} } // allowed: a literal inside the package
 func zeroBox() Box {
 	let b Box // error even inside the package: State is a union, so Box is not defaultable (rule 3) // want S108
 	return b

@@ -17,7 +17,7 @@ func Greet(_ Friends, name string) string fails NotFound {
 }
 
 let Live = wire {
-	Greeter: Friends{},
+	Greeter: Friends,
 }
 
 func greet(name string) needs Console {

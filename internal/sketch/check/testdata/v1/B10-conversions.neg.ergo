@@ -1,0 +1,12 @@
+// Spec D-B5: no integer-to-string conversion (Go's `string(65)` trap; write
+// "\(n)"), and no conversion between unrelated record types (S108).
+type Card { Number string }
+type Order { Number string }
+
+func text(n int) string {
+	return string(n) // want S108
+}
+
+func card(o Order) Card {
+	return Card(o) // want S108
+}

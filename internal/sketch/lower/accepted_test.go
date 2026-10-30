@@ -22,7 +22,7 @@ import (
 // each needs a witness, a source that lowers whole and compiles.
 var implementedFamilies = []string{
 	"File", "ImportDecl", "ImportSpec", "TypeDecl", "FuncDecl", "VarDecl", "VarSpec", "WireDecl", "WireBody", "WireEntry",
-	"Field", "FieldList", "FuncType", "StructType", "InterfaceType", "ErrorRow", "NeedsClause", "ExternSpec",
+	"Field", "FieldList", "FuncType", "StructType", "InterfaceType", "VariantSpec", "ErrorRow", "NeedsClause", "ExternSpec",
 	"Ident", "BasicLit", "CompositeLit", "KeyValueExpr", "FuncLit", "ParenExpr", "SelectorExpr", "IndexExpr", "SliceExpr",
 	"CallExpr", "UnaryExpr", "BinaryExpr", "StarExpr", "TryExpr", "CatchExpr", "CatchArm", "AsPattern", "ArrayType", "MapType",
 	"DeclStmt", "ExprStmt", "AssignStmt", "ReturnStmt", "BlockStmt", "IfStmt", "ForStmt", "BranchStmt",
@@ -46,7 +46,6 @@ var refusedFamilies = map[string]string{
 	"AssertStmt":         "check-v1 stage E",
 	"LawDecl":            "check-v1 stage E",
 	"TupleExpr":          "check-v1 stage B",
-	"VariantSpec":        "check-v1 stage B",
 	"pattern:Bind":       "check-v1 stage B",
 	"pattern:Record":     "check-v1 stage B",
 	"pattern:Tuple":      "check-v1 stage B",
@@ -112,7 +111,7 @@ var refusalReasons = []struct {
 	{"FuncType:tuple", regexp.MustCompile(`^(several results are|a function type with several results is|an operation with several results is|a literal with several results is) a tuple, (which lowering supports|lowered) after check-v1 stage B`)},
 	{"ReturnStmt:tuple", regexp.MustCompile(`^returning several values is a tuple, lowered after check-v1 stage B`)},
 	{"CaseClause:duplicate", regexp.MustCompile(`check-v1 stage B reports such an arm as unreachable \(D-B4\)$`)},
-	{"InterfaceType:unionInline", regexp.MustCompile(`^an inline (or qualified variant|union) is lowered after check-v1 stage B`)},
+	{"InterfaceType:unionInline", regexp.MustCompile(`^an inline union is lowered after check-v1 stage B`)},
 	{"TypeDecl:errorText", regexp.MustCompile(`^the text of an error type with a field of .+ is lowered in lower-v1 stage 3`)},
 }
 

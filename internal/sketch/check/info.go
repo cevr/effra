@@ -39,6 +39,31 @@ import (
 // the identifier `with` is a `with` block; a WireDecl is a package-level
 // wire `let`; a RangeStmt is a `for … in`; a ForStmt is a `for` on a
 // condition.
+//
+// Stage B forms (all additive):
+//   - A bare record with no fields in value position, `return Pending` or
+//     the receiver of `Runner.Each(f)`, is an Ident (or a pkg.T selector)
+//     whose Uses entry is the record's *TypeName and whose Types entry is
+//     the record type: the lowering writes Pending{}.
+//   - An inline variant `Declined{ Reason string }` is a *TypeName in
+//     Package.Types, after its union, whose Decl is a TypeDecl the checker
+//     builds: its Name is the VariantSpec's (with a Defs entry), its Spec a
+//     StructType over the VariantSpec's fields, and its TypeParams the
+//     union's parameters the fields mention, as new identifiers that are
+//     not in the tree (no Defs entry).
+//   - A defined type `type N T` is a *Named whose Underlying is T's and
+//     whose Defined is T; a record or union has a nil Defined.
+//   - Every pattern node of a match, catch, let or for has a Patterns entry
+//     (a ParenExpr shares its inner node's), and a binding's Var is its
+//     Defs entry. A package-level `let P = e` defines each name of P as a
+//     package *Var.
+//     The frozen tree stores a local let's single bare name in VarSpec.Names
+//     even when it tests a known type or constant (VarSpec.Pattern is nil).
+//     In that case Info.Patterns holds its pattern, Uses names the referred
+//     object, and Defs has no binder. Lowering reads that pattern first.
+//   - A tuple value `(a, b)` and a tuple type have the *Tuple type; a
+//     function's one result may be a tuple, and `let q, r = f()`
+//     destructures it.
 
 // Package is a checked package.
 type Package struct {
@@ -322,7 +347,7 @@ func (o *TypeParam) pos() syntax.Pos { return o.Pos }
 
 // def records a declaring identifier (Info.Defs).
 func (c *checker) def(id *syntax.Ident, o Object) {
-	if c.silent == 0 && id != nil && id.Name != "_" {
+	if c.silent == 0 && id != nil && id.Name != "_" && !c.synthetic[id] {
 		c.pkg.Info.Defs[id] = o
 	}
 }

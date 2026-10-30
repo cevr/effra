@@ -1,6 +1,7 @@
 package check
 
 import (
+	"ergo.local/prototype/internal/sketch/std"
 	"ergo.local/prototype/internal/sketch/syntax"
 )
 
@@ -88,9 +89,21 @@ func (c *checker) stmt(s syntax.Stmt) {
 		}
 		done()
 	case *syntax.SwitchStmt:
-		c.switchStmt(s)
+		if s.Init != nil || s.Tag == nil {
+			c.undecided(s, "a match with an init statement or no subject")
+			return
+		}
+		c.matchStmt(s, s.Switch, []syntax.Expr{s.Tag}, s.Clauses)
 	case *syntax.TypeSwitchStmt:
-		c.typeSwitch(s)
+		if s.Init != nil || s.Binds != nil || s.Define.IsValid() {
+			c.undecided(s, "a match header with an init statement or a binding")
+			return
+		}
+		subjects := make([]syntax.Expr, len(s.Subjects))
+		for i, g := range s.Subjects {
+			subjects[i] = g.X
+		}
+		c.matchStmt(s, s.Switch, subjects, s.Clauses)
 	case *syntax.ForStmt:
 		c.forStmt(s)
 	case *syntax.RangeStmt:
@@ -195,8 +208,22 @@ func (c *checker) exprStmt(s *syntax.ExprStmt) {
 // value needs a value (types.md, Zero values 3).
 func (c *checker) varDecl(d *syntax.VarDecl) {
 	for _, spec := range d.Specs {
-		if spec.Pattern != nil {
-			c.patternLet(spec)
+		p := spec.Pattern
+		if p == nil && len(spec.Names) == 1 {
+			n := spec.Names[0]
+			switch o := c.lookup(n.Name).(type) {
+			case *Const, *TypeName, *capBinding, *Builtin:
+				p = n
+			case *Func:
+				if o.Pkg != nil && o.Pkg.Path == std.PreludePath {
+					p = n
+				}
+			}
+		}
+		if p != nil {
+			patternSpec := *spec
+			patternSpec.Pattern = p
+			c.letPattern(&patternSpec)
 			continue
 		}
 		var declared Type
@@ -614,11 +641,12 @@ func (c *checker) countRange(s *syntax.RangeStmt, r *syntax.BinaryExpr) {
 		if v := c.declareLocal(id, t); v != nil {
 			l.Bindings = append(l.Bindings, v)
 		}
+	} else if s.Value != nil {
+		c.forPattern(s.Value, t, l)
 	}
 	if !isInvalid(t) {
 		c.loop(s, l)
 	}
-	c.rangePatterns(s)
 	pop := c.push(brLoop)
 	c.block(s.Body)
 	pop()
@@ -667,8 +695,8 @@ func (c *checker) rangeStmt(s *syntax.RangeStmt) {
 	if vt == nil && s.Value != nil {
 		c.errorf(s.Value, CodeType, "range over %s permits only one iteration variable", x.typ)
 	}
-	c.rangePatterns(s)
 	// for x in xs binds the element; for i, x in xs the position first.
+	// A binding may be a pattern, matched irrefutably (spec D-B5).
 	l := &Loop{Domain: domain, Elem: vt, Pos: kt}
 	if vt == nil {
 		l.Elem, l.Pos = kt, nil
@@ -677,11 +705,19 @@ func (c *checker) rangeStmt(s *syntax.RangeStmt) {
 		if v := c.declareLocal(id, kt); v != nil {
 			l.Bindings = append(l.Bindings, v)
 		}
+	} else if s.Key != nil {
+		c.forPattern(s.Key, kt, l)
 	}
 	if id, ok := s.Value.(*syntax.Ident); ok && vt != nil {
 		if v := c.declareLocal(id, vt); v != nil {
 			l.Bindings = append(l.Bindings, v)
 		}
+	} else if s.Value != nil && !ok {
+		et := vt
+		if et == nil {
+			et = invalid
+		}
+		c.forPattern(s.Value, et, l)
 	}
 	if domain != 0 {
 		c.loop(s, l)
@@ -689,60 +725,6 @@ func (c *checker) rangeStmt(s *syntax.RangeStmt) {
 	pop := c.push(brLoop)
 	c.block(s.Body)
 	pop()
-}
-
-func (c *checker) switchStmt(s *syntax.SwitchStmt) {
-	if s.Init != nil {
-		c.undecided(s.Init, "a match header's init statement")
-		return
-	}
-	done := c.openScope()
-	defer done()
-	var tag operand
-	tagType := Type(Typ[Bool])
-	if s.Tag != nil {
-		tag = c.valueExpr(s.Tag, nil)
-		tagType = c.typeOf(&tag)
-	}
-	pop := c.push(brSwitch)
-	defer pop()
-	if s.Tag == nil {
-		c.match(s, &Match{Arms: len(s.Clauses)})
-	} else if !isInvalid(tagType) {
-		c.match(s, &Match{Subjects: []Type{tagType}, Arms: len(s.Clauses)})
-	}
-	defaults := 0
-	for _, cl := range s.Clauses {
-		if cl.List == nil {
-			defaults++
-			if defaults > 1 {
-				c.errorf(cl, CodeType, "a match has at most one case _")
-			}
-		}
-		for _, e := range cl.List {
-			op := c.valueExpr(e, tagType)
-			if op.invalid() || isInvalid(tagType) {
-				continue
-			}
-			if s.Tag == nil {
-				if !isBoolean(op.typ) {
-					c.errorf(e, CodeType, "a case of a match without a subject must be a bool, not %s", op.typ)
-				}
-				continue
-			}
-			if op.mode == modeConst {
-				c.pattern(e, &Pattern{Kind: PatConst, Value: op.val, Type: tagType})
-			}
-			l := operand{mode: modeValue, typ: tagType, expr: s.Tag}
-			bin := &syntax.BinaryExpr{X: s.Tag, Op: syntax.EQL, Y: e, OpPos: cl.Case}
-			if c.matchTypes(bin, &l, &op) && !comparable(l.typ) {
-				c.errorf(e, CodeType, "%s values cannot be compared", l.typ)
-			}
-		}
-		inner := c.openScope()
-		c.stmtList(cl.Body, false)
-		inner()
-	}
 }
 
 // ---------------------------------------------------------------- termination
@@ -768,28 +750,25 @@ func (c *checker) terminates(s syntax.Stmt) bool {
 	case *syntax.ForStmt:
 		return s.Cond == nil && !hasBreak(s.Body)
 	case *syntax.SwitchStmt:
-		hasDefault := false
-		for _, cl := range s.Clauses {
-			if cl.List == nil {
-				hasDefault = true
-			}
-			if !c.terminatesList(cl.Body) || hasBreakList(cl.Body) {
-				return false
-			}
-		}
-		return hasDefault
+		return c.matchTerminates(s, s.Clauses)
 	case *syntax.TypeSwitchStmt:
-		if !c.totalSwitch[s] {
-			return false
-		}
-		for _, cl := range s.Clauses {
-			if !c.terminatesList(cl.Body) || hasBreakList(cl.Body) {
-				return false
-			}
-		}
-		return true
+		return c.matchTerminates(s, s.Clauses)
 	}
 	return false
+}
+
+// matchTerminates reports whether a match terminates: it is total (proved,
+// or reported S103 so no S107 follows) and every case terminates.
+func (c *checker) matchTerminates(s syntax.Stmt, clauses []*syntax.CaseClause) bool {
+	if !c.totalSwitch[s] {
+		return false
+	}
+	for _, cl := range clauses {
+		if !c.terminatesList(cl.Body) || hasBreakList(cl.Body) {
+			return false
+		}
+	}
+	return true
 }
 
 // hasBreak reports whether a break leaves the statement being analysed: a

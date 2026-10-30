@@ -1,0 +1,23 @@
+// 196p (fourth round, item 4): a match over a union names every variant or
+// has `case _:`.
+type Payment = Pending{} | Authorized{AuthID string} | Declined{Reason string}
+
+func label(p Payment) string {
+	match p {
+	case Pending:
+		return "waiting"
+	case Authorized:
+		return "ok"
+	case Declined:
+		return "declined"
+	}
+}
+
+func short(p Payment) string {
+	match p {
+	case Pending:
+		return "waiting"
+	case _:
+		return "settled"
+	}
+}

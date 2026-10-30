@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"ergo.local/prototype/internal/sketch/check"
+	"ergo.local/prototype/internal/sketch/std"
 	"ergo.local/prototype/internal/sketch/syntax"
 )
 
@@ -104,6 +105,21 @@ func TestLateNamesNeverCaptureLocals(t *testing.T) {
 	// would shadow in Ergo too.
 	for _, m := range regexp.MustCompile(`(^|[^.A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)`).FindAllStringSubmatch(base, -1) {
 		declared[m[2]] = true
+	}
+	// A type or function in unqualified Ergo scope cannot be a bare let
+	// binder even if this source never spells it. Qualified library names
+	// (such as Expired) remain legal candidates and still exercise capture.
+	for _, e := range l.pkgOrder {
+		switch o := e.key.obj.(type) {
+		case *check.TypeName:
+			if o.Pkg == pkg || o.Pkg.Path == std.PreludePath {
+				declared[o.Name] = true
+			}
+		case *check.Func:
+			if o.Pkg == pkg || o.Pkg.Path == std.PreludePath {
+				declared[o.Name] = true
+			}
+		}
 	}
 	var names []string
 	for _, e := range l.pkgOrder {

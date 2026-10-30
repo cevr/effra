@@ -29,14 +29,37 @@ func TotalitySteps(src string) ([]int, []Diagnostic) {
 	return c.totalitySteps, diags
 }
 
-// SolverSteps checks src and returns, for each type switch in check order,
-// the totality steps and the reachability steps, with the diagnostics.
+// TotalityBudgets checks src and returns the budget of each match's
+// totality solver, in check order: proportional to written source (solverFor).
+func TotalityBudgets(src string) []int {
+	c, _ := checkFor(src)
+	if c == nil {
+		return nil
+	}
+	return c.totalityBudgets
+}
+
+// SolverSteps checks src and returns each match or irrefutable-pattern
+// proof in check order: totality steps, reachability steps (zero for
+// irrefutable patterns), and diagnostics.
 func SolverSteps(src string) (total, useful []int, diags []Diagnostic) {
 	c, diags := checkFor(src)
 	if c == nil {
 		return nil, nil, diags
 	}
 	return c.totalitySteps, c.usefulSteps, diags
+}
+
+// PatternCost reports source-weighted proof work and allocated cells.
+// This alias is test-only, like SolverSteps; it adds no production API.
+type PatternCost = patternCost
+
+func SolverCosts(src string) ([]PatternCost, []Diagnostic) {
+	c, diags := checkFor(src)
+	if c == nil {
+		return nil, diags
+	}
+	return c.patternCosts, diags
 }
 
 // UsefulSteps checks src and returns the reachability steps of each type

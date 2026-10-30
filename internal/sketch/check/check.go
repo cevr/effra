@@ -145,11 +145,14 @@ type checker struct {
 	selfFinal map[*syntax.SelectorExpr]*Func
 	kinds     declKinds // solved bracket kinds of the package's generic types
 	init      initDeps  // references of each package-level body (initialization order)
-	// totalitySteps records the solver steps of each type switch reported
+	// totalitySteps records each match or irrefutable-pattern proof reported
 	// (not silent), in check order: the deterministic cost the tests bound.
 	totalitySteps []int
-	// usefulSteps records the steps of each switch's reachability checks.
+	// usefulSteps records reachability steps (zero for irrefutable patterns).
 	usefulSteps []int
+	// totalityBudgets records each totality solver's budget (solverFor).
+	totalityBudgets []int
+	patternCosts    []patternCost // work and allocation receipts at the source boundary
 	// bodyEdges counts the edges of the body graph: linear in the source
 	// (round-3 M5), and bounded by a test.
 	bodyEdges int
@@ -233,10 +236,19 @@ type checker struct {
 	reach     map[any]*reachNode
 	providers map[*Named][]*Named // capability → provider types bound to it anywhere
 
-	// totalSwitch holds the type switches that are total (named every
-	// variant or have default): such a switch terminates when every case
-	// does (D8).
-	totalSwitch map[*syntax.TypeSwitchStmt]bool
+	// totalSwitch holds the matches that are total (proved, or reported
+	// S103): such a match terminates when every case does (D8).
+	totalSwitch map[syntax.Stmt]bool
+
+	// variants holds the record each inline variant `Name{…}` of a union
+	// declares (spec D-B1), and synthetic the identifiers the checker made
+	// for those records' type parameters: they are not in the tree, so
+	// Info.Defs does not list them.
+	variants  map[*syntax.VariantSpec]*TypeName
+	synthetic map[*syntax.Ident]bool
+	// pkgPatterns holds the package-level lets that bind several names
+	// from one value (a pattern, or `let q, r = e`), each checked once.
+	pkgPatterns map[*syntax.VarSpec]*pkgPattern
 
 	fn *funcCtx // the body being checked
 }
@@ -253,6 +265,17 @@ type pkgVar struct {
 	initCycle bool
 	// size is the initializer's syntax nodes (bodySize), once known.
 	size int
+	// name is the declaring identifier; group is set for a let that binds
+	// several names from one value (its first member checks it for all).
+	name  *syntax.Ident
+	group *pkgPattern
+}
+
+// pkgPattern is a package-level let that binds several names from one
+// value: `let (a, b) = e`, `let Order{Total: t} = e` or `let q, r = e`.
+type pkgPattern struct {
+	spec    *syntax.VarSpec
+	members []*pkgVar
 }
 
 var nextID struct {
@@ -285,7 +308,10 @@ func newChecker(path string, imp Importer, universe *Scope) *checker {
 		reach:          map[any]*reachNode{},
 		providers:      map[*Named][]*Named{},
 
-		totalSwitch: map[*syntax.TypeSwitchStmt]bool{},
+		totalSwitch: map[syntax.Stmt]bool{},
+		variants:    map[*syntax.VariantSpec]*TypeName{},
+		synthetic:   map[*syntax.Ident]bool{},
+		pkgPatterns: map[*syntax.VarSpec]*pkgPattern{},
 	}
 	c.types.substRow = c.substRow
 	return c
