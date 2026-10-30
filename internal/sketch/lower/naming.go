@@ -75,7 +75,7 @@ func (l *lowerer) nameAll() {
 			}
 		}
 		for _, c := range convs {
-			from, ok := c.From.(*check.Named)
+			from, _, ok := opsSource(c.From)
 			to, ok2 := c.To.(*check.Named)
 			if c.Kind != check.ConvOperations || !ok || !ok2 || mentionsTypeParam(c.From) || mentionsTypeParam(c.To) {
 				continue
@@ -107,6 +107,16 @@ func (l *lowerer) nameAll() {
 // source and target types.
 func adapterKey(c check.Conversion) string {
 	return c.From.String() + " => " + c.To.String()
+}
+
+// opsSource is the named type an operations conversion converts from: T,
+// or T behind a pointer *T (ptr). ok is false for any other source.
+func opsSource(from check.Type) (named *check.Named, ptr, ok bool) {
+	if p, isPtr := from.(*check.Pointer); isPtr {
+		from, ptr = p.Elem, true
+	}
+	named, ok = from.(*check.Named)
+	return named, ptr, ok
 }
 
 // libraryPackages are the packages other than the user's that the user

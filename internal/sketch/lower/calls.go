@@ -120,6 +120,18 @@ func (fc *funcCtx) callText(x *syntax.CallExpr, c *check.Call) (string, bool, bo
 			}
 			head, rest = "("+vals[0]+")."+fd.name, vals[1:]
 		} else {
+			if len(c.TypeArgs) < len(c.Func.Sig.TParams) {
+				// Info names fewer type arguments than the function has
+				// (stage C round 4 review T1): a dot call on a generic
+				// type, whose receiver binds the rest, or an instance in
+				// parentheses, (Fn[int])(1), which is a value.
+				if c.Recv != nil {
+					refuse(x, "a dot call to the generic function %s is lowered after check-v1 stage D (D-D8)", c.Func.Name)
+				}
+				if _, ok := unparen(x.Fun).(*syntax.IndexExpr); ok {
+					refuse(x.Fun, "an explicit instantiation used as a value is lowered after check-v1 stage E")
+				}
+			}
 			head, rest = fd.name+fc.typeArgs(c.Func.Sig, c.TypeArgs, x), vals
 		}
 		if fd.env {
@@ -558,7 +570,10 @@ func (l *lowerer) providerNeeds(x syntax.Expr) map[*check.TypeName]bool {
 // operation's exact Go signatures, the value is already the interface's;
 // otherwise an adapter struct calls the table's functions.
 func (l *lowerer) operations(conv check.Conversion, val string, site syntax.Node) string {
-	from, ok := conv.From.(*check.Named)
+	// A *T source (types.md, Methods 5) always goes through an adapter that
+	// holds the pointer: a table function on T reads *v, one on *T takes v
+	// (stage C round 4 review T1).
+	from, ptrSource, ok := opsSource(conv.From)
 	to, ok2 := conv.To.(*check.Named)
 	if !ok || !ok2 {
 		refuse(site, "an operations conversion from %s to %s is not lowered yet", conv.From, conv.To)
@@ -569,11 +584,21 @@ func (l *lowerer) operations(conv check.Conversion, val string, site syntax.Node
 	}
 	tc := &typeCtx{l: l, params: map[*check.TypeParam]string{}, site: site}
 	if mentionsTypeParam(conv.From) || mentionsTypeParam(conv.To) {
-		refuse(site, "an operations conversion inside a generic function is not lowered yet")
+		refuse(site, "an operations conversion inside a generic function is lowered after check-v1 stage E (D-E1)")
 	}
 	fromGo := tc.goType(conv.From)
 	tc.goType(conv.To) // the adapter implements it: the type is emitted
-	direct := from.Orig == nil
+	// An instance of a generic operation type, A[int]: its operations'
+	// signatures name A's type parameters, which stand for the instance's
+	// arguments here (stage C round 4 review T1).
+	if to.Orig != nil {
+		for i, tp := range to.Orig.TParams {
+			if i < len(to.TArgs) && tp.Kind == check.KindType {
+				tc.params[tp] = tc.goType(to.TArgs[i])
+			}
+		}
+	}
+	direct := from.Orig == nil && !ptrSource
 	for _, op := range toDecl.ops {
 		f := conv.Table[op.Name]
 		if f == nil {
@@ -610,8 +635,11 @@ func (l *lowerer) operations(conv check.Conversion, val string, site syntax.Node
 				args = append(args, n)
 			}
 			recv := self + ".v"
-			if fd.ptr {
+			switch {
+			case fd.ptr && !ptrSource:
 				recv = "&" + recv
+			case !fd.ptr && ptrSource:
+				recv = "*" + recv
 			}
 			var call string
 			if fd.method != nil {

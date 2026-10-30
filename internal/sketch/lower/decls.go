@@ -627,6 +627,12 @@ func (l *lowerer) emitFuncBody(fd *funcDecl) {
 	var params []*check.Var
 	if f.Decl.Type != nil && f.Decl.Type.Params != nil {
 		for _, field := range f.Decl.Type.Params.List {
+			if len(field.Names) == 0 {
+				// An unnamed parameter, func M(S, int): no name binds, so
+				// it gets a fresh Go name (stage C round 4 review T1).
+				params = append(params, nil)
+				continue
+			}
 			for _, id := range field.Names {
 				v, ok := f.Pkg.Info.Defs[id].(*check.Var)
 				if !ok {
@@ -810,6 +816,7 @@ func (l *lowerer) packageVar(spec *syntax.VarSpec, id *syntax.Ident, x syntax.Ex
 	if !ok && (id.Name != "_" || x == nil) {
 		ice(id, "the let %s has no Defs entry", id.Name)
 	}
+	refuseUntypedLet(spec, id)
 	fc := newFuncCtx(l, newNamer(l.names), true)
 	fc.depth = 2
 	name, goType := "_", ""

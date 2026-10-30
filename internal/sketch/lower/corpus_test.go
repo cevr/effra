@@ -14,32 +14,49 @@ import (
 )
 
 // A program that checks clean builds (stage C round 3 review M1, the
-// structural guard). The check package's tests hold the checker's corpus
-// inline, as Go string literals: a case's source, often after a decls
-// constant. This test reads them from ../check/*_test.go with go/parser,
-// so a new check test joins the corpus with no list to keep. Each literal,
-// alone and after each string constant of its function or file, is a
-// candidate. Every candidate that parses and checks clean is lowered and
-// built with go vet and go build, all in one Go module. A lowering refusal
-// (a family a later stage owns) is skipped and counted; a panic or another
-// lowering error fails. The .ergo fixtures under ../check/testdata are
-// lowered and built by TestAcceptedNodesLower.
+// structural guard; round 4 review T1 to T3). The check package's tests
+// hold the checker's corpus inline, as Go strings. This test reads them
+// from ../check/*_test.go with go/parser, so a new check test joins the
+// corpus with no list to keep.
 //
-// Bounds: at stage C the corpus is about 1,900 candidates, of which about
-// 430 check clean and lower; one go command vets and builds them in about
-// ten seconds, under the gate's memory limit. Past maxCorpus programs the
-// test takes every k-th program in a stable order and says so.
+// The enumeration rule (checkCorpus): in each test file, a named string is
+// a const or var whose value is a string literal, or a sum of literals and
+// named strings, at package level or in a function. The candidates are
+// every named string, every string literal anywhere in the file (case
+// tables, struct fields, call arguments, package-level declarations), and
+// each literal after each named string of its file (the tests' decls
+// prefixes). Only strings with a top-level func, type or let are kept.
+//
+// Every candidate that parses and checks clean is lowered and built with
+// go vet and go build, in one Go module. A lowering panic or error fails,
+// and so does any refusal that is not a documented deferred family whose
+// owner is a later stage (deferredOwners; refusalReasons and
+// refusedFamilies of TestAcceptedNodesLower). An internal compiler error
+// always fails.
+//
+// Bounds: at stage C the enumerated corpus is about 2,000 candidates;
+// about 450 check clean and lower, and one go command vets and builds them
+// in about ten seconds. Past maxCandidates the test takes every k-th
+// candidate in a stable order, before checking and lowering, and says so.
+// The .ergo fixtures under ../check/testdata are lowered and built by
+// TestAcceptedNodesLower.
 func TestCheckCorpusBuilds(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds the check corpus")
-	}
-	const maxCorpus = 3000
+	const maxCandidates = 8000
 	sources, files := checkCorpus(t, "../check")
 	if files < 30 || len(sources) < 200 {
 		t.Fatalf("the corpus has %d candidates from %d files; the check tests moved?", len(sources), files)
 	}
+	if n := len(sources); n > maxCandidates {
+		k := (n + maxCandidates - 1) / maxCandidates
+		var sample []string
+		for i := 0; i < n; i += k {
+			sample = append(sample, sources[i])
+		}
+		t.Logf("sampled every %dth of %d candidates", k, n)
+		sources = sample
+	}
 	var programs []*lowered
-	rejected, refused := 0, 0
+	rejected, deferred := 0, map[string]int{}
 	for i, src := range sources {
 		o := lowerSource(fmt.Sprintf("c%d", i), src, false)
 		switch {
@@ -50,7 +67,14 @@ func TestCheckCorpusBuilds(t *testing.T) {
 		case o.err != nil:
 			t.Errorf("a clean program does not lower: %v\n%s", o.err, src)
 		case len(o.refused) > 0:
-			refused++
+			for _, r := range o.refused {
+				if why := undeferred(r.Message); why != "" {
+					t.Errorf("%d:%d: %s: %s\n%s", r.Line, r.Column, why, r.Message, src)
+					continue
+				}
+				f := refusalFamily(r.Message)
+				deferred[f+" ("+refusedFamilies[f]+")"]++
+			}
 		default:
 			programs = append(programs, o)
 		}
@@ -58,21 +82,49 @@ func TestCheckCorpusBuilds(t *testing.T) {
 	if len(programs) < 100 {
 		t.Fatalf("only %d clean programs lowered; the corpus reader lost the check tests?", len(programs))
 	}
-	if n := len(programs); n > maxCorpus {
-		k := (n + maxCorpus - 1) / maxCorpus
-		var sample []*lowered
-		for i := 0; i < n; i += k {
-			sample = append(sample, programs[i])
-		}
-		t.Logf("sampled every %dth of %d lowered programs", k, n)
-		programs = sample
+	var owners []string
+	for o, n := range deferred {
+		owners = append(owners, fmt.Sprintf("%s: %d", o, n))
 	}
-	t.Logf("candidates %d from %d files: rejected by the parser or checker %d, refused %d, built %d", len(sources), files, rejected, refused, len(programs))
+	sort.Strings(owners)
+	t.Logf("candidates %d from %d files: rejected by the parser or checker %d; deferred refusals by family [%s]; built %d (every clean program of the enumerated corpus that lowers)", len(sources), files, rejected, strings.Join(owners, ", "), len(programs))
 	buildAll(t, programs, false)
 }
 
-// checkCorpus returns the distinct candidate sources in dir's test files,
-// in a stable order, and the number of files read.
+// deferredOwners are the later stages and units a refusal may name: the
+// forms they own are not lowered yet. A refusal owned by a stage that has
+// landed (check-v1 stages A to C, #196 stage b) is a lowering gap.
+var deferredOwners = map[string]bool{
+	"check-v1 stage D": true,
+	"check-v1 stage E": true,
+	"lower-v1 stage 3": true,
+	"lower-v1 stage 4": true,
+	"lower-v1 request": true,
+	"unused by v1":     true,
+}
+
+// undeferred says why a refusal is not a documented deferral, or "".
+func undeferred(message string) string {
+	if strings.Contains(message, "internal compiler error") {
+		return "an internal compiler error"
+	}
+	family := refusalFamily(message)
+	if family == "" {
+		return "an unclassified refusal (add it to refusalReasons with a refused family, or lower the form)"
+	}
+	owner := refusedFamilies[family]
+	switch {
+	case owner == "" || !strings.Contains(message, owner):
+		return fmt.Sprintf("the refusal stands at %s, documented as owned by %q, and names another owner", family, owner)
+	case !deferredOwners[owner]:
+		return fmt.Sprintf("a refusal of %s, owned by %s, which has landed", family, owner)
+	}
+	return ""
+}
+
+// checkCorpus returns the distinct candidate sources in dir's test files
+// by the enumeration rule of TestCheckCorpusBuilds, in a stable order, and
+// the number of files read.
 func checkCorpus(t *testing.T, dir string) ([]string, int) {
 	t.Helper()
 	paths, err := filepath.Glob(filepath.Join(dir, "*_test.go"))
@@ -83,6 +135,9 @@ func checkCorpus(t *testing.T, dir string) ([]string, int) {
 	seen := map[string]bool{}
 	var out []string
 	add := func(src string) {
+		if !looksLikeSource(src) {
+			return
+		}
 		if !strings.HasSuffix(src, "\n") {
 			src += "\n"
 		}
@@ -100,38 +155,35 @@ func checkCorpus(t *testing.T, dir string) ([]string, int) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fileConsts := stringConsts(f)
-		for _, d := range f.Decls {
-			fn, ok := d.(*ast.FuncDecl)
-			if !ok || fn.Body == nil {
-				continue
-			}
-			prefixes := append(stringConsts(fn.Body), fileConsts...)
-			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				lit, ok := n.(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
-					return true
-				}
-				s, err := strconv.Unquote(lit.Value)
-				if err != nil || !looksLikeSource(s) {
-					return true
-				}
-				add(s)
-				for _, pre := range prefixes {
-					if pre != s {
-						add(pre + s)
-					}
-				}
-				return true
-			})
+		named := namedStrings(f)
+		for _, s := range named {
+			add(s)
 		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			lit, ok := n.(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				return true
+			}
+			s, err := strconv.Unquote(lit.Value)
+			if err != nil || !looksLikeSource(s) {
+				return true
+			}
+			add(s)
+			for _, pre := range named {
+				if pre != s {
+					add(pre + s)
+				}
+			}
+			return true
+		})
 	}
 	return out, len(paths)
 }
 
-// stringConsts returns the values of the string constants declared in n
-// whose values are literals or sums of literals and known constants.
-func stringConsts(n ast.Node) []string {
+// namedStrings returns the values of the file's string consts and vars,
+// at package level and in functions, whose values are literals or sums of
+// literals and earlier named strings, in source order.
+func namedStrings(f *ast.File) []string {
 	known := map[string]string{}
 	var out []string
 	var eval func(e ast.Expr) (string, bool)
@@ -158,20 +210,32 @@ func stringConsts(n ast.Node) []string {
 		}
 		return "", false
 	}
-	ast.Inspect(n, func(x ast.Node) bool {
-		g, ok := x.(*ast.GenDecl)
-		if !ok || g.Tok != token.CONST {
-			return true
+	record := func(name string, value ast.Expr) {
+		if s, ok := eval(value); ok && looksLikeSource(s) {
+			known[name] = s
+			out = append(out, s)
 		}
-		for _, spec := range g.Specs {
-			vs := spec.(*ast.ValueSpec)
-			for i, name := range vs.Names {
-				if i >= len(vs.Values) {
-					break
+	}
+	ast.Inspect(f, func(x ast.Node) bool {
+		switch x := x.(type) {
+		case *ast.GenDecl:
+			if x.Tok != token.CONST && x.Tok != token.VAR {
+				return true
+			}
+			for _, spec := range x.Specs {
+				vs := spec.(*ast.ValueSpec)
+				for i, name := range vs.Names {
+					if i < len(vs.Values) {
+						record(name.Name, vs.Values[i])
+					}
 				}
-				if s, ok := eval(vs.Values[i]); ok && looksLikeSource(s) {
-					known[name.Name] = s
-					out = append(out, s)
+			}
+		case *ast.AssignStmt:
+			if x.Tok == token.DEFINE && len(x.Lhs) == len(x.Rhs) {
+				for i, l := range x.Lhs {
+					if id, ok := l.(*ast.Ident); ok {
+						record(id.Name, x.Rhs[i])
+					}
 				}
 			}
 		}
@@ -180,7 +244,7 @@ func stringConsts(n ast.Node) []string {
 	return out
 }
 
-// looksLikeSource keeps the literals that may be Ergo programs: those with
+// looksLikeSource keeps the strings that may be Ergo programs: those with
 // a top-level declaration keyword.
 func looksLikeSource(s string) bool {
 	for _, kw := range []string{"func ", "type ", "let "} {

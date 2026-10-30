@@ -63,6 +63,11 @@ var refusedFamilies = map[string]string{
 	"ReturnStmt:tuple":        "check-v1 stage B",
 	"CaseClause:duplicate":    "check-v1 stage B",
 	"TypeDecl:errorText":      "lower-v1 stage 3",
+	// Met by TestCheckCorpusBuilds (stage C round 4 review T1), and an
+	// existing refusal given its owner (conv:Operations:generic).
+	"call:Func:genericDot":    "check-v1 stage D",
+	"VarSpec:untyped":         "check-v1 stage D",
+	"conv:Operations:generic": "check-v1 stage E",
 }
 
 // refusalReasons classifies a refusal by its message into the refused
@@ -93,6 +98,9 @@ var refusalReasons = []struct {
 	{"ReturnStmt:tuple", regexp.MustCompile(`^returning several values is a tuple, lowered after check-v1 stage B`)},
 	{"CaseClause:duplicate", regexp.MustCompile(`check-v1 stage B reports such an arm as unreachable \(D-B4\)$`)},
 	{"TypeDecl:errorText", regexp.MustCompile(`^the text of an error type with a field of .+ is lowered in lower-v1 stage 3`)},
+	{"call:Func:genericDot", regexp.MustCompile(`^a dot call to the generic function \S+ is lowered after check-v1 stage D \(D-D8\)$`)},
+	{"VarSpec:untyped", regexp.MustCompile(`^a let with neither a type nor a value is decided in check-v1 stage D \(D-D1\)$`)},
+	{"conv:Operations:generic", regexp.MustCompile(`^an operations conversion inside a generic function is lowered after check-v1 stage E \(D-E1\)$`)},
 }
 
 // refusalFamily is the refused family a refusal message stands at, or "".

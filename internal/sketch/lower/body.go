@@ -187,6 +187,7 @@ func (fc *funcCtx) let(d *syntax.VarDecl) {
 		if !ok {
 			ice(id, "the let %s has no Defs entry", id.Name)
 		}
+		refuseUntypedLet(spec, id)
 		goType := fc.goType(v.Type)
 		if len(spec.Values) == 0 {
 			name := fc.declare(v)
