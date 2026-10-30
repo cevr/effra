@@ -78,7 +78,11 @@ Darwin and the whole executing file on Linux: on Darwin it is SHA-256 over the
 domain tag `ergo-producer-darwin-code-1` and the bytes `[0, codeLimit)` that
 the page hashes cover, so the signature container and any trailing bytes,
 which the cdhash does not authenticate and which cannot change the running
-code, are not part of it; two files with one cdhash have one identity. A
+code, are not part of it; two files with one cdhash have one identity, and so
+do two signed files with the same code and different signature data (such as
+entitlements), by design. The matching CodeDirectory must hold full SHA-256
+page hashes (hash type 2, which the Go linker writes); SHA-1 or truncated
+hashes report `unavailable` with their reason. A
 universal (fat) file reports `unavailable`. The Go linker signs every
 darwin/arm64 binary; an unsigned image (darwin/amd64) has no kernel record.
 SHA-256 content identity has

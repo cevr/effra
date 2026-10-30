@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/binary"
+	"errors"
 	"hash"
 	"testing"
 )
@@ -145,13 +147,13 @@ func TestCodeSignatureAcceptsOnlyTheKernelsImage(t *testing.T) {
 	}
 }
 
-// Every hash type xnu names verifies by its own page hashes and cdhash; a
-// truncated SHA-256 directory keeps 20 bytes of each, and a directory may name
-// its limit in the 64-bit field alone.
+// A full SHA-256 directory verifies in each slot and limit form xnu names;
+// a directory may name its limit in the 64-bit field alone. A directory the
+// kernel recorded whose page hashes are not full SHA-256 (SHA-1, SHA-256
+// cut to 20 bytes, SHA-384, or SHA-256 page hashes cut short) is refused
+// with errWeakDirectory, even though its pages and cdhash match.
 func TestCodeSignatureReadsEachDirectoryForm(t *testing.T) {
 	forms := map[string]signedDirectory{
-		"sha1":              {slot: csSlotCodeDirectory, hashType: 1, newHash: sha1.New},
-		"sha256 truncated":  {slot: csSlotCodeDirectory, hashType: 3, newHash: sha256.New, hashSize: 20},
 		"64-bit code limit": {slot: csSlotCodeDirectory, hashType: 2, newHash: sha256.New, wide: true},
 		"last alternate":    {slot: csSlotAlternateLast, hashType: 2, newHash: sha256.New},
 	}
@@ -161,19 +163,34 @@ func TestCodeSignatureReadsEachDirectoryForm(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
+	weak := map[string]signedDirectory{
+		"sha1":                {slot: csSlotCodeDirectory, hashType: 1, newHash: sha1.New},
+		"sha256 truncated":    {slot: csSlotCodeDirectory, hashType: 3, newHash: sha256.New, hashSize: 20},
+		"sha384":              {slot: csSlotCodeDirectory, hashType: 4, newHash: sha512.New384},
+		"sha256 short hashes": {slot: csSlotCodeDirectory, hashType: 2, newHash: sha256.New, hashSize: 20},
+		"sha1 last alternate": {slot: csSlotAlternateLast, hashType: 1, newHash: sha1.New},
+	}
+	for name, form := range weak {
+		image, cdhashes := signedImage(threePages, 12, form)
+		if err := verifies(image, cdhashes[0]); !errors.Is(err, errWeakDirectory) {
+			t.Errorf("%s: %v, want errWeakDirectory", name, err)
+		}
+	}
 }
 
 // codesign(1) may write a SHA-1 primary directory with a SHA-256 alternate,
-// and the kernel records the alternate's cdhash. Any directory whose cdhash
-// matches verifies the image, by that directory's own page hashes.
+// and the kernel records the alternate's cdhash. The SHA-256 alternate
+// verifies the image by its own page hashes; a kernel record naming the
+// SHA-1 primary gives errWeakDirectory.
 func TestCodeSignatureMatchesAnAlternateDirectory(t *testing.T) {
 	sha1Directory := signedDirectory{slot: csSlotCodeDirectory, hashType: 1, newHash: sha1.New}
 	alternate := signedDirectory{slot: csSlotAlternateFirst, hashType: 2, newHash: sha256.New}
 	image, cdhashes := signedImage([]byte("compiler"), 12, sha1Directory, alternate)
-	for i, cdhash := range cdhashes {
-		if err := verifies(image, cdhash); err != nil {
-			t.Fatalf("directory %d: %v", i, err)
-		}
+	if err := verifies(image, cdhashes[0]); !errors.Is(err, errWeakDirectory) {
+		t.Fatalf("the SHA-1 primary: %v, want errWeakDirectory", err)
+	}
+	if err := verifies(image, cdhashes[1]); err != nil {
+		t.Fatalf("the SHA-256 alternate: %v", err)
 	}
 	ignored := signedDirectory{slot: 2, hashType: 2, newHash: sha256.New} // the requirements slot
 	image, cdhashes = signedImage([]byte("compiler"), 12, ignored)

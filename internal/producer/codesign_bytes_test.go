@@ -2,6 +2,7 @@ package producer
 
 import (
 	"bytes"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -82,6 +83,12 @@ func TestDarwinIdentityIsTheAuthenticatedCode(t *testing.T) {
 		if got.ReuseScope != "process" || got.Digest != "" || got.Reason != "executing image does not match the kernel's code signature record" {
 			t.Errorf("%s: %+v, want process scope, no digest, the unverified reason", name, got)
 		}
+	}
+	// A SHA-1 directory the kernel recorded, with matching pages: process
+	// scope, with its own reason (no SHA-1 trust).
+	sha1Image, sha1Hashes := signedImage(threePages, 12, signedDirectory{slot: csSlotCodeDirectory, hashType: 1, newHash: sha1.New})
+	if got := darwinIdentity(sha1Image, sha1Hashes[0]); got.ReuseScope != "process" || got.Digest != "" || got.Reason != "executing image's code directory does not use full SHA-256 page hashes" {
+		t.Errorf("a SHA-1 directory: %+v, want process scope with the weak-directory reason", got)
 	}
 	// A universal file holding this image as its one slice: a fat header,
 	// one arch entry, then the thin image.
