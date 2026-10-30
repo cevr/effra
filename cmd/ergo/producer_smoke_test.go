@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,8 +19,9 @@ import (
 )
 
 // TestProducerSmoke: the producer identity follows the executing artifact
-// rather than its installed pathname, dirty hosts are distinguished by
-// digest, an unavailable identity stays process-scoped, and building never
+// rather than its installed pathname, a running host never reports the
+// bytes that replaced it, dirty hosts are distinguished by digest, an
+// unavailable identity stays process-scoped, and building never
 // acquires an identity. Variant compilers are built from this package's
 // source with Go build overlays, each phase in its own workspace.
 func TestProducerSmoke(t *testing.T) {
@@ -102,17 +104,7 @@ func TestProducerSmoke(t *testing.T) {
 		t.Parallel()
 		requireContentIdentity(t)
 		directory := t.TempDir()
-		fixture := filepath.Join(directory, "host")
-		sources, err := filepath.Glob(filepath.Join(filepath.Dir(ownerPath), "*.go"))
-		if err != nil || len(sources) == 0 {
-			t.Fatalf("producer sources: %v %v", sources, err)
-		}
-		for _, source := range sources {
-			if !strings.HasSuffix(source, "_test.go") {
-				smokeWrite(t, fixture, filepath.Join("internal", "producer", filepath.Base(source)), producerSmokeRead(t, source))
-			}
-		}
-		smokeWrite(t, fixture, "go.mod", "module ergo.local/prototype\n\ngo 1.27\n")
+		fixture := producerHostFixture(t, directory, filepath.Dir(ownerPath))
 		const host = `package main
 import("encoding/json";"os";"ergo.local/prototype/internal/producer")
 const marker="baseline"
@@ -138,6 +130,58 @@ func main(){json.NewEncoder(os.Stdout).Encode(map[string]any{"marker":marker,"pr
 		}
 		if !reflect.DeepEqual(identities[0]["declaration"], identities[1]["declaration"]) || reflect.DeepEqual(identities[0]["digest"], identities[1]["digest"]) {
 			t.Fatalf("dirty hosts must share a declaration and differ by digest: %v / %v", identities[0], identities[1])
+		}
+	})
+
+	// A running host whose installation pathname is replaced before it first
+	// acquires never reports the replacement's bytes: Linux reads the image
+	// it executes, and on darwin the file at the path no longer carries the
+	// kernel's cdhash, so the identity is unavailable.
+	t.Run("replaced-before-acquisition", func(t *testing.T) {
+		t.Parallel()
+		requireContentIdentity(t)
+		directory := t.TempDir()
+		fixture := producerHostFixture(t, directory, filepath.Dir(ownerPath))
+		const host = `package main
+import("bufio";"encoding/json";"os";"ergo.local/prototype/internal/producer")
+const marker="baseline"
+func main(){bufio.NewReader(os.Stdin).ReadString('\n');json.NewEncoder(os.Stdout).Encode(map[string]any{"marker":marker,"producer":producer.Current()})}
+`
+		binaries := map[string]string{}
+		for _, marker := range []string{"running", "replacement"} {
+			smokeWrite(t, fixture, "main.go", strings.Replace(host, "baseline", marker, 1))
+			binaries[marker] = filepath.Join(directory, marker)
+			producerSmokeRun(t, fixture, "go", "build", "-buildvcs=false", "-o", binaries[marker], ".")
+		}
+		installed := filepath.Join(directory, "installed")
+		producerSmokeInstall(t, binaries["running"], installed)
+		staged := filepath.Join(directory, "staged")
+		producerSmokeInstall(t, binaries["replacement"], staged)
+		command := exec.Command(installed)
+		command.Dir = directory
+		release := &replaceOnRead{replace: func() error { return os.Rename(staged, installed) }}
+		command.Stdin = release
+		stdout, stderr, code := runSmokeCommand(t, processDeadline, command)
+		if code != 0 || release.err != nil {
+			t.Fatalf("host: exit %d, replacement %v\nstderr=%s", code, release.err, stderr)
+		}
+		if producerSmokeDigest(t, installed) != producerSmokeDigest(t, binaries["replacement"]) {
+			t.Fatal("the installation pathname was not replaced")
+		}
+		result := smokeJSON(t, stdout)
+		identity, _ := result["producer"].(map[string]any)
+		if result["marker"] != "running" || identity["digest"] == producerSmokeDigest(t, binaries["replacement"]) {
+			t.Fatalf("a running host reported its replacement: %v", result)
+		}
+		switch runtime.GOOS {
+		case "linux":
+			if identity["digest"] != producerSmokeDigest(t, binaries["running"]) {
+				t.Fatalf("linux: %v", identity)
+			}
+		case "darwin":
+			if _, present := identity["digest"]; present || identity["strength"] != "unavailable" || identity["reuseScope"] != "process" || identity["reason"] != "executing image does not match the kernel's code signature record" {
+				t.Fatalf("darwin: %v", identity)
+			}
 		}
 	})
 
@@ -195,6 +239,41 @@ func main(){json.NewEncoder(os.Stdout).Encode(map[string]any{"marker":marker,"pr
 			}
 		}
 	})
+}
+
+// producerHostFixture copies the producer package's sources into a module
+// under directory, for a tiny host that embeds it, and returns the module.
+func producerHostFixture(t *testing.T, directory, owner string) string {
+	t.Helper()
+	fixture := filepath.Join(directory, "host")
+	sources, err := filepath.Glob(filepath.Join(owner, "*.go"))
+	if err != nil || len(sources) == 0 {
+		t.Fatalf("producer sources: %v %v", sources, err)
+	}
+	for _, source := range sources {
+		if !strings.HasSuffix(source, "_test.go") {
+			smokeWrite(t, fixture, filepath.Join("internal", "producer", filepath.Base(source)), producerSmokeRead(t, source))
+		}
+	}
+	smokeWrite(t, fixture, "go.mod", "module ergo.local/prototype\n\ngo 1.27\n")
+	return fixture
+}
+
+// replaceOnRead is a standard input whose first read runs replace and then
+// releases the process with one line; os/exec reads it only once the
+// process has started.
+type replaceOnRead struct {
+	replace func() error
+	err     error
+	done    bool
+}
+
+func (r *replaceOnRead) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, io.EOF
+	}
+	r.done, r.err = true, r.replace()
+	return copy(p, "\n"), nil
 }
 
 // producerUnavailableSource is the producer's identity.go with the platform's
