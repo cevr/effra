@@ -151,45 +151,285 @@ func (tc *typeCtx) zero(t check.Type) string {
 	return "*new(" + tc.goType(t) + ")"
 }
 
-// defaultValue is the default of t in Go, for a let without a value and for
-// a record field a literal omits (types.md, Zero values): Go's zero value,
-// except that a Map is an empty, writable Map, never Go's nil map, which
-// panics on a write. A Map inside a record or a tuple is one too, at any
-// depth. The empty value is "" when Go's zero value is the default, so a
-// declaration can omit it.
+// Defaults (types.md, Zero values; Loops and len rule 5). The default of a
+// type, for a let without a value and for a record field a literal omits,
+// is Go's zero value, except that a Map is an empty, writable Map, never
+// Go's nil map, which panics on a write. A Map inside a record or a tuple,
+// named or not, a generic instance included, is one too, at any depth.
+//
+// One owner builds every default, in work linear in the type graph, output
+// included (spec D16, Speed 8):
+//
+//   - holdsMap decides whether a type's default holds a Map, memoized per
+//     lowering by type identity: a defined type or instance is visited once,
+//     a tuple is decided from its elements' results.
+//   - A defined type or instance whose default holds a Map has one generated
+//     Go function, with no parameters, that returns its default
+//     (defaultFunc). It is emitted once, at first use; its name is given by
+//     the naming pass (reserveDefaults). A default of the type is a call of
+//     it, so a type that two fields share is built by one function, never
+//     by a copy of its literal: a diamond of records costs one function per
+//     record, not a tree of literals.
+//   - A Map is `map[K]V{}` inline; an unnamed tuple is an inline keyed
+//     literal over its elements' defaults.
+//
+// Every call builds new Maps, so two defaults never share a Map. The memo
+// holds decisions and names, never runtime values.
+//
+// Prior art: Rust's #[derive(Default)] emits one default() per type, which
+// calls each field's Default::default(), so a nested default is a call, not
+// an inlined tree; Go zero-fills by type layout. Gleam, ReScript and Elixir
+// have no implicit default: a value is always built, as here the empty Map
+// is built by the generated function.
+
+// holdState is holdsMap's memo of a defined type or instance.
+type holdState int8
+
+const (
+	holdsUnknown holdState = iota
+	holdsVisiting
+	holdsNo
+	holdsYes
+)
+
+// defaultValue is the default of t in Go (see Defaults). It is "" when Go's
+// zero value is the default, so a declaration can omit it.
 func (tc *typeCtx) defaultValue(t check.Type) string {
-	if !holdsMap(t, map[*check.Named]bool{}) {
+	if !tc.l.holdsMap(t) {
 		return ""
 	}
-	return tc.emptyValue(t)
-}
-
-// emptyValue is defaultValue's Go text for a type that holds a Map.
-func (tc *typeCtx) emptyValue(t check.Type) string {
-	goType := tc.goType(t)
 	switch u := t.(type) {
 	case *check.Map:
-		return goType + "{}"
+		return tc.goType(t) + "{}"
 	case *check.Tuple:
-		var parts []string
-		for i, e := range u.Types {
-			if v := tc.defaultValue(e); v != "" {
-				parts = append(parts, tupleField(i)+": "+v)
-			}
-		}
-		return goType + "{" + strings.Join(parts, ", ") + "}"
+		return tc.goType(t) + "{" + strings.Join(tc.tupleDefaults(u), ", ") + "}"
 	case *check.Named:
-		switch under := u.Underlying().(type) {
-		case *check.Map:
-			return goType + "{}"
-		case *check.Struct:
-			td := tc.l.typeDecl(u.Obj, tc.site)
-			parts := tc.fieldDefaults(td, under, nil)
-			return goType + "{" + strings.Join(parts, ", ") + "}"
+		name, free := tc.l.defaultFunc(u, tc.site)
+		if len(free) == 0 {
+			return name + "()"
+		}
+		args := make([]string, len(free))
+		for i, tp := range free {
+			args[i] = tc.goType(tp)
+		}
+		return name + "[" + strings.Join(args, ", ") + "]()"
+	}
+	ice(tc.site, "the type %s holds a Map but has no default", t)
+	return ""
+}
+
+// tupleDefaults is the keyed Go elements that set each element of the tuple
+// u whose default is not Go's zero value.
+func (tc *typeCtx) tupleDefaults(u *check.Tuple) []string {
+	var parts []string
+	for i, e := range u.Types {
+		if v := tc.defaultValue(e); v != "" {
+			parts = append(parts, tupleField(i)+": "+v)
 		}
 	}
-	ice(tc.site, "the type %s holds a Map but has no empty value", t)
-	return ""
+	return parts
+}
+
+// defaultFunc is the generated function that returns the default of n, a
+// defined type or instance whose default holds a Map, and the type
+// parameters of the enclosing declaration that n mentions, which the
+// function takes as its own type parameters. The function is emitted once,
+// at its first use; the defaults of n's fields and elements call their own
+// functions.
+func (l *lowerer) defaultFunc(n *check.Named, site syntax.Node) (string, []*check.TypeParam) {
+	key := l.defaultKey(n)
+	name := l.pkgName(key, defaultBase(n))
+	free := freeTypeParams(n)
+	if l.defaults[key] {
+		return name, free
+	}
+	l.defaults[key] = true
+	scope := newNamer(l.names)
+	list, names := l.typeParams(free, scope, site)
+	tc := &typeCtx{l: l, params: names, site: site}
+	goType := tc.goType(n)
+	var parts []string
+	switch under := n.Underlying().(type) {
+	case *check.Map:
+	case *check.Struct:
+		parts = tc.fieldDefaults(l.typeDecl(n.Obj, site), under, nil)
+	default:
+		ice(site, "the type %s holds a Map but has no default", n)
+	}
+	l.gen.WriteString("func " + name + list + "() " + goType + " {\n\treturn " + goType + "{" + strings.Join(parts, ", ") + "}\n}\n\n")
+	return name, free
+}
+
+// defaultBase is the preferred Go name of n's default function.
+func defaultBase(n *check.Named) string { return "ergoDefault" + n.Obj.Name }
+
+// defaultKey is the package-scope key of n's default function: n's
+// spelling (typeKey), one function per Go type.
+func (l *lowerer) defaultKey(n *check.Named) pkgKey {
+	return pkgKey{"default", l.typeKey(n)}
+}
+
+// typeKey spells t for a key: deterministic, from the source alone, and
+// distinct for distinct Go types. A declared type is named by its package
+// path, name and position, a type parameter by its name and position; a
+// type argument that is not type-kinded is left out, as goType leaves it
+// out. It is memoized per type object, so a key is built from its
+// children's keys once.
+func (l *lowerer) typeKey(t check.Type) string {
+	if k, ok := l.typeKeys[t]; ok {
+		return k
+	}
+	var k string
+	switch u := t.(type) {
+	case *check.Basic:
+		k = u.Name
+	case *check.Named:
+		path := ""
+		if u.Obj.Pkg != nil {
+			path = u.Obj.Pkg.Path
+		}
+		k = path + "." + u.Obj.Name + "@" + strconv.Itoa(int(u.Obj.Pos))
+		if args := typeArgs(u); len(args) > 0 {
+			keys := make([]string, len(args))
+			for i, a := range args {
+				keys[i] = l.typeKey(a)
+			}
+			k += "[" + strings.Join(keys, ", ") + "]"
+		}
+	case *check.TypeParam:
+		k = "$" + u.Name + "@" + strconv.Itoa(int(u.Pos))
+	case *check.Slice:
+		k = "[]" + l.typeKey(u.Elem)
+	case *check.Map:
+		k = "map[" + l.typeKey(u.Key) + "]" + l.typeKey(u.Elem)
+	case *check.Pointer:
+		k = "*" + l.typeKey(u.Elem)
+	case *check.Tuple:
+		keys := make([]string, len(u.Types))
+		for i, e := range u.Types {
+			keys[i] = l.typeKey(e)
+		}
+		k = "(" + strings.Join(keys, ", ") + ")"
+	case *check.Signature:
+		keys := make([]string, len(u.Params))
+		for i, p := range u.Params {
+			keys[i] = l.typeKey(p.Type)
+		}
+		k = "func(" + strings.Join(keys, ", ") + ")"
+		for _, r := range u.Results {
+			k += " " + l.typeKey(r)
+		}
+	default:
+		k = "?" + t.String()
+	}
+	l.typeKeys[t] = k
+	return k
+}
+
+// typeArgs is n's type-kinded type arguments, the ones its Go type takes.
+func typeArgs(n *check.Named) []check.Type {
+	origin := n
+	if n.Orig != nil {
+		origin = n.Orig
+	}
+	var args []check.Type
+	for i, a := range n.TArgs {
+		if i < len(origin.TParams) && origin.TParams[i].Kind == check.KindType {
+			args = append(args, a)
+		}
+	}
+	return args
+}
+
+// freeTypeParams is the type-kinded type parameters that t's Go type
+// mentions, in the order of their first mention.
+func freeTypeParams(t check.Type) []*check.TypeParam {
+	var out []*check.TypeParam
+	seen := map[*check.TypeParam]bool{}
+	var walk func(t check.Type)
+	walk = func(t check.Type) {
+		switch u := t.(type) {
+		case *check.TypeParam:
+			if u.Kind == check.KindType && !seen[u] {
+				seen[u] = true
+				out = append(out, u)
+			}
+		case *check.Named:
+			for _, a := range typeArgs(u) {
+				walk(a)
+			}
+		case *check.Slice:
+			walk(u.Elem)
+		case *check.Map:
+			walk(u.Key)
+			walk(u.Elem)
+		case *check.Pointer:
+			walk(u.Elem)
+		case *check.Tuple:
+			for _, e := range u.Types {
+				walk(e)
+			}
+		case *check.Signature:
+			for _, p := range u.Params {
+				walk(p.Type)
+			}
+			for _, r := range u.Results {
+				walk(r)
+			}
+		}
+	}
+	walk(t)
+	return out
+}
+
+// reserveDefaults gives, in the naming pass, the key and preferred name of
+// every default function the lowering can emit: one for each defined type
+// or instance whose default holds a Map and that a let without a value, a
+// record literal or a field or element of one reaches. It reads the
+// checker's Defs and Types; each type object is walked once. Reserving a
+// function the lowering does not emit only renames a local.
+func (l *lowerer) reserveDefaults(reserve func(key pkgKey, base string)) {
+	walked := map[check.Type]bool{}
+	var walk func(t check.Type)
+	walk = func(t check.Type) {
+		if t == nil || walked[t] {
+			return
+		}
+		walked[t] = true
+		switch u := t.(type) {
+		case *check.Slice:
+			walk(u.Elem)
+		case *check.Map:
+			walk(u.Key)
+			walk(u.Elem)
+		case *check.Pointer:
+			walk(u.Elem)
+		case *check.Tuple:
+			for _, e := range u.Types {
+				walk(e)
+			}
+		case *check.Named:
+			if l.holdsMap(u) {
+				reserve(l.defaultKey(u), defaultBase(u))
+			}
+			switch under := u.Underlying().(type) {
+			case *check.Tuple:
+				walk(under)
+			case *check.Struct:
+				for _, f := range under.Fields {
+					walk(f.Type)
+				}
+			}
+		}
+	}
+	for _, o := range l.info.Defs {
+		if v, ok := o.(*check.Var); ok {
+			walk(v.Type)
+		}
+	}
+	for _, t := range l.info.Types {
+		walk(t)
+	}
 }
 
 // fieldDefaults is the keyed Go elements that set each field of the record
@@ -211,35 +451,48 @@ func (tc *typeCtx) fieldDefaults(td *typeDecl, s *check.Struct, set map[string]b
 	return parts
 }
 
-// holdsMap reports whether t's default holds a Map: t is a Map, or a record
-// or tuple with a field that holds one. A slice's default is empty, so its
-// elements hold nothing. A type parameter has no default (the checker
-// refuses it).
-func holdsMap(t check.Type, seen map[*check.Named]bool) bool {
+// holdsMap reports whether t's default holds a Map: t is a Map, or a
+// record or tuple, named or not, with a field or element that holds one. A
+// slice's default is empty, so its elements hold nothing. A type parameter
+// has no default (the checker refuses it). A defined type or instance is
+// decided once per lowering (see Defaults); a type that reaches itself
+// through its own fields holds nothing more through that path.
+func (l *lowerer) holdsMap(t check.Type) bool {
+	l.holdsVisits++
 	switch u := t.(type) {
 	case *check.Map:
 		return true
 	case *check.Tuple:
 		for _, e := range u.Types {
-			if holdsMap(e, seen) {
+			if l.holdsMap(e) {
 				return true
 			}
 		}
 	case *check.Named:
-		if seen[u] {
+		switch l.holds[u] {
+		case holdsYes:
+			return true
+		case holdsNo, holdsVisiting:
 			return false
 		}
-		seen[u] = true
+		l.holds[u] = holdsVisiting
+		held := false
 		switch under := u.Underlying().(type) {
 		case *check.Map:
-			return true
+			held = true
 		case *check.Struct:
 			for _, f := range under.Fields {
-				if holdsMap(f.Type, seen) {
-					return true
+				if l.holdsMap(f.Type) {
+					held = true
+					break
 				}
 			}
 		}
+		l.holds[u] = holdsNo
+		if held {
+			l.holds[u] = holdsYes
+		}
+		return held
 	}
 	return false
 }

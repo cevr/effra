@@ -47,3 +47,67 @@ func TestNamingWorkIsLinear(t *testing.T) {
 		}
 	}
 }
+
+// TestDefaultWorkIsLinear: a counted bound on the work and the output of
+// defaults, not a time (stage D2 round 2 review M2). A chain of n records,
+// each holding the one before and the first a Map, and a diamond, each
+// record holding the one before twice, get one holdsMap visit decision per
+// type and one generated default function per type: the holdsMap calls and
+// the generated Go bytes stay under a fixed multiple of the type count. A
+// walk that restarts per default is quadratic on the chain; inlining each
+// default's literal is exponential on the diamond (2^20 copies of R0).
+func TestDefaultWorkIsLinear(t *testing.T) {
+	chain := func(n int) string {
+		var src strings.Builder
+		src.WriteString("type R0 { M Map[string, int] }\n")
+		for i := 1; i < n; i++ {
+			fmt.Fprintf(&src, "type R%d { V R%d }\n", i, i-1)
+		}
+		fmt.Fprintf(&src, "func main() {\n\tlet r R%d\n\t_ = r\n}\n", n-1)
+		return src.String()
+	}
+	diamond := func(n int) string {
+		var src strings.Builder
+		src.WriteString("type R0 { M Map[string, int] }\n")
+		for i := 1; i < n; i++ {
+			fmt.Fprintf(&src, "type R%d { A R%d, B R%d }\n", i, i-1, i-1)
+		}
+		fmt.Fprintf(&src, "func main() {\n\tlet r R%d\n\t_ = r\n}\n", n-1)
+		return src.String()
+	}
+	cases := []struct {
+		name  string
+		types int
+		src   string
+	}{
+		{"chain", 100, chain(100)},
+		{"chain", 200, chain(200)},
+		{"chain", 400, chain(400)},
+		{"diamond", 21, diamond(21)},
+	}
+	for _, c := range cases {
+		file, err := syntax.Parse(c.src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pkg, diags := check.Check("main", []*syntax.File{file}, nil)
+		if len(diags) > 0 {
+			t.Fatalf("%s %d: %v", c.name, c.types, diags)
+		}
+		l := newLowerer(Unit{Package: pkg, Files: []*syntax.File{file}, Sources: []Source{{Path: testSourcePath, Text: c.src}}})
+		code, err := l.program()
+		if err != nil {
+			t.Fatalf("%s %d: %v", c.name, c.types, err)
+		}
+		t.Logf("%s of %d types: %d holdsMap calls, %d Go bytes", c.name, c.types, l.holdsVisits, len(code))
+		if l.holdsVisits > 8*c.types {
+			t.Errorf("%s of %d types: %d holdsMap calls, more than 8 per type", c.name, c.types, l.holdsVisits)
+		}
+		if len(code) > 4000+300*c.types {
+			t.Errorf("%s of %d types: %d Go bytes, more than 4000 + 300 per type", c.name, c.types, len(code))
+		}
+		if got := strings.Count(string(code), "\nfunc ergoDefault"); got != c.types {
+			t.Errorf("%s of %d types: %d generated default functions, want one per type", c.name, c.types, got)
+		}
+	}
+}

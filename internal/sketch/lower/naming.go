@@ -25,8 +25,10 @@ import (
 //     (calls.go, #230) and the package initializer (decls.go, initFunc);
 //  3. every type and function of every library package the program reaches
 //     (the prelude and imported std packages, by path), used or not;
-//  4. the operations adapters of every operations conversion, and the text
-//     functions every error type's text needs, in a sorted order.
+//  4. the operations adapters of every operations conversion, the text
+//     functions every error type's text needs, and the default function of
+//     every defined type or instance whose default holds a Map (types.go,
+//     Defaults), in a sorted order.
 //
 // Reserving an unused library or generated name only renames a local that
 // would have taken it; it emits nothing.
@@ -96,6 +98,9 @@ func (l *lowerer) nameAll() {
 			})
 		}
 	}
+	l.reserveDefaults(func(key pkgKey, base string) {
+		generated = append(generated, entry{key, "default " + key.obj.(string), base})
+	})
 	sort.SliceStable(generated, func(i, j int) bool { return generated[i].sort < generated[j].sort })
 	for _, e := range generated {
 		l.pkgName(e.key, e.base)

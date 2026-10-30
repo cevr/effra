@@ -169,7 +169,12 @@ type lowerer struct {
 	wires    map[*check.Wire]string
 	adapters map[string]string // operation-table adapters by source and target Go types
 	texts    map[pkgKey]bool   // generated text functions emitted
-	methods  map[*check.Package]map[*check.TypeName][]*check.Func
+	defaults map[pkgKey]bool   // generated default functions emitted (types.go, Defaults)
+	holds    map[*check.Named]holdState
+	typeKeys map[check.Type]string
+	// holdsVisits counts holdsMap calls (TestDefaultWorkIsLinear).
+	holdsVisits int
+	methods     map[*check.Package]map[*check.TypeName][]*check.Func
 
 	envName   string
 	envFields map[*check.TypeName]string
@@ -230,6 +235,9 @@ func newLowerer(u Unit) *lowerer {
 		wires:     map[*check.Wire]string{},
 		adapters:  map[string]string{},
 		texts:     map[pkgKey]bool{},
+		defaults:  map[pkgKey]bool{},
+		holds:     map[*check.Named]holdState{},
+		typeKeys:  map[check.Type]string{},
 		methods:   map[*check.Package]map[*check.TypeName][]*check.Func{},
 		envFields: map[*check.TypeName]string{},
 	}

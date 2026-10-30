@@ -323,6 +323,32 @@ func main() needs Console {
 `, "local let\npackage let\nomitted field\nnested omitted field\nlet of a record\nelided record\ngeneric record\ndefined Map\ntuple\nrecursive record\n")
 }
 
+// TestErgoRunDefaultsShareNoMap: every default builds new Maps (stage D2
+// round 2 review M2): two lets of one record type, the two fields of one
+// type in a record, a package let and a local, and two omitted fields of a
+// literal each get their own Map, though one generated function builds
+// them all.
+func TestErgoRunDefaultsShareNoMap(t *testing.T) {
+	wantRun(t, `type R { M Map[string, int] }
+type O { A R, B R }
+
+let pr R
+
+func main() needs Console {
+	let mut a R
+	let b R
+	a.M["x"] = 1
+	let mut o O
+	o.A.M["y"] = 1
+	let mut p = O{}
+	p.B.M["z"] = 1
+	if len(a.M) == 1 && len(b.M) == 0 && len(o.B.M) == 0 && len(p.A.M) == 0 && len(pr.M) == 0 {
+		Console.Println("independent")
+	}
+}
+`, "independent\n")
+}
+
 // TestErgoRunMapWriteTargets: a Map write fixes its Map, left to right,
 // before a key whose evaluation writes statements (spec D4): when the key
 // reassigns the Map variable, the write still reaches the Map the variable
