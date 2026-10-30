@@ -25,6 +25,14 @@ import (
 // reports, and the elements the fixed program names reach that row only
 // through the pinned member.
 //
+// Outside the component, a reference to the refused member reads an error
+// row that holds invalid (stage D1 round 4, rows.md Inference 6). A check
+// that holds only for some values of that row is silent there, so the
+// later-component rows (q1b, q2b, q5, q9) have no follow-on, and the
+// fixed program's diagnostics on such a catch are listed as hidden with
+// the catch in unknown. A check that holds for every value of the row
+// (a duplicate arm) still reports.
+//
 // Each row names the review probe it comes from: p (round 12 review), q
 // (round 13 review), k1 and kept (round 13 request). Condition (c) is
 // measured with the base17 binary (round-14-receipts/probes.log); the test
@@ -76,7 +84,14 @@ type followOnRow struct {
 	// follow-on Catch 1 replaces them. The elements they name reach the
 	// row only through the pinned member, so they are not independent of
 	// the arm's error.
+	// It also holds on a catch listed in unknown.
 	hidden []string
+	// unknown: the lines where catches start whose caught row in the
+	// broken program comes from a refused member outside the component,
+	// so it holds invalid (rows.md, Inference 6). The checks on that row
+	// (Catch 1, Catch 2's row half, Catch 4, a bare generic arm) stay
+	// silent, because each holds only for some values of the unknown row.
+	unknown []int
 	// noFixed: the row has no arm error to fix (a kept S108).
 	noFixed bool
 }
@@ -456,20 +471,19 @@ func outer() {
 }
 func main() {}
 `,
-		// w2's try on the refused member walk is refused with it
-		// (groupRef, stage D1), so it adds no "cannot fail".
+		// w2 reads the refused member walk, so its row holds invalid
+		// (stage D1 round 4): Catch 1, Catch 2's row half and Catch 4
+		// stay silent on outer's catch. The duplicate arm holds for every
+		// row and stays.
 		want: []string{
 			armError12,
-			"24:2 S108 catch on an expression that cannot fail (rows.md, Catch 1)",
 			"26:7 S108 main.Q is caught twice (rows.md, Catch 2)",
-		},
-		followOn: []string{
-			"24:2 S108 catch on an expression that cannot fail (rows.md, Catch 1)",
 		},
 		hidden: []string{
 			"22:7 S103 this catch does not handle {main.E}; a catch without try handles every error of the row (rows.md, Catch 4)",
 			"23:7 S108 main.Q is not in the caught row {main.E} (rows.md, Catch 2)",
 		},
+		unknown: []int{24},
 	},
 	{
 		// Q is in no real row, so its Catch 2 is real, and so is the
@@ -545,13 +559,18 @@ func outer() {
 }
 func main() {}
 `,
-		// w2's try on the refused member walk is refused with it
-		// (groupRef, stage D1).
+		// w2 reads the refused member walk, so its row {main.E} also
+		// holds invalid (stage D1 round 4): whether Q is in it is
+		// unknown, so Catch 2's row half is silent. The duplicate arm
+		// holds for every row and stays.
 		want: []string{
 			armError12,
-			"27:7 S108 main.Q is not in the caught row {main.E} (rows.md, Catch 2)",
 			"28:7 S108 main.Q is caught twice (rows.md, Catch 2)",
 		},
+		hidden: []string{
+			"25:7 S108 main.Q is not in the caught row {main.E} (rows.md, Catch 2)",
+		},
+		unknown: []int{25},
 	},
 	{
 		// The row reaches outer through a generic row parameter.
@@ -587,17 +606,10 @@ func outer() {
 }
 func main() {}
 `,
-		// w2's try on the refused member walk is refused with it
-		// (groupRef, stage D1).
-		want: []string{
-			armError11,
-			"26:2 S108 catch on an expression that cannot fail (rows.md, Catch 1)",
-			"26:15 S108 try on an expression that cannot fail (rows.md, Error rows 6)",
-		},
-		followOn: []string{
-			"26:2 S108 catch on an expression that cannot fail (rows.md, Catch 1)",
-			"26:15 S108 try on an expression that cannot fail (rows.md, Error rows 6)",
-		},
+		// w2 reads the refused member walk, so its row holds invalid
+		// (stage D1 round 4). The literal's try can fail, R binds a row
+		// that holds invalid, and outer's catch is not known to be empty.
+		want: []string{armError11},
 	},
 	{
 		// The partial catch in m reads w2's pinned row, so its Catch 1
@@ -651,8 +663,8 @@ func main() {}
 		hidden: []string{"24:7 S108 main.Q is not in the caught row {main.E} (rows.md, Catch 2)"},
 	},
 	{
-		// A bare generic arm on w2's pinned row finds no instance: an
-		// absence check, a follow-on like Catch 1.
+		// A bare generic arm on w2's row, which reads the refused member:
+		// whether it has an instance is unknown.
 		name: "q9: a bare generic arm on a pinned row",
 		src: `type E {}
 type G[T] {}
@@ -683,17 +695,10 @@ func outer() {
 }
 func main() {}
 `,
-		// w2's try on the refused member walk is refused with it
-		// (groupRef, stage D1).
-		want: []string{
-			armError11,
-			"23:2 S108 catch on an expression that cannot fail (rows.md, Catch 1)",
-			"24:7 S108 generic type main.G needs type arguments",
-		},
-		followOn: []string{
-			"23:2 S108 catch on an expression that cannot fail (rows.md, Catch 1)",
-			"24:7 S108 generic type main.G needs type arguments",
-		},
+		// w2 reads the refused member walk, so its row holds invalid
+		// (stage D1 round 4): the catch is not known to be empty, and the
+		// bare arm's instance is unknown, so both checks are silent.
+		want: []string{armError11},
 	},
 	{
 		name: "k1: try and catch on a pinned row that is empty",
@@ -825,8 +830,8 @@ func lineMap(src, fixed string) (mapLine func(int) (int, bool), changed func(int
 }
 
 // inFollowOnCatch1 reports whether line lies inside a catch expression of
-// src whose first line has a follow-on Catch 1.
-func inFollowOnCatch1(src string, line int, followOn []string) bool {
+// src whose first line has a follow-on Catch 1 or is listed in unknown.
+func inFollowOnCatch1(src string, line int, followOn []string, unknown []int) bool {
 	f, err := syntax.Parse(src)
 	if err != nil {
 		return false
@@ -841,6 +846,9 @@ func inFollowOnCatch1(src string, line int, followOn []string) bool {
 		first, last := lineAt(ce.Pos()), lineAt(ce.End()-1)
 		if line < first || line > last {
 			return true
+		}
+		if slices.Contains(unknown, first) {
+			found = true
 		}
 		for _, d := range followOn {
 			if l, _ := lineOf(d); l == first && strings.Contains(d, "Catch 1") {
@@ -909,8 +917,8 @@ func TestFollowOnRows(t *testing.T) {
 				continue
 			}
 			if slices.Contains(tc.hidden, d) {
-				if !inFollowOnCatch1(tc.src, m, tc.followOn) {
-					t.Errorf("%s: hidden %q is not on a catch whose Catch 1 is a follow-on (at %d)", tc.name, d, m)
+				if !inFollowOnCatch1(tc.src, m, tc.followOn, tc.unknown) {
+					t.Errorf("%s: hidden %q is not on a catch whose Catch 1 is a follow-on or whose row is unknown (at %d)", tc.name, d, m)
 				}
 				continue
 			}

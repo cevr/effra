@@ -35,10 +35,6 @@ type target struct {
 	// the whole expression to its right); tried records that one did.
 	tries int
 	tried bool
-	// pinned: a pinned row (operand.pinned) reached this target, so its
-	// inferred row is a lower bound too; a literal's value then has
-	// pinnedSig (funcLit, blockLit).
-	pinned bool
 }
 
 func (t *target) row(declared, inferred *Row) *Row {
@@ -100,6 +96,8 @@ func describeCharge(n syntax.Node) string {
 // escape records failures that escape to the current target at n (try, a
 // fallible return, a return of an error value, the rest of a partial catch):
 // each must be in the declared error row (S101), or joins the inferred row.
+// An inferred row takes invalid too, so it is unknown where the escaping row
+// is; a declared row is checked against the known part (Row.unknown).
 func (c *checker) escape(n syntax.Node, row *Row) {
 	if row.Empty() || c.fn == nil || c.fn.t == nil {
 		return
@@ -109,7 +107,7 @@ func (c *checker) escape(n syntax.Node, row *Row) {
 		t.errors = t.errors.union(c.types, row)
 		return
 	}
-	extra := row.minus(c.types, t.declErrors)
+	extra := row.minus(c.types, t.declErrors).known(c.types)
 	if extra.Empty() {
 		return
 	}
@@ -525,18 +523,20 @@ func funcKey(f *Func) string {
 // (D3); the S108 is at the member's declaration (reportGroup). A reference
 // from outside the component, checked after it settled, keeps f's written
 // signature, so an arity or argument mistake there is still reported; only
-// its pinned rows are no evidence, so the reference is pinned: its value
-// has pinnedSig, a call of it has a pinned row, and the absence checks on
-// that row are skipped (classf/go-statement.ergo's caller F got a cascade
-// "returns no value"; stage D1 round 1 review M5). The provenance rides on
-// the operand, so a callback body that calls f pins only what invokes the
-// callback (stage D1 round 2 review M1).
-func (c *checker) groupRef(f *Func) (refused, pinned bool) {
+// its pinned rows are no evidence, so when f is refused the reference is
+// unknown: its error row holds invalid (unknownSig), and every row that
+// takes it, through bindings, literals, generics and inference, is unknown
+// too, so no definite-row check cascades from it (classf/go-statement.ergo's
+// caller F got a cascade "returns no value"; stage D1 round 1 review M5;
+// round 3 review M1, M2; rows.md, Inference 6).
+func (c *checker) groupRef(f *Func) (refused, unknown bool) {
 	if !f.inferErrors && !f.inferUses {
 		return false, false
 	}
 	if !c.group[f] {
-		return false, c.silent == 0 && c.refusedMembers[f]
+		// The silent passes read it too, so the fixpoint and the
+		// reporting pass see one row (unknownSig).
+		return false, c.refusedMembers[f]
 	}
 	for _, l := range c.lits {
 		if !slices.Contains(l.refs, f) {
@@ -549,6 +549,16 @@ func (c *checker) groupRef(f *Func) (refused, pinned bool) {
 		return true, false
 	}
 	return false, false
+}
+
+// unknownSig is the signature a reference to a refused class G member from a
+// later component has: its written signature, with invalid in its error row
+// (Row.unknown), so every row that takes it is unknown and no definite-row
+// check cascades from it. The member's own row variable is not changed.
+func (c *checker) unknownSig(sig *Signature) *Signature {
+	s := *sig
+	s.Errors = sig.Errors.with(c.types, invalid)
+	return &s
 }
 
 // exceeded returns which of f's pinned rows (errors, capabilities) its body
@@ -989,7 +999,8 @@ func (c *checker) checkFuncBody(f *Func) bool {
 				// The fixpoint decides; the reporting pass, which refuses the
 				// value uses, only reads it.
 				grew := c.grew[f]
-				grew[v.Kind-KindErrors] = !p.row.Empty()
+				// An unknown row's invalid is no evidence (Row.unknown).
+				grew[v.Kind-KindErrors] = !p.row.known(c.types).Empty()
 				c.grew[f] = grew
 			}
 			continue

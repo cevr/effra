@@ -505,6 +505,32 @@ func (r *Row) subsetOf(tab *typeTable, o *Row) bool {
 	return r.minus(tab, o).Empty()
 }
 
+// unknown reports whether the row holds invalid, through its variables'
+// solutions: the row reached a refused class G member, whose written
+// signature stays but whose row is no evidence, so the row may hold more
+// than it lists (rows.md, Inference 6). A check of absence, which holds only
+// if the row lacks something (try or catch on an expression that cannot
+// fail, a type not in the caught row, an unreachable rest arm, a bare
+// generic arm with no instance, a return of no value), is silent on an
+// unknown row, as a type check is on an invalid type (D3). A check of
+// presence (an unhandled failure, Catch 4, S101, a row wider than a
+// function type's or an interface method's) reads the known part, so an
+// error that holds whatever the row turns out to be is still reported.
+// invalid is an element like any other, so bindings, joins, instantiation,
+// inference and row parameters carry it with no side table (go/types
+// Typ[Invalid], rustc ty::Error, TypeScript errorType).
+func (r *Row) unknown(tab *typeTable) bool {
+	return !r.Empty() && r.has(tab, invalid)
+}
+
+// known returns the row without invalid: the elements that are evidence.
+func (r *Row) known(tab *typeTable) *Row {
+	if !r.unknown(tab) {
+		return r
+	}
+	return r.without(tab, map[int32]bool{tab.id(invalid): true})
+}
+
 func (r *Row) equal(tab *typeTable, o *Row) bool {
 	r, o = tab.set(r), tab.set(o)
 	return len(r.Elems()) == len(o.Elems()) && r.subsetOf(tab, o)
@@ -512,7 +538,7 @@ func (r *Row) equal(tab *typeTable, o *Row) bool {
 
 // list prints the elements in typeString order (ties, which only distinct
 // declarations of one name can make, keep the identity order). A row
-// variable prints as its solution so far.
+// variable prints as its solution so far; invalid prints as nothing.
 func (r *Row) list(sep string) string {
 	elems := r.Elems()
 	if r != nil && r.vars {
@@ -541,6 +567,10 @@ func (r *Row) list(sep string) string {
 	for i, k := range order {
 		// A solved variable may repeat an element the row lists.
 		if i > 0 && elems[k] == elems[order[i-1]] {
+			continue
+		}
+		// An unknown row's invalid is never printed (Row.unknown).
+		if elems[k] == Type(invalid) {
 			continue
 		}
 		parts = append(parts, elems[k].String())

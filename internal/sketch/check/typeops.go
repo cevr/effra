@@ -236,8 +236,9 @@ func (c *checker) assignable(v, t Type) (bool, string) {
 		if !c.sameShape(vs, tt) {
 			return false, "the parameters or results differ"
 		}
-		if !vs.Errors.subsetOf(c.types, tt.Errors) {
-			return false, fmt.Sprintf("its error row %s is wider than %s", rowText(vs.Errors), rowText(tt.Errors))
+		// An unknown row is checked by its known part (Row.unknown).
+		if ve := vs.Errors.known(c.types); !ve.subsetOf(c.types, tt.Errors) {
+			return false, fmt.Sprintf("its error row %s is wider than %s", rowText(ve), rowText(tt.Errors))
 		}
 		if !vs.Uses.subsetOf(c.types, tt.Uses) {
 			return false, fmt.Sprintf("its capability row %s is wider than %s", rowText(vs.Uses), rowText(tt.Uses))
@@ -421,8 +422,9 @@ func (c *checker) implements(v Type, it *Interface) string {
 			// depend on declaration order (D0; fuzz-check-C-r7rev-dbdbb39c).
 			return fmt.Sprintf("%s.%s has signature %s, want %s", v, m.Name, shapeOf(got), shapeOf(m.Sig))
 		}
-		if !got.Errors.subsetOf(c.types, m.Sig.Errors) {
-			return fmt.Sprintf("%s.%s can fail with %s, wider than %s", v, m.Name, rowText(got.Errors.minus(c.types, m.Sig.Errors)), rowText(m.Sig.Errors))
+		// An unknown row is checked by its known part (Row.unknown).
+		if ge := got.Errors.known(c.types); !ge.subsetOf(c.types, m.Sig.Errors) {
+			return fmt.Sprintf("%s.%s can fail with %s, wider than %s", v, m.Name, rowText(ge.minus(c.types, m.Sig.Errors)), rowText(m.Sig.Errors))
 		}
 		if !got.Uses.subsetOf(c.types, m.Sig.Uses) {
 			return fmt.Sprintf("%s.%s requires %s, which the interface's method does not (README Gap 17 stays with #37)", v, m.Name, rowText(got.Uses.minus(c.types, m.Sig.Uses)))

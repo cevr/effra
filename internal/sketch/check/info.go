@@ -488,14 +488,23 @@ func (w *Wire) EachProvider(f func(cap Type, e *WireEntry) bool) {
 }
 
 // finishInfo resolves the rows Info holds once every body is final, so no
-// row variable remains (invariant 2).
+// row variable remains (invariant 2), and without invalid, which is the
+// check's mark of an unknown row and no failure a client can name
+// (Row.unknown).
 func (c *checker) finishInfo() {
 	for _, call := range c.pkg.Info.Calls {
 		if call.Fails != nil {
-			call.Fails = c.types.resolve(call.Fails)
+			call.Fails = c.types.resolve(call.Fails).known(c.types)
 		}
 		if call.Needs != nil {
 			call.Needs = c.types.resolve(call.Needs)
+		}
+	}
+	for x, sig := range c.pkg.Info.Literals {
+		if sig.Errors.unknown(c.types) {
+			s := *sig
+			s.Errors = sig.Errors.known(c.types)
+			c.pkg.Info.Literals[x] = &s
 		}
 	}
 	for p, name := range c.asNames {
@@ -541,7 +550,7 @@ func (c *checker) finalType(t Type, memo map[Type]Type) Type {
 			s.Results[i] = c.finalType(r, memo)
 			changed = changed || s.Results[i] != r
 		}
-		if e := c.types.resolve(t.Errors); e != t.Errors {
+		if e := c.types.resolve(t.Errors).known(c.types); e != t.Errors {
 			s.Errors, changed = e, true
 		}
 		if u := c.types.resolve(t.Uses); u != t.Uses {

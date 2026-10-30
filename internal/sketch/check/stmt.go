@@ -513,8 +513,8 @@ func (c *checker) returnStmt(s *syntax.ReturnStmt) {
 		if op.invalid() {
 			return
 		}
-		// The row is returned: a pinned one may hold more than it shows.
-		c.pinTarget(&op)
+		// The row is returned; an unknown row is fallible (Row.unknown), so
+		// `return b()` over a refused member passes it on.
 		switch op.mode {
 		case modeValue, modeConst, modeNoValue:
 		default:
@@ -541,9 +541,6 @@ func (c *checker) returnStmt(s *syntax.ReturnStmt) {
 			return
 		}
 		switch {
-		case len(results) == 0 && op.mode == modeNoValue && op.pinned:
-			// `return b()` over a refused member's pinned row: with its
-			// real row it may pass failures on, so this is a follow-on.
 		case len(results) == 0:
 			c.errorf(s.Results[0], CodeType, "%s returns no value", c.describeTarget())
 		case len(results) == 1:

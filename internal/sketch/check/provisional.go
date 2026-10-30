@@ -12,9 +12,10 @@ import "ergo.local/prototype/internal/sketch/syntax"
 //     of the open component is provisional: the instance a bare generic
 //     catch arm takes from the caught row (catchType) may still arrive
 //     (rowWaits); a row from outside the component is final;
-//   - in the reporting pass, a reference to a member class G refuses is
-//     invalid so that nothing cascades from its pinned row (groupRef); its
-//     diagnostic is the member's S108, which reportGroup decides last.
+//   - in the reporting pass, a reference to a member class G refuses keeps
+//     its written signature, and its error row holds invalid so that
+//     nothing cascades from it (groupRef, Row.unknown); its diagnostic is
+//     the member's S108, which reportGroup decides last.
 //
 // A local bound to an undiagnosed value is undiagnosed (Var.undiagnosed),
 // and each read of an undiagnosed value counts (undiagSeq). A callback

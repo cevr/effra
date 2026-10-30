@@ -46,15 +46,14 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 		if op.invalid() {
 			return op
 		}
-		// The rest escapes; a pinned rest may hold more than it shows.
-		c.pinTarget(&op)
-		if valid && op.errs.Empty() && !op.pinned && (t == nil || !t.tried) && c.openRowSeq == openMark {
+		// The rest escapes; an unknown rest is not empty (Row.unknown).
+		if valid && op.errs.Empty() && (t == nil || !t.tried) && c.openRowSeq == openMark {
 			// The catch handles the whole row and nothing inside it
 			// propagates: try has nothing to pass on (review O3).
 			c.errorf(x, CodeType, "try over a catch that handles every failure: nothing is left to propagate; drop the try (rows.md, Error rows 6)")
 		}
 		c.escape(x, op.errs)
-		op.errs, op.pinned = nil, false
+		op.errs = nil
 		return op
 	}
 	op := c.exprAs(x.X, hint, use)
@@ -72,17 +71,14 @@ func (c *checker) try(x *syntax.TryExpr, hint Type) operand {
 			return bad(x)
 		}
 	}
-	// The row escapes; a pinned one may hold more than it shows.
-	c.pinTarget(&op)
-	pinned := op.pinned
-	op.pinned, op.addressable = false, false
+	// The row escapes; an unknown row is fallible (Row.unknown), so the
+	// check below is silent on it.
+	op.addressable = false
 	if !op.fallible() && inner {
 		return op
 	}
 	if !op.fallible() {
-		if !pinned { // a pinned row is a lower bound: a follow-on
-			c.errorf(x, CodeType, "try on an expression that cannot fail (rows.md, Error rows 6)")
-		}
+		c.errorf(x, CodeType, "try on an expression that cannot fail (rows.md, Error rows 6)")
 		return op
 	}
 	c.escape(x, op.errs)
@@ -118,11 +114,10 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 	valid := !op.invalid()
 	// open: the row may still grow in this component (rowWaits). operandOK:
 	// the caught expression is valid, so an arm its row lacks is not a
-	// cascade of its diagnostic. pinned: the caught expression runs a
-	// refused member's pinned row, a lower bound, so no absence check holds
-	// on it (operand.pinned).
-	pinned := valid && op.pinned
-	open, operandOK := c.openRowSeq != openMark, valid && !pinned
+	// cascade of its diagnostic. unknown: the caught row holds invalid, so
+	// no absence check holds on it (Row.unknown).
+	unknown := valid && op.errs.unknown(c.types)
+	open, operandOK := c.openRowSeq != openMark, valid && !unknown
 	if valid {
 		switch op.mode {
 		case modeValue, modeConst, modeNoValue:
@@ -139,10 +134,8 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 	// on the value resolves before the rows settle (selfcalls.go; round 8
 	// review M1).
 	hasValue := valid && op.mode != modeNoValue
-	if valid && row.Empty() {
-		if !pinned {
-			c.errorf(x.X, CodeType, "catch on an expression that cannot fail (rows.md, Catch 1)")
-		}
+	if valid && row.Empty() { // an unknown row is not empty
+		c.errorf(x.X, CodeType, "catch on an expression that cannot fail (rows.md, Catch 1)")
 		valid = false
 	}
 	var valueType Type
@@ -189,7 +182,7 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 			}
 			if it.rest {
 				rest := row.without(c.types, cs.covered(row))
-				if valid && !pinned && !unreachable && !cs.over() && rest.Empty() {
+				if valid && !unknown && !unreachable && !cs.over() && rest.Empty() {
 					c.errorf(it.te, CodeType, "this arm is unreachable: the arms before it handle every failure of the row %s (rows.md, Catch 2)", rowText(row))
 				}
 				rested = true
@@ -200,7 +193,7 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 					continue
 				}
 				restName, restType = it.restID, c.rowValue(rest)
-				if !valid || rest.Empty() {
+				if !valid || rest.Empty() || rest.unknown(c.types) {
 					restType = invalid
 				}
 				continue
@@ -209,7 +202,7 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 			if it.t == nil || unreachable {
 				continue
 			}
-			cs.judge(it, row, valid && !pinned)
+			cs.judge(it, row, valid && !unknown)
 		}
 		saved := c.fn.scope
 		c.fn.scope = newScope(saved)
@@ -245,9 +238,10 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 		valid = false
 	}
 	if !valid {
-		if partial {
-			// try passes the rest on, and a pinned rest is a lower bound.
-			c.pinTarget(&op)
+		if partial && unknown {
+			// try passes the rest on, and the rest of an unknown row is
+			// unknown.
+			c.escape(x, newRow().with(c.types, invalid))
 		}
 		if hasValue {
 			return operand{mode: modeValue, typ: valueType}, false
@@ -255,10 +249,16 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 		return bad(x), false
 	}
 	rest := row.without(c.types, cs.covered(row))
-	if !partial && !rest.Empty() {
-		c.errorAt(x.Catch, x.Catch+5, CodeNotTotal, "this catch does not handle %s; a catch without try handles every error of the row (rows.md, Catch 4)", rowText(rest))
+	// An unknown rest is checked by its known part (Row.unknown).
+	if known := rest.known(c.types); !partial && !known.Empty() {
+		c.errorAt(x.Catch, x.Catch+5, CodeNotTotal, "this catch does not handle %s; a catch without try handles every error of the row (rows.md, Catch 4)", rowText(known))
 	}
-	m := &Match{Subjects: row.Elems(), Arms: len(x.Arms), Partial: partial}
+	if !partial && rest.unknown(c.types) {
+		// What it may not handle makes the target's row unknown, as an
+		// unhandled unknown row does (handled).
+		c.escape(x, newRow().with(c.types, invalid))
+	}
+	m := &Match{Subjects: row.known(c.types).Elems(), Arms: len(x.Arms), Partial: partial}
 	if hasValue && wantValue {
 		m.Result = valueType
 	}
@@ -268,7 +268,7 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 		res = operand{mode: modeNoValue, typ: NoValue}
 	}
 	if partial {
-		res.errs, res.pinned = rest, pinned
+		res.errs = rest
 	}
 	return res, true
 }

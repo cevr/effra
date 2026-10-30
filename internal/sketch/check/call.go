@@ -234,7 +234,7 @@ func (c *checker) callSig(x *syntax.CallExpr, sig *Signature, fun operand) opera
 		if !ok {
 			c.errorf(args.trailing, CodeType, "a trailing block is a function-literal argument, but the final parameter has type %s", pt)
 		} else {
-			lit, refused, _ := c.blockLit(args.trailing, ps, nil, true)
+			lit, refused := c.blockLit(args.trailing, ps, nil, true)
 			if refused { // class G: invalid, nothing cascades
 				return bad(x)
 			}
@@ -243,9 +243,7 @@ func (c *checker) callSig(x *syntax.CallExpr, sig *Signature, fun operand) opera
 			}
 		}
 	}
-	// A call of a pinned function value runs its pinned row; its arguments,
-	// literals included, are only passed (stage D1 round 2 review M1).
-	return c.result(x, sig, fun.pinnedSig)
+	return c.result(x, sig)
 }
 
 // argument checks one argument against its parameter type. It reports false
@@ -295,15 +293,17 @@ func (c *checker) argValue(a syntax.Expr, hint Type, call *syntax.CallExpr) (ope
 }
 
 // result is the operand of a call: its value results, its error row, and
-// the charges of its capability row (rows.md, Capability rows 2). pinned:
-// the called function's error row is a lower bound (operand.pinned).
-func (c *checker) result(x *syntax.CallExpr, sig *Signature, pinned bool) operand {
+// the charges of its capability row (rows.md, Capability rows 2). An
+// unknown error row (Row.unknown) stays unknown in the result.
+func (c *checker) result(x *syntax.CallExpr, sig *Signature) operand {
 	// An inferred row is read through its variable (class F).
 	c.chargeRow(x, c.types.resolve(sig.Uses))
 	c.readRow(sig.Errors)
-	op := operand{mode: modeValue, errs: c.types.resolve(sig.Errors), pinned: pinned}
+	op := operand{mode: modeValue, errs: c.types.resolve(sig.Errors)}
 	call := c.callInfo(x)
-	call.Fails, call.Needs = op.errs, c.types.resolve(sig.Uses)
+	// Info records the evidence only: invalid is the check's mark
+	// (Row.unknown), not a failure a client can name.
+	call.Fails, call.Needs = op.errs.known(c.types), c.types.resolve(sig.Uses)
 	switch len(sig.Results) {
 	case 0:
 		op.mode, op.typ = modeNoValue, NoValue
@@ -343,7 +343,7 @@ func (c *checker) explicit(x *syntax.IndexExpr, fun operand) operand {
 		}
 		targs[i] = t
 	}
-	return operand{mode: modeGeneric, typ: sig, fn: fun.fn, val: nil, obj: &explicitArgs{targs: targs}, pinnedSig: fun.pinnedSig}
+	return operand{mode: modeGeneric, typ: sig, fn: fun.fn, val: nil, obj: &explicitArgs{targs: targs}}
 }
 
 // cannotInfer reports a type parameter the inferred subset does not reach
@@ -511,9 +511,6 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 	n := args.n()
 	allExplicit := len(explicit) == len(sig.TParams)
 	failed := false
-	// argPinned: a function argument has a pinned row (operand.pinnedSig);
-	// through a row parameter of the result it pins the call (result).
-	argPinned := false
 	ops := make([]*operand, n)
 	lits := make([]Type, n)
 	mismatch := func(at syntax.Node, t, pt Type) {
@@ -539,7 +536,6 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 			op := c.funcLit(lit, expected, in)
 			op.expr = lit
 			c.record(lit, op)
-			argPinned = argPinned || op.pinnedSig
 			lt, isSig := op.typ.(*Signature)
 			if !isSig { // refused (class G): invalid, nothing cascades
 				failed = true
@@ -572,7 +568,6 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 		}
 		op, ok := c.argValue(args.exprs[i], hint, x)
 		ops[i] = &op
-		argPinned = argPinned || op.pinnedSig
 		if !ok || op.invalid() || containsInvalid(op.typ) {
 			// The invalid-operand rule, in this one place (round-8 M5;
 			// round 9 class D; D3): an argument that is invalid, or was
@@ -643,11 +638,10 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 			c.errorf(args.trailing, CodeType, "a trailing block is a function-literal argument, but the final parameter has type %s", pt)
 			return bad(x)
 		}
-		lt, refused, pinned := c.blockLit(args.trailing, expected, in, true)
+		lt, refused := c.blockLit(args.trailing, expected, in, true)
 		if refused { // class G: invalid, nothing cascades
 			return bad(x)
 		}
-		argPinned = argPinned || pinned
 		lits[i] = lt
 		_ = in.unify(pt, lt, unifyAssign) // a block's mismatch is the assignment's error below
 	}
@@ -726,19 +720,9 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 		c.assign(ops[i], pt, "argument")
 	}
 	// A function argument is run by the callee only as far as its type says:
-	// a pinned argument pins the call when the callee's error row takes a
-	// row parameter, which the argument's row may bind.
-	return c.result(x, inst, fun.pinnedSig || argPinned && rowParam(sig.Errors))
-}
-
-// rowParam reports whether row has a row-kinded type parameter.
-func rowParam(row *Row) bool {
-	for _, e := range row.Elems() {
-		if tp, ok := e.(*TypeParam); ok && tp.Kind != KindType {
-			return true
-		}
-	}
-	return false
+	// an argument whose row is unknown makes the call's row unknown only
+	// through a row parameter it binds (inst carries the invalid element).
+	return c.result(x, inst)
 }
 
 // ---------------------------------------------------------------- literals and blocks
@@ -783,7 +767,7 @@ func (c *checker) funcLit(x *syntax.FuncLit, expected *Signature, in *inferer) o
 	})
 	sig.Errors = t.row(t.declErrors, t.errors)
 	sig.Uses = t.row(t.declUses, t.uses)
-	if !writtenErr && !sig.Errors.Empty() {
+	if !writtenErr && !sig.Errors.known(c.types).Empty() {
 		sig.Fallible = true
 	}
 	if c.silent == 0 {
@@ -792,9 +776,10 @@ func (c *checker) funcLit(x *syntax.FuncLit, expected *Signature, in *inferer) o
 	if c.endLit(frame) {
 		return bad(x)
 	}
-	// Creating the literal runs nothing: a pinned row in its body pins only
-	// a call of it, through its inferred row (stage D1 round 2 review M1).
-	return operand{mode: modeValue, typ: sig, pinnedSig: t.pinned && t.declErrors == nil}
+	// Creating the literal runs nothing: an unknown row in its body makes
+	// only a call of it unknown, through its inferred row (stage D1 round 2
+	// review M1).
+	return operand{mode: modeValue, typ: sig}
 }
 
 // body runs check inside a nested target with its own frame: a function
@@ -831,9 +816,7 @@ func (c *checker) body(t *target, ft *syntax.FuncType, params []*Var, check func
 // no parameters (grammar.md, Expressions 3): f(a) { body } is
 // f(a, func() T { return body }). The block's last expression is its result;
 // return, break and continue may not leave it (grammar.md, Statements 5).
-// pinned reports that the block's inferred error row is a lower bound
-// (operand.pinnedSig).
-func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer, value bool) (sig *Signature, refused, pinned bool) {
+func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer, value bool) (sig *Signature, refused bool) {
 	c.typedFrame(b)
 	sig = &Signature{Errors: newRow(), Uses: newRow()}
 	t := &target{name: "this block"}
@@ -872,7 +855,6 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 	c.body(t, nil, nil, func() {
 		res := c.yieldingBlock(b, b.List, t.results, t.resultKnown, false, func(op *operand) {
 			c.escape(op.expr, op.errs)
-			c.pinTarget(op)
 		})
 		if resultFree {
 			if res != nil && res != NoValue {
@@ -884,14 +866,14 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 	})
 	sig.Errors = t.row(t.declErrors, t.errors)
 	sig.Uses = t.row(t.declUses, t.uses)
-	sig.Fallible = !sig.Errors.Empty() || expected != nil && expected.Fallible
+	sig.Fallible = !sig.Errors.known(c.types).Empty() || expected != nil && expected.Fallible
 	if frame != nil {
 		refused = c.endLit(frame)
 	}
 	if c.silent == 0 {
 		c.pkg.Info.Literals[b] = sig
 	}
-	return sig, refused, t.pinned && t.declErrors == nil
+	return sig, refused
 }
 
 // yieldingBlock checks a block that yields its last statement, by the one
