@@ -105,8 +105,16 @@ func calledSelector(fun syntax.Expr) *syntax.SelectorExpr {
 // their own mistakes are still reported, without further cascades. What
 // the callee expects is unknown, so a type argument is no mistake:
 // new(int) is one S104, never a second "int is a type" (D3).
-func (c *checker) silentArgs(x *syntax.CallExpr) {
-	for _, a := range x.Args {
+func (c *checker) silentArgs(x *syntax.CallExpr) { c.orphanValues(x.Args) }
+
+// orphanValues checks expressions whose expected type is unknown because
+// the expression around them is invalid (reported there): the arguments
+// of an invalid callee, the index of a base that is invalid or cannot be
+// indexed. Each value's own errors show and its names resolve as the
+// reference walk resolves them (class H; stage D1 fuzz input
+// 45ef37113544dcb7, `func d() { func() { 0[d] } }`).
+func (c *checker) orphanValues(xs []syntax.Expr) {
+	for _, a := range xs {
 		if _, ok := a.(*syntax.FuncLit); ok {
 			continue
 		}

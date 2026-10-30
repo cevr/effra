@@ -1058,6 +1058,12 @@ func (c *checker) index(x *syntax.IndexExpr, hint Type) operand {
 	base := c.expr(x.X, nil)
 	switch base.mode {
 	case modeInvalid:
+		// The indices may be type arguments of a refused generic callee,
+		// so they are typed silently: their names resolve as the
+		// reference walk resolves them, and nothing cascades (D3).
+		c.silent++
+		c.orphanValues(x.Indices)
+		c.silent--
 		return bad(x)
 	case modeGeneric:
 		return c.explicit(x, base)
@@ -1071,10 +1077,12 @@ func (c *checker) index(x *syntax.IndexExpr, hint Type) operand {
 	c.needValue(&base)
 	c.handled(&base)
 	if base.invalid() {
+		c.orphanValues(x.Indices)
 		return bad(x)
 	}
 	if len(x.Indices) != 1 {
 		c.errorf(x, CodeType, "one index expected")
+		c.orphanValues(x.Indices)
 		return bad(x)
 	}
 	t := base.typ
@@ -1100,6 +1108,7 @@ func (c *checker) index(x *syntax.IndexExpr, hint Type) operand {
 		}
 	}
 	c.errorf(x, CodeType, "cannot index %s", base.typ)
+	c.orphanValues(x.Indices)
 	return bad(x)
 }
 
