@@ -382,6 +382,32 @@ func TestQueueValuesRefusedNamingD3(t *testing.T) {
 	}
 }
 
+// TestStdOperationThroughDefinedTypeRefusedNamingD3: the operations of a
+// type defined over a std type, at any depth, and of a pointer to a std
+// type are the std type's, so their calls are refused naming D3 too, never
+// lowered to a local Go interface (or a pointer to one) with no task.
+func TestStdOperationThroughDefinedTypeRefusedNamingD3(t *testing.T) {
+	cases := []struct{ name, src string }{
+		{"defined", "import queue\n\ntype MyQ queue.Queue[int]\n\nfunc f(q MyQ) {\n\tq.Close()\n}\n"},
+		{"defined-twice", "import queue\n\ntype MyQ queue.Queue[int]\ntype Q2 MyQ\n\nfunc f(q Q2) {\n\tq.Close()\n}\n"},
+		{"pointer", "import queue\n\nfunc f(p *queue.Queue[int]) {\n\tp.Close()\n}\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o := lowerSource("r", tc.src, false)
+			if len(o.diags) != 0 {
+				t.Fatalf("want a clean check; got %v", o.diags)
+			}
+			if o.panicked != nil || len(o.refused) != 1 {
+				t.Fatalf("want one refusal; got refusals %v, panic %v, err %v\n%s", o.refused, o.panicked, o.err, o.mainGo())
+			}
+			if r := o.refused[0]; !strings.Contains(r.Message, "std operation Queue.Close") || !strings.Contains(r.Message, "check-v1 stage D3") {
+				t.Fatalf("want a refusal of Queue.Close naming check-v1 stage D3; got %+v", r)
+			}
+		})
+	}
+}
+
 // TestRangeLowersWithoutRefusal:no for-in, `a..b` or Map write is refused
 // by the lowering any more (the stage D refusals are gone).
 func TestRangeLowersWithoutRefusal(t *testing.T) {

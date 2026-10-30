@@ -306,6 +306,30 @@ func exactFloat(v constant.Value) string {
 	return "(" + num.ExactString() + ".0 / " + den.ExactString() + ")"
 }
 
+// foreignOwner is the type of another, non-prelude package that declares
+// the operations of t, or nil: t itself, or the type a defined type is
+// defined over, at any depth, through a pointer too. So `type MyQ
+// queue.Queue[int]` has queue.Queue's operations, and so has
+// `*queue.Queue[int]`.
+func (l *lowerer) foreignOwner(t check.Type) *check.Named {
+	seen := map[*check.Named]bool{}
+	for t != nil {
+		if p, ok := t.(*check.Pointer); ok {
+			t = p.Elem
+		}
+		n, ok := t.(*check.Named)
+		if !ok || seen[n] {
+			return nil
+		}
+		seen[n] = true
+		if pkg := n.Obj.Pkg; pkg != nil && pkg != l.pkg && pkg.Path != "prelude" {
+			return n
+		}
+		t = n.Defined()
+	}
+	return nil
+}
+
 func isInteger(t check.Type) bool {
 	b, ok := t.(*check.Basic)
 	return ok && b.Kind >= check.Int && b.Kind <= check.Uintptr

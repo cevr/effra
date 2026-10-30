@@ -1,6 +1,7 @@
 package check_test
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -57,6 +58,34 @@ func TestForRefusals(t *testing.T) {
 	})
 }
 
+// D-D4: each refused domain's one diagnostic names the Ergo form to
+// write, not Go's wording; a second binding over a refused domain adds
+// nothing (it binds with no type); and a binder refused for its name gives
+// the one D-D3 diagnostic, never S110 as well.
+func TestForRefusalMessages(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"string", "func f(s string) int {\n\tlet mut n = 0\n\tfor c in s {\n\t\tn += c\n\t}\n\tn\n}\n", "S108:3:a for does not iterate a string in v1: count its bytes with for i in 0..len(s)"},
+		{"int", "func f() int {\n\tlet mut n = 0\n\tfor x in 5 {\n\t\tn += x\n\t}\n\tn\n}\n", "S108:3:int is not iterable: count with for i in 0..n"},
+		{"pointer", "func f(p *[]int) int {\n\tlet mut n = 0\n\tfor x in p {\n\t\tn += x\n\t}\n\tn\n}\n", "S108:3:a for does not iterate through a pointer: write for x in *p"},
+		{"two-bindings-over-string", "func f(s string) int {\n\tlet mut n = 0\n\tfor i, b in s {\n\t\tn += i + b\n\t}\n\tn\n}\n", "S108:3:a for does not iterate a string in v1: count its bytes with for i in 0..len(s)"},
+		{"two-bindings-over-int", "func f() int {\n\tlet mut n = 0\n\tfor i, b in 5 {\n\t\tn += i + b\n\t}\n\tn\n}\n", "S108:3:int is not iterable: count with for i in 0..n"},
+		{"prelude-value-binder-unread", "func f(xs []int) {\n\tfor Some in xs {\n\t}\n}\n", "S108:2:Some is a prelude name, which cannot be redeclared; choose another name (#196, eighth round, item 3)"},
+		{"prelude-function-binder-unread", "func f(xs []int) {\n\tfor len in xs {\n\t}\n}\n", "S108:2:len is a prelude name, which cannot be redeclared; choose another name (#196, eighth round, item 3)"},
+		{"prelude-let-unread", "func f() {\n\tlet Some = 1\n}\n", "S108:2:Some is a prelude name, which cannot be redeclared; choose another name (#196, eighth round, item 3)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, d := check.CheckSource(tc.src)
+			if len(d) != 1 {
+				t.Fatalf("want one diagnostic %q; got %s", tc.want, describe(d))
+			}
+			if got := fmt.Sprintf("%s:%d:%s", d[0].Code, d[0].Line, d[0].Message); got != tc.want {
+				t.Fatalf("want %q\ngot  %q", tc.want, got)
+			}
+		})
+	}
+}
+
 // D-D4: `a..b` is a Range[T] for one integer type T, outside a for too.
 func TestRangeValues(t *testing.T) {
 	runD1(t, []d1Case{
@@ -77,7 +106,9 @@ func TestRangeValues(t *testing.T) {
 func TestForSingleNameBinders(t *testing.T) {
 	const decls = "let K = 1\ntype T {}\nfunc h() {}\n"
 	same := []struct{ name, let, loop string }{
-		{"constant", "func f() {\n\tlet K = 2\n}\n", "func f(xs []int) {\n\tfor K in xs {\n\t}\n}\n"},
+		// K is a package let; the only Const objects, true and false, are
+		// prelude names (the next case).
+		{"package-let", "func f() {\n\tlet K = 2\n}\n", "func f(xs []int) {\n\tfor K in xs {\n\t}\n}\n"},
 		{"prelude-value", "func f() {\n\tlet true = false\n\t_ = true\n}\n", "func f(xs []bool) {\n\tfor true in xs {\n\t\t_ = true\n\t}\n}\n"},
 		{"prelude-type", "func f() {\n\tlet Console = 1\n\t_ = Console\n}\n", "func f(xs []int) {\n\tfor Console in xs {\n\t\t_ = Console\n\t}\n}\n"},
 	}

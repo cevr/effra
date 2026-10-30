@@ -24,8 +24,11 @@ func (c *checker) declareLocal(id *syntax.Ident, t Type) *Var {
 		return nil
 	}
 	sc := c.fn.scope
+	refused := false
 	if c.preludeName(id) {
-		// D-D3: the one diagnostic; the name still binds below.
+		// D-D3: the one diagnostic; the name still binds below, marked
+		// used, so an unread refused binder adds no S110.
+		refused = true
 	} else if prev, ok := sc.names[id.Name]; ok {
 		switch prev := prev.(type) {
 		case *capBinding:
@@ -51,7 +54,7 @@ func (c *checker) declareLocal(id *syntax.Ident, t Type) *Var {
 	v := c.bindLocal(&Var{Name: id.Name, Type: t, Pos: id.Pos()})
 	c.def(id, v)
 	sc.insert(id.Name, v)
-	if isInvalid(t) {
+	if isInvalid(t) || refused {
 		v.used = true
 	}
 	c.fn.locals = append(c.fn.locals, v)
