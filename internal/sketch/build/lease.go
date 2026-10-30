@@ -33,9 +33,11 @@ import (
 // on a root that is being removed, nor reuses a module inside one.
 //
 // Sweeps are rate-limited like Go's cache trim: a stamp file in Root/private
-// records the last pass, a pass runs at most once per sweepInterval, one
-// process claims it by locking the stamp, and each pass is bounded. A build
-// that finds the stamp recent reads only the stamp.
+// records when the last complete sweep ended, a sweep starts at most once
+// per sweepInterval, one process claims each pass by locking the stamp, and
+// each pass is bounded. A pass that hits a bound leaves the sweep due, with
+// a cursor, so the next build continues it until it completes. A build that
+// finds the stamp recent reads only the stamp.
 //
 // Prior art: Go's build cache locks its entries with cmd/go/internal/
 // lockedfile, flock on Unix, and trims at most daily behind trim.txt; Cargo
@@ -48,16 +50,19 @@ const leaseName = "lease"
 // removingPrefix names a root a sweep has renamed aside to remove.
 const removingPrefix = ".removing-"
 
-// stampName is the sweep stamp in Root/private: the Unix time, in seconds,
-// at which the last pass was claimed. Its lock claims a pass.
+// stampName is the sweep stamp in Root/private (type stamp). Its lock
+// claims a pass.
 const stampName = ".swept"
 
-// sweepInterval is the least time between two sweep passes of one cache.
+// sweepInterval is the least time between the end of one complete sweep and
+// the start of the next.
 const sweepInterval = 24 * time.Hour
 
-// A sweep pass reads at most sweepEntries names of Root/private and removes
-// at most sweepRemovals roots; the next pass continues.
+// A sweep pass reads names of Root/private sweepChunk at a time, examines at
+// most sweepEntries of them and removes at most sweepRemovals roots; a pass
+// that hits a bound leaves the rest to the next build.
 const (
+	sweepChunk    = 256
 	sweepEntries  = 1024
 	sweepRemovals = 64
 )
@@ -159,18 +164,24 @@ func sameLease(f *os.File, path string) bool {
 	return err == nil && os.SameFile(open, named)
 }
 
-// maybeSweep runs a sweep pass of c when the last one is sweepInterval old
-// and no other process is running one. A recent stamp costs one file read
-// and no directory scan; a cache without private roots is not touched.
+// maybeSweep runs a sweep pass of c unless the last complete sweep is less
+// than sweepInterval old, or another process holds the claim. A recent
+// stamp costs one file read and no directory scan; a cache without private
+// roots is not touched. The claim is the stamp's lock, which the kernel
+// drops if the claimant dies. The stamp records a sweep as complete only
+// after a pass that reached the end of the directory without hitting a
+// bound; a pass that hits one, or dies, leaves the sweep due, so the next
+// build continues from the recorded cursor. Every pass stays bounded, and
+// reclaim keeps pace with however many roots builds create.
 func (c Cache) maybeSweep(now time.Time) {
 	if !leasesSupported {
 		return
 	}
-	stamp := filepath.Join(c.Root, "private", stampName)
-	if data, err := os.ReadFile(stamp); err == nil && recent(data, now) {
+	path := filepath.Join(c.Root, "private", stampName)
+	if data, err := os.ReadFile(path); err == nil && readStamp(data).recent(now) {
 		return
 	}
-	f, err := os.OpenFile(stamp, os.O_RDWR|os.O_CREATE, 0o644)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
 		return // no private roots at all, or no access: nothing to do
 	}
@@ -178,66 +189,122 @@ func (c Cache) maybeSweep(now time.Time) {
 	if !tryLockExclusive(f) {
 		return // another process is sweeping
 	}
-	if data, err := io.ReadAll(f); err != nil || recent(data, now) {
-		return // a pass ran since the first read
-	}
-	if f.Truncate(0) != nil {
+	data, err := io.ReadAll(f)
+	if err != nil {
 		return
 	}
-	if _, err := f.WriteAt([]byte(strconv.FormatInt(now.Unix(), 10)), 0); err != nil {
-		return
+	s := readStamp(data)
+	if s.recent(now) {
+		return // a sweep completed since the first read
 	}
-	c.sweep(now)
+	complete, cursor := c.sweep(now, s.cursor)
+	if complete {
+		s = stamp{completed: now.Unix()}
+	} else {
+		s.cursor = cursor
+	}
+	if f.Truncate(0) == nil {
+		_, _ = f.WriteAt(s.bytes(), 0)
+	}
 }
 
-// recent reports whether stamp names a pass less than sweepInterval before
-// now. A torn or foreign stamp is not recent.
-func recent(stamp []byte, now time.Time) bool {
-	seconds, err := strconv.ParseInt(strings.TrimSpace(string(stamp)), 10, 64)
-	if err != nil {
+// stamp is the content of the stamp file: the Unix time, in seconds, at
+// which the last complete sweep ended, and the cursor at which an unfinished
+// sweep continues (names of Root/private to pass over), as "SECONDS CURSOR".
+type stamp struct {
+	completed int64
+	cursor    int
+}
+
+// readStamp parses a stamp; a torn or foreign one is a sweep that never
+// completed, due at once from the start.
+func readStamp(data []byte) stamp {
+	fields := strings.Fields(string(data))
+	if len(fields) != 2 {
+		return stamp{}
+	}
+	completed, err1 := strconv.ParseInt(fields[0], 10, 64)
+	cursor, err2 := strconv.Atoi(fields[1])
+	if err1 != nil || err2 != nil || cursor < 0 {
+		return stamp{}
+	}
+	return stamp{completed: completed, cursor: cursor}
+}
+
+func (s stamp) bytes() []byte {
+	return []byte(strconv.FormatInt(s.completed, 10) + " " + strconv.Itoa(s.cursor))
+}
+
+// recent reports whether the last complete sweep ended less than
+// sweepInterval before now.
+func (s stamp) recent(now time.Time) bool {
+	if s.completed == 0 {
 		return false
 	}
-	age := now.Sub(time.Unix(seconds, 0))
+	age := now.Sub(time.Unix(s.completed, 0))
 	return age >= 0 && age < sweepInterval
 }
 
-// sweep is one bounded pass: it removes the private roots under c that no
-// build holds and no build has taken for privateLifetime, and what earlier
-// passes left aside. It never waits for an owner, and a root it cannot
-// remove stays for a later pass.
-func (c Cache) sweep(now time.Time) {
+// sweep is one bounded pass from cursor: it removes the private roots under
+// c that no build holds and no build has taken for privateLifetime, and what
+// earlier passes left aside. It reads names in chunks of sweepChunk, passes
+// over the first cursor names, which earlier passes of this sweep examined,
+// then examines at most sweepEntries names and removes at most sweepRemovals
+// roots. It reports whether the pass reached the end of the directory, and
+// otherwise the cursor at which the next pass continues: the names it passed
+// over and examined, less those it removed. Passing over a name costs only
+// its read, never a stat. Roots created during a sweep may shift the order,
+// so one sweep can miss a root or examine one twice; the next sweep reaches
+// it. It never waits for an owner, and a root it cannot remove stays for a
+// later pass.
+func (c Cache) sweep(now time.Time, cursor int) (bool, int) {
 	if !leasesSupported {
-		return
+		return true, 0
 	}
 	parent := filepath.Join(c.Root, "private")
 	dir, err := os.Open(parent)
 	if err != nil {
-		return
+		return true, 0
 	}
-	list, _ := dir.ReadDir(sweepEntries)
-	dir.Close()
-	removed := 0
-	for _, e := range list {
-		if removed == sweepRemovals {
-			return
+	defer dir.Close()
+	passed, examined, removed := 0, 0, 0
+	for {
+		names, err := dir.Readdirnames(sweepChunk)
+		for _, name := range names {
+			if passed < cursor {
+				passed++
+				continue
+			}
+			if examined == sweepEntries || removed == sweepRemovals {
+				return false, cursor + examined - removed
+			}
+			examined++
+			if c.reclaim(now, filepath.Join(parent, name)) {
+				removed++
+			}
 		}
-		root := filepath.Join(parent, e.Name())
-		if strings.HasPrefix(e.Name(), removingPrefix) {
-			_ = os.RemoveAll(root)
-			removed++
-			continue
-		}
-		if !e.IsDir() || heldLease(root) {
-			continue
-		}
-		info, err := os.Lstat(root)
-		if err != nil || !info.IsDir() || now.Sub(info.ModTime()) <= privateLifetime {
-			continue
-		}
-		if collect(root) {
-			removed++
+		if err != nil || len(names) == 0 {
+			return true, 0
 		}
 	}
+}
+
+// reclaim removes one entry of Root/private if a sweep may: what an earlier
+// pass left aside, or a root no build holds that is older than
+// privateLifetime. It reports whether it removed it.
+func (c Cache) reclaim(now time.Time, root string) bool {
+	if strings.HasPrefix(filepath.Base(root), removingPrefix) {
+		_ = os.RemoveAll(root)
+		return true
+	}
+	if heldLease(root) {
+		return false
+	}
+	info, err := os.Lstat(root)
+	if err != nil || !info.IsDir() || now.Sub(info.ModTime()) <= privateLifetime {
+		return false
+	}
+	return collect(root)
 }
 
 // collect removes root if it takes root's lease exclusively without

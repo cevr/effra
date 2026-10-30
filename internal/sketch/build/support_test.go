@@ -44,6 +44,9 @@ func helperMain(mode string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	if mode == "sweep-stall" {
+		return sweepStallHelper()
+	}
 	if mode == "lease" {
 		return leaseHelper()
 	}

@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -95,7 +94,7 @@ func sweepUntil(t *testing.T, c Cache, root string) (stop func() int64) {
 			default:
 			}
 			_ = os.Chtimes(root, old, old)
-			c.sweep(time.Now())
+			c.sweep(time.Now(), 0)
 			n.Add(1)
 		}
 	}()
@@ -169,7 +168,7 @@ func TestPrivateRootLease(t *testing.T) {
 	t.Run("a stale building owner keeps its root", func(t *testing.T) {
 		for range 3 {
 			age(t, private)
-			c.sweep(time.Now())
+			c.sweep(time.Now(), 0)
 		}
 		if !exists() {
 			t.Fatal("a sweep removed the root of a live build")
@@ -208,7 +207,7 @@ func TestPrivateRootLease(t *testing.T) {
 			t.Fatalf("the owner answered %q", reply)
 		}
 		age(t, private)
-		c.sweep(time.Now())
+		c.sweep(time.Now(), 0)
 		if _, err := os.Stat(private); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("the released root of a live owner is still there: %v", err)
 		}
@@ -224,7 +223,7 @@ func TestPrivateRootLease(t *testing.T) {
 		_ = owner.Wait()
 		killed = true
 		age(t, private)
-		c.sweep(time.Now())
+		c.sweep(time.Now(), 0)
 		if _, err := os.Stat(private); !os.IsNotExist(err) {
 			t.Fatalf("the abandoned root is still there: %v", err)
 		}
@@ -395,103 +394,4 @@ func TestLeaseIsHeldPerBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.Release() // a published module holds nothing; Release is a no-op
-}
-
-// TestSweepIsRateLimited (round 2 review O1): Module sweeps at most once per
-// sweepInterval per cache. A recent stamp means no pass, so an aged,
-// ownerless root stays; a stamp that is due runs one pass, which removes it
-// and renews the stamp; a pass another process has claimed (it holds the
-// stamp's lock) is not run twice; and one pass removes at most
-// sweepRemovals roots.
-func TestSweepIsRateLimited(t *testing.T) {
-	if !leasesSupported {
-		t.Skip("no flock here")
-	}
-	root := t.TempDir()
-	c := Cache{Root: root}
-	in := baseInput()
-	in.Compiler = "process:" + strings.Repeat("a", 64)
-	build := func() {
-		t.Helper()
-		m, err := c.Module(in, emitFor(in, nil))
-		if err != nil {
-			t.Fatal(err)
-		}
-		m.Release()
-	}
-	build() // the first build in a cache sweeps and writes the stamp
-	stamp := filepath.Join(root, "private", stampName)
-	data, err := os.ReadFile(stamp)
-	if err != nil || !recent(data, time.Now()) {
-		t.Fatalf("no recent stamp after the first build: %q %v", data, err)
-	}
-	abandoned := func(n int) []string {
-		t.Helper()
-		var roots []string
-		for i := range n {
-			r := filepath.Join(root, "private", fmt.Sprintf("abandoned-%03d", i))
-			if err := os.MkdirAll(filepath.Join(r, "modules"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			age(t, r)
-			roots = append(roots, r)
-		}
-		return roots
-	}
-	present := func(roots []string) int {
-		n := 0
-		for _, r := range roots {
-			if _, err := os.Stat(r); err == nil {
-				n++
-			}
-		}
-		return n
-	}
-	due := func() {
-		t.Helper()
-		then := time.Now().Add(-sweepInterval - time.Hour).Unix()
-		if err := os.WriteFile(stamp, []byte(strconv.FormatInt(then, 10)), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	roots := abandoned(1)
-	build()
-	if present(roots) != 1 {
-		t.Fatal("a build with a recent stamp swept")
-	}
-
-	due()
-	claim, err := os.OpenFile(stamp, os.O_RDWR, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !tryLockExclusive(claim) {
-		t.Fatal("the test could not claim the stamp")
-	}
-	build()
-	claim.Close()
-	if present(roots) != 1 {
-		t.Fatal("a build swept while another process held the claim")
-	}
-
-	build()
-	if present(roots) != 0 {
-		t.Fatal("a build with a due stamp did not sweep")
-	}
-	if data, err := os.ReadFile(stamp); err != nil || !recent(data, time.Now()) {
-		t.Fatalf("the pass did not renew the stamp: %q %v", data, err)
-	}
-
-	many := abandoned(sweepRemovals + 5)
-	due()
-	build()
-	if left := present(many); left != 5 {
-		t.Fatalf("one pass left %d of %d roots, want %d (at most %d removals)", left, len(many), 5, sweepRemovals)
-	}
-	due()
-	build()
-	if left := present(many); left != 0 {
-		t.Fatalf("the next pass left %d roots", left)
-	}
 }
