@@ -45,11 +45,13 @@ func (c *checker) with(x *syntax.CallExpr, hint Type) operand {
 		expect = []Type{hint}
 	}
 	c.typedFrame(x.Trailing)
-	res := c.yieldingBlock(x.Trailing, x.Trailing.List, expect, false, func(op *operand) { errs = op.errs })
+	res := c.yieldingBlock(x.Trailing, x.Trailing.List, expect, false, func(op *operand) { errs = errs.union(c.types, op.errs) })
 	c.fn.branches = c.fn.branches[:len(c.fn.branches)-1]
 	done()
 	t.withs = t.withs[:len(t.withs)-1]
 	c.recordWith(x, frame)
+	// A with's Fails is the row its block passes through (rows.md, With 6).
+	c.callInfo(x).Fails = errs
 	if res == nil {
 		return bad(x)
 	}

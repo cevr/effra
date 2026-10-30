@@ -61,19 +61,7 @@ func (fc *funcCtx) fallibleExpr(x syntax.Expr) bool {
 	if c == nil {
 		return false
 	}
-	if c.Kind == check.CallWith {
-		if call.Trailing == nil || len(call.Trailing.List) == 0 {
-			return false
-		}
-		last, ok := call.Trailing.List[len(call.Trailing.List)-1].(*syntax.ExprStmt)
-		if !ok {
-			return false
-		}
-		if _, tail := fc.l.info.Tails[last]; !tail {
-			return false
-		}
-		return fc.fallibleExpr(last.X)
-	}
+	// A with's Fails is the row its block's tails pass through.
 	return len(rowElems(c.Fails)) > 0
 }
 
@@ -513,10 +501,14 @@ func (fc *funcCtx) sliceExpr(x *syntax.SliceExpr) string {
 // Error rows 7). try on a catch makes the catch partial: the failures no arm
 // handles escape.
 func (fc *funcCtx) try(x *syntax.TryExpr) operand {
-	if c, ok := unparen(x.X).(*syntax.CatchExpr); ok {
-		return fc.catch(c, true)
-	}
+	// try covers the whole expression: a failure inside the caught
+	// expression of a partial catch propagates too (D-C3).
 	fc.tries++
+	if c, ok := unparen(x.X).(*syntax.CatchExpr); ok {
+		o := fc.catch(c, true)
+		fc.tries--
+		return o
+	}
 	o := fc.expr(x.X)
 	fc.tries--
 	if o.err != "" {

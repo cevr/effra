@@ -25,11 +25,14 @@ const (
 	destAssign
 )
 
-// dest is where a body's last value goes.
+// dest is where a body's last value goes. A with block's tails assign its
+// value to name (none when the with has no value) and the failure a tail
+// passes on to err (rows.md, With 6).
 type dest struct {
 	kind  destKind
 	block bool
 	name  string
+	err   string
 }
 
 // yieldList writes a statement list whose last statement yields to d and
@@ -56,6 +59,19 @@ func (fc *funcCtx) yieldStmt(s syntax.Stmt, d dest) bool {
 			return true
 		}
 		if _, tail := fc.l.info.Tails[s]; !tail {
+			fc.discard(s.X)
+			return false
+		}
+		if d.err != "" && fc.fallibleExpr(s.X) {
+			o := fc.expr(s.X)
+			if d.name != "" && o.val != "" {
+				fc.line(d.name + ", " + d.err + " = " + fc.convertAt(s.X, o.val) + ", " + o.err)
+			} else {
+				fc.line(d.err + " = " + o.err)
+			}
+			return false
+		}
+		if d.name == "" {
 			fc.discard(s.X)
 			return false
 		}

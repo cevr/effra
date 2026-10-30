@@ -227,6 +227,12 @@ func (c *checker) binary(x *syntax.BinaryExpr, hint Type) operand {
 	if l.invalid() || r.invalid() {
 		return bad(x)
 	}
+	if isRowValue(l.typ) || isRowValue(r.typ) {
+		// A row value is returned, matched, caught or assigned to a union
+		// that lists its types; it has no other operation (D-C3).
+		c.errorf(x, CodeType, "a row value has no operator %s: return it, match it, catch it or assign it to a union that lists its types (rows.md, Catch 7)", x.Op)
+		return bad(x)
+	}
 	if !c.matchTypes(x, &l, &r) {
 		return bad(x)
 	}

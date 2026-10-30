@@ -190,7 +190,8 @@ type Call struct {
 	// Type is a conversion's target type.
 	Type Type
 	// Fails and Needs are the callee's error and capability rows at this
-	// site, after substitution.
+	// site, after substitution. A with's Fails is the row its block's
+	// tails pass through (rows.md, With 6).
 	Fails, Needs *Row
 }
 

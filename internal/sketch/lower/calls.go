@@ -342,22 +342,12 @@ func (fc *funcCtx) with(x *syntax.CallExpr) operand {
 		refuse(x.Args[0], "a with of an imported wire is lowered after check-v1 stage B supplies its wire (check-v1 r5b m2)")
 	}
 	list := x.Trailing.List
-	var tail *syntax.ExprStmt
-	if len(list) > 0 {
-		if last, ok := list[len(list)-1].(*syntax.ExprStmt); ok {
-			if _, isTail := fc.l.info.Tails[last]; isTail {
-				tail = last
-			}
-		}
-	}
 	var res operand
-	valued := !fc.noValue(x) && tail != nil
-	if valued {
+	if !fc.noValue(x) {
 		res.val = fc.temp("v")
 		fc.line("var " + res.val + " " + fc.goType(fc.typeOf(x)))
 	}
-	fallible := tail != nil && fc.fallibleExpr(tail.X)
-	if fallible {
+	if fc.fallibleExpr(x) {
 		res.err = fc.temp("err")
 		fc.line("var " + res.err + " error")
 	}
@@ -373,24 +363,13 @@ func (fc *funcCtx) with(x *syntax.CallExpr) operand {
 	fc.line(build + "(&" + env + ")")
 	saved := fc.env
 	fc.env = "(&" + env + ")"
-	if tail == nil {
-		fc.stmts(list)
+	// The block yields by the one tail rule (D-C1, D-C2): its last
+	// statement, through a final if, match or block, assigns the with's
+	// value and passes its failure on.
+	if res.val == "" && res.err == "" {
+		fc.yieldList(list, dest{kind: destStmt})
 	} else {
-		fc.stmts(list[:len(list)-1])
-		fc.at(tail)
-		switch {
-		case fallible:
-			o := fc.expr(tail.X)
-			if res.val != "" {
-				fc.line(res.val + ", " + res.err + " = " + fc.convertAt(tail.X, o.val) + ", " + o.err)
-			} else {
-				fc.line(res.err + " = " + o.err)
-			}
-		case valued:
-			fc.line(res.val + " = " + fc.assigned(tail.X))
-		default:
-			fc.discard(tail.X)
-		}
+		fc.yieldList(list, dest{kind: destAssign, name: res.val, err: res.err})
 	}
 	fc.env = saved
 	fc.depth--

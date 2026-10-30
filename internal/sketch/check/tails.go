@@ -34,6 +34,14 @@ type sink struct {
 	// noElse reports an if without else on a path that needs a value; nil
 	// uses missing at the enclosing body's end.
 	noElse func(s *syntax.IfStmt)
+	// optional: whether the body has a value is not known yet (a with block,
+	// or a trailing block whose result is inferred). A path with no value
+	// makes the body yield none (none), and the place that uses the body's
+	// value reports it, not the body.
+	optional, none bool
+	// hint is an optional body's expected type: the type a literal tail
+	// takes, never a type the branches must have (M16).
+	hint Type
 	// valued: some branch yielded a value.
 	valued bool
 	// bad: a branch's value was invalid and already reported (D3).
@@ -46,6 +54,24 @@ func (k *sink) typ() Type {
 		return k.want
 	}
 	return k.join
+}
+
+// exprHint is the expected type of a tail expression.
+func (k *sink) exprHint() Type {
+	if t := k.typ(); t != nil {
+		return t
+	}
+	return k.hint
+}
+
+// miss is a path that ends with no value at end: an optional body then has
+// no value; any other body reports it.
+func (k *sink) miss(end syntax.Pos) {
+	if k.optional {
+		k.none = true
+		return
+	}
+	k.missing(end)
 }
 
 // functionBody checks a declared function's or literal's body: its last
@@ -82,7 +108,7 @@ func (c *checker) missingBodyResult(body *syntax.BlockStmt, name string) {
 func (c *checker) yieldList(list []syntax.Stmt, k *sink, end syntax.Pos) {
 	if len(list) == 0 {
 		if !k.discard {
-			k.missing(end)
+			k.miss(end)
 		}
 		return
 	}
@@ -133,7 +159,7 @@ func (c *checker) yieldStmt(s syntax.Stmt, k *sink, end syntax.Pos) {
 	default:
 		c.stmt(s)
 		if !k.discard && !c.terminates(s) {
-			k.missing(end)
+			k.miss(end)
 		}
 		return
 	}
@@ -144,7 +170,7 @@ func (c *checker) yieldStmt(s syntax.Stmt, k *sink, end syntax.Pos) {
 
 // yieldExpr checks a body's last expression statement against k.
 func (c *checker) yieldExpr(last *syntax.ExprStmt, k *sink, end syntax.Pos) {
-	op := c.expr(last.X, k.typ())
+	op := c.expr(last.X, k.exprHint())
 	if op.invalid() {
 		k.bad = true
 		return
@@ -186,7 +212,11 @@ func (c *checker) yieldExpr(last *syntax.ExprStmt, k *sink, end syntax.Pos) {
 		return
 	}
 	if op.mode == modeNoValue {
-		k.missing(end)
+		if fallible {
+			// Its failures pass on from this tail (k.pass).
+			c.tail(last, NoValue)
+		}
+		k.miss(end)
 		return
 	}
 	switch t := k.typ(); {
@@ -225,11 +255,12 @@ func (c *checker) ifYield(s *syntax.IfStmt, k *sink, end syntax.Pos) {
 	switch e := s.Else.(type) {
 	case nil:
 		switch {
-		case k.discard:
+		case k.discard, k.optional:
+			k.none = k.none || k.optional
 		case k.noElse != nil:
 			k.noElse(s)
 		default:
-			k.missing(end)
+			k.miss(end)
 		}
 	case *syntax.BlockStmt:
 		inner := c.openScope()
