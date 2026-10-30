@@ -23,6 +23,8 @@ func eq[T comparable](a T, b T) bool { a == b }
 		{"row-generic", `func f() int { g() catch { case err: if eq(err, err) { 1 } else { 0 } } }`},
 		{"row-assigned-union", "func f() int {\n\tg() catch {\n\tcase err:\n\t\tlet v V = err\n\t\tif v == v { 1 } else { 0 }\n\t}\n}"},
 		{"declared-union", "func same(a V, b V) bool { a == b }\nfunc f() int { if same(E{N: []int{1}}, F) { 1 } else { 0 } }"},
+		// A row value never compares, even over a comparable error type.
+		{"row-comparable", "type K { N int }\nfunc gk() int fails K { K{N: 1} }\nfunc f() int { gk() catch { case err: if (err, 1) == (err, 1) { 1 } else { 0 } } }"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := decls + tc.src + "\nfunc main() needs Console { if f() == 1 { Console.Println(\"equal\") } }\n"

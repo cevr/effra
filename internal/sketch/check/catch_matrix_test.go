@@ -197,6 +197,9 @@ func TestComparabilityIsStructural(t *testing.T) {
 		{"operation-type", "func same(a Svc, b Svc) bool { a == b }", "S108:9"},
 		{"comparable-union", "func same(a U, b U) bool { a == b && eq(a, b) && (a, 1) == (b, 1) }", ""},
 		{"comparable-union-key", "func f() int { let m = Map[U, int]{}; len(m) }", ""},
+		// A row value never compares, even when every type of its row does.
+		{"row-comparable-tuple", "func g2() int fails C { 1 }\nfunc f() int {\n\tg2() catch { case err: if (err, 1) == (err, 1) { 1 } else { 0 } }\n}", "S108:11"},
+		{"row-comparable-generic", "func g2() int fails C { 1 }\nfunc f() int {\n\tg2() catch { case err: if eq(err, err) { 1 } else { 0 } }\n}", "S108:11"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := decls + tc.src + "\n"
