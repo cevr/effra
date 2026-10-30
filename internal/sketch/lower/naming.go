@@ -39,6 +39,7 @@ func (l *lowerer) nameAll() {
 	l.declareNames()
 	l.pkgName(pkgKey{"import", runtimeImport}, "ergo")
 	l.pkgName(pkgKey{"import", "time"}, "time")
+	l.pkgName(pkgKey{"import", taskImport}, "rt")
 	l.pkgName(pkgKey{"env", nil}, "Env")
 	l.pkgName(pkgKey{"noenv", nil}, "noEnv")
 	l.pkgName(pkgKey{"is", nil}, "ergoIs")

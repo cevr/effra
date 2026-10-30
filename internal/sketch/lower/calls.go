@@ -675,13 +675,14 @@ func isString(t check.Type) bool {
 	return ok && b.Kind == check.String
 }
 
-// Call identities (#230). A call that can fail or that uses a capability
-// keeps its Ergo identity: the source declaration that makes it, the
-// function or operation it calls and its position. The program lists them
-// in its call table, ergoCalls, and the Go line that makes the call stands
-// directly after the //line directive of its own position, so a Go stack
-// and the table name one site. Only user code has identities: library
-// bodies carry no directives.
+// Call identities (#230). Every call of the program's source, to a function,
+// an operation or a function value, keeps its Ergo identity: the source
+// declaration that makes it, what it calls and its position. The program
+// lists them in its call table, ergoCalls, and the Go line that makes the
+// call stands directly after the //line directive of its own position, so a
+// Go stack and the table name one site: a defect's report reads its Ergo
+// call chain from them (v1.RegisterCalls). Only user code has identities:
+// library bodies carry no directives.
 
 // identify records x's identity when it has one and writes the directive
 // of its position, unless the current directive already names it. The Go
@@ -691,9 +692,6 @@ func isString(t check.Type) bool {
 func (fc *funcCtx) identify(x *syntax.CallExpr, c *check.Call) func() {
 	none := func() {}
 	if !fc.directives || !x.Pos().IsValid() {
-		return none
-	}
-	if len(rowElems(c.Fails)) == 0 && len(rowElems(c.Needs)) == 0 && c.Kind != check.CallProviderOp {
 		return none
 	}
 	fc.l.recordCall(x, fc.owner, fc.callee(x, c))
@@ -774,11 +772,14 @@ func (l *lowerer) recordCall(x *syntax.CallExpr, owner, callee string) {
 }
 
 // callTable is the Go declaration of the call table and its entry type, in
-// source order, or "" when the program has no identified call. The entry
-// type is generated in the program, so the identity needs no runtime
-// change: Func is the source declaration that makes the call, Callee what
-// it calls, and File, Line and Column its position, which the //line
-// directive before the call also names.
+// source order, and the init function that registers it with the runtime,
+// or "" when the program has no identified call. Func is the source
+// declaration that makes the call, Callee what it calls, and File, Line and
+// Column its position, which the //line directive before the call also
+// names. The entry type is an alias of the struct v1.RegisterCalls takes;
+// registered, the table names the Ergo call sites of a defect in its report
+// (runtime.md, Exit causes), so it is linked into every program that has
+// one. It is written after the entry, so it may name the runtime package.
 func (l *lowerer) callTable() string {
 	if len(l.calls) == 0 {
 		return ""
@@ -787,14 +788,15 @@ func (l *lowerer) callTable() string {
 	entry := l.pkgName(pkgKey{"call", nil}, "ergoCall")
 	table := l.pkgName(pkgKey{"calls", nil}, "ergoCalls")
 	var b strings.Builder
-	b.WriteString("// " + entry + " is the Ergo identity of one lowered call that can fail or uses a capability (#230).\n")
-	b.WriteString("type " + entry + " struct {\n\tFunc, Callee string\n\tFile         string\n\tLine, Column int\n}\n\n")
-	b.WriteString("// " + table + " lists the identity of each such call of the program, in source order.\n")
+	b.WriteString("// " + entry + " is the Ergo identity of one lowered call (#230).\n")
+	b.WriteString("type " + entry + " = struct {\n\tFunc, Callee string\n\tFile         string\n\tLine, Column int\n}\n\n")
+	b.WriteString("// " + table + " lists the identity of each call of the program, in source order.\n")
 	b.WriteString("var " + table + " = [...]" + entry + "{\n")
 	file := strconv.Quote(l.src)
 	for _, c := range l.calls {
 		fmt.Fprintf(&b, "\t{Func: %s, Callee: %s, File: %s, Line: %d, Column: %d},\n", strconv.Quote(c.fn), strconv.Quote(c.callee), file, c.line, c.column)
 	}
 	b.WriteString("}\n\n")
+	b.WriteString("func init() {\n\t" + l.rt() + ".RegisterCalls(" + table + "[:])\n}\n\n")
 	return b.String()
 }

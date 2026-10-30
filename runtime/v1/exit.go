@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"strconv"
+	"strings"
 
 	"ergo.local/prototype/runtime/rt"
 )
@@ -127,6 +129,95 @@ func guarded[T any](t *rt.Task, body func(*rt.Task) (T, error)) (v T, err error)
 	return body(t)
 }
 
+// calls is the program's call table (#230), which RegisterCalls sets once,
+// before main runs.
+var calls []struct {
+	Func, Callee string
+	File         string
+	Line, Column int
+}
+
+// RegisterCalls registers the program's call table (#230): one entry per
+// call of the program's source, its Ergo function, what it calls and its
+// .ergo position. The lowered program registers it before main runs. With
+// a table registered, the defect report names the Ergo call sites of the
+// panic from it, innermost first, and no Go frame.
+func RegisterCalls(table []struct {
+	Func, Callee string
+	File         string
+	Line, Column int
+}) {
+	calls = table
+}
+
+// ergoStack is the Ergo call chain of a defect's Go stack, innermost
+// first: each frame at a position of the program's source (a //line
+// directive names it), as the call there from the table, or, for the
+// frame that panicked, its position and the function its caller called.
+// Go frames at no source position, the runtime's and generated code's,
+// are left out.
+func ergoStack(stack []byte) []string {
+	type site struct {
+		file string
+		line int
+	}
+	files := map[string]bool{}
+	for _, c := range calls {
+		files[c.File] = true
+	}
+	var frames []site
+	for _, ln := range strings.Split(string(stack), "\n") {
+		loc, ok := strings.CutPrefix(ln, "\t")
+		if !ok {
+			continue
+		}
+		if i := strings.LastIndex(loc, " +0x"); i >= 0 {
+			loc = loc[:i]
+		}
+		i := strings.LastIndex(loc, ":")
+		if i < 0 || !files[loc[:i]] {
+			continue
+		}
+		n, err := strconv.Atoi(loc[i+1:])
+		if err != nil {
+			continue
+		}
+		f := site{loc[:i], n}
+		if len(frames) == 0 || frames[len(frames)-1] != f {
+			frames = append(frames, f)
+		}
+	}
+	at := func(f site) []int {
+		var out []int
+		for i, c := range calls {
+			if c.File == f.file && c.Line == f.line {
+				out = append(out, i)
+			}
+		}
+		return out
+	}
+	var out []string
+	for i, f := range frames {
+		if here := at(f); len(here) > 0 {
+			c := calls[here[0]]
+			callees := []string{c.Callee}
+			for _, j := range here[1:] {
+				callees = append(callees, calls[j].Callee)
+			}
+			out = append(out, fmt.Sprintf("%s calls %s at %s:%d:%d", c.Func, strings.Join(callees, " or "), c.File, c.Line, c.Column))
+			continue
+		}
+		name := ""
+		if i+1 < len(frames) {
+			if outer := at(frames[i+1]); len(outer) == 1 {
+				name = calls[outer[0]].Callee + " "
+			}
+		}
+		out = append(out, fmt.Sprintf("%sat %s:%d", name, f.file, f.line))
+	}
+	return out
+}
+
 // Main runs body, the lowered main, as the root task of the program and
 // exits with the status of its exit (Exit causes, rule 6): 0 on success, 1
 // for a typed failure, 2 when any reason is a defect, as Go's own panic
@@ -182,7 +273,13 @@ func report(w io.Writer, err error) int {
 				}
 			}
 			if p, ok := r.Value.(*Panic); ok && len(p.Stack) > 0 {
-				fmt.Fprintf(w, "\n%s\n", p.Stack)
+				if calls == nil {
+					fmt.Fprintf(w, "\n%s\n", p.Stack)
+				} else {
+					for _, s := range ergoStack(p.Stack) {
+						fmt.Fprintf(w, "\t%s\n", s)
+					}
+				}
 			}
 		case rt.KindInterruption:
 			fmt.Fprintln(w, "interrupted")
