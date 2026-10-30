@@ -25,3 +25,35 @@ func TestPreludeLetNamesUseBinderDiagnostic(t *testing.T) {
 		})
 	}
 }
+
+func TestMatchBranchesTargetEnclosingLoop(t *testing.T) {
+	for _, tc := range []struct {
+		name, src, code string
+		count           int
+	}{
+		{"no-loop", `func F(n int) { match n { case 0: break
+case _: continue } }`, check.CodeType, 2},
+		{"loop", `func F(n int) int { let mut out = 0
+for { match n { case 0: out = 1; break
+case _: continue } }
+return out }`, "", 0},
+		{"loop-can-exit", `func F(n int) int { for { match n { case 0: break
+case _: continue } } }`, check.CodeMissingRet, 1},
+		{"nested-for", `func F(n int) int { match n { case 0: for { break }; return 1
+case _: return 2 } }`, "", 0},
+		{"barrier", `func F(n int) { for { with wire {} { match n { case 0: break
+case _: continue } } } }`, check.CodeType, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, d := check.CheckSource(tc.src + "\n")
+			if len(d) != tc.count {
+				t.Fatalf("want %d diagnostics, got %s", tc.count, describe(d))
+			}
+			for _, x := range d {
+				if x.Code != tc.code {
+					t.Fatalf("want %s, got %s", tc.code, describe(d))
+				}
+			}
+		})
+	}
+}

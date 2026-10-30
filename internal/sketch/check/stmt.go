@@ -584,7 +584,7 @@ func (c *checker) branchStmt(s *syntax.BranchStmt) {
 			crossed = true
 			continue
 		}
-		if s.Tok == syntax.CONTINUE && b.kind != brLoop {
+		if b.kind != brLoop {
 			continue
 		}
 		if crossed {
@@ -596,7 +596,7 @@ func (c *checker) branchStmt(s *syntax.BranchStmt) {
 		c.errorf(s, CodeType, "%s cannot leave a with block or a block argument (grammar.md, Statements 5)", s.Tok)
 		return
 	}
-	c.errorf(s, CodeType, "%s is not inside a for or match", s.Tok)
+	c.errorf(s, CodeType, "%s is not inside a for", s.Tok)
 }
 
 func (c *checker) push(kind branchKind) func() {
@@ -771,9 +771,8 @@ func (c *checker) matchTerminates(s syntax.Stmt, clauses []*syntax.CaseClause) b
 	return true
 }
 
-// hasBreak reports whether a break leaves the statement being analysed: a
-// break outside any nested for or match (the decided language has no
-// labels).
+// hasBreak reports a break of the enclosing loop: match is transparent,
+// and a nested for owns its own breaks (the decided language has no labels).
 func hasBreak(s syntax.Stmt) bool {
 	found := false
 	syntax.Inspect(s, func(x syntax.Node) bool {
@@ -787,8 +786,8 @@ func hasBreak(s syntax.Stmt) bool {
 			if x.Tok == syntax.BREAK {
 				found = true
 			}
-		case *syntax.ForStmt, *syntax.RangeStmt, *syntax.SwitchStmt, *syntax.TypeSwitchStmt:
-			return syntax.Node(x) == syntax.Node(s)
+		case *syntax.ForStmt, *syntax.RangeStmt:
+			return false
 		}
 		return true
 	})
