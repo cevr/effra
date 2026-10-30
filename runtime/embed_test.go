@@ -67,7 +67,7 @@ func TestPackagesMatchTheirDirectories(t *testing.T) {
 }
 
 // program is a lowered program, written by hand as the lowering will emit
-// it once the std packages bind (lower-v1 stage 3b): a frame with an exit
+// it once the std calls lower (check-v1 stage D): a frame with an exit
 // action starts a producer task that pushes into a queue and closes it; the
 // frame drains the queue with Values and waits for the task.
 const program = `package main
@@ -83,7 +83,7 @@ func run(t *rt.Task) (err error) {
 	s := ergo.NewScope(t)
 	defer s.End(&err)
 	q := ergo.New[int](2)
-	s.OnExit(func() { fmt.Println("exit action") })
+	ergo.OnExit(&s, func() { fmt.Println("exit action") })
 	producer := ergo.Go(&s, "producer at main.ergo:5:14", func(pt *rt.Task) (int, error) {
 		for i := 1; i <= 3; i++ {
 			if err := q.Push(pt, i); err != nil {

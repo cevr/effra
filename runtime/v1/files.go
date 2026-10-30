@@ -1,15 +1,240 @@
 package v1
 
-import runtimefiles "ergo.local/prototype/runtime"
+import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"io/fs"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+
+	runtimefiles "ergo.local/prototype/runtime"
+)
 
 // Source holds this package's runtime files as the one embed owner,
 // runtime/embed.go, holds them. This file is not among them: it serves
 // only the compiler.
 var Source = runtimefiles.Package("v1")
 
-// SourceFiles names the files of Source that the lowering copies today, in
-// order. runtime.go alone needs no other runtime package. When the lowering
-// lowers the std packages task, scope and queue (lower-v1 stage 3b, after
-// check-v1 stage D), it copies runtimefiles.Files("runtime/v1") instead:
-// every file of this package and of runtime/rt, which it imports.
+// SourceFiles names the files of Source that the lowering copies today:
+// runtime.go alone, which imports no other runtime package. The lowering
+// of the std packages task, scope and queue (check-v1 stage D) copies
+// runtimefiles.Files("runtime/v1") instead, every file of this package and
+// of runtime/rt, which it imports.
 var SourceFiles = []string{"runtime.go"}
+
+// rtPath is the import path of runtime/rt, whose *Task is the hidden task.
+const rtPath = runtimefiles.Module + "/runtime/rt"
+
+// Hidden is a hidden parameter of a std extern's Go body: an argument the
+// Ergo signature does not show and the lowering supplies at the call
+// (docs/spec/stdlib.md, Hidden arguments). Its Go type alone names it: no
+// Ergo type lowers to *Scope, Site or *rt.Task.
+type Hidden string
+
+const (
+	// Frame, a *Scope, is the frame scope of the innermost source function
+	// at the call (in an exit action's block, the frame the lowering made
+	// for that function; the scope routes to the action's frame itself).
+	Frame Hidden = "frame"
+	// CallSite, a Site, is the call's Ergo identity: the called declaration
+	// and the call's source position.
+	CallSite Hidden = "site"
+	// CallerTask, an *rt.Task, is the task that runs the call.
+	CallerTask Hidden = "task"
+)
+
+// hiddenOrder is the order hidden parameters take, each at most once.
+var hiddenOrder = []Hidden{Frame, CallSite, CallerTask}
+
+// Body is the Go shape of one std extern's body: a function of this
+// package, or, for an operation of a type that a std extern returns, the
+// method of that name on the Go type the extern's body returns.
+type Body struct {
+	// Hidden are the leading hidden parameters, in hiddenOrder.
+	Hidden []Hidden
+	// Params are the parameters after them, one per Ergo parameter, in
+	// order.
+	Params []Param
+	// Results are the Go result types, as written: the Ergo value results,
+	// then error when the Ergo signature has an error row.
+	Results []string
+}
+
+// Param is one Go parameter that stands for an Ergo parameter.
+type Param struct {
+	// Type is the parameter's Go type, as written in the body's source.
+	Type string
+	// Func is the shape of a function-typed parameter, the Go function the
+	// body calls: its own leading hidden parameters (the task that runs the
+	// block, for task.Go) follow the same convention. Nil otherwise.
+	Func *Body
+}
+
+// BodyOf returns the Go shape of the body named name in Source: "Go" for
+// the function Go, "Queue.Push" for the method Push of Queue. It fails when
+// there is no such exported declaration, or when its parameters break the
+// convention: a hidden type after an Ergo parameter, out of order or twice.
+func BodyOf(name string) (Body, error) {
+	decls, err := sourceDecls()
+	if err != nil {
+		return Body{}, err
+	}
+	return decls.body(name)
+}
+
+// sourceDecls parses Source once per process.
+var sourceDecls = sync.OnceValues(func() (goDecls, error) { return parseDecls(Source) })
+
+// goDecl is one exported function or method of a parsed package, with the
+// local name its file gives runtime/rt.
+type goDecl struct {
+	fn *ast.FuncDecl
+	rt string
+}
+
+// goDecls are the exported functions and methods of a package's non-test
+// files, by name ("Go", "Queue.Push").
+type goDecls map[string]goDecl
+
+// parseDecls parses every non-test Go file at the root of fsys.
+func parseDecls(fsys fs.FS) (goDecls, error) {
+	names, err := fs.Glob(fsys, "*.go")
+	if err != nil {
+		return nil, err
+	}
+	decls := goDecls{}
+	fset := token.NewFileSet()
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		data, err := fs.ReadFile(fsys, name)
+		if err != nil {
+			return nil, err
+		}
+		f, err := parser.ParseFile(fset, name, data, parser.SkipObjectResolution)
+		if err != nil {
+			return nil, err
+		}
+		rt := ""
+		for _, imp := range f.Imports {
+			if p, _ := strconv.Unquote(imp.Path.Value); p == rtPath {
+				rt = "rt"
+				if imp.Name != nil {
+					rt = imp.Name.Name
+				}
+			}
+		}
+		for _, d := range f.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || !fn.Name.IsExported() {
+				continue
+			}
+			key := fn.Name.Name
+			if fn.Recv != nil && len(fn.Recv.List) == 1 {
+				key = recvName(fn.Recv.List[0].Type) + "." + key
+			}
+			decls[key] = goDecl{fn: fn, rt: rt}
+		}
+	}
+	return decls, nil
+}
+
+// recvName is the base type name of a receiver: Queue for *Queue[T].
+func recvName(e ast.Expr) string {
+	for {
+		switch x := e.(type) {
+		case *ast.StarExpr:
+			e = x.X
+		case *ast.IndexExpr:
+			e = x.X
+		case *ast.IndexListExpr:
+			e = x.X
+		case *ast.Ident:
+			return x.Name
+		default:
+			return ""
+		}
+	}
+}
+
+func (d goDecls) body(name string) (Body, error) {
+	g, ok := d[name]
+	if !ok {
+		return Body{}, fmt.Errorf("runtime/v1: no exported Go body %s", name)
+	}
+	b, err := goShape(g.fn.Type, g.rt)
+	if err != nil {
+		return Body{}, fmt.Errorf("runtime/v1: %s: %w", name, err)
+	}
+	return b, nil
+}
+
+// goShape reads a Go function type under the hidden-argument convention.
+func goShape(ft *ast.FuncType, rt string) (Body, error) {
+	var b Body
+	next := 0 // the index in hiddenOrder a further hidden parameter may take
+	for _, field := range ft.Params.List {
+		n := max(len(field.Names), 1)
+		for range n {
+			h, hidden := hiddenOf(field.Type, rt)
+			switch {
+			case hidden && len(b.Params) > 0:
+				return Body{}, fmt.Errorf("the hidden %s parameter follows an Ergo parameter", h)
+			case hidden:
+				i := slices.Index(hiddenOrder, h)
+				if i < next {
+					return Body{}, fmt.Errorf("the hidden %s parameter is out of order or repeated (order: %v)", h, hiddenOrder)
+				}
+				next = i + 1
+				b.Hidden = append(b.Hidden, h)
+			default:
+				p := Param{Type: types.ExprString(field.Type)}
+				if inner, ok := field.Type.(*ast.FuncType); ok {
+					fb, err := goShape(inner, rt)
+					if err != nil {
+						return Body{}, fmt.Errorf("function parameter %d: %w", len(b.Params)+1, err)
+					}
+					p.Func = &fb
+				}
+				b.Params = append(b.Params, p)
+			}
+		}
+	}
+	if ft.Results != nil {
+		for _, field := range ft.Results.List {
+			for range max(len(field.Names), 1) {
+				b.Results = append(b.Results, types.ExprString(field.Type))
+			}
+		}
+	}
+	return b, nil
+}
+
+// hiddenOf names the hidden parameter whose Go type e is: *Scope, Site or
+// *rt (the file's name for runtime/rt).Task.
+func hiddenOf(e ast.Expr, rt string) (Hidden, bool) {
+	switch x := e.(type) {
+	case *ast.Ident:
+		if x.Name == "Site" {
+			return CallSite, true
+		}
+	case *ast.StarExpr:
+		switch y := x.X.(type) {
+		case *ast.Ident:
+			if y.Name == "Scope" {
+				return Frame, true
+			}
+		case *ast.SelectorExpr:
+			if id, ok := y.X.(*ast.Ident); ok && rt != "" && id.Name == rt && y.Sel.Name == "Task" {
+				return CallerTask, true
+			}
+		}
+	}
+	return "", false
+}
