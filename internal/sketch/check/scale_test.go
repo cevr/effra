@@ -24,7 +24,10 @@ import (
 // Time is logged, and asserted only against a control (see
 // scaleShape.control): under load, shapes whose bytes grow linearly showed
 // time exponents up to 1.70 at these sizes, so a bare time bound loose
-// enough not to flake would catch nothing the bytes miss.
+// enough not to flake would catch nothing the bytes miss. No active shape
+// asserts time: the one shape with a control (long names) is skipped for
+// #234, so a time-only quadratic is caught only where a control exists, and
+// today no active shape has one.
 //
 // Every shape comes from a review finding of run wf10 about memory or
 // quadratic cost; the finding is named at the shape. A valid shape must
@@ -633,7 +636,11 @@ var scaleShapes = []scaleShape{
 		// Measured on main e36c9471: bytes exponent 1.02, time exponent
 		// 1.92 to 2.00; the time over the control's grows 3.2x to 3.9x
 		// from n to 4n. A linear stand-in (a 40-byte name) grew at most
-		// 1.45x in 15 runs of three concurrent copies.
+		// 1.45x in 15 runs of three concurrent copies. The margin is thin:
+		// in the round 2 review, unskipped, the shape failed 14 of 15 runs
+		// (one run grew only 1.93x, under maxControlGrowth), and the linear
+		// stand-in reached 1.60x. When #234 is fixed and the skip goes, check
+		// that margin again before the shape guards anything.
 		skip:    "#234: a capability's priority (FNV over the whole name) and its key comparison run on every insert, once per wire that reaches it, so check time is the name length times the wire count (checker-196 r21 m1)",
 		source:  func(n int) string { return longNames(n, false) },
 		control: func(n int) string { return longNames(n, true) },
