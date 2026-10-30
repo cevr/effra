@@ -91,6 +91,27 @@ func main() {
 	q.Push("x")
 }
 `
+	// Each generic takes a type that is not comparable, as its Go body's
+	// T any does (matchTypeParams ties the two constraints together).
+	const notComparable = `import task
+import slice
+import queue
+
+func main() fails queue.Closed {
+	let xs = slice.WithCapacity[[]int64](3)
+	let q = queue.New[[]int64](1)
+	try q.Push([]int64{2})
+	_ = xs
+	let t = task.Go() { []int64{1} }
+	let ys = t.Wait()
+	_ = ys
+	let zs = try q.Pop()
+	_ = zs
+}
+`
+	if _, diags := check.CheckSource(notComparable); len(diags) > 0 {
+		t.Fatalf("non-comparable type arguments: %v", diags)
+	}
 	// The code is the checker's (S101 since check-v1 stage C); this test
 	// pins only that the row reaches the call.
 	_, diags := check.CheckSource(unhandled)
@@ -133,6 +154,7 @@ func TestEachExternHasItsGoBody(t *testing.T) {
 			bound[name] = true
 			where := path + "." + f.Name
 			matchSig(t, where, f.Sig, body)
+			matchTypeParams(t, where, f.Sig.TParams, body)
 			for i, r := range f.Sig.Results {
 				if isTask(r) && !hasHidden(body, v1.Frame) {
 					t.Errorf("%s returns a Task but its body takes no hidden frame: %+v", where, body)
@@ -150,6 +172,7 @@ func TestEachExternHasItsGoBody(t *testing.T) {
 					}
 					bound[goType+"."+m.Name] = true
 					matchSig(t, where+" "+m.Name, m.Sig, opBody)
+					matchTypeParams(t, where+" "+m.Name, ownerParams(r), opBody)
 				}
 			}
 		}
@@ -233,6 +256,56 @@ func TestStdTypesBindRuntimeTypes(t *testing.T) {
 	if seen != len(errorValues) {
 		t.Errorf("checked %d records of v1 packages, errorValues lists %d", seen, len(errorValues))
 	}
+}
+
+// matchTypeParams checks a body's Go type parameters against the Ergo type
+// parameters after row erasure (docs/spec/stdlib.md, Types 2): the same
+// names, in order, with the same constraint. So the checker admits a type
+// argument exactly when the Go call does: an Ergo T with no constraint
+// takes a non-comparable type, which a Go T comparable would refuse.
+func matchTypeParams(t *testing.T, where string, ergo []*check.TypeParam, body v1.Body) {
+	t.Helper()
+	var want []v1.TypeParam
+	for _, p := range ergo {
+		if p.Kind != check.KindType {
+			continue
+		}
+		c, ok := goConstraint(p.Constraint)
+		if !ok {
+			t.Errorf("%s: type parameter %s has a constraint with no Go rule", where, p.Name)
+			return
+		}
+		want = append(want, v1.TypeParam{Name: p.Name, Constraint: c})
+	}
+	if !slices.Equal(want, body.TypeParams) {
+		t.Errorf("%s: the Ergo type parameters after row erasure are %v, the Go body's are %v", where, want, body.TypeParams)
+	}
+}
+
+// goConstraint is the Go constraint of an Ergo one: none and any are any,
+// comparable is comparable.
+func goConstraint(c check.Type) (string, bool) {
+	if c == nil {
+		return "any", true
+	}
+	i, ok := c.(*check.Interface)
+	switch {
+	case !ok || len(i.Methods) > 0:
+		return "", false
+	case i.Comparable:
+		return "comparable", true
+	}
+	return "any", true
+}
+
+// ownerParams are the type parameters of the operations type t, an
+// instance or its origin.
+func ownerParams(t check.Type) []*check.TypeParam {
+	n := t.(*check.Named)
+	if n.Orig != nil {
+		n = n.Orig
+	}
+	return n.TParams
 }
 
 // matchSig checks a Go body's shape against an Ergo signature.

@@ -55,6 +55,10 @@ var hiddenOrder = []Hidden{Frame, CallSite, CallerTask}
 // package, or, for an operation of a type that a std extern returns, the
 // method of that name on the Go type the extern's body returns.
 type Body struct {
+	// TypeParams are the Go type parameters of a function, or of the
+	// method's receiver type, in order. An Ergo row parameter has none
+	// (docs/spec/stdlib.md, Types 2). Nil for a function type parameter.
+	TypeParams []TypeParam
 	// Hidden are the leading hidden parameters, in hiddenOrder.
 	Hidden []Hidden
 	// Params are the parameters after them, one per Ergo parameter, in
@@ -63,6 +67,12 @@ type Body struct {
 	// Results are the Go result types, as written: the Ergo value results,
 	// then error when the Ergo signature has an error row.
 	Results []string
+}
+
+// TypeParam is one Go type parameter of a body: its name and its
+// constraint as written (any, comparable).
+type TypeParam struct {
+	Name, Constraint string
 }
 
 // Param is one Go parameter that stands for an Ergo parameter.
@@ -215,7 +225,60 @@ func (d goDecls) body(name string) (Body, error) {
 	if err != nil {
 		return Body{}, fmt.Errorf("runtime/v1: %s: %w", name, err)
 	}
+	if b.TypeParams, err = d.typeParams(g.fn); err != nil {
+		return Body{}, fmt.Errorf("runtime/v1: %s: %w", name, err)
+	}
 	return b, nil
+}
+
+// typeParams are a function's own type parameters, or a method's: the
+// names its receiver gives them, with the constraints of the receiver
+// type's declaration.
+func (d goDecls) typeParams(fn *ast.FuncDecl) ([]TypeParam, error) {
+	if fn.Recv == nil || len(fn.Recv.List) != 1 {
+		return fieldParams(fn.Type.TypeParams, nil), nil
+	}
+	recv := fn.Recv.List[0].Type
+	base := recvName(recv)
+	g, ok := d[base]
+	if !ok || g.typ == nil {
+		return nil, fmt.Errorf("the receiver type %s is not declared", base)
+	}
+	if star, ok := recv.(*ast.StarExpr); ok {
+		recv = star.X
+	}
+	var names []string
+	switch x := recv.(type) {
+	case *ast.IndexExpr:
+		names = append(names, types.ExprString(x.Index))
+	case *ast.IndexListExpr:
+		for _, ix := range x.Indices {
+			names = append(names, types.ExprString(ix))
+		}
+	}
+	decl := fieldParams(g.typ.TypeParams, nil)
+	if len(names) != len(decl) {
+		return nil, fmt.Errorf("the receiver names %d type parameters of %s's %d", len(names), base, len(decl))
+	}
+	return fieldParams(g.typ.TypeParams, names), nil
+}
+
+// fieldParams lists a type-parameter list, renamed by names when given.
+func fieldParams(list *ast.FieldList, names []string) []TypeParam {
+	if list == nil {
+		return nil
+	}
+	var out []TypeParam
+	for _, f := range list.List {
+		for _, n := range f.Names {
+			name := n.Name
+			if names != nil {
+				name = names[len(out)]
+			}
+			out = append(out, TypeParam{Name: name, Constraint: types.ExprString(f.Type)})
+		}
+	}
+	return out
 }
 
 // goShape reads a Go function type under the hidden-argument convention.
