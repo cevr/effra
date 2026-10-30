@@ -7,16 +7,9 @@ import (
 	"testing"
 )
 
-// -record-durations runs its packages under the memory budget, as the gate
-// runs its steps: a measured package whose test passes the step budget is
-// stopped, and the durations file is not rewritten.
-func TestBudgetRecordDurations(t *testing.T) {
-	t.Setenv(mechanismVariable, "rss")
-	t.Setenv(stepMemoryVariable, "256M")
-	t.Setenv(gateMemoryVariable, "1G")
-	root := t.TempDir()
-	write(t, root, "go.mod", "module example.test/alloc\n\ngo 1.24\n")
-	write(t, root, "alloc_test.go", `package alloc
+// allocatingTest is a test file whose one test allocates and touches 1 GiB
+// and holds it for 10 seconds.
+const allocatingTest = `package alloc
 
 import (
 	"runtime"
@@ -36,7 +29,18 @@ func TestAllocate(t *testing.T) {
 	time.Sleep(10 * time.Second)
 	runtime.KeepAlive(chunks)
 }
-`)
+`
+
+// -record-durations runs its packages under the memory budget, as the gate
+// runs its steps: a measured package whose test passes the step budget is
+// stopped, and the durations file is not rewritten.
+func TestBudgetRecordDurations(t *testing.T) {
+	t.Setenv(mechanismVariable, "rss")
+	t.Setenv(stepMemoryVariable, "256M")
+	t.Setenv(gateMemoryVariable, "1G")
+	root := t.TempDir()
+	write(t, root, "go.mod", "module example.test/alloc\n\ngo 1.24\n")
+	write(t, root, "alloc_test.go", allocatingTest)
 	saved := slowPackages
 	slowPackages = []string{"."}
 	t.Cleanup(func() { slowPackages = saved })

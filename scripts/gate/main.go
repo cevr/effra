@@ -13,13 +13,16 @@
 // Every step runs under a memory budget: a hard cap for the step with all the
 // processes it starts (ERGO_GATE_STEP_MEMORY, default 8G), one for all the
 // steps of the gate together (ERGO_GATE_MEMORY, default half of physical
-// memory) and one for all the gates of the host together
-// (ERGO_GATE_HOST_MEMORY, default three quarters of physical memory). Go
-// processes in a step get GOMEMLIMIT at 3/4 of the step cap unless the caller
-// set it. On Linux with a working `systemd-run --user`, the gate re-executes
-// itself in one transient scope in the user slice ergo-gates.slice; the
-// scope's MemoryMax is the gate budget, with swap denied, and the gate sets
-// the slice's MemoryMax to the host budget. Each step starts in its own child
+// memory) and one for all the gates of the host together, the bound of the
+// gates' slice. ERGO_GATE_HOST_MEMORY lowers only this gate's own budgets to
+// it; it never changes the slice's bound. Go processes in a step get
+// GOMEMLIMIT at 3/4 of the step cap unless the caller set it. On Linux with a
+// working `systemd-run --user`, the gate re-executes itself in one transient
+// scope in the user slice ergo-gates.slice; the scope's MemoryMax is the gate
+// budget, with swap denied. The slice's MemoryMax belongs to the host: a gate
+// sets it only when the slice has none, and then only to the default (three
+// quarters of physical memory), and never lowers or raises a set bound. Each
+// step starts in its own child
 // cgroup whose memory.max is the step budget and whose memory.oom.group stops
 // the whole step at an out-of-memory kill, so the kernel enforces all three
 // caps, and the gate reads the step's OOM events before it removes the

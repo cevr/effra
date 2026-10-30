@@ -30,8 +30,10 @@ import (
 // step, as the RSS watch does. The scope sets MemorySwapMax=0, which holds for
 // every cgroup below it, so a step cannot page out past its budget. Every
 // gate scope lives in the one user slice ergo-gates.slice, whose MemoryMax
-// each gate sets, at its start, to the host budget, so the gates together
-// cannot take the host either. The kernel stops a step when it reaches its
+// bounds the gates together, so they cannot take the host either. That
+// bound belongs to the host: the first gate to find the slice without one
+// gives it the default host bound, and no gate changes a bound once set
+// (boundHost). The kernel stops a step when it reaches its
 // own budget, or when the gate's steps together reach the gate budget, or
 // when the host's gates reach the host budget; in the last two cases it picks
 // the largest process under the limit, and two steps can both be stopped
@@ -148,9 +150,7 @@ type scopeLimiter struct {
 	// dir is the scope's cgroup, and slice the cgroup of the slice that
 	// holds it.
 	dir, slice string
-	// host is the slice's memory.max, or 0 when the slice bounds nothing;
-	// hostNote describes it.
-	host     int64
+	// hostNote describes the slice's bound for the budget line.
 	hostNote string
 	steps    atomic.Int64
 }
@@ -206,9 +206,12 @@ func openScope(unit string, budget memoryBudget) (limiter, error) {
 	return s, nil
 }
 
-// boundHost sets the slice's MemoryMax to the host budget, for this gate
-// and every other in the slice, and reads back the bound that holds: when
-// gates with different host budgets run at once, the last one set wins. A
+// boundHost finds the bound of the gates' slice, which holds this gate and
+// every other. The bound belongs to the host, not to one gate: a slice with
+// no bound yet gets the default host bound (defaultHostMemory), and a bound
+// already set is neither lowered nor raised, since lowering it under
+// running gates would make the kernel kill them without a verdict. This
+// gate's host budget (ERGO_GATE_HOST_MEMORY) lowers only its own budgets. A
 // slice that cannot be bounded leaves the gate without a host bound, which
 // the budget line says; the step and gate caps still hold.
 func (s *scopeLimiter) boundHost() {
@@ -217,20 +220,44 @@ func (s *scopeLimiter) boundHost() {
 		s.hostNote = fmt.Sprintf("no bound across gates (the scope is in %s, not in %s)", name, gateSlice)
 		return
 	}
-	set := exec.Command("systemctl", "--user", "set-property", "--runtime", name, "MemoryMax="+strconv.FormatInt(s.budget.host, 10))
-	set.Env = scopeEnvironment("")
-	if output, err := set.CombinedOutput(); err != nil {
-		s.hostNote = fmt.Sprintf("no bound across gates (systemctl --user set-property %s failed (%v): %s)", name, err, firstLine(output))
-		return
+	if limit, err := readTrimmed(filepath.Join(s.slice, "memory.max")); err == nil && limit == "max" {
+		bound := defaultHostMemory()
+		if bound <= 0 {
+			s.hostNote = fmt.Sprintf("no bound across gates (%s has none, and physical memory is unknown)", name)
+			return
+		}
+		// Gates that find the slice unbound at once all set the same value.
+		set := exec.Command("systemctl", "--user", "set-property", "--runtime", name, "MemoryMax="+strconv.FormatInt(bound, 10))
+		set.Env = scopeEnvironment("")
+		if output, err := set.CombinedOutput(); err != nil {
+			s.hostNote = fmt.Sprintf("no bound across gates (systemctl --user set-property %s failed (%v): %s)", name, err, firstLine(output))
+			return
+		}
 	}
-	limit, err := readTrimmed(filepath.Join(s.slice, "memory.max"))
-	host, parseErr := strconv.ParseInt(limit, 10, 64)
-	if err != nil || parseErr != nil {
+	host := sliceBound(s.slice)
+	if host == 0 {
+		limit, _ := readTrimmed(filepath.Join(s.slice, "memory.max"))
 		s.hostNote = fmt.Sprintf("no bound across gates (%s has memory.max %q)", name, limit)
 		return
 	}
-	s.host = host
 	s.hostNote = fmt.Sprintf("%s across gates in %s", formatBytes(host), name)
+	if host < s.budget.gate {
+		s.hostNote += fmt.Sprintf(", below this gate's %s", formatBytes(s.budget.gate))
+	}
+}
+
+// sliceBound is the slice's memory.max in bytes, or 0 when it has none or
+// it cannot be read.
+func sliceBound(slice string) int64 {
+	limit, err := readTrimmed(filepath.Join(slice, "memory.max"))
+	if err != nil {
+		return 0
+	}
+	bound, err := strconv.ParseInt(limit, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return bound
 }
 
 func (s *scopeLimiter) describe() string {
@@ -280,10 +307,13 @@ func (s *scopeStep) started(int) {}
 // the step reached its memory.max; "oom_kill" counts its processes the
 // kernel killed, for its own budget or for a larger one. Which larger one is
 // the limit that was reached while the step ran: the scope's (the gate
-// budget) or else the slice's (the host budget). With other gates in the
-// slice that is an inference, not a record, and a kill no counter explains
-// is put down to the gate budget. The cgroup is removed when it is empty; a
-// process the step left running keeps it until the scope ends.
+// budget) or else the slice's (the host bound, as the slice has it now).
+// Only memory.events.local says that a cgroup reached its own limit;
+// memory.events also counts its descendants, such as another gate's scope
+// in the slice. With other gates in the slice the choice is an inference,
+// not a record, and a kill no counter explains is put down to the gate
+// budget. The cgroup is removed when it is empty; a process the step left
+// running keeps it until the scope ends.
 func (s *scopeStep) finish() usage {
 	defer s.handle.Close()
 	defer os.Remove(s.dir)
@@ -293,14 +323,15 @@ func (s *scopeStep) finish() usage {
 	}
 	events, err := readEvents(filepath.Join(s.dir, "memory.events"))
 	rose := func(before int64, dir string) bool { return before >= 0 && localOOM(dir) > before }
+	host := sliceBound(s.limiter.slice)
 	switch {
 	case err != nil:
 		u.verdict = "memory budget not enforced: read the step's memory events: " + err.Error()
 	case events["oom"] > 0:
 		u.verdict = stepExceeded(s.limiter.budget)
 	case events["oom_kill"] == 0:
-	case !rose(s.gateOOM, s.limiter.dir) && s.limiter.host > 0 && rose(s.hostOOM, s.limiter.slice):
-		u.verdict = hostExceeded(s.limiter.host)
+	case !rose(s.gateOOM, s.limiter.dir) && host > 0 && rose(s.hostOOM, s.limiter.slice):
+		u.verdict = hostExceeded(host)
 	default:
 		u.verdict = gateExceeded(s.limiter.budget)
 	}

@@ -17,8 +17,11 @@ const (
 	stepMemoryVariable = "ERGO_GATE_STEP_MEMORY"
 	// gateMemoryVariable overrides the gate budget, half of physical memory.
 	gateMemoryVariable = "ERGO_GATE_MEMORY"
-	// hostMemoryVariable overrides the host budget, three quarters of
-	// physical memory: the cap on every gate of the host together.
+	// hostMemoryVariable overrides this gate's host budget, three quarters
+	// of physical memory. It lowers only this gate's own budgets: the bound
+	// on every gate of the host together is the bound of the gates' slice,
+	// which belongs to the host, and no gate's setting changes it (see
+	// boundHost).
 	hostMemoryVariable = "ERGO_GATE_HOST_MEMORY"
 	// mechanismVariable set to "rss" forces the RSS watch where the systemd
 	// scope would work, so its tests run on Linux too.
@@ -39,10 +42,21 @@ const (
 // reached 44 GB, stops at it. The gate budget, half of the workbox's 62G,
 // is 31G: room for the concurrent steps of one gate (about 4G together at
 // these peaks) and for one runaway step, while one gate never takes more
-// than half the host. The host budget, three quarters of it (47G), bounds
-// the gates that run at once (up to three on the workbox) and leaves the
-// rest of the host a quarter.
+// than half the host. The default host bound, three quarters of it (47G),
+// bounds the gates that run at once (up to three on the workbox) and leaves
+// the rest of the host a quarter.
 const defaultStepMemory int64 = 8 << 30
+
+// defaultHostMemory is the default host budget, three quarters of physical
+// memory rounded down, or 0 when physical memory is unknown. It is also the
+// bound a gate gives the gates' slice when the slice has none.
+func defaultHostMemory() int64 {
+	total := physicalMemory()
+	if total <= 0 {
+		return 0
+	}
+	return roundedDown(total / 4 * 3)
+}
 
 // memoryBudget is the hard cap, in bytes, of each step, of all the steps of
 // one gate together, and of all the gates of the host together.
@@ -50,20 +64,25 @@ type memoryBudget struct{ step, gate, host int64 }
 
 // currentBudget reads the budget from the environment. The gate budget
 // defaults to half of physical memory, so one gate cannot take the host, and
-// the host budget to three quarters, so the gates together cannot either. A
-// budget above the one that holds it is lowered to it.
+// the host budget to three quarters (defaultHostMemory). A budget above the
+// one that holds it is lowered to it.
 func currentBudget() (memoryBudget, error) {
 	budget := memoryBudget{step: defaultStepMemory}
 	for _, setting := range []struct {
 		variable string
 		size     *int64
-		// share of physical memory, in quarters, when the variable is unset;
-		// 0 means a fixed default already in size.
-		quarters int64
+		// fallback is the default when the variable is unset, or nil for the
+		// fixed default already in size; 0 means physical memory is unknown.
+		fallback func() int64
 	}{
-		{stepMemoryVariable, &budget.step, 0},
-		{gateMemoryVariable, &budget.gate, 2},
-		{hostMemoryVariable, &budget.host, 3},
+		{stepMemoryVariable, &budget.step, nil},
+		{gateMemoryVariable, &budget.gate, func() int64 {
+			if total := physicalMemory(); total > 0 {
+				return roundedDown(total / 4 * 2)
+			}
+			return 0
+		}},
+		{hostMemoryVariable, &budget.host, defaultHostMemory},
 	} {
 		if value := os.Getenv(setting.variable); value != "" {
 			parsed, err := parseBytes(value)
@@ -73,19 +92,18 @@ func currentBudget() (memoryBudget, error) {
 			*setting.size = parsed
 			continue
 		}
-		if setting.quarters == 0 {
+		if setting.fallback == nil {
 			continue
 		}
-		total := physicalMemory()
-		if total <= 0 {
-			if setting.variable == hostMemoryVariable {
-				// The host budget is then the gate budget: one gate's bound.
-				budget.host = budget.gate
-				continue
-			}
-			return memoryBudget{}, fmt.Errorf("physical memory unknown on this host: set %s", setting.variable)
+		if *setting.size = setting.fallback(); *setting.size > 0 {
+			continue
 		}
-		*setting.size = roundedDown(total / 4 * setting.quarters)
+		if setting.variable == hostMemoryVariable {
+			// The host budget is then the gate budget: one gate's bound.
+			budget.host = budget.gate
+			continue
+		}
+		return memoryBudget{}, fmt.Errorf("physical memory unknown on this host: set %s", setting.variable)
 	}
 	budget.gate = min(budget.gate, budget.host)
 	budget.step = min(budget.step, budget.gate)
