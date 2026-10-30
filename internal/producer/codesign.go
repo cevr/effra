@@ -8,6 +8,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash"
+	"io"
+	"strings"
 )
 
 // A Mach-O image identifies itself to the Darwin kernel through its embedded
@@ -19,16 +21,37 @@ import (
 // image is then only a hint: bytes that differ from the executing image's
 // pages fail, wherever they were read. Layouts follow xnu's cs_blobs.h and
 // Go's cmd/internal/codesign.
+//
+// On Darwin the producer identity is the authenticated code, not the file:
+// the bytes [0, codeLimit) that the page hashes cover, which the cdhash
+// authenticates, are exactly the code that runs. The signature container
+// (its SuperBlob header, index, ignored blobs, padding) and any byte after
+// it are not authenticated by the cdhash, cannot change the running code,
+// and so are not part of the identity: two files with the same cdhash have
+// the same identity, whatever those bytes hold.
 
 var (
 	errUnverified        = errors.New("executing image does not match the kernel's code signature record")
 	errNoSignatureRecord = errors.New("executing image has no kernel code signature record")
-	// The two below verify as code but are not all bound to the running
-	// image: the digest names every byte of the file, so a file with any
-	// byte outside the verified structure gets no artifact identity.
+	// A universal file's code may verify, but which slice the kernel ran is
+	// not recorded here, so it gets no artifact identity.
 	errUniversal = errors.New("executing image is a universal file, whose other slices the kernel check does not cover")
-	errTrailing  = errors.New("executing image has bytes after its code signature, which the kernel check does not cover")
 )
+
+// darwinCodeTag separates the Darwin code digest from the Linux whole-file
+// digest: the two never name the same bytes in the same way.
+const darwinCodeTag = "ergo-producer-darwin-code-1\x00"
+
+// authenticatedCode is what the Darwin identity digests, given the file read
+// once and the kernel's cdhash: the domain tag, then the code that
+// verifyCodeSignature authenticates. A refused image returns its reason.
+func authenticatedCode(image, cdhash []byte) (io.ReadCloser, error) {
+	code, err := verifyCodeSignature(image, cdhash)
+	if err != nil {
+		return nil, err
+	}
+	return io.NopCloser(io.MultiReader(strings.NewReader(darwinCodeTag), bytes.NewReader(code))), nil
+}
 
 // fatMagic and fatMagic64 begin a universal (fat) file, big-endian.
 const (
@@ -52,36 +75,33 @@ const (
 )
 
 // verifyCodeSignature checks image, a thin 64-bit little-endian Mach-O file,
-// against cdhash, the kernel's record of the executing image. It accepts the
-// image only when every byte of the file is bound to the running image: the
-// pages below the signature match a CodeDirectory with that cdhash, and the
-// file ends exactly where the signature that LC_CODE_SIGNATURE names ends.
-// A universal file, or a byte after the signature, verifies nothing about
-// those bytes, so the identity, a digest of the whole file, would name bytes
-// the kernel never checked (codesign --verify --strict refuses both).
-func verifyCodeSignature(image, cdhash []byte) error {
+// against cdhash, the kernel's record of the executing image, and returns the
+// authenticated code: image[:codeLimit], every page of which matches a
+// CodeDirectory with that cdhash, where codeLimit is the offset of the
+// signature that LC_CODE_SIGNATURE names. The directory fixes codeLimit and
+// every page hash, so two images that verify against one cdhash return the
+// same code (up to a hash collision). Bytes from codeLimit on are not
+// returned; a universal file is refused with its own reason.
+func verifyCodeSignature(image, cdhash []byte) ([]byte, error) {
 	if len(image) >= 4 {
 		if magic := binary.BigEndian.Uint32(image); magic == fatMagic || magic == fatMagic64 {
-			return errUniversal
+			return nil, errUniversal
 		}
 	}
 	if len(cdhash) != cdhashSize || len(image) < machoHeaderSize64 || binary.LittleEndian.Uint32(image) != machoMagic64 {
-		return errUnverified
+		return nil, errUnverified
 	}
 	signature, codeEnd, ok := codeSignature(image)
 	if !ok {
-		return errUnverified
+		return nil, errUnverified
 	}
 	for _, directory := range codeDirectories(signature) {
 		sum, ok := directoryHash(directory)
 		if ok && bytes.Equal(sum[:cdhashSize], cdhash) && pagesMatch(image, directory, codeEnd) {
-			if codeEnd+uint64(len(signature)) != uint64(len(image)) {
-				return errTrailing
-			}
-			return nil
+			return image[:codeEnd:codeEnd], nil
 		}
 	}
-	return errUnverified
+	return nil, errUnverified
 }
 
 // codeSignature returns the embedded signature and its file offset, which

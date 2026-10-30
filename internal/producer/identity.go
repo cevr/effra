@@ -90,8 +90,6 @@ func acquireOnce(open func() (io.ReadCloser, error), info func() (*debug.BuildIn
 				identity.Reason = "executing image has no kernel code signature record"
 			case errUniversal:
 				identity.Reason = "executing image is a universal file, whose other slices the kernel check does not cover"
-			case errTrailing:
-				identity.Reason = "executing image has bytes after its code signature, which the kernel check does not cover"
 			case errImageTooLarge:
 				identity.Reason = "executing image cannot be read within its byte limit"
 			default:

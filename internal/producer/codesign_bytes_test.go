@@ -2,27 +2,85 @@ package producer
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"testing"
 )
 
-// TestCodeSignatureBindsEveryByte: the identity is a digest of the whole
-// file, so a file verifies only when every byte is bound to the running
-// image. A copy with the same signed pages and cdhash plus one byte after
-// the signature, and a universal file, verify their code but are refused
-// with their own reason, which gives a process-scoped identity.
-func TestCodeSignatureBindsEveryByte(t *testing.T) {
+// verifies reports only whether image verifies against cdhash.
+func verifies(image, cdhash []byte) error {
+	_, err := verifyCodeSignature(image, cdhash)
+	return err
+}
+
+// darwinIdentity acquires an identity as Darwin does once the kernel has
+// answered cdhash and the file at the executable path held image.
+func darwinIdentity(image, cdhash []byte) Identity {
+	open := func() (io.ReadCloser, error) { return authenticatedCode(image, cdhash) }
+	info := func() (*debug.BuildInfo, bool) { return nil, false }
+	nonce := func() (string, error) { return "nonce", nil }
+	return acquireOnce(open, info, nonce)()
+}
+
+// codeDigest is the Darwin rule written out: SHA-256 over the domain tag and
+// the bytes below the signature.
+func codeDigest(image []byte, codeEnd int) string {
+	sum := sha256.Sum256(append([]byte(darwinCodeTag), image[:codeEnd]...))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// TestDarwinIdentityIsTheAuthenticatedCode: on Darwin the identity is the
+// code the cdhash authenticates, [0, codeLimit), under its own domain tag.
+// Files with the same cdhash and different signature-container or trailing
+// bytes run the same code, so they get the same artifact identity; a file
+// with different code gets a process-scoped one; a universal file gets a
+// process-scoped one with its own reason.
+func TestDarwinIdentityIsTheAuthenticatedCode(t *testing.T) {
 	image, cdhashes := signedImage(threePages, 12, sha256Directory)
-	if err := verifyCodeSignature(image, cdhashes[0]); err != nil {
-		t.Fatalf("the signed image: %v", err)
+	codeEnd := machoHeaderSize64 + 16 + len(threePages)
+	base := darwinIdentity(image, cdhashes[0])
+	if base.ReuseScope != "artifact" || base.Digest != codeDigest(image, codeEnd) || base.Qualifier != base.Digest {
+		t.Fatalf("the signed image: %+v, want artifact scope with digest %s", base, codeDigest(image, codeEnd))
 	}
-	for name, suffix := range map[string][]byte{"one byte": {0}, "a page": bytes.Repeat([]byte{'x'}, 4096)} {
-		if err := verifyCodeSignature(append(bytes.Clone(image), suffix...), cdhashes[0]); !errors.Is(err, errTrailing) {
-			t.Errorf("%s after the signature: %v, want errTrailing", name, err)
+	whole := sha256.Sum256(image)
+	if base.Digest == "sha256:"+hex.EncodeToString(whole[:]) {
+		t.Fatal("the Darwin digest equals the whole-file digest; it must be the tagged code digest")
+	}
+	// The SuperBlob index slot of the primary directory rewritten to an
+	// alternate slot: outside the CodeDirectory, so the cdhash and pages
+	// are unchanged (bid-round-2 M2's counterexample).
+	alternate := bytes.Clone(image)
+	binary.BigEndian.PutUint32(alternate[codeEnd+12:], csSlotAlternateFirst)
+	same := map[string][]byte{
+		"an index slot rewritten": alternate,
+		"one byte appended":       append(bytes.Clone(image), 0),
+		"a page appended":         append(bytes.Clone(image), bytes.Repeat([]byte{'x'}, 4096)...),
+	}
+	for name, candidate := range same {
+		if bytes.Equal(candidate, image) {
+			t.Fatalf("%s: the fixture did not change the file", name)
+		}
+		got := darwinIdentity(candidate, cdhashes[0])
+		if got.ReuseScope != "artifact" || got.Digest != base.Digest {
+			t.Errorf("%s: %+v, want the same artifact digest %s", name, got, base.Digest)
+		}
+	}
+	// Different code under the running image's cdhash: one code byte
+	// changed, or another build altogether.
+	tampered := bytes.Clone(image)
+	tampered[4096]++
+	other, _ := signedImage(bytes.Repeat([]byte("compiler B "), 1000), 12, sha256Directory)
+	for name, candidate := range map[string][]byte{"a code byte changed": tampered, "another build": other} {
+		got := darwinIdentity(candidate, cdhashes[0])
+		if got.ReuseScope != "process" || got.Digest != "" || got.Reason != "executing image does not match the kernel's code signature record" {
+			t.Errorf("%s: %+v, want process scope, no digest, the unverified reason", name, got)
 		}
 	}
 	// A universal file holding this image as its one slice: a fat header,
@@ -37,18 +95,21 @@ func TestCodeSignatureBindsEveryByte(t *testing.T) {
 	fat = append(fat, image...)
 	for _, magic := range []uint32{fatMagic, fatMagic64} {
 		binary.BigEndian.PutUint32(fat, magic)
-		if err := verifyCodeSignature(fat, cdhashes[0]); !errors.Is(err, errUniversal) {
+		if err := verifies(fat, cdhashes[0]); !errors.Is(err, errUniversal) {
 			t.Errorf("a universal file (magic %#x): %v, want errUniversal", magic, err)
+		}
+		if got := darwinIdentity(fat, cdhashes[0]); got.ReuseScope != "process" || got.Digest != "" {
+			t.Errorf("a universal file (magic %#x): %+v, want process scope", magic, got)
 		}
 	}
 }
 
-// TestGoLinkedDarwinImageEndsAtItsSignature: a darwin/arm64 binary as the Go
-// linker writes and signs it, cross-linked here, ends exactly at its code
-// signature and verifies against its own cdhash, so the normal compiler
-// keeps its artifact identity; the same file with one byte appended does
-// not. This runs on every host: it reads the file, it never executes it.
-func TestGoLinkedDarwinImageEndsAtItsSignature(t *testing.T) {
+// TestGoLinkedDarwinImageKeepsItsCodeIdentity: a darwin/arm64 binary as the
+// Go linker writes and signs it, cross-linked here, verifies against its own
+// cdhash and gets artifact scope with the tagged code digest; the same file
+// with one byte appended keeps that digest. This runs on every host: it
+// reads the file, it never executes it.
+func TestGoLinkedDarwinImageKeepsItsCodeIdentity(t *testing.T) {
 	dir := t.TempDir()
 	for name, text := range map[string]string{
 		"go.mod":  "module example.com/signed\n\ngo 1.23\n",
@@ -82,10 +143,11 @@ func TestGoLinkedDarwinImageEndsAtItsSignature(t *testing.T) {
 		t.Fatal("the CodeDirectory names no known hash")
 	}
 	t.Logf("darwin/arm64 binary: %d bytes, signature at %d, %d bytes", len(image), codeEnd, len(signature))
-	if err := verifyCodeSignature(image, cdhash[:cdhashSize]); err != nil {
-		t.Fatalf("the Go-linked binary against its own cdhash: %v", err)
+	want := codeDigest(image, int(codeEnd))
+	if got := darwinIdentity(image, cdhash[:cdhashSize]); got.ReuseScope != "artifact" || got.Digest != want {
+		t.Fatalf("the Go-linked binary against its own cdhash: %+v, want artifact digest %s", got, want)
 	}
-	if err := verifyCodeSignature(append(bytes.Clone(image), 0), cdhash[:cdhashSize]); !errors.Is(err, errTrailing) {
-		t.Fatalf("the Go-linked binary with one byte appended: %v, want errTrailing", err)
+	if got := darwinIdentity(append(bytes.Clone(image), 0), cdhash[:cdhashSize]); got.ReuseScope != "artifact" || got.Digest != want {
+		t.Fatalf("the Go-linked binary with one byte appended: %+v, want artifact digest %s", got, want)
 	}
 }

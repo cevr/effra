@@ -73,8 +73,15 @@ been atomically replaced. On Darwin it reads the file `os.Executable` names
 once, and accepts it only if its embedded code signature carries the cdhash the
 kernel records for the executing image (`csops` `CS_OPS_CDHASH`) and every page
 below the signature matches that CodeDirectory's page hashes; the pathname is a
-hint, never trusted. The Go linker signs every darwin/arm64 binary; an unsigned
-image (darwin/amd64) has no kernel record. SHA-256 content identity has
+hint, never trusted. The digest is the executing image's authenticated code on
+Darwin and the whole executing file on Linux: on Darwin it is SHA-256 over the
+domain tag `ergo-producer-darwin-code-1` and the bytes `[0, codeLimit)` that
+the page hashes cover, so the signature container and any trailing bytes,
+which the cdhash does not authenticate and which cannot change the running
+code, are not part of it; two files with one cdhash have one identity. A
+universal (fat) file reports `unavailable`. The Go linker signs every
+darwin/arm64 binary; an unsigned image (darwin/amd64) has no kernel record.
+SHA-256 content identity has
 `executing-artifact` strength and `artifact` reuse scope. Unreadable,
 unsupported, unverified or over-256-MiB images report `unavailable`, with a
 random stable process qualifier and `process` reuse scope; if that qualifier

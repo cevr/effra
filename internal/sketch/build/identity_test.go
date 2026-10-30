@@ -3,6 +3,7 @@ package build
 import (
 	"bytes"
 	"crypto/sha256"
+	"debug/macho"
 	"encoding/hex"
 	"encoding/json"
 	"io/fs"
@@ -66,14 +67,50 @@ func identityOf(t *testing.T, binary string) (string, string) {
 	return marker, identity
 }
 
-func fileDigest(t *testing.T, path string) string {
+// identityDigest is the producer identity rule applied to the file at path,
+// written out here as an independent oracle: on darwin, SHA-256 over the
+// domain tag and the authenticated code, the bytes below the offset
+// LC_CODE_SIGNATURE names; elsewhere, SHA-256 over the whole file.
+func identityDigest(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:])
+	h := sha256.New()
+	if runtime.GOOS == "darwin" {
+		file, err := macho.NewFile(bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		end := -1
+		for _, load := range file.Loads {
+			if raw := load.Raw(); len(raw) >= 16 && file.ByteOrder.Uint32(raw) == 0x1d { // LC_CODE_SIGNATURE
+				end = int(file.ByteOrder.Uint32(raw[8:]))
+			}
+		}
+		if end < 0 || end > len(data) {
+			t.Fatalf("%s has no code signature", path)
+		}
+		h.Write([]byte("ergo-producer-darwin-code-1\x00"))
+		data = data[:end]
+	}
+	h.Write(data)
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+// sameBytes reports whether the files at a and b hold the same bytes.
+func sameBytes(t *testing.T, a, b string) bool {
+	t.Helper()
+	x, err := os.ReadFile(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	y, err := os.ReadFile(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bytes.Equal(x, y)
 }
 
 // linkVariant links this package's test binary into dir with marker as
@@ -149,7 +186,7 @@ func TestCompilerIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := fileDigest(t, binary)
+	want := identityDigest(t, binary)
 	_, first := identityOf(t, binary)
 	_, second := identityOf(t, binary)
 	inProcess, err := CompilerIdentity()
@@ -172,8 +209,8 @@ func TestCompilerIdentity(t *testing.T) {
 	for _, marker := range []string{"ergo-identity-marker-0", "ergo-identity-marker-1"} {
 		output := linkVariant(t, dir, marker)
 		printed, identity := identityOf(t, output)
-		if printed != marker || identity != fileDigest(t, output) {
-			t.Fatalf("variant %s printed marker %s and identity %s, want its digest %s", marker, printed, identity, fileDigest(t, output))
+		if printed != marker || identity != identityDigest(t, output) {
+			t.Fatalf("variant %s printed marker %s and identity %s, want its digest %s", marker, printed, identity, identityDigest(t, output))
 		}
 		data, err := os.ReadFile(output)
 		if err != nil {
@@ -208,7 +245,7 @@ func TestCompilerIdentity(t *testing.T) {
 		if err := os.WriteFile(patched, changed, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if _, other := identityOf(t, patched); other == want || other != fileDigest(t, patched) {
+		if _, other := identityOf(t, patched); other == want || other != identityDigest(t, patched) {
 			t.Fatalf("a one-byte change gave identity %s (original %s)", other, want)
 		}
 	}
@@ -236,15 +273,16 @@ type replaced struct {
 // Two replacements run: another compiler (a -X variant, whose signed code
 // differs), and the running compiler's own bytes plus one byte after its
 // code signature, whose signed pages and cdhash equal the running image's.
-// The second is the case a pages-only check would miss: on darwin it is
-// refused for its trailing byte (internal/producer), so its whole-file
-// digest never keys a module.
+// On darwin the identity is the authenticated code, so the second has the
+// running compiler's identity: it runs the same code, and the module is
+// published under that identity in both modes. On Linux its whole-file
+// digest differs, and the running image's digest keys the module.
 func TestNoPublicationUnderAReplacementsKey(t *testing.T) {
 	binary, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	running := fileDigest(t, binary)
+	running := identityDigest(t, binary)
 	dir := t.TempDir()
 	variant := linkVariant(t, dir, "ergo-identity-marker-1")
 	trailing := filepath.Join(dir, "trailing-compiler")
@@ -254,11 +292,16 @@ func TestNoPublicationUnderAReplacementsKey(t *testing.T) {
 	} else if _, err := f.Write([]byte{0}); err != nil || f.Close() != nil {
 		t.Fatal("append a byte to the trailing replacement")
 	}
-	for _, replacing := range []struct{ name, path string }{{"variant", variant}, {"trailing", trailing}} {
+	for _, replacing := range []struct {
+		name, path string
+		sameCode   bool
+	}{{"variant", variant, false}, {"trailing", trailing, true}} {
 		replacement := replacing.path
-		replacementDigest := fileDigest(t, replacement)
-		if replacementDigest == running {
-			t.Fatal("the replacement compiler has the running compiler's digest")
+		replacementDigest := identityDigest(t, replacement)
+		// Only on darwin does a same-code replacement share the identity.
+		sharesIdentity := replacing.sameCode && runtime.GOOS == "darwin"
+		if (replacementDigest == running) != sharesIdentity {
+			t.Fatalf("the replacement's digest %s against the running %s: shared %v, want %v", replacementDigest, running, replacementDigest == running, sharesIdentity)
 		}
 		for _, mode := range []string{"replace", "replace-early"} {
 			t.Run(replacing.name+"/"+mode, func(t *testing.T) {
@@ -278,18 +321,20 @@ func TestNoPublicationUnderAReplacementsKey(t *testing.T) {
 				if err := json.Unmarshal(out, &got); err != nil {
 					t.Fatalf("replace helper printed %q: %v", out, err)
 				}
-				if fileDigest(t, installed) != replacementDigest {
+				if !sameBytes(t, installed, replacement) {
 					t.Fatal("the compiler's path does not name the replacement")
 				}
-				if got.Identity == replacementDigest {
-					t.Fatalf("the running compiler took the replacement's identity %s", got.Identity)
-				}
-				for _, compiler := range publishedCompilers(t, root) {
-					if compiler == replacementDigest {
-						t.Fatalf("a module is published under the replacement's identity %s", compiler)
+				if !sharesIdentity {
+					if got.Identity == replacementDigest {
+						t.Fatalf("the running compiler took the replacement's identity %s", got.Identity)
+					}
+					for _, compiler := range publishedCompilers(t, root) {
+						if compiler == replacementDigest {
+							t.Fatalf("a module is published under the replacement's identity %s", compiler)
+						}
 					}
 				}
-				kernelNamesImage := runtime.GOOS == "linux" || contentIdentity() && mode == "replace-early"
+				kernelNamesImage := runtime.GOOS == "linux" || contentIdentity() && (mode == "replace-early" || replacing.sameCode)
 				switch {
 				case kernelNamesImage:
 					if got.Identity != running || got.Private || !strings.HasPrefix(got.Dir, filepath.Join(root, "modules")+string(filepath.Separator)) {

@@ -53,7 +53,7 @@ func TestUnavailableQualificationAndBoundedDeclarations(t *testing.T) {
 	fails := func(err error) func() (io.ReadCloser, error) {
 		return func() (io.ReadCloser, error) { return nil, err }
 	}
-	for _, open := range []func() (io.ReadCloser, error){fails(errors.New("private path")), func() (io.ReadCloser, error) { return brokenReader{}, nil }, fails(errUnsupported), fails(errUnverified), fails(errNoSignatureRecord), fails(errUniversal), fails(errTrailing), fails(errImageTooLarge)} {
+	for _, open := range []func() (io.ReadCloser, error){fails(errors.New("private path")), func() (io.ReadCloser, error) { return brokenReader{}, nil }, fails(errUnsupported), fails(errUnverified), fails(errNoSignatureRecord), fails(errUniversal), fails(errImageTooLarge)} {
 		var count atomic.Int32
 		get := acquireOnce(func() (io.ReadCloser, error) { count.Add(1); return open() }, func() (*debug.BuildInfo, bool) { return nil, false }, func() (string, error) { return "nonce-A", nil })
 		first, second := get(), get()
@@ -68,7 +68,6 @@ func TestUnavailableQualificationAndBoundedDeclarations(t *testing.T) {
 		errUnverified:         "executing image does not match the kernel's code signature record",
 		errNoSignatureRecord:  "executing image has no kernel code signature record",
 		errUniversal:          "executing image is a universal file, whose other slices the kernel check does not cover",
-		errTrailing:           "executing image has bytes after its code signature, which the kernel check does not cover",
 		errImageTooLarge:      "executing image cannot be read within its byte limit",
 		errors.New("private"): "executing image cannot be opened",
 	} {

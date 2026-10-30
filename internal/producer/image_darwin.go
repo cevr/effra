@@ -3,7 +3,6 @@
 package producer
 
 import (
-	"bytes"
 	"io"
 	"os"
 	"syscall"
@@ -14,14 +13,16 @@ import (
 // as xnu's cs_blobs.h numbers it.
 const csOpsCDHash = 5
 
-// openImage returns the bytes of the executing image. Darwin has no
-// /proc/self/exe, and os.Executable names the path the process was started
-// from, which may since name other bytes. The kernel keeps the cdhash of the
-// image it executes; the file at that path counts only if its code signature
-// carries that cdhash, its pages match it, and the file ends where its
-// signature ends (verifyCodeSignature): a universal file or a byte after the
-// signature gives a process-scoped identity, because the digest would name
-// bytes the kernel never checked. The file is read once, so the bytes
+// openImage returns the bytes the identity digests: on Darwin, the executing
+// image's authenticated code. Darwin has no /proc/self/exe, and
+// os.Executable names the path the process was started from, which may since
+// name other bytes. The kernel keeps the cdhash of the image it executes;
+// the file at that path counts only if its code signature carries that
+// cdhash and its pages match it (verifyCodeSignature), and then only the
+// code those pages cover is digested, under its own domain tag
+// (authenticatedCode): the signature container and any trailing bytes are
+// not authenticated and cannot change the running code. A universal file
+// gives a process-scoped identity. The file is read once, so the bytes
 // verified are the bytes hashed. A Go binary for
 // darwin/arm64 is always signed (the linker signs it ad hoc); an unsigned
 // image has no kernel record, and its identity stays process-scoped.
@@ -57,8 +58,5 @@ func openImage() (io.ReadCloser, error) {
 	if len(image) > maxImageBytes {
 		return nil, errImageTooLarge
 	}
-	if err := verifyCodeSignature(image, cdhash[:]); err != nil {
-		return nil, err
-	}
-	return io.NopCloser(bytes.NewReader(image)), nil
+	return authenticatedCode(image, cdhash[:])
 }

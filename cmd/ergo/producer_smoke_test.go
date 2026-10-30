@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"debug/macho"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -346,10 +348,33 @@ func producerSmokeRun(t *testing.T, dir, program string, args ...string) string 
 	return string(stdout)
 }
 
+// producerSmokeDigest is the producer identity rule for the file at path,
+// written out as an independent oracle: on darwin, SHA-256 over the domain
+// tag and the authenticated code, the bytes below the offset
+// LC_CODE_SIGNATURE names; elsewhere, SHA-256 over the whole file.
 func producerSmokeDigest(t *testing.T, path string) string {
 	t.Helper()
-	sum := sha256.Sum256(smokeRead(t, path))
-	return "sha256:" + hex.EncodeToString(sum[:])
+	data := smokeRead(t, path)
+	h := sha256.New()
+	if runtime.GOOS == "darwin" {
+		file, err := macho.NewFile(bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		end := -1
+		for _, load := range file.Loads {
+			if raw := load.Raw(); len(raw) >= 16 && file.ByteOrder.Uint32(raw) == 0x1d { // LC_CODE_SIGNATURE
+				end = int(file.ByteOrder.Uint32(raw[8:]))
+			}
+		}
+		if end < 0 || end > len(data) {
+			t.Fatalf("%s has no code signature", path)
+		}
+		h.Write([]byte("ergo-producer-darwin-code-1\x00"))
+		data = data[:end]
+	}
+	h.Write(data)
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
 func producerSmokeInstall(t *testing.T, source, target string) {
