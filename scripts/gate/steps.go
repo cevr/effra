@@ -276,19 +276,27 @@ func authoredExamples(root string) ([]string, error) {
 var slowPackages = []string{"./cmd/ergo"}
 
 // writeDurations measures each slow package's tests serially (as a single
-// process runs them) and rewrites the durations file.
-func writeDurations(root string) error {
+// process runs them), each under the memory budget of limit, and rewrites
+// the durations file.
+func writeDurations(root string, limit limiter) error {
 	durations := map[string]map[string]float64{}
 	module := modulePath(root)
 	for _, pkg := range slowPackages {
+		name := "go test -json " + pkg
 		command := exec.Command("go", "test", "-count=1", "-json", testTimeout, pkg)
 		command.Env = stepEnvironment()
 		command.Dir = root
+		var stdout bytes.Buffer
+		command.Stdout = &stdout
 		command.Stderr = os.Stderr
-		output, err := command.Output()
-		if err != nil {
-			return fmt.Errorf("go test -json %s: %w", pkg, err)
+		used, err := runBudgeted(limit, name, command)
+		if used.verdict != "" {
+			return fmt.Errorf("%s: %s", name, used.verdict)
 		}
+		if err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		output := stdout.Bytes()
 		// Elapsed omits time a test spends waiting for its parallel
 		// subtests, so a test's weight is its wall time to finish, counted
 		// from its start or, for a parallel test, from when it resumes.
