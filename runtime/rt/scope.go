@@ -168,6 +168,42 @@ func (s *Scope) runReleaseTraced(e entry, c *Cause) {
 	e.run.release(e.v)
 }
 
+// Release runs f as one release on t for a scope whose entries rt does not
+// hold, such as runtime/v1's frame list, and reports it as a Scope reports
+// its own releases (runReleaseTraced). The caller masks, as Scope.End does.
+// A panic of f is recovered and recorded into c: settle, called inside the
+// recover while the panicking frame is still on the stack, returns the
+// value of the fresh defect the panic is (nil when it carries an exit
+// instead) and the exits to add after it (the carried exit or interruption,
+// and the exits of whatever the release ends after its body); c records the
+// defect as raised in a release. On a traced tree, a panic first closes the
+// trace calls f opened and left open, never an outer one (the release-local
+// unwind), and the defect event links the innermost of them; when f ends,
+// on every path, the release event is raised.
+func Release(t *Task, c *Cause, f func(), settle func(p any) (defect any, exits error)) {
+	floor := 0
+	if t.trace != nil {
+		floor = t.traceDepth()
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			var left uint64
+			if t.trace != nil {
+				left = t.traceUnwind(p, floor)
+			}
+			defect, exits := settle(p)
+			if defect != nil {
+				c.defect(t, defect, true, left)
+			}
+			c.Add(exits)
+		}
+		if t.trace != nil {
+			t.traceTask(TraceRelease, nil)
+		}
+	}()
+	f()
+}
+
 // Scoped runs body with a fresh scope owned by t and ends the scope on every
 // exit, returning the body's value or the combined exit.
 func Scoped[T any](t *Task, body func(*Scope) (T, error)) (v T, err error) {

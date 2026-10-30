@@ -79,6 +79,8 @@ Status: the runtime body is **implemented** in `runtime/v1` (`Scope.OnExit`, rul
 
 *Prior art:* Go's `defer` is function-scoped, and Ergo takes it because Go is the target, so the lowering and the translation are exact. Swift and Zig `defer` run at the end of the enclosing block. Effect `Scope.addFinalizer` and `Effect.onExit` run finalizers uninterruptibly and keep every finalizer's failure in the `Cause`; Go `errgroup` and Trio nurseries join children before the scope's own cleanup.
 
+**Traced releases ([#230](https://github.com/cevr/ergo/issues/230)).** On a traced tree (`rt.TracedRoot`), each release of a frame's list, an exit action or the drain of a task the frame still owns, reports through rt's tracer as rt's own scopes report theirs. `runtime/v1` runs each through `rt.Release`, rt's one hook for scopes whose entries it does not hold. The tracer receives one release event per release, nested releases first. A defect in an exit action is a panic event marked as raised in a release. A panic first closes the capability calls that the release opened and left open, never an outer one, and the panic event links the innermost of them. A traced run has the same exit as an untraced one.
+
 ## Timeouts
 
 Status: **implemented in prototype** as a name-keyed exception (README Gap 31); **designed** as the library function below.

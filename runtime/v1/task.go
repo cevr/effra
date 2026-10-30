@@ -119,16 +119,21 @@ func (s *Scope) End(err *error) {
 func (s *Scope) end(e error) error {
 	s.ended = true
 	if s.last != nil {
-		m := s.s.Task().Mask()
+		t := s.s.Task()
+		m := t.Mask()
 		for s.last != nil {
 			x := s.last
 			s.remove(x)
 			if x.task != nil {
-				if err := x.task.drain(); err != nil {
-					s.exits.Add(err)
-				}
+				// A drain is one release: rt.Release reports it on a
+				// traced tree, as rt's own scope reports its releases.
+				rt.Release(t, &s.exits, func() {
+					if err := x.task.drain(); err != nil {
+						s.exits.Add(err)
+					}
+				}, classify)
 			} else {
-				x.action() // it recovers its own panic
+				x.action() // a release of its own, through rt.Release
 			}
 		}
 		m.Unmask()
@@ -161,18 +166,23 @@ func (s *Scope) OnExit(body func()) {
 		// The route to the action's frame stays through the block and
 		// through the frame's own release, where nested exit actions run.
 		defer func() { s.action = prev }()
-		var e error
-		func() {
-			defer func() {
-				if p := recover(); p != nil {
-					e = captureIn(t, p, true)
-				}
-			}()
+		// The block and its frame's release are one release of s, which
+		// rt.Release reports on a traced tree: the block's frame ends
+		// inside it, so nested releases report first. A panic of the block
+		// is recorded by rt as a release defect after the release-local
+		// unwind; the block's frame then ends with that exit's carried part.
+		var nested error
+		rt.Release(t, &s.exits, func() {
 			body()
-		}()
-		if e = action.end(e); e != nil {
-			s.exits.Add(e)
-		}
+			nested = action.end(nil)
+		}, func(p any) (any, error) {
+			defect, carried := classify(p)
+			if action.ended {
+				return defect, carried // the frame's end itself panicked
+			}
+			return defect, action.end(carried)
+		})
+		s.exits.Add(nested)
 	}})
 }
 
