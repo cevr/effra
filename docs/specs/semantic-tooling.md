@@ -36,7 +36,7 @@ Include a separate compiler/analysis-producer identity in the full semantic snap
 
 Extend inspect/type queries from the canonical type representation established by bundled interfaces. A type graph contains stable identities within the snapshot, roots and one definition per reachable type; references express sharing or recursion. A display string is derived presentation. No independently parsed string grammar or opaque callback erasure is acceptable.
 
-Exact producer content identity must describe the executing artifact, not whichever binary now occupies its installation pathname. Keep release/build declarations separate and informational; expose only bounded, whitelisted settings. On a platform where executing-artifact bytes cannot be identified, report that limitation and limit reuse to an explicitly qualified process scope. Linux may read the executing image through `/proc/self/exe`; opening the pathname returned by `os.Executable` is insufficient after replacement. See the [Linux executable-image contract](https://man7.org/linux/man-pages/man5/proc_pid_exe.5.html). Artifact identity does not authenticate a build or identify arbitrary dynamically loaded dependencies. Keep acquisition lazy and outside semantic compilation, with passive identity facts shared by adapters. Test actual atomic replacement with an old running server and a fresh process, distinct dirty builds, unavailable identity, and lazy single acquisition. Repeated unchanged digests alone do not prove single acquisition. Preserve ordinary build/emit behavior and measure first-report cost separately from subsequent reports.
+Exact producer content identity must describe the executing artifact, not whichever binary now occupies its installation pathname. Keep release/build declarations separate and informational; expose only bounded, whitelisted settings. On a platform where executing-artifact bytes cannot be identified, report that limitation and limit reuse to an explicitly qualified process scope. Linux may read the executing image through `/proc/self/exe`; opening the pathname returned by `os.Executable` is insufficient after replacement, unless the bytes read are verified against the kernel's own record of the executing image, as Darwin's code signature cdhash allows. See the [Linux executable-image contract](https://man7.org/linux/man-pages/man5/proc_pid_exe.5.html). Artifact identity does not authenticate a build or identify arbitrary dynamically loaded dependencies. Keep acquisition lazy and outside semantic compilation, with passive identity facts shared by adapters. Test actual atomic replacement with an old running server and a fresh process, distinct dirty builds, unavailable identity, and lazy single acquisition. Repeated unchanged digests alone do not prove single acquisition. Preserve ordinary build/emit behavior and measure first-report cost separately from subsequent reports.
 
 For supported language constructs, expose:
 
@@ -69,11 +69,17 @@ fresh facts and does not validate cached facts from another compiler.
 
 The shared lazy producer owner identifies the executing Go host on Linux by
 streaming `/proc/self/exe` once, including when the installation pathname has
-been atomically replaced. SHA-256 content identity has `executing-artifact`
-strength and `artifact` reuse scope. Unreadable, unsupported or over-256-MiB
-images report `unavailable`, with a random stable process qualifier and `process`
-reuse scope; if that qualifier cannot be generated, scope is `none` and facts
-cannot be reused. Other platforms do not claim executing-image identification.
+been atomically replaced. On Darwin it reads the file `os.Executable` names
+once, and accepts it only if its embedded code signature carries the cdhash the
+kernel records for the executing image (`csops` `CS_OPS_CDHASH`) and every page
+below the signature matches that CodeDirectory's page hashes; the pathname is a
+hint, never trusted. The Go linker signs every darwin/arm64 binary; an unsigned
+image (darwin/amd64) has no kernel record. SHA-256 content identity has
+`executing-artifact` strength and `artifact` reuse scope. Unreadable,
+unsupported, unverified or over-256-MiB images report `unavailable`, with a
+random stable process qualifier and `process` reuse scope; if that qualifier
+cannot be generated, scope is `none` and facts cannot be reused. Other
+platforms do not claim executing-image identification.
 Informative whitelisted Go/module/VCS/platform declarations are bounded and
 separate from the content key. No Git subprocess runs during acquisition or
 queries. Private distributed interface compatibility continues to use its ABI
