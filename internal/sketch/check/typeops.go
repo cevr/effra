@@ -236,16 +236,65 @@ func (c *checker) assignable(v, t Type) (bool, string) {
 		if !c.sameShape(vs, tt) {
 			return false, "the parameters or results differ"
 		}
-		// An unknown row is checked by its known part (Row.unknown).
-		if ve := vs.Errors.known(c.types); !ve.subsetOf(c.types, tt.Errors) {
+		// An unknown source row is checked by its known part, and an
+		// unknown destination row accepts any row, as an invalid type does
+		// both ways (Row.unknown; stage D1 round 4 review M2). An inferred
+		// receiver keeps the source's known part (widenUnknown).
+		if ve := vs.Errors.known(c.types); !tt.Errors.unknown(c.types) && !ve.subsetOf(c.types, tt.Errors) {
 			return false, fmt.Sprintf("its error row %s is wider than %s", rowText(ve), rowText(tt.Errors))
 		}
-		if vu := vs.Uses.known(c.types); !vu.subsetOf(c.types, tt.Uses) {
+		if vu := vs.Uses.known(c.types); !tt.Uses.unknown(c.types) && !vu.subsetOf(c.types, tt.Uses) {
 			return false, fmt.Sprintf("its capability row %s is wider than %s", rowText(vu), rowText(tt.Uses))
 		}
 		return true, ""
 	}
 	return false, ""
+}
+
+// widenUnknown returns dst, the type an inferred receiver holds (the first
+// branch of a join, the binding of a type parameter), with the known part of
+// src's rows joined into each of dst's unknown rows, in dst and in its
+// results. An unknown row accepts any row (assignable), so without the join
+// the failures src is known to have would be lost downstream (stage D1
+// round 4 review M2). Koka and OCaml check the known labels of an open row
+// and let the tail absorb the rest; Elixir checks the static part of
+// dynamic() and t. It is dst itself when no row changes.
+func (c *checker) widenUnknown(dst, src Type) Type {
+	d, ok := dst.(*Signature)
+	s, ok2 := src.(*Signature)
+	if !ok || !ok2 || len(d.TParams) > 0 || len(s.TParams) > 0 {
+		return dst
+	}
+	out, changed := *d, false
+	if d.Errors.unknown(c.types) {
+		if e := d.Errors.union(c.types, s.Errors.known(c.types)); !e.equal(c.types, d.Errors) {
+			out.Errors, changed = e, true
+		}
+	}
+	if d.Uses.unknown(c.types) {
+		if u := d.Uses.union(c.types, s.Uses.known(c.types)); !u.equal(c.types, d.Uses) {
+			out.Uses, changed = u, true
+		}
+	}
+	if len(d.Results) == len(s.Results) {
+		var rs []Type
+		for i, r := range d.Results {
+			if w := c.widenUnknown(r, s.Results[i]); w != r {
+				if rs == nil {
+					rs = append([]Type(nil), d.Results...)
+				}
+				rs[i] = w
+			}
+		}
+		if rs != nil {
+			out.Results, changed = rs, true
+		}
+	}
+	if !changed {
+		return dst
+	}
+	out.Fallible = d.Fallible || s.Fallible
+	return &out
 }
 
 func rowText(r *Row) string {

@@ -743,10 +743,12 @@ func (c *checker) funcLit(x *syntax.FuncLit, expected *Signature, in *inferer) o
 		}
 	}
 	t := &target{name: "this function literal", results: sig.Results, resultKnown: true, isFunc: true}
+	// An unknown expected row declares nothing: the literal infers that row,
+	// and the unknown row accepts it (stage D1 round 4 review M2).
 	switch {
 	case writtenErr:
 		t.declErrors = sig.Errors
-	case expected != nil && (in == nil || !in.rowFree(expected.Errors)):
+	case expected != nil && (in == nil || !in.rowFree(expected.Errors)) && !expected.Errors.unknown(c.types):
 		t.declErrors = expected.Errors
 	default:
 		t.errors = newRow()
@@ -754,7 +756,7 @@ func (c *checker) funcLit(x *syntax.FuncLit, expected *Signature, in *inferer) o
 	switch {
 	case x.Type.Needs != nil:
 		t.declUses = sig.Uses
-	case expected != nil && (in == nil || !in.rowFree(expected.Uses)):
+	case expected != nil && (in == nil || !in.rowFree(expected.Uses)) && !expected.Uses.unknown(c.types):
 		t.declUses = expected.Uses
 	default:
 		t.uses = newRow()
@@ -831,14 +833,15 @@ func (c *checker) blockLit(b *syntax.BlockStmt, expected *Signature, in *inferer
 	if expected != nil && len(expected.Params) > 0 {
 		c.errorf(b, CodeType, "a trailing block takes no parameters, but the parameter type %s has %d; write a func literal", expected, len(expected.Params))
 	}
+	// An unknown expected row declares nothing, as for a literal (funcLit).
 	switch {
-	case expected != nil && (in == nil || !in.rowFree(expected.Errors)):
+	case expected != nil && (in == nil || !in.rowFree(expected.Errors)) && !expected.Errors.unknown(c.types):
 		t.declErrors = expected.Errors
 	default:
 		t.errors = newRow()
 	}
 	switch {
-	case expected != nil && (in == nil || !in.rowFree(expected.Uses)):
+	case expected != nil && (in == nil || !in.rowFree(expected.Uses)) && !expected.Uses.unknown(c.types):
 		t.declUses = expected.Uses
 	default:
 		t.uses = newRow()

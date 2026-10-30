@@ -171,6 +171,11 @@ func (in *inferer) nify(x, y Type, mode unifyMode, depth int) bool {
 		if !in.nify(b, y, mode, depth) {
 			return false
 		}
+		// An unknown row in the binding takes y's known part, as an if
+		// join does (widenUnknown).
+		if w := in.c.widenUnknown(b, y); w != b {
+			b, in.m[px] = w, w
+		}
 		bi, yi := asInterface(b), asInterface(y)
 		_, bn := b.(*Named)
 		_, yn := y.(*Named)

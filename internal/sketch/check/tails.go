@@ -297,6 +297,10 @@ func (c *checker) yieldExpr(last *syntax.ExprStmt, k *sink, end syntax.Pos) {
 			k.bad = true
 			return
 		}
+		if k.want == nil {
+			// An unknown row in the join takes this branch's known part.
+			k.join = c.widenUnknown(k.join, op.typ)
+		}
 	}
 	k.valued = true
 	c.tail(last, k.typ())

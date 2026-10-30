@@ -84,7 +84,8 @@ func (c *checker) charge(n syntax.Node, cap Type) {
 		t.uses = t.uses.with(c.types, cap)
 		return
 	}
-	if t.declUses.has(c.types, cap) {
+	if t.declUses.has(c.types, cap) || t.declUses.unknown(c.types) {
+		// An unknown declared row accepts any capability (escape).
 		return
 	}
 	switch {
@@ -115,6 +116,11 @@ func (c *checker) escape(n syntax.Node, row *Row) {
 	t := c.fn.t
 	if t.declErrors == nil {
 		t.errors = t.errors.union(c.types, row)
+		return
+	}
+	if t.declErrors.unknown(c.types) {
+		// An unknown declared row accepts any row (assignable; stage D1
+		// round 4 review M2). A literal does not declare one (funcLit).
 		return
 	}
 	extra := row.minus(c.types, t.declErrors).known(c.types)
