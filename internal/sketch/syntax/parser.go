@@ -234,12 +234,15 @@ func (p *parser) reach(top int) {
 
 // attempt runs parse and reports whether it succeeded; on failure it
 // restores the parser to where it was, so the caller can try another
-// reading of the same tokens.
+// reading of the same tokens. A reading that fails on the lexical error
+// read the source without fault up to it, so that error is the first in
+// the source: attempt stops the parse with it, and no other reading can
+// report an earlier error that the source does not have (#226).
 func (p *parser) attempt(parse func()) (ok bool) {
 	i, nest, peak, lev := p.i, p.nest, p.peak, p.exprLev
 	defer func() {
 		if r := recover(); r != nil {
-			if _, isBailout := r.(bailout); !isBailout {
+			if _, isBailout := r.(bailout); !isBailout || p.err == p.s.err {
 				panic(r)
 			}
 			p.backtrack(i)
@@ -589,7 +592,9 @@ func (p *parser) refuseSingleton() {
 
 // bracketsThenParen reports whether the brackets that open at the next
 // token close before a `(`, as in the operation `Get[T](k string) T`; a
-// field type such as `xs [n]int` closes before a type instead.
+// field type such as `xs [n]int` closes before a type instead. At the
+// lexical error it reports false: the field reading parses on to the error
+// (#226).
 func (p *parser) bracketsThenParen() bool {
 	depth := 0
 	for i := 1; ; i++ {
@@ -600,7 +605,7 @@ func (p *parser) bracketsThenParen() bool {
 			if depth--; depth == 0 {
 				return p.peek(i+1).tok == LPAREN
 			}
-		case LBRACE, RBRACE, SEMICOLON, EOF:
+		case LBRACE, RBRACE, SEMICOLON, ILLEGAL, EOF:
 			return false
 		}
 	}
@@ -1142,7 +1147,9 @@ func (p *parser) parseType(ctx typeCtx) Expr {
 	case LBRACK:
 		lbrack := p.tok.pos
 		p.next()
-		if p.tok.tok != RBRACK {
+		// At the lexical error the source after `[` is unknown: parse on,
+		// so the error is reported (#226).
+		if p.tok.tok != RBRACK && p.tok.tok != ILLEGAL {
 			p.habit(lbrack, 1, habitArray)
 		}
 		p.next()
