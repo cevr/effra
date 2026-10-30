@@ -1,0 +1,19 @@
+// 196v rule 2: an inner scope may not redeclare a name of an enclosing
+// scope in the same function (S108); a function literal's names count too.
+func f(x int) int {
+	let y = x
+	if y > 0 {
+		let x = 2 // want S108
+		return x
+	}
+	y
+}
+
+func g(xs []int) int {
+	let total = len(xs)
+	for total in xs { // want S108
+		return total
+	}
+	let add = func(total int) int { total + 1 } // want S108
+	add(total)
+}

@@ -206,7 +206,7 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 		vars := c.declareArm(lists)
 		var restBind []asBinding
 		if restName != nil {
-			if b, ok := c.declareAs(restName, restType); ok {
+			if b, ok := c.declareAs(restName, restType, false); ok {
 				restBind = append(restBind, b)
 				if v, isVar := c.fn.scope.names[restName.Name].(*Var); isVar && c.silent == 0 {
 					if p := c.pkg.Info.Patterns[restName]; p != nil {
@@ -217,7 +217,7 @@ func (c *checker) catchValid(x *syntax.CatchExpr, hint Type, wantValue, partial 
 		}
 		for _, id := range placeholders {
 			if _, bound := c.fn.scope.names[id.Name]; !bound {
-				c.declareAs(id, invalid) // no type: no S110, no cascade
+				c.declareAs(id, invalid, true) // no type: no S110, no cascade
 			}
 		}
 		c.catchArm(arm, valueType, wantValue && hasValue)

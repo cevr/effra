@@ -365,6 +365,11 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 	for _, n := range scc {
 		if n.fn != nil {
 			delete(c.settled, n.fn)
+			// A refused member stays refused for the components checked
+			// after this one (groupRef).
+			if c.refused(n.fn) {
+				c.refusedMembers[n.fn] = true
+			}
 		}
 	}
 	c.finalComponent(scc)
@@ -513,9 +518,19 @@ func funcKey(f *Func) string {
 // enclosing literal frame takes f, and the reference is refused when f is
 // (refused): in the reporting pass, every reference to a member whose
 // pinned row its body exceeds is invalid, so nothing cascades from it
-// (D3); the S108 is at the member's declaration (reportGroup).
+// (D3); the S108 is at the member's declaration (reportGroup). A reference
+// from outside the component, checked after it settled, is refused the
+// same way: the pinned row is no evidence for the caller either (stage D1:
+// classf/go-statement.ergo's caller F got a cascade "returns no value").
 func (c *checker) groupRef(f *Func) bool {
-	if !c.group[f] || !f.inferErrors && !f.inferUses {
+	if !f.inferErrors && !f.inferUses {
+		return false
+	}
+	if !c.group[f] {
+		if c.silent == 0 && c.refusedMembers[f] {
+			c.readUndiagnosed()
+			return true
+		}
 		return false
 	}
 	for _, l := range c.lits {
@@ -941,6 +956,7 @@ func (c *checker) checkFuncBody(f *Func) bool {
 				continue
 			}
 		}
+		c.preludeNameAt(p.Name, p.Pos) // D-D3; the parameter still binds
 		v := &Var{Name: p.Name, Type: p.Type, Pos: p.Pos, param: true, used: true}
 		c.def(c.paramIdents[p.Pos], v)
 		frame.insert(p.Name, v)
@@ -948,6 +964,7 @@ func (c *checker) checkFuncBody(f *Func) bool {
 	c.bindRequirements(frame, d.Type)
 	c.functionBody(d.Body, name)
 	c.reportUnused(fc)
+	c.reportNeverReassigned(fc)
 	changed := false
 	// Inference writes the solved rows into the variables, never into the
 	// signature (class F); a final variable keeps its solution. After a
@@ -1096,6 +1113,9 @@ func (c *checker) checkPkgVar(pv *pkgVar) {
 	}
 	switch {
 	case len(pv.spec.Values) == 0:
+		if pv.spec.Type == nil {
+			c.untypedLet(pv.spec.Names[pv.idx])
+		}
 		if declared != nil && !isInvalid(declared) && !defaultable(declared) {
 			c.errorf(pv.spec.Names[pv.idx], CodeType, "let %s of type %s needs a value: %s has no zero value (types.md, Zero values 3)", pv.obj.Name, declared, declared)
 		}

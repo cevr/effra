@@ -72,6 +72,10 @@ type Var struct {
 	pkg     bool
 	group   *switchGroup // a type-switch or catch binding: used if any arm reads it
 	bindRow bool         // a capability-row binding (needs X): an entry of the frame, not a value
+	// let marks a name a local `let` binds (not a pattern's); mut a `let
+	// mut` name, the only kind an assignment may target (D-D1). reassigned
+	// records an assignment rooted at a mut name (Q3).
+	let, mut, reassigned bool
 	// undiagnosed: a local bound to a value typing treats as invalid with no
 	// diagnostic of its own (provisional.go).
 	undiagnosed bool

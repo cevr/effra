@@ -21,14 +21,15 @@ probes/operators.ergo clean
 probes/predeclared-error.ergo S108
 probes/predeclared-local.ergo S108
 probes/predeclared-panic.ergo clean
-probes/prelude-locals.ergo S104
+probes/prelude-locals.ergo S108
 probes/same-local-as-cap.ergo S108
+probes/sleep-timeout.ergo S108
 probes/timeout-capability.ergo clean
 probes/timeout-statement-last.ergo clean
 probes/user-type-shadow.ergo S108
 probes/unused-expression.ergo S108
 probes/wire-method-cycle.ergo S108
-probes/wire-predeclared-name.ergo clean
+probes/wire-predeclared-name.ergo S108
 probes/with-nonlocal-return.ergo S108
 probes/with-return.ergo S108
 probes/compound-discard.ergo S110

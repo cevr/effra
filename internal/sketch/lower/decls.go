@@ -584,7 +584,7 @@ func (l *lowerer) useFunc(f *check.Func, site syntax.Node) *funcDecl {
 		if !fd.library {
 			refuse(f.Decl, "a user extern go binding (here of %s) is lowered after check-v1 stage E (196x); this lowering implements an extern target only for the prelude declaration it binds", fd.extern)
 		}
-		refuse(site, "the extern go target %s of %s has no Go body yet (lower-v1 stage 3 adds the prelude and std targets)", fd.extern, f.Name)
+		refuse(site, "a call to the std function %s (extern go target %s) is lowered after check-v1 stage D (D3: std calls with their hidden task and scope arguments)", f.Name, fd.extern)
 	case fd.extern == "" && (f.Decl == nil || f.Decl.Body == nil):
 		refuse(site, "%s has no body, so it cannot be called", f.Name)
 	}
@@ -816,7 +816,6 @@ func (l *lowerer) packageVar(spec *syntax.VarSpec, id *syntax.Ident, x syntax.Ex
 	if !ok && (id.Name != "_" || x == nil) {
 		ice(id, "the let %s has no Defs entry", id.Name)
 	}
-	refuseUntypedLet(spec, id)
 	fc := newFuncCtx(l, newNamer(l.names), true)
 	fc.depth = 2
 	name, goType := "_", ""

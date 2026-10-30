@@ -1,0 +1,16 @@
+// 196v rule 2: no shadowing inside a function. Sibling scopes may reuse a
+// name, and a local may reuse the name of a package-level declaration.
+func helper() int {
+	1
+}
+
+func f(flag bool) int {
+	let helper = 2
+	if flag {
+		let t = 1
+		return t + helper
+	} else {
+		let t = 3
+		return t
+	}
+}

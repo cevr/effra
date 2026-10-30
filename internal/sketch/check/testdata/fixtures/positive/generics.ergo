@@ -10,7 +10,7 @@ type Just[T] { Value T }
 type Nothing {}
 type Maybe[T] = Just[T] | Nothing
 
-func Map[A, B, E, R](xs []A, f func(A) B fails E needs R) []B fails E needs R {
+func Transform[A, B, E, R](xs []A, f func(A) B fails E needs R) []B fails E needs R {
 	let mut out = []B{}
 	for x in xs {
 		out = out.Append(try f(x))
@@ -47,7 +47,7 @@ type Sleepy { Nap(d duration) }
 
 func main() needs Console {
 	let p = Pair[string, int64]{Key: "a", Value: 1}
-	let ys = Map([]int64{1, 2}, double)
+	let ys = Transform([]int64{1, 2}, double)
 	let n = On[Fault](func() int64 fails Fault { return Fault }) catch {
 	case Fault:
 		0

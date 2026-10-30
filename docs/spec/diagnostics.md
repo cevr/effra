@@ -79,7 +79,7 @@ The checker does not restrict `main`'s capability row; the build refuses what th
 - An unknown local, function, type, field, method, package or wire (`reject/unknown-name.ergo`, `unknown-local`, `unknown-type`, `unknown-field`, `unknown-selector`, `unknown-wire`).
 - A Go built-in function other than `len`: `make`, `new`, `cap`, `copy`, `close`, `print`, `println`, `append`, `delete`, `min`, `max`, `clear`, `panic`, `recover`, `complex`, `real` and `imag` are not predeclared. The message names the Ergo form: `xs.Append(x)`, `m.Delete(k)`, a literal, `Console.Println`, `if a < b { a } else { b }` (#196, fourth round, item 2).
 - A capability name in an expression position other than a method call's receiver, such as `f(Orders)` (`capability-as-value`; README Gap 29).
-- A local of the same name as a capability that the function's written row lists, in the same frame (`local-and-binding-one-frame`; rows-and-constraints §7 amendment 3). A local in an inner frame may shadow a package capability.
+- A local of the same name as a capability that the function's written row lists, in the same frame (`local-and-binding-one-frame`; rows-and-constraints §7 amendment 3). A binder in an inner scope that reuses the name is S108 (no shadowing, check-v1 D-D2).
 - A capability row or a wire key names a type that is not a capability (`needs-non-capability`, `wire-entry-non-capability`).
 - An error row names a type that is not a named struct type (`error-row-non-struct`).
 
@@ -105,6 +105,9 @@ The checker does not restrict `main`'s capability row; the build refuses what th
 | Rule | Fixture |
 | --- | --- |
 | A type, function, wire, method, field, parameter or local is declared twice in one scope; a type and a function share a name | `duplicate-function`, `probes/duplicate-field.ergo`, `duplicate-method`, `duplicate-parameter`, `probes/receiver-parameter.ergo` |
+| An assignment `x = e` or `x op= e` whose target is not rooted at a `let mut` local, directly or through fields and indexes: a `let` ("declare x with let mut"), a parameter, a pattern, `as`, `case err:` or loop binding, or a package-level `let`; a borrow `&x`, or a call `x.f()` whose function takes `*T`, of such a root. A write through a pointer changes the pointee and needs no `let mut` (pointers are #222's). A package-level `let mut` (S108 at `mut`; its assignments add nothing); `let mut` over a pattern; `let x` with neither a type nor a value (x binds with no type, so its uses add nothing) (check-v1 D-D1, Q2) | `testdata/v1/D1-let-mut.neg.ergo`, `D9-assign-root.neg`; `TestLetMutReassignment`, `TestLetMutPointers`, `TestUntypedLet` |
+| A binder that reuses a name bound in an enclosing scope of the same function, function literals and trailing blocks included: a parameter, `let`, pattern, `as`, `case err:`, loop binding or function-literal parameter (S108 at the inner binder, which still binds; the outer one is not then reported unused). Sibling scopes may reuse a name, and a local may reuse a package-level name other than a prelude name (check-v1 D-D2) | `D2-no-shadowing.neg`; `TestNoShadowing` |
+| A declaration of a prelude name at any scope: a type, variant, function, package `let`, wire, import alias, type parameter, parameter, local or pattern binding named after a universe name (the basic types, `byte`, `rune`, `duration`, `comparable`, `ordered`, `number`, `true`, `false`, `len`, `Map`) or an exported prelude name (`Option`, `Some`, `None`, `Console`, `Clock`, `Task`, …). The refused binder still binds, so its uses add nothing (check-v1 D-D3) | `D3-prelude-names.neg`; `testdata/fixtures/negative/prelude-name-binders.ergo`; `TestPreludeNamesCannotBeRedeclared` |
 | A plain call `f(x)` of a name that several functions share; each takes a distinct named type of the package first and is called as `x.f(…)` (196m rule 3) | checker tests (`TestSelfCallSameNamedFunctions`) |
 | A union variant is not a record declared in the package (a basic, operation, union or defined type); an inline variant of a generic union written with other type arguments than the parameters its fields mention; a defined type over a type parameter or over itself (check-v1 D-B1) | `union-variant-interface`, `testdata/v1/B1-type-shapes.neg.ergo` |
 | A record with no fields written `Pending{}`, or a record with fields written bare (check-v1 D-B2) | `testdata/v1/B2-empty-record-bare.neg.ergo` |
@@ -152,7 +155,6 @@ The checker refuses a construct that another ticket owns, and names it, instead 
 | A union variant from another package, `type E = Declined \| timeout.Expired` | 196b, packages (spec Q7) |
 | The `ordered` constraint; an `escaping` function type | 196g, constraints; 196e, escaping (check-v1) |
 | A law, a `test` declaration, `assert` | 196l, laws and tests (check-v1) |
-| `import task`, `scope`, `slice` or `queue` | lower-v1, the std modules |
 | `import go net/url` | [#202](https://github.com/cevr/ergo/issues/202), Go imports |
 | A node or field the decided parser never builds, in a tree built by hand: a channel, `select`, `go`, `defer`, a label, `++` or `--`, a variadic parameter or spread argument, an array type with a length, a receiver, a dot or grouped import, a grouped `let`, a `:=` or multi-side assignment, an `if`, `for` or `match` header statement. The message is "… is not produced by the decided parser" | syntax `TestDecidedOnly` (no owner: the form left the language) |
 | At build only: any refusal of the prototype bridge, checker or emitter, with the message "the prototype emitter cannot lower this program yet (#50): CODE message" at its position | [#50](https://github.com/cevr/ergo/issues/50) |
@@ -163,6 +165,7 @@ The checker refuses a construct that another ticket owns, and names it, instead 
 - An `as` binding is read in no case (`unused-type-switch-binding`).
 - An expression statement is not a call, `try`, `catch` or `with` (`unused-expression`, `probes/unused-expression.ergo`).
 - An import is not used (Go's rule).
+- A `let mut` local is never reassigned: "n is never reassigned; write let n". An assignment through a field or an index, and a borrow, count; a `let mut` read nowhere keeps only its unused diagnostic (check-v1 Q3; `D10-mut-reassigned.neg`, `TestLetMutNeverReassigned`).
 
 *Prior art:* Go rejects unused locals, imports and unused expression values; Rust and Gleam warn instead. Ergo keeps Go's errors because its output is Go and because an unread value usually hides a dropped result.
 

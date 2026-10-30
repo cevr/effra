@@ -246,15 +246,6 @@ func refuse(n syntax.Node, format string, args ...any) {
 	panic(refusal{pos: pos, msg: fmt.Sprintf(format, args...)})
 }
 
-// refuseUntypedLet refuses `let x` with neither a type nor a value: the
-// checker admits it with no type for x, and check-v1 stage D decides it
-// (D-D1; stage C round 4 review T1).
-func refuseUntypedLet(spec *syntax.VarSpec, id *syntax.Ident) {
-	if spec.Type == nil && len(spec.Values) == 0 {
-		refuse(id, "a let with neither a type nor a value is decided in check-v1 stage D (D-D1)")
-	}
-}
-
 // ice is an internal compiler error: Info lacks a fact that an accepted
 // program's form needs (the Info contract, check-v1 spec). It is located,
 // and it never becomes unchecked Go.

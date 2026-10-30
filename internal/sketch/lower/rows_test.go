@@ -236,7 +236,7 @@ func main() fails Bad needs Console {
 	}, {
 		name: "wires",
 		src: `type Store { Get() string }
-type Clock { Now() string }
+type Timer { Now() string }
 
 type Holder { V string }
 
@@ -272,7 +272,7 @@ let Healed = wire {
 }
 
 let Shared = wire {
-	Store, Clock: Both{V: "one"},
+	Store, Timer: Both{V: "one"},
 }
 
 func show() needs Console, Store {
@@ -288,7 +288,7 @@ func main() needs Console {
 	with Healed { show() }
 	with Shared {
 		Console.Println(Store.Get())
-		Console.Println(Clock.Now())
+		Console.Println(Timer.Now())
 	}
 }
 `,

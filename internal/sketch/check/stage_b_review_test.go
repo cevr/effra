@@ -16,14 +16,14 @@ func TestRefusedPatternNameBinds(t *testing.T) {
 		{"len", ""},
 		{"timeout", `import timeout`},
 		{"shared", `let shared = 1`},
-		{"Done", `type Done { N int }`},
+		{"Finished", `type Finished { N int }`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := fmt.Sprintf("%s\ntype R { Value string }\nfunc F(r R) string { match r { case R{Value: %s}: return %s } }\n", tc.decl, tc.name, tc.name)
 			_, d := check.CheckSource(src)
 			want := tc.name + " already names"
-			if tc.name == "Done" {
-				want = "Done does not match"
+			if tc.name == "Finished" {
+				want = "Finished does not match"
 			}
 			if len(d) != 1 || d[0].Code != check.CodeType || !strings.Contains(d[0].Message, want) {
 				t.Fatalf("want one refused-name diagnostic, got %s", describe(d))
@@ -37,7 +37,7 @@ func TestRefusedPatternNameBinds(t *testing.T) {
 func TestSingleNameLetPattern(t *testing.T) {
 	for _, tc := range []struct{ name, src, code string }{
 		{"constant", `func F() { let true = false }`, check.CodeType},
-		{"variant", `type State = Pending{} | Done{}
+		{"variant", `type State = Pending{} | Finished{}
 func F(s State) { let Pending = s }`, check.CodeNotTotal},
 		{"own-record", `type R { N int }
 func F(r R) { let R = r }`, ""},
@@ -58,7 +58,7 @@ func F() { let _ as helper = func() {}; helper() }`, ""},
 		{"explicit-type-binding", `type R { N int }
 func F() int { let _ as R = 1; return R }`, ""},
 		{"binding", `func F() int { let n = 1; return n }`, ""},
-		{"local-rebinding", `func F() int { let n = 1; if true { let n = 2; return n }; return n }`, ""},
+		{"local-shadowing", `func F() int { let n = 1; if true { let n = 2; return n }; return n }`, check.CodeType},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, d := check.CheckSource(tc.src + "\n")
@@ -74,7 +74,7 @@ func F() int { let _ as R = 1; return R }`, ""},
 }
 
 func TestRefusedLetTypeNameBinds(t *testing.T) {
-	_, d := check.CheckSource("type Done { N int }\nfunc F() int { let Done = 3; return Done + 1 }\n")
+	_, d := check.CheckSource("type Finished { N int }\nfunc F() int { let Finished = 3; return Finished + 1 }\n")
 	if len(d) != 1 || d[0].Code != check.CodeType || !strings.Contains(d[0].Message, "does not match") {
 		t.Fatalf("want only the refused type-test diagnostic, got %s", describe(d))
 	}
@@ -82,13 +82,13 @@ func TestRefusedLetTypeNameBinds(t *testing.T) {
 
 func TestPatternTestsOwnUnionType(t *testing.T) {
 	for _, src := range []string{
-		`type State = Pending{} | Done{}
+		`type State = Pending{} | Finished{}
 func F(s State) State { match s { case State as same: return same } }`,
-		`type State[T] = Pending{Value T} | Done{}
+		`type State[T] = Pending{Value T} | Finished{}
 func F(s State[int]) State[int] { match s { case State[int] as same: return same } }`,
-		`type State[T] = Pending{Value T} | Done{}
+		`type State[T] = Pending{Value T} | Finished{}
 func F(s State[int]) State[int] { match s { case State as same: return same } }`,
-		`type State = Pending{} | Done{}
+		`type State = Pending{} | Finished{}
 func F(s State) { let State = s }`,
 	} {
 		if _, d := check.CheckSource(src + "\n"); len(d) > 0 {

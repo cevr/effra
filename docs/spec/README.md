@@ -55,7 +55,7 @@ This directory is the normative specification of the Go-shaped Ergo language: Ef
 | Single-subject `match` on a union | Checked, total or with `case _` (S103; Gap 3); runs | [rows](rows.md#totality) |
 | Multi-subject `match (a, b)` | Checked, total by a usefulness check (Gap 12); build refused | [rows](rows.md#totality) |
 | `if`/`else`, `else if`; `if` and `match` as expressions, function tails (196r) | Checked; runs (check-v1 stage C, D-C1, D-C2) | [grammar](grammar.md#statements) |
-| `let` definitions | Checked; runs | [grammar](grammar.md#statements) |
+| `let` definitions; `let mut` and assignment roots, no shadowing, prelude names not redeclared (196v) | Checked; runs (check-v1 stage D1, D-D1..D-D3) | [grammar](grammar.md#statements) |
 | Operators `==` (on `string`, `int64`, `bool`) and `+` | Checked; runs | [types](types.md#operators) |
 | Other operators, `&&`, `\|\|`, `==` on `duration` | Checked with Go's operand rules (Gaps 10, 26); build refused | [types](types.md#operators) |
 | `fails` rows and `try` | Checked; runs | [rows](rows.md#error-rows) |

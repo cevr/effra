@@ -15,7 +15,7 @@ func TestPreludeLetNamesUseBinderDiagnostic(t *testing.T) {
 	for _, name := range []string{"Sleep", "len"} {
 		t.Run(name, func(t *testing.T) {
 			_, d := check.CheckSource(fmt.Sprintf("func F() { let %s = 3; _ = %s }\n", name, name))
-			want := name + " is a prelude name; choose another name (rows.md, Totality 6; D-D3)"
+			want := name + " is a prelude name, which cannot be redeclared; choose another name (#196, eighth round, item 3)"
 			if len(d) != 1 || d[0].Code != check.CodeType || d[0].Message != want {
 				t.Fatalf("want one prelude-binder diagnostic %q, got %s", want, describe(d))
 			}

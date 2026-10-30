@@ -117,46 +117,46 @@ let (a, b) = (1, undefinedName)
 func main() {}
 `, []string{"S104:2"}},
 	{"wire declaration", "let W = wire", `
-type Clock { Now() int64 }
+type Ticker { Now() int64 }
 type Fixed { t int64 }
 func Now(f Fixed) int64 { return f.t }
-let W = wire { Clock: Fixed{t: 1} }
-func f() int64 { return with W { Clock.Now() } }
+let W = wire { Ticker: Fixed{t: 1} }
+func f() int64 { return with W { Ticker.Now() } }
 func main() {}
 `, nil},
 	{"wire header", "a named wire's provides and needs", `
-type Clock { Now() int64 }
+type Ticker { Now() int64 }
 type Log { Write(s string) }
 type Fixed { t int64 }
 func Now(f Fixed) int64 { return f.t }
-let W = wire provides Clock needs Log { Clock: Fixed{t: 1} }
+let W = wire provides Ticker needs Log { Ticker: Fixed{t: 1} }
 func main() {}
 `, []string{"S109:6", "S109:6"}},
 	{"wire value", "a wire value outside with is 196x's, with no cascade at its use", `
-type Clock { Now() int64 }
+type Ticker { Now() int64 }
 type Fixed { t int64 }
 func Now(f Fixed) int64 { return f.t }
 func f() int64 {
-	let w = wire { Clock: Fixed{t: 1} }
-	return with w { Clock.Now() }
+	let w = wire { Ticker: Fixed{t: 1} }
+	return with w { Ticker.Now() }
 }
 func main() {}
 `, []string{"S109:6"}},
 	{"inline wire header", "an inline wire's provides", `
-type Clock { Now() int64 }
+type Ticker { Now() int64 }
 type Fixed { t int64 }
 func Now(f Fixed) int64 { return f.t }
-func f() int64 { return with wire provides Clock { Clock: Fixed{t: 1} } { Clock.Now() } }
+func f() int64 { return with wire provides Ticker { Ticker: Fixed{t: 1} } { Ticker.Now() } }
 func main() {}
 `, []string{"S109:5"}},
 	{"wire entries", "an entry of two keys, an embedding and a replace", `
-type Clock { Now() int64 }
+type Ticker { Now() int64 }
 type Timer { Now() int64 }
 type Fixed { t int64 }
 func Now(f Fixed) int64 { return f.t }
-let Base = wire { Clock, Timer: Fixed{t: 1} }
-let W = wire { replace Clock: Fixed{t: 2}, Base }
-func f() int64 { return with W { Clock.Now() + Timer.Now() } }
+let Base = wire { Ticker, Timer: Fixed{t: 1} }
+let W = wire { replace Ticker: Fixed{t: 2}, Base }
+func f() int64 { return with W { Ticker.Now() + Timer.Now() } }
 func main() {}
 `, nil},
 	{"with", "with W { … } discharges W's capabilities", `
@@ -642,8 +642,8 @@ func main() {}
 // The timeout module.
 import timeout
 
-// Clock reads the time.
-type Clock {
+// Ticker reads the time.
+type Ticker {
 	// Now is the time.
 	Now() int64,
 }
@@ -660,17 +660,17 @@ func Now(f Fixed) int64 { return f.t }
 // fail is Go's.
 extern go example.com/door.Fail func fail() int
 
-// W provides Clock.
+// W provides Ticker.
 let W = wire {
 	// The fixed clock.
-	Clock: Fixed{t: 1},
+	Ticker: Fixed{t: 1},
 }
 
 // n is one.
 let n = 1
 
 // f reads W.
-func f() int64 { return with W { Clock.Now() } + int64(n) + int64(fail()) }
+func f() int64 { return with W { Ticker.Now() } + int64(n) + int64(fail()) }
 func g() timeout.Expired { return timeout.Expired }
 func main() {}
 `, nil},
@@ -692,15 +692,15 @@ func f(b Box[int]) int { return b.V }
 func main() {}
 `, nil},
 	{"variant in place", "a generic variant declared in place", `
-type Opt[T] = Some[T]{ V T } | None{}
+type Opt[T] = Has[T]{ V T } | Empty{}
 func main() {}
 `, nil},
 	{"inline wire header", "an inline wire's provides and needs", `
-type Clock { Now() int64 }
+type Ticker { Now() int64 }
 type Log { Write(s string) }
 type Fixed { t int64 }
 func Now(f Fixed) int64 { return f.t }
-func f() int64 needs Log { return with wire provides Clock needs Log { Clock: Fixed{t: 1} } { Clock.Now() } }
+func f() int64 needs Log { return with wire provides Ticker needs Log { Ticker: Fixed{t: 1} } { Ticker.Now() } }
 func main() {}
 `, []string{"S109:6", "S109:6"}},
 	{"law", "a documented law", `

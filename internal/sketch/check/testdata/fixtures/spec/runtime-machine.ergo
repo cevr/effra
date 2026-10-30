@@ -12,8 +12,8 @@ type Signal = Failure | Success | Retry
 
 func step(s State, sig Signal) Decision[State, string] fails ProbeDown needs Probe {
 	match (s, sig) {
-	case (Closed, Failure as sig):
-		return Enter{Open{sig.Endpoint}}
+	case (Closed, Failure as f):
+		return Enter{Open{f.Endpoint}}
 	case (HalfOpen, Success):
 		return Enter{Closed{0}}
 	case (_, _):

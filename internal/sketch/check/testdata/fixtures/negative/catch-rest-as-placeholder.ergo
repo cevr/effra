@@ -1,0 +1,12 @@
+type E { N int }
+
+func g() int fails E { 1 }
+
+func use(n int) {}
+
+func f() {
+	g() catch {
+	case a as e: // want S108
+		use(a)
+	}
+}

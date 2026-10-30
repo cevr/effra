@@ -1,0 +1,21 @@
+// 196v: `=` reassigns only a `let mut` name (S108): not a `let`, not a
+// parameter, not a package-level `let`; a package-level `let mut` is S108
+// (no mutable globals).
+let Limit = 1000
+
+let mut Counter = 0 // want S108
+
+func total(fee int) int {
+	let base = 10
+	base = base + fee // want S108
+	base
+}
+
+func bump(n int) int {
+	n += 1 // want S108
+	n
+}
+
+func reset() {
+	Limit = 0 // want S108
+}

@@ -20,12 +20,12 @@ const sketchWaitSource = `func wait() needs Console, Scheduler {
 	Scheduler.Sleep(60s)
 }
 
-let Clock = wire {
+let Host = wire {
 	Scheduler: LiveScheduler,
 }
 
 func main() needs Console {
-	with Clock { wait() }
+	with Host { wait() }
 }
 `
 

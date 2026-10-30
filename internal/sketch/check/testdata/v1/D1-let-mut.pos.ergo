@@ -1,0 +1,15 @@
+// 196v (amended): `let` binds a name that cannot be reassigned; `let mut`
+// binds one that can, with `=` and `op=`. A package-level `let` is
+// immutable and readable everywhere.
+let Limit = 1000
+
+func total(order int, fee int) int {
+	let base = order
+	let mut sum = base + fee
+	if sum > Limit {
+		sum = sum + 5
+	}
+	sum -= 1
+	let typed int64 = 5000
+	sum + int(typed)
+}

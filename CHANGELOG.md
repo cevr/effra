@@ -6,6 +6,12 @@ Entries describe user-visible changes and are true at the commit that carries th
 
 ### Breaking changes
 
+- The checker enforces stage D1 of the v1 checker, and every form it admits runs under `ergo run` ([#196](https://github.com/cevr/ergo/issues/196), 196v; check-v1):
+  - An assignment `x = e` or `x op= e` needs a target rooted at a `let mut` local, directly or through fields and indexes. A parameter, a `let`, a pattern, `as`, `case err:` or loop binding and a package-level `let` are immutable (S108, "declare x with let mut"). A borrow `&x`, or a call `x.f()` of a function that takes `*T`, needs a `let mut` root too; a write through a pointer does not. A `let mut` that is never reassigned is S110 "n is never reassigned; write let n".
+  - `let x` with neither a type nor a value is S108; a package-level `let mut` and `let mut` over a pattern are S108.
+  - No shadowing: a binder that reuses a name bound in an enclosing scope of the same function is S108 at the inner binder. Sibling scopes may reuse a name.
+  - A prelude name (`int`, `len`, `Map`, `ordered`, `Option`, `Clock`, `Console`, …) cannot be redeclared at any scope: S108 "X is a prelude name, which cannot be redeclared; choose another name".
+  - A reference to a function the checker refused for its pinned row (class G) is refused in a later component too, so it adds no cascade diagnostic.
 - The checker enforces stage C of the v1 checker, and every form it admits runs under `ergo run` ([#196](https://github.com/cevr/ergo/issues/196), 196r; check-v1):
   - A body yields its last expression: a function, an `if` or `match` arm, a `catch` arm and a trailing block; `return e` leaves early and means the same. A fallible tail's failure escapes, as `return f()` does. A body that needs a value and ends in a statement is S107 at its closing brace.
   - `if` and `match` are expressions: `let s = if c { 1 } else { 2 }`, `1 + match p { … }`, an argument, a tail. With an expected type every branch takes it; without one the branches have the first branch's type and never join into a union. A value `if` without `else` is S108. A branch that ends in `return`, `break` or `continue` joins any type.

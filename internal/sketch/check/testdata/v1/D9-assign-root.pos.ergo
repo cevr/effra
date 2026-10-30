@@ -1,0 +1,13 @@
+// Open question Q2 (recommended): an assignment's target is rooted at a
+// `let mut` name, also through fields and indexes.
+type Order { Total int }
+
+func bump(o Order, xs []int, m Map[string, int]) int {
+	let mut copy = o
+	copy.Total = 5
+	let mut ys = xs
+	ys[0] = 1
+	let mut n = m
+	n["a"] = 2
+	copy.Total + ys[0] + n["a"]
+}

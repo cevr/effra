@@ -39,8 +39,8 @@ func blocks() int {
 	if y > 0 {
 		return y
 	}
-	for x in 0..2 {
-		_ = x
+	for z in 0..2 {
+		_ = z
 	}
 	return x
 }

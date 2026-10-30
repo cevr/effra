@@ -345,6 +345,14 @@ func infoGaps(file *syntax.File, src string, info *Info) []string {
 					}
 				}
 			}
+			// An implicit type parameter (196a D6, until stage E's D-E1)
+			// has no declaring identifier; it is the function's own too
+			// (stage D1 fuzz triage: `func A(a B) B { return a }`).
+			if fn, ok := info.Defs[d.Name].(*Func); ok && fn.Sig != nil {
+				for _, tp := range fn.Sig.TParams {
+					own[tp] = true
+				}
+			}
 			if d.Type != nil {
 				fields(d.Type.Params, "the parameter")
 			}
@@ -637,7 +645,7 @@ func NewStore(v string) Store { return Mem{V: v} }
 
 func use(s Store, m Mem, xs []int8) int {
 	let n = Id(xs)
-	let total = len(n) + 2 * 3
+	let mut total = len(n) + 2 * 3
 	for i, x in xs {
 		let y = int(x) + i
 		s.Get()

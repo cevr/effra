@@ -291,9 +291,11 @@ func (r *patResolver) pattern0(e syntax.Expr, t Type, col int) resolved {
 				break
 			}
 			if r.bindings {
-				c.errorf(x, CodeType, "%s is a prelude name; choose another name (rows.md, Totality 6; D-D3)", x.Name)
+				// Only a prelude function or built-in is not reusable.
+				c.preludeName(x)
 			} else {
 				c.errorf(x, CodeType, "a pattern name binds; %s already names %s: compare with if, or choose another name (rows.md, Totality 1)", x.Name, objectNoun(o))
+				c.refuseBinder(x.Pos())
 			}
 			if p, ok := o.(*PkgName); ok {
 				p.used = true // The refused occurrence must not add an unused import.
@@ -303,6 +305,7 @@ func (r *patResolver) pattern0(e syntax.Expr, t Type, col int) resolved {
 		case *Var:
 			if o.pkg && !r.bindings {
 				c.errorf(x, CodeType, "a pattern name binds; %s already names a package value: compare with if, or choose another name (rows.md, Totality 1)", x.Name)
+				c.refuseBinder(x.Pos())
 				r.bind(x, invalid, &Pattern{Kind: PatBind}, false)
 				return r.fail(nil, t)
 			}
@@ -852,6 +855,7 @@ func (c *checker) declareArm(items [][]patBinding) []armVar {
 	for _, b := range first {
 		g := &switchGroup{}
 		groups[b.id.Name] = g
+		c.localBinder(b.id.Name, b.id.Pos())
 		v := c.bindLocal(&Var{Name: b.id.Name, Type: b.t, Pos: b.id.Pos(), group: g, used: true})
 		if isInvalid(b.t) {
 			g.used = true // an invalid pattern adds no S110 (D3)

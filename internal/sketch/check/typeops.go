@@ -354,6 +354,27 @@ func selfBinding(t *Named, f *Func) map[*TypeParam]Type {
 	return m
 }
 
+// sigHasInvalid reports whether a parameter or result type of sig is
+// invalid or holds an invalid part.
+func sigHasInvalid(sig *Signature) bool {
+	for _, p := range sig.Params {
+		if containsInvalid(p.Type) {
+			return true
+		}
+	}
+	for _, r := range sig.Results {
+		if containsInvalid(r) {
+			return true
+		}
+	}
+	return false
+}
+
+// shapeOf is sig's parameters and results without its rows.
+func shapeOf(sig *Signature) *Signature {
+	return &Signature{Params: sig.Params, Results: sig.Results, Errors: newRow(), Uses: newRow()}
+}
+
 // dropSelf is sig without its first parameter, which x of x.f(…) fills.
 func dropSelf(sig *Signature) *Signature {
 	out := *sig
@@ -389,8 +410,16 @@ func (c *checker) implements(v Type, it *Interface) string {
 				return fmt.Sprintf("%s.%s has a type parameter of its own, %s; an operation takes none", v, m.Name, extra.Name)
 			}
 		}
+		if sigHasInvalid(got) {
+			// The invalid part has its own diagnostic; comparing it would
+			// cascade (D3; stage D1 fuzz triage, fuzz-check-C-r4-f8314ece).
+			continue
+		}
 		if !c.sameShape(got, m.Sig) {
-			return fmt.Sprintf("%s.%s has signature %s, want %s", v, m.Name, got, m.Sig)
+			// The shape is the mismatch, so the message prints shapes: an
+			// inferred row may still be open here, and its text would
+			// depend on declaration order (D0; fuzz-check-C-r7rev-dbdbb39c).
+			return fmt.Sprintf("%s.%s has signature %s, want %s", v, m.Name, shapeOf(got), shapeOf(m.Sig))
 		}
 		if !got.Errors.subsetOf(c.types, m.Sig.Errors) {
 			return fmt.Sprintf("%s.%s can fail with %s, wider than %s", v, m.Name, rowText(got.Errors.minus(c.types, m.Sig.Errors)), rowText(m.Sig.Errors))

@@ -10,11 +10,11 @@ import (
 // unifies with the variant its argument names, and the variant's type
 // arguments bind; a conflicting later argument is S108.
 func TestInferenceUnions(t *testing.T) {
-	const decls = `type Some[T] { V T }
+	const decls = `type Has[T] { V T }
 
-type None {}
+type Empty {}
 
-type Opt[T] = Some[T] | None
+type Opt[T] = Has[T] | Empty
 
 func Get[T](o Opt[T], d T) T { return d }
 
@@ -24,13 +24,13 @@ func Pair[T](o Opt[T], p Opt[T]) {}
 		name, body string
 		accept     bool
 	}{
-		{"variant-binds", `func G() int { return Get(Some[int]{V: 1}, 2) }`, true},
-		{"plain-variant", `func G() int { return Get(None, 2) }`, true},
-		{"variant-then-conflict", `func G(s string) string { return Get(Some[int]{V: 1}, s) }`, false},
-		{"two-variants-agree", `func G() { Pair(Some[int]{V: 1}, Some[int]{V: 2}) }`, true},
-		{"two-variants-conflict", `func G() { Pair(Some[int]{V: 1}, Some[string]{V: "a"}) }`, false},
-		{"not-a-variant", `func G() int { return Get(Some2, 2) }
-type Some2 {}`, false},
+		{"variant-binds", `func G() int { return Get(Has[int]{V: 1}, 2) }`, true},
+		{"plain-variant", `func G() int { return Get(Empty, 2) }`, true},
+		{"variant-then-conflict", `func G(s string) string { return Get(Has[int]{V: 1}, s) }`, false},
+		{"two-variants-agree", `func G() { Pair(Has[int]{V: 1}, Has[int]{V: 2}) }`, true},
+		{"two-variants-conflict", `func G() { Pair(Has[int]{V: 1}, Has[string]{V: "a"}) }`, false},
+		{"not-a-variant", `func G() int { return Get(Has2, 2) }
+type Has2 {}`, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1,0 +1,6 @@
+// Open question Q3 (recommended): a `let mut` name that is never reassigned
+// is S110 "n is never reassigned; write let n".
+func count(xs []int) int {
+	let mut n = len(xs) // want S110
+	n
+}

@@ -1,0 +1,10 @@
+// Open question Q2 (recommended): a field or element of a `let` name or a
+// parameter is not assignable (S108, "declare o with let mut").
+type Order { Total int }
+
+func bump(o Order, xs []int) int {
+	o.Total = 5 // want S108
+	let ys = xs
+	ys[0] = 1 // want S108
+	o.Total + ys[0]
+}

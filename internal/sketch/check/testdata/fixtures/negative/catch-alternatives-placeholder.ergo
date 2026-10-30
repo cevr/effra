@@ -1,0 +1,18 @@
+type E { N int }
+type F {}
+
+func gf() int fails E | F { 1 }
+
+func f() int {
+	gf() catch {
+	case E{N: e}, a as e: // want S108
+		e + "x" // want S108
+	}
+}
+
+func h() int {
+	gf() catch {
+	case a as e, E{N: e}: // want S108
+		e + "x" // want S108
+	}
+}

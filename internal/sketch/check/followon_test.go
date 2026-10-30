@@ -456,14 +456,14 @@ func outer() {
 }
 func main() {}
 `,
+		// w2's try on the refused member walk is refused with it
+		// (groupRef, stage D1), so it adds no "cannot fail".
 		want: []string{
 			armError12,
-			"21:2 S108 try on an expression that cannot fail (rows.md, Error rows 6)",
 			"24:2 S108 catch on an expression that cannot fail (rows.md, Catch 1)",
 			"26:7 S108 main.Q is caught twice (rows.md, Catch 2)",
 		},
 		followOn: []string{
-			"21:2 S108 try on an expression that cannot fail (rows.md, Error rows 6)",
 			"24:2 S108 catch on an expression that cannot fail (rows.md, Catch 1)",
 		},
 		hidden: []string{
@@ -545,13 +545,13 @@ func outer() {
 }
 func main() {}
 `,
+		// w2's try on the refused member walk is refused with it
+		// (groupRef, stage D1).
 		want: []string{
 			armError12,
-			"22:2 S108 try on an expression that cannot fail (rows.md, Error rows 6)",
 			"27:7 S108 main.Q is not in the caught row {main.E} (rows.md, Catch 2)",
 			"28:7 S108 main.Q is caught twice (rows.md, Catch 2)",
 		},
-		followOn: []string{"22:2 S108 try on an expression that cannot fail (rows.md, Error rows 6)"},
 	},
 	{
 		// The row reaches outer through a generic row parameter.
@@ -587,14 +587,14 @@ func outer() {
 }
 func main() {}
 `,
+		// w2's try on the refused member walk is refused with it
+		// (groupRef, stage D1).
 		want: []string{
 			armError11,
-			"20:2 S108 try on an expression that cannot fail (rows.md, Error rows 6)",
 			"26:2 S108 catch on an expression that cannot fail (rows.md, Catch 1)",
 			"26:15 S108 try on an expression that cannot fail (rows.md, Error rows 6)",
 		},
 		followOn: []string{
-			"20:2 S108 try on an expression that cannot fail (rows.md, Error rows 6)",
 			"26:2 S108 catch on an expression that cannot fail (rows.md, Catch 1)",
 			"26:15 S108 try on an expression that cannot fail (rows.md, Error rows 6)",
 		},
@@ -683,14 +683,14 @@ func outer() {
 }
 func main() {}
 `,
+		// w2's try on the refused member walk is refused with it
+		// (groupRef, stage D1).
 		want: []string{
 			armError11,
-			"20:2 S108 try on an expression that cannot fail (rows.md, Error rows 6)",
 			"23:2 S108 catch on an expression that cannot fail (rows.md, Catch 1)",
 			"24:7 S108 generic type main.G needs type arguments",
 		},
 		followOn: []string{
-			"20:2 S108 try on an expression that cannot fail (rows.md, Error rows 6)",
 			"23:2 S108 catch on an expression that cannot fail (rows.md, Catch 1)",
 			"24:7 S108 generic type main.G needs type arguments",
 		},

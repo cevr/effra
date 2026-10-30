@@ -29,10 +29,15 @@ type asBinding struct {
 	group *switchGroup
 }
 
-// declareAs declares one `as` name with type t; `_` binds nothing.
-func (c *checker) declareAs(name *syntax.Ident, t Type) (asBinding, bool) {
+// declareAs declares one `as` name with type t; `_` binds nothing. A
+// placeholder (the name of a pattern typing skipped) binds without the
+// binder rules: its pattern carries the one diagnostic (D3).
+func (c *checker) declareAs(name *syntax.Ident, t Type, placeholder bool) (asBinding, bool) {
 	if name.Name == "_" {
 		return asBinding{}, false
+	}
+	if !placeholder {
+		c.localBinder(name.Name, name.Pos())
 	}
 	g := &switchGroup{}
 	v := c.bindLocal(&Var{Name: name.Name, Type: t, Pos: name.Pos(), group: g, used: true})
@@ -50,7 +55,16 @@ func (c *checker) catchAll(id *syntax.Ident) bool {
 	if r, _ := utf8.DecodeRuneInString(id.Name); !unicode.IsLower(r) {
 		return false
 	}
-	return c.lookupType(id.Name, c.localTypeCtx()) == nil
+	switch o := c.lookupType(id.Name, c.localTypeCtx()).(type) {
+	case nil:
+		return true
+	case *Var:
+		// A local of an enclosing scope: the arm still binds the rest, and
+		// the reuse is D-D2's S108 at the binder, not a type test. A local
+		// hides no package object, so the reference walk agrees.
+		return !o.pkg
+	}
+	return false
 }
 
 // unusedAs reports each `as` name that its arm never reads (S110), as the

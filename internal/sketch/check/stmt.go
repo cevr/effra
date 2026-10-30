@@ -25,7 +25,9 @@ func (c *checker) declareLocal(id *syntax.Ident, t Type) *Var {
 		return nil
 	}
 	sc := c.fn.scope
-	if prev, ok := sc.names[id.Name]; ok {
+	if c.preludeName(id) {
+		// D-D3: the one diagnostic; the name still binds below.
+	} else if prev, ok := sc.names[id.Name]; ok {
 		switch prev := prev.(type) {
 		case *capBinding:
 			c.errorf(id, CodeUnknown, "%s is in this function's capability row, so a local of that name in the same frame is an error; rename the local (rows-and-constraints §7 amendment 3)", id.Name)
@@ -33,10 +35,16 @@ func (c *checker) declareLocal(id *syntax.Ident, t Type) *Var {
 			// The second declaration is the error; the first is not
 			// also reported as unused (no cascade, D3).
 			prev.used = true
-			c.errorf(id, CodeType, "%s is already declared in this block", id.Name)
+			if prev.param {
+				c.errorf(id, CodeType, "%s is already a parameter of this function; choose another name (no shadowing, #196 196v rule 2)", id.Name)
+			} else {
+				c.errorf(id, CodeType, "%s is already declared in this block; choose another name (no shadowing, #196 196v rule 2)", id.Name)
+			}
 		default:
 			c.errorf(id, CodeType, "%s is already declared in this block", id.Name)
 		}
+	} else {
+		c.shadowed(id.Name, id.Pos(), sc)
 	}
 	if t == nil {
 		t = invalid
@@ -222,7 +230,18 @@ func (c *checker) unusedValue(at syntax.Expr, op operand) {
 // varDecl checks a local var declaration. A var of a type with no zero
 // value needs a value (types.md, Zero values 3).
 func (c *checker) varDecl(d *syntax.VarDecl) {
+	mut := d.Mut.IsValid()
+	// declare binds one let name: immutable, or mut under `let mut`
+	// (D-D1).
+	declare := func(n *syntax.Ident, t Type) {
+		if v := c.declareLocal(n, t); v != nil {
+			v.let, v.mut = true, mut
+		}
+	}
 	for _, spec := range d.Specs {
+		if mut && spec.Pattern != nil {
+			c.mutPattern(d)
+		}
 		p := spec.Pattern
 		if p == nil && len(spec.Names) == 1 {
 			n := spec.Names[0]
@@ -251,7 +270,10 @@ func (c *checker) varDecl(d *syntax.VarDecl) {
 				c.errorf(spec.Names[0], CodeType, "let %s of type %s needs a value: %s has no zero value (types.md, Zero values 3)", spec.Names[0].Name, declared, declared)
 			}
 			for _, n := range spec.Names {
-				c.declareLocal(n, declared)
+				if spec.Type == nil {
+					c.untypedLet(n) // D-D1; n binds with the invalid type
+				}
+				declare(n, declared)
 			}
 		case len(spec.Values) == len(spec.Names):
 			types := make([]Type, len(spec.Names))
@@ -265,7 +287,7 @@ func (c *checker) varDecl(d *syntax.VarDecl) {
 				}
 			}
 			for i, n := range spec.Names {
-				c.declareLocal(n, types[i])
+				declare(n, types[i])
 			}
 		case len(spec.Values) == 1:
 			types := c.multiValue(spec.Values[0], len(spec.Names))
@@ -277,12 +299,12 @@ func (c *checker) varDecl(d *syntax.VarDecl) {
 					}
 					t = declared
 				}
-				c.declareLocal(n, t)
+				declare(n, t)
 			}
 		default:
 			c.errorf(spec, CodeType, "%d names and %d values", len(spec.Names), len(spec.Values))
 			for _, n := range spec.Names {
-				c.declareLocal(n, invalid)
+				declare(n, invalid)
 			}
 		}
 	}
@@ -405,18 +427,18 @@ func assignOp(t syntax.Token) syntax.Token {
 	return syntax.ILLEGAL
 }
 
-// lhs checks an assignment target: a local, a field or an element. A
-// package-level let is immutable (grammar.md, Declarations 6). Assigning
-// does not read the variable.
+// lhs checks an assignment target: a local, a field or an element, rooted
+// at a `let mut` local (D-D1, Q2; mutableRoot). A package-level let is
+// immutable (grammar.md, Declarations 6). Assigning does not read the
+// variable.
 func (c *checker) lhs(x syntax.Expr) operand {
 	if id, ok := unparen(x).(*syntax.Ident); ok {
 		o := c.lookup(id.Name)
 		if v, ok := o.(*Var); ok {
-			if v.pkg {
-				c.errorf(x, CodeType, "the package-level let %s is immutable (grammar.md, Declarations 6)", id.Name)
-				return bad(x)
-			}
-			if v.Type == nil || isInvalid(v.Type) {
+			// The root rule reports and never changes the typing (D-D1);
+			// a package-level let stays unassignable, as before.
+			c.mutableRoot(x)
+			if v.pkg || v.Type == nil || isInvalid(v.Type) {
 				return bad(x)
 			}
 			c.recordUse(id, v)
@@ -439,6 +461,13 @@ func (c *checker) lhs(x syntax.Expr) operand {
 		return op
 	}
 	c.assignable0(x, &op)
+	if op.invalid() {
+		// The target's own diagnostic is the one; its let mut root still
+		// counts as reassigned, so no S110 joins it (D3).
+		c.markReassigned(x)
+	} else {
+		c.mutableRoot(x)
+	}
 	return op
 }
 

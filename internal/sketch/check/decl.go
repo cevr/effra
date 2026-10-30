@@ -181,6 +181,7 @@ func (c *checker) collect() {
 				// parameters are distinct local types (196m rule 3) and
 				// reports the redeclaration otherwise.
 				if prev, ok := c.pkg.Scope.names[d.Name.Name].(*Func); ok && d.Name.Name != "_" {
+					c.preludeName(d.Name) // D-D3, at each declaration
 					prev.same = append(prev.same, fn)
 					continue
 				}
@@ -191,6 +192,9 @@ func (c *checker) collect() {
 				if len(d.Specs) != 1 || d.Lparen.IsValid() {
 					c.undecided(d, "a grouped let")
 					continue
+				}
+				if d.Mut.IsValid() {
+					c.mutPackageLet(d)
 				}
 				for _, spec := range d.Specs {
 					if spec.Pattern != nil {
@@ -204,7 +208,9 @@ func (c *checker) collect() {
 						c.pkgPatterns[spec] = group
 					}
 					for i, name := range spec.Names {
-						v := &Var{Name: name.Name, Pos: name.Pos(), pkg: true, used: true}
+						// A refused package-level let mut (mutPackageLet)
+						// keeps mut, so its assignments add nothing (D3).
+						v := &Var{Name: name.Name, Pos: name.Pos(), pkg: true, used: true, mut: d.Mut.IsValid()}
 						c.declare(name, v)
 						pv := &pkgVar{obj: v, spec: spec, idx: i, file: fi, name: name, group: group}
 						if group != nil {
@@ -216,6 +222,7 @@ func (c *checker) collect() {
 			case *syntax.TestDecl:
 				c.notYet(d)
 			case *syntax.WireDecl:
+				c.preludeName(d.Name) // D-D3; the wire still binds
 				w := &Wire{Name: d.Name.Name, Pos: d.Name.Pos(), Decl: d, file: fi, pkg: c.pkg}
 				if _, dup := c.pkg.Wires[w.Name]; dup {
 					c.errorf(d.Name, CodeType, "wire %s is declared twice", w.Name)
@@ -265,12 +272,15 @@ func (c *checker) collect() {
 }
 
 // declare enters a package-level name; a second declaration of one name is
-// S108 (a type and a function share the package's namespace).
+// S108 (a type and a function share the package's namespace). A prelude
+// name is S108 (D-D3) and still declares, so its uses add nothing.
 func (c *checker) declare(id *syntax.Ident, o Object) bool {
 	if id.Name == "_" {
 		return false
 	}
-	if prev, ok := c.pkg.Scope.names[id.Name]; ok {
+	if c.preludeName(id) {
+		// reported; the declaration binds below
+	} else if prev, ok := c.pkg.Scope.names[id.Name]; ok {
 		what := "declared"
 		if _, isType := prev.(*TypeName); isType {
 			what = "declared as a type"
@@ -305,13 +315,6 @@ func (c *checker) importSpec(fi *fileInfo, spec *syntax.ImportSpec) {
 		return
 	}
 	pkg, err := c.imp.Import(path)
-	if (err != nil || pkg == nil) && laterStd[path] {
-		// A decided std module that lower-v1 brings: S109, never an
-		// unknown package, and its uses do not cascade.
-		c.errorf(spec.Path, CodeOutside, "the std module %s is lower-v1's (task, scope, slice and queue); it is not checked yet", path)
-		c.bindBrokenImport(fi, spec, path)
-		return
-	}
 	if err != nil || pkg == nil {
 		c.errorf(spec.Path, CodeUnknown, "unknown package %q", path)
 		c.bindBrokenImport(fi, spec, path)
@@ -320,6 +323,7 @@ func (c *checker) importSpec(fi *fileInfo, spec *syntax.ImportSpec) {
 	name := pkg.Name
 	if spec.Kind == syntax.ImportNamed {
 		name = spec.Name.Name
+		c.preludeName(spec.Name) // D-D3; the import still binds
 	}
 	pn := &PkgName{Name: name, Pos: spec.Pos(), Pkg: pkg, spec: spec}
 	if name == "_" {
@@ -335,10 +339,6 @@ func (c *checker) importSpec(fi *fileInfo, spec *syntax.ImportSpec) {
 
 // bindBrokenImport binds the name of a failed import to an empty package,
 // so its uses add no diagnostic of their own (D3).
-// laterStd are the decided std modules lower-v1 brings (#50): an import of
-// one is S109 naming lower-v1 until the checker reads its declarations.
-var laterStd = map[string]bool{"task": true, "scope": true, "slice": true, "queue": true}
-
 func (c *checker) bindBrokenImport(fi *fileInfo, spec *syntax.ImportSpec, path string) {
 	name := path[strings.LastIndex(path, "/")+1:]
 	if spec.Kind == syntax.ImportNamed && spec.Name != nil {
@@ -383,6 +383,7 @@ func (c *checker) resolveNamed(n *Named) {
 		kinds, conflicts := c.bracketKinds(n.Obj)
 		for _, field := range d.TypeParams.List {
 			for _, name := range field.Names {
+				c.preludeName(name) // D-D3; the parameter still binds
 				tp := &TypeParam{Name: name.Name, Pos: name.Pos(), id: newID()}
 				c.def(name, tp)
 				switch {
@@ -623,7 +624,13 @@ func (c *checker) lookupType(name string, ctx *typeCtx) Object {
 	if ctx != nil && ctx.scope != nil {
 		scope = ctx.scope
 	}
-	if o, _ := scope.lookup(name); o != nil {
+	if o, at := scope.lookup(name); o != nil {
+		// A refused import of a prelude name still binds (D-D3; lookup).
+		if c.abovePackage(at) && c.cur != nil {
+			if imp, ok := c.cur.scope.names[name]; ok {
+				return imp
+			}
+		}
 		return o
 	}
 	if c.cur != nil {
@@ -1272,6 +1279,7 @@ func (c *checker) funcSig(f *Func) *Signature {
 	if d.TypeParams != nil {
 		for _, field := range d.TypeParams.List {
 			for _, name := range field.Names {
+				c.preludeName(name) // D-D3; the parameter still binds
 				tp := &TypeParam{Name: name.Name, Pos: name.Pos(), id: newID()}
 				c.def(name, tp)
 				switch {

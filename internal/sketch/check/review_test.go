@@ -295,18 +295,24 @@ func F() Box[int] { return with wire {} { Box{} } }`},
 func F(m Map[int, S]) { m[0].X = 1 }`},
 	{"M17", "map-index-assignment", "", `type S { X int }
 func F(m Map[int, S], n Map[int, int]) {
-	m[0] = S{}
-	m[1] = S{X: 2}
-	n[3] += S{}.X
+	let mut m2 = m
+	let mut n2 = n
+	m2[0] = S{}
+	m2[1] = S{X: 2}
+	n2[3] += S{}.X
 }`},
 	{"M17", "map-index-field-increment", "S108", `type S { X int }
 func F(m Map[int, S]) { m[2].X += 1 }`},
 	{"M17", "map-value-increment", "", `func F(m Map[int, int]) {
-	m[0] += 1
-	m[1] += 2
+	let mut m2 = m
+	m2[0] += 1
+	m2[1] += 2
 }`},
 	{"M17", "slice-element-field", "", `type S { X int }
-func F(xs []S) { xs[0].X = 1 }`},
+func F(xs []S) {
+	let mut ys = xs
+	ys[0].X = 1
+}`},
 	{"M17", "map-index-address", "S108", `type S { X int }
 func G(s *S)          {}
 func F(m Map[int, S]) { G(&m[0]) }`},

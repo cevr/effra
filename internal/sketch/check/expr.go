@@ -361,13 +361,20 @@ func (c *checker) localTypeCtx() *typeCtx {
 
 // lookup resolves a name in expression position, innermost frame first:
 // locals and the body's frame, the package, the universe and the prelude,
-// then the file's import names (D4).
+// then the file's import names (D4). An import named after a prelude name
+// is refused (D-D3) and still binds, so it wins over the prelude name it
+// reuses.
 func (c *checker) lookup(name string) Object {
+	sc := c.pkg.Scope
 	if c.fn != nil && c.fn.scope != nil {
-		if o, _ := c.fn.scope.lookup(name); o != nil {
-			return o
+		sc = c.fn.scope
+	}
+	if o, at := sc.lookup(name); o != nil {
+		if c.abovePackage(at) && c.cur != nil {
+			if imp, ok := c.cur.scope.names[name]; ok {
+				return imp
+			}
 		}
-	} else if o, _ := c.pkg.Scope.lookup(name); o != nil {
 		return o
 	}
 	if c.cur != nil {
@@ -475,6 +482,35 @@ func fitsInt64(v constant.Value) bool {
 
 // ---------------------------------------------------------------- composite literals
 
+// orphanElements types the element values of a composite literal whose
+// written type did not resolve (reported there), as the arguments of an
+// invalid callee are (silentArgs): each value's own errors show and its
+// names resolve as the reference walk resolves them (class H; stage D1
+// fuzz triage, `with 0 { with wire { A: A{read} } {} }`). A key is a field
+// name of an unknown type and stays unchecked; a function literal and an
+// elided-type literal need the missing type and are skipped.
+func (c *checker) orphanElements(x *syntax.CompositeLit) {
+	for _, e := range x.Elts {
+		if kv, ok := e.(*syntax.KeyValueExpr); ok {
+			e = kv.Value
+		}
+		switch e := e.(type) {
+		case *syntax.FuncLit:
+			continue
+		case *syntax.CompositeLit:
+			if e.Type == nil {
+				continue
+			}
+		}
+		op := c.expr(e, nil)
+		if op.mode == modeType {
+			continue
+		}
+		c.needValue(&op)
+		c.handled(&op)
+	}
+}
+
 func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 	var t Type
 	switch {
@@ -489,6 +525,7 @@ func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 	default:
 		t = c.literalType(x, hint)
 		if t == nil {
+			c.orphanElements(x)
 			return bad(x)
 		}
 	}
@@ -929,6 +966,9 @@ func (c *checker) selfCall(x *syntax.SelectorExpr, base operand, sig *Signature,
 	if fn.Ptr && !isPointer(base.typ) && !base.addressable {
 		c.errorf(x.X, CodeType, "%s takes *%s, and %s is not addressable", fn.Name, fn.owner.Obj.Name, exprText(x.X))
 		return bad(x)
+	}
+	if fn.Ptr && !isPointer(base.typ) {
+		c.borrowRoot(x.X, x.X, fn.Name) // D-D1: the implicit borrow could change x
 	}
 	if c.monoBad(fn.Sig.TParams) {
 		return bad(x)

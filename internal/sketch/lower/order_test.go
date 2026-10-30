@@ -310,9 +310,12 @@ const placeSum = "b1.A + 3 * b1.B + 5 * b2.A + 7 * b2.B + 11 * xs[0] + 13 * xs[1
 // ys, makes bs cs, or replaces b1. The oracle fixes each place in a
 // temporary before it evaluates the value, so a lowering that reads the
 // base after the value, or calls a *T function on a copy, differs.
-func (g *orderGen) placeStmts(src *strings.Builder) func(*interp) *placeState {
-	src.WriteString("\tlet mut b1 = Box{A: 1, B: 2}\n\tlet mut b2 = Box{A: 3, B: 4}\n\tlet mut p = &b1\n")
-	src.WriteString("\tlet mut xs = []int{5, 6}\n\tlet ys = []int{7, 8}\n\tlet mut bs = []Box{Box{A: 9, B: 0}, Box{A: 10, B: 0}}\n\tlet cs = []Box{Box{A: 11, B: 0}, Box{A: 12, B: 0}}\n\tlet mut ws = []Wrap{Wrap{inner: Box{A: 13, B: 14}}, Wrap{inner: Box{A: 15, B: 16}}}\n\tlet vs = []Wrap{Wrap{inner: Box{A: 17, B: 18}}, Wrap{inner: Box{A: 19, B: 20}}}\n")
+func (g *orderGen) placeStmts(out *strings.Builder) func(*interp) *placeState {
+	// The statements go to src first: a base is declared `let mut` only
+	// when a statement reassigns it, writes through it or borrows it (b1,
+	// which p borrows), as check-v1 D-D1 and Q3 require.
+	src := &strings.Builder{}
+	mut := map[string]bool{"b1": true}
 	// value is an int operand that may move one base first.
 	type move int
 	const (
@@ -331,14 +334,18 @@ func (g *orderGen) placeStmts(src *strings.Builder) func(*interp) *placeState {
 		switch m {
 		case moveP:
 			stmt, apply = "p = &b2", func(s *placeState) { s.p = &s.b2 }
+			mut["p"], mut["b2"] = true, true
 		case moveXs:
 			stmt, apply = "xs = ys", func(s *placeState) { s.xs = s.ys }
+			mut["xs"] = true
 		case moveBs:
 			stmt, apply = "bs = cs", func(s *placeState) { s.bs = s.cs }
+			mut["bs"] = true
 		case moveB1:
 			stmt, apply = "b1 = Box{A: 40, B: 50}", func(s *placeState) { s.b1 = box{40, 50} }
 		case moveWs:
 			stmt, apply = "ws = vs", func(s *placeState) { s.ws = s.vs }
+			mut["ws"] = true
 		}
 		eval := func(in *interp, s *placeState) int {
 			if apply != nil {
@@ -381,6 +388,7 @@ func (g *orderGen) placeStmts(src *strings.Builder) func(*interp) *placeState {
 			isrc, i := index()
 			src1, v := value(pickMove(moveXs))
 			fmt.Fprintf(src, "\txs[%s] = %s\n", isrc, src1)
+			mut["xs"] = true
 			steps = append(steps, func(in *interp, s *placeState) { base := s.xs; k := i(in); base[k] = v(in, s) })
 		case 3: // a *T dot call on a variable: the variable, not a copy
 			src1, v := value(pickMove(moveB1))
@@ -394,6 +402,7 @@ func (g *orderGen) placeStmts(src *strings.Builder) func(*interp) *placeState {
 			isrc, i := index()
 			src1, v := value(pickMove(moveBs))
 			fmt.Fprintf(src, "\tbs[%s].Bump(%s)\n", isrc, src1)
+			mut["bs"] = true
 			steps = append(steps, func(in *interp, s *placeState) { base := s.bs; recv := &base[i(in)]; n := v(in, s); recv.A += n })
 		case 7: // a *T dot call on a dereferenced pointer: the pointee, not a copy
 			src1, v := value(pickMove(moveP))
@@ -407,11 +416,13 @@ func (g *orderGen) placeStmts(src *strings.Builder) func(*interp) *placeState {
 			isrc, i := index()
 			src1, v := value(pickMove(moveWs))
 			fmt.Fprintf(src, "\tws[%s].inner.Bump(%s)\n", isrc, src1)
+			mut["ws"] = true
 			steps = append(steps, func(in *interp, s *placeState) { base := s.ws; recv := &base[i(in)].inner; n := v(in, s); recv.A += n })
 		case 10: // a field of a field of a slice element
 			isrc, i := index()
 			src1, v := value(pickMove(moveWs))
 			fmt.Fprintf(src, "\tws[%s].inner.B = %s\n", isrc, src1)
+			mut["ws"] = true
 			steps = append(steps, func(in *interp, s *placeState) { base := s.ws; k := i(in); base[k].inner.B = v(in, s) })
 		default: // a field of a field of a variable
 			src1, v := value(pickMove(moveB1))
@@ -419,6 +430,23 @@ func (g *orderGen) placeStmts(src *strings.Builder) func(*interp) *placeState {
 			steps = append(steps, func(in *interp, s *placeState) { n := v(in, s); s.b1.B = n })
 		}
 	}
+	let := func(name, value string) {
+		kw := "let"
+		if mut[name] {
+			kw = "let mut"
+		}
+		fmt.Fprintf(out, "\t%s %s = %s\n", kw, name, value)
+	}
+	let("b1", "Box{A: 1, B: 2}")
+	let("b2", "Box{A: 3, B: 4}")
+	let("p", "&b1")
+	let("xs", "[]int{5, 6}")
+	let("ys", "[]int{7, 8}")
+	let("bs", "[]Box{Box{A: 9, B: 0}, Box{A: 10, B: 0}}")
+	let("cs", "[]Box{Box{A: 11, B: 0}, Box{A: 12, B: 0}}")
+	let("ws", "[]Wrap{Wrap{inner: Box{A: 13, B: 14}}, Wrap{inner: Box{A: 15, B: 16}}}")
+	let("vs", "[]Wrap{Wrap{inner: Box{A: 17, B: 18}}, Wrap{inner: Box{A: 19, B: 20}}}")
+	out.WriteString(src.String())
 	return func(in *interp) *placeState {
 		s := &placeState{b1: box{1, 2}, b2: box{3, 4}, xs: []int{5, 6}, ys: []int{7, 8}, bs: []box{{9, 0}, {10, 0}}, cs: []box{{11, 0}, {12, 0}}, ws: []wrap{{box{13, 14}}, {box{15, 16}}}, vs: []wrap{{box{17, 18}}, {box{19, 20}}}}
 		s.p = &s.b1

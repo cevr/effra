@@ -126,6 +126,7 @@ func (c *checker) unary(x *syntax.UnaryExpr, hint Type) operand {
 			c.errorf(x, CodeType, "cannot take the address of this expression; a borrow &x names a variable, field or element")
 			return bad(x)
 		}
+		c.borrowRoot(x, x.X, "&") // D-D1: a borrow could change x
 		return operand{mode: modeValue, typ: &Pointer{Elem: op.typ}}
 	case syntax.ADD, syntax.SUB, syntax.NOT, syntax.XOR:
 	default:
@@ -218,6 +219,17 @@ func (c *checker) binary(x *syntax.BinaryExpr, hint Type) operand {
 		return c.shift(x, hint)
 	}
 	if x.Op == syntax.DOTDOT {
+		// A range outside a for header is stage D2's (D-D4). Its operands
+		// are typed first, each on its own, so their own errors show and
+		// their names resolve as the reference walk resolves them (class H;
+		// stage D1 fuzz triage, `with A { Store..Get() }`).
+		for _, e := range []syntax.Expr{x.X, x.Y} {
+			op := c.expr(e, nil)
+			if op.mode != modeType {
+				c.needValue(&op)
+				c.handled(&op)
+			}
+		}
 		return c.notYet(x)
 	}
 	if isComparison(x.Op) {

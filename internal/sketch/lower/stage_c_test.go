@@ -109,7 +109,7 @@ func word(b bool) string {
 	}
 }
 func trace(s string, n int) int needs Console { Console.Println(s); n }
-func ordered(c bool) int needs Console { trace("left", 1) + if c { trace("then", 2) } else { trace("else", 3) } }
+func inOrder(c bool) int needs Console { trace("left", 1) + if c { trace("then", 2) } else { trace("else", 3) } }
 func main() needs Console {
 	if sign(-5) == -1 && sign(0) == 0 && sign(9) == 1 { Console.Println("sign") }
 	if size(A) == 0 && size(B{N: 3}) == 3 { Console.Println("match") }
@@ -123,7 +123,7 @@ func main() needs Console {
 	voidTail(false) catch { case E: Console.Println("unexpected") }
 	if arm(true) == 2 && arm(false) == 0 { Console.Println("catch arm") }
 	if word(true) == "yes" && word(false) == "no" { Console.Println("bool") }
-	if ordered(false) == 4 { Console.Println("order") }
+	if inOrder(false) == 4 { Console.Println("order") }
 }
 `, "sign\nmatch\nlet\noperand\nargument\nunion\nreturn\nbreak\nvoid failed\ncatch arm\nbool\nleft\nelse\norder\n")
 }

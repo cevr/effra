@@ -148,6 +148,12 @@ func (c *checker) irrefutable(p syntax.Expr, t Type, what string, own map[*synta
 func (c *checker) declareBindings(binds []patBinding) []*Var {
 	var out []*Var
 	for _, b := range binds {
+		if isInvalid(b.t) {
+			// A placeholder of a refused pattern, or a binding of an
+			// invalid value: the pattern carries the one diagnostic, so
+			// the binder rules add none (D3).
+			c.refuseBinder(b.id.Pos())
+		}
 		v := c.declareLocal(b.id, b.t)
 		if v != nil {
 			b.info.Var = v

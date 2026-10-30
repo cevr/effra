@@ -131,6 +131,11 @@ func (c *checker) functionBody(body *syntax.BlockStmt, name string) {
 		k.tuple = results
 	}
 	k.missing = func(end syntax.Pos) {
+		for _, r := range results {
+			if containsInvalid(r) {
+				return // the result type has its own diagnostic (D3)
+			}
+		}
 		if end == body.Rbrace {
 			c.missingBodyResult(body, name)
 			return

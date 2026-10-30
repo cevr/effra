@@ -228,26 +228,29 @@ func main() fails Bad | Gen[int] | Gen2[int] needs Console {
 	}, {
 		name: "sharedonce",
 		// A named wire is closed, so its provider cannot print; the provider
-		// holds a slice instead, and Store's write is visible through Clock
+		// holds a slice instead, and Store's write is visible through Reader
 		// only when both keys hold one evaluated value.
 		src: `type Store { Bump() }
 
-type Clock { Read() int }
+type Reader { Read() int }
 
 type Both { s []int }
 
-func Bump(b Both) { b.s[0] = b.s[0] + 1 }
+func Bump(b Both) {
+	let mut s = b.s
+	s[0] = s[0] + 1
+}
 
 func Read(b Both) int { return b.s[0] }
 
 let Shared = wire {
-	Store, Clock: Both{s: []int{0}},
+	Store, Reader: Both{s: []int{0}},
 }
 
 func main() needs Console {
 	with Shared {
 		Store.Bump()
-		if Clock.Read() == 1 {
+		if Reader.Read() == 1 {
 			Console.Println("one value")
 		} else {
 			Console.Println("two values")

@@ -68,6 +68,13 @@ type checker struct {
 	diags    []Diagnostic
 	seen     map[string]bool
 	silent   int
+	// refusedBinders holds the binders the reporting pass has already
+	// refused by name (a pattern name that names a package object, a
+	// prelude name), so the binder rules add no second diagnostic (D3).
+	refusedBinders map[binderKey]bool
+	// refusedMembers holds the class G members the reporting pass refused,
+	// so a reference from a later component is invalid too (groupRef).
+	refusedMembers map[*Func]bool
 
 	cur *fileInfo
 	// instance caches the instances of generic named types by their
@@ -316,6 +323,9 @@ func newChecker(path string, imp Importer, universe *Scope) *checker {
 		variants:    map[*syntax.VariantSpec]*TypeName{},
 		synthetic:   map[*syntax.Ident]bool{},
 		pkgPatterns: map[*syntax.VarSpec]*pkgPattern{},
+
+		refusedBinders: map[binderKey]bool{},
+		refusedMembers: map[*Func]bool{},
 	}
 	c.types.substRow = c.substRow
 	return c

@@ -159,7 +159,9 @@ var workCases = []workCase{
 	// with its one arm error, n readers of walk, and one literal that
 	// calls every reader and is called n times. Each `try` there reads
 	// walk's pinned row, which is empty: 3n follow-ons that base17 gives
-	// too (round 13 ruling), with linear work.
+	// too (round 13 ruling), with linear work. From stage D1 the readers'
+	// own `try walk()` reads the refused member and is refused with it
+	// (groupRef), so 2n follow-ons remain.
 	{"M2 witness: one arm error read by n readers through one literal", func(n int) string {
 		var b strings.Builder
 		b.WriteString("type E {}\ntype G[T] {}\ntype H[T] {}\n")
@@ -181,7 +183,7 @@ var workCases = []workCase{
 		b.WriteString("}\nfunc main() {}\n")
 		return b.String()
 	}, "", func(n int) string {
-		return strings.TrimSpace(strings.Repeat("S108 ", 3*n+1))
+		return strings.TrimSpace(strings.Repeat("S108 ", 2*n+1))
 	}},
 }
 
