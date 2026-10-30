@@ -139,17 +139,38 @@ func TestSupersededInputs(t *testing.T) {
 	}
 }
 
-// Unquoted paths keep each slash. Comments start between words, including
-// immediately after a keyword, and retain their place when formatted.
+// Comments retain their place at every import and extern token boundary.
 func TestImportPathComments(t *testing.T) {
 	for _, src := range []string{
 		"import net/http // note\n",
 		"import go net/http /* note */\n",
 		"import alias /* note */ example.com/json\n",
+		"import alias/* note */example.com/json\n",
 		"import/* note */net/http\n",
+		"import go strings// note\n",
+		"import go alias net/http/* note */\n",
+		"extern go net/http.Get/* note */ func Get()\n",
 		"extern go net/http.Get /* note */ func Get()\n",
 	} {
 		check(t, "path comments", src, 3)
+	}
+}
+
+// Assert the independent token oracle as well as the formatter: a path
+// ends before either comment opener, with or without separating blanks.
+func TestImportCommentSpacing(t *testing.T) {
+	for _, c := range []struct{ src, want, comment string }{
+		{"import strings// note", "import strings // note\n", "// note"},
+		{"import strings/* c */", "import strings /* c */\n", "/* c */"},
+		{"import strings /* c */", "import strings /* c */\n", "/* c */"},
+	} {
+		got, ok := sketchtest.Interleaved(c.src)
+		if !ok || strings.Join(got, "\n") != "import\nstrings\ncomment "+c.comment {
+			t.Errorf("%q: token oracle got %q (ok %v), want a path then a comment", c.src, got, ok)
+		}
+		if out := check(t, "import comment spacing", c.src, 3); out != c.want {
+			t.Errorf("%q: formatted %q, want %q", c.src, out, c.want)
+		}
 	}
 }
 

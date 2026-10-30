@@ -220,16 +220,18 @@ func pathRune(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
-// pathWord scans one whole word of an import or extern line, enforcing
-// grammar.md's import_path. A slash inside the word belongs to the path:
-// `a//b` is an empty path element, not `a` followed by a comment (#231).
-// Comments between words still lex in run. Right after import, the word
-// `go` is the keyword of a Go import.
+// pathWord scans an import or extern path, enforcing grammar.md's
+// import_path. Comments end a path word just as they end any other token;
+// run scans the comment next. Right after import, the word `go` is the
+// keyword of a Go import.
 func (s *scanner) pathWord(start int) {
 	src := s.src
 	end := start
 	elementStart := true
 	for end < len(src) {
+		if src[end] == '/' && end+1 < len(src) && (src[end+1] == '/' || src[end+1] == '*') {
+			break
+		}
 		r, size := utf8.DecodeRuneInString(src[end:])
 		if r == utf8.RuneError && size == 1 {
 			s.fail(end, 1, "invalid UTF-8 byte %#x", src[end])

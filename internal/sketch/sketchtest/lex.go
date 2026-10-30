@@ -76,6 +76,9 @@ func (l *lexer) run(depth int, inner bool) {
 		case l.paths > 0 && pathByte(c) && !(c == '/' && start+1 < len(src) && (src[start+1] == '/' || src[start+1] == '*')):
 			end := start
 			for end < len(src) && pathByte(src[end]) {
+				if src[end] == '/' && end+1 < len(src) && (src[end+1] == '/' || src[end+1] == '*') {
+					break
+				}
 				end++
 			}
 			word := src[start:end]
