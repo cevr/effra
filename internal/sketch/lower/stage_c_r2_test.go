@@ -30,7 +30,7 @@ func withIf(b bool) int { with W { if b { 1 } else { 2 } } }
 func withMatch(b bool) int { with W { match b { case true: 3; case false: 4 } } }
 func withFallible(b bool) int fails E { with W { if b { flag(true) } else { 5 } } }
 func voidFail() fails E { E{B: false} }
-func voidCatch() { voidFail() catch { case E: 1 } }
+func voidCatch() { voidFail() catch { case E: withIf(true) } }
 func use(f func() int) int { f() }
 func trailing(b bool) int { use() { if b { 6 } else { 7 } } }
 func arm(b bool) int { flag(b) catch { case E{B: true}: if b { 8 } else { 0 }; case E: 9 } }

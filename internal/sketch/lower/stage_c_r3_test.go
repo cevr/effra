@@ -50,27 +50,32 @@ func main() needs Console {
 `, "comparable union\n")
 }
 
-// m4: a with, try or catch whose value is discarded drops its tails (one
-// discard rule, D-C1), and the lowered program runs: tails of two types,
-// a fallible tail under a statement catch, and a with in a void tail.
+// m4: a with, try or catch whose value is discarded discards its call
+// tails (one statement-position rule, rows.md Totality 3), and the lowered
+// program runs each of them: call tails of two types, a fallible tail
+// under a statement catch, and a with in a void tail.
 func TestErgoRunDiscardedWith(t *testing.T) {
 	wantRun(t, `let W = wire {}
 type E {}
 func g(b bool) int fails E { if b { return E }; 7 }
 func each(f func()) { f() }
+func i() int needs Console { Console.Println("i"); 1 }
+func s() string needs Console { Console.Println("s"); "s" }
+func pi() int { 1 }
+func ps() string { "s" }
 func f(b bool) needs Console {
-	with W { if b { 1 } else { "s" } }
+	with W { if b { i() } else { s() } }
 	with W { Console.Println("in with") }
-	with W { g(b) } catch { case E: "caught" }
-	with W { if b { g(b) } else { "t" } } catch { case E: Console.Println("caught E") }
-	each() { with W { if b { 1 } else { "s" } } }
+	with W { g(b) } catch { case E: s() }
+	with W { if b { g(b) } else { s() } } catch { case E: Console.Println("caught E") }
+	each() { with W { if b { pi() } else { ps() } } }
 }
 func main() needs Console {
 	f(true)
 	f(false)
 	Console.Println("ok")
 }
-`, "in with\ncaught E\nin with\nok\n")
+`, "i\nin with\ns\ncaught E\ns\nin with\ns\nok\n")
 }
 
 // O2: an if or match branch's fallible tail passes its failure to the

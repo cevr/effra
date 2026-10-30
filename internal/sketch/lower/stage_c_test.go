@@ -37,9 +37,10 @@ func value() int { 42 }
 func small() int8 { -128 }
 func early(n int) int { if n < 0 { return 0 }; n }
 func literal() int { let f = func() int { 7 }; f() }
-func ignored() { 123 }
+func n123() int { 123 }
+func ignored() { n123() }
 func id[T](v T) T { return v }
-func ignoredFunction() { id[int] }
+func ignoredFunction() { id[int](5) }
 func fail() int fails Failed { Failed{Code: 3} }
 func through() int fails Failed { fail() }
 func main() needs Console {

@@ -168,7 +168,6 @@ func (c *checker) recordDown(outer, inner syntax.Expr, op operand) {
 // exprStmt checks an expression statement: a call, try, catch or with
 // (S110 otherwise). A fallible statement is S105.
 func (c *checker) exprStmt(s *syntax.ExprStmt) {
-	x := unparen(s.X)
 	// The statement's value is discarded: a with, try or catch here is a
 	// body with no result (D-C1; review m4).
 	op := c.exprAs(s.X, nil, useDiscard)
@@ -184,18 +183,30 @@ func (c *checker) exprStmt(s *syntax.ExprStmt) {
 		}
 	}
 	c.handled(&op)
+	c.unusedValue(s.X, op)
+}
+
+// unusedValue reports a value in statement position that is not a call's
+// result, Go's "evaluated but not used" (S110): a literal, a name, an
+// operator, a conversion or a built-in's value. A call's result is
+// discarded. One rule for an expression statement and for the discarded
+// tail of every body kind: an if or match arm, a with block, a trailing
+// block, a catch arm and a body with no result (rows.md, Totality 3;
+// stage C round 3 review m2).
+func (c *checker) unusedValue(at syntax.Expr, op operand) {
+	x := unparen(at)
 	if !isCallLike(x) {
-		c.errorf(s.X, CodeUnused, "this value is not used; an expression statement is a call, try, catch or with")
+		c.errorf(at, CodeUnused, "this value is not used; an expression statement is a call, try, catch or with")
 		return
 	}
 	if call, ok := x.(*syntax.CallExpr); ok && op.mode != modeNoValue {
 		if fun, ok := unparen(call.Fun).(*syntax.Ident); ok && fun.Name != "with" {
 			if o, isB := c.lookup(fun.Name).(*Builtin); isB {
-				c.errorf(s.X, CodeUnused, "the value of %s is not used", o.Name)
+				c.errorf(at, CodeUnused, "the value of %s is not used", o.Name)
 				return
 			}
 			if tn, isT := c.lookup(fun.Name).(*TypeName); isT && !isCapability(tn.Type) {
-				c.errorf(s.X, CodeUnused, "the conversion to %s is not used", tn.Name)
+				c.errorf(at, CodeUnused, "the conversion to %s is not used", tn.Name)
 				return
 			}
 		}

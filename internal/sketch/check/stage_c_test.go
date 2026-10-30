@@ -64,7 +64,8 @@ func TestFunctionBodiesYieldTailExpressions(t *testing.T) {
 		{"value", `func Value() int { 42 }`},
 		{"context", `func Small() int8 { -128 }`},
 		{"early-return", `func F(n int) int { if n < 0 { return 0 }; n }`},
-		{"discard", `func F() { 123 }`},
+		{"discard", `func N() int { 123 }
+func F() { N() }`},
 		{"literal", `func F() int { let f = func() int { 7 }; return f() }`},
 		{"failure", `type Failed { Code int }
 func F() int fails Failed { Failed{Code: 3} }`},
@@ -130,7 +131,11 @@ func F(c bool) int8 { H(if c { 1 } else { 2 }) }`, ""},
 	n
 }`, ""},
 		{"void-tail-escapes", `func F(c bool) fails E { if c { G() } }`, ""},
-		{"void-discards-arm", `func F(c bool) { if c { 1 } else { 2 } }`, ""},
+		{"void-discards-arm", `func N() int { 1 }
+func S() string { "s" }
+func F(c bool) { if c { N() } else { S() } }`, ""},
+		{"void-value-arm", `func N() int { 1 }
+func F(c bool) { if c { 1 } else { N() } }`, "S110:7"},
 		{"catch-arm-if", `func F(c bool) int {
 	G() catch {
 	case E as e:

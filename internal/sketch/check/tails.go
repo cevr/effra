@@ -256,6 +256,9 @@ func (c *checker) yieldExpr(last *syntax.ExprStmt, k *sink, end syntax.Pos) {
 		}
 	}
 	if k.discard {
+		// The value is discarded: a pure value here is S110, a call's
+		// result is dropped (one statement-position rule, review m2).
+		c.unusedValue(last.X, op)
 		if fallible {
 			c.tail(last, NoValue)
 		}

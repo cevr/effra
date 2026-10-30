@@ -19,7 +19,7 @@ func TestEveryBodyKindYields(t *testing.T) {
 		{"with-if", "func f(b bool) int { with W { if b { 1 } else { 2 } } }", ""},
 		{"with-match", "func f(b bool) int { with W { match b { case true: 1; case false: 2 } } }", ""},
 		{"with-nested", "func f(b bool, c bool) int {\n\twith W {\n\t\tif b { if c { 1 } else { 2 } } else { 3 }\n\t}\n}", ""},
-		{"with-statement", "func f(b bool) {\n\twith W {\n\t\tif b { g() catch { case E: 0 } }\n\t}\n}", ""},
+		{"with-statement", "func f(b bool) {\n\twith W {\n\t\tif b { g() catch { case E: h() } }\n\t}\n}\nfunc h() int { 1 }", ""},
 		{"with-missing-else", "func f(b bool) int {\n\twith W {\n\t\tif b { 1 }\n\t}\n}", "S107:9"},
 		{"with-int8-literals", "func f(b bool) int8 { with W { if b { 1 } else { 2 } } }", ""},
 		// trailing blocks
@@ -27,7 +27,8 @@ func TestEveryBodyKindYields(t *testing.T) {
 		{"trailing-missing-else", "func f() int {\n\tuse() {\n\t\tif true { 1 }\n\t}\n}", "S107:9"},
 		{"trailing-empty", "func f() int {\n\tuse() {\n\t}\n}", "S107:8"},
 		// catch arms
-		{"catch-void-tail", "func f() {\n\tg() catch { case E: 1 }\n}", ""},
+		{"catch-void-tail", "func f() {\n\tg() catch { case E: h() }\n}\nfunc h() int { 1 }", ""},
+		{"catch-void-value-tail", "func f() {\n\tg() catch { case E: 1 }\n}", "S110:7"},
 		{"catch-arm-if", "func f(b bool) int { n() catch { case E: if b { 1 } else { 2 } } }", ""},
 		{"catch-arm-missing-else", "func f(b bool) int {\n\tn() catch {\n\tcase E:\n\t\tif b { 1 }\n\t}\n}", "S107:9"},
 		{"catch-arm-statement", "func f(b bool) int {\n\tn() catch {\n\tcase E:\n\t\tlet x = 1\n\t\t_ = x\n\t}\n}", "S107:10"},

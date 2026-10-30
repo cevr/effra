@@ -142,7 +142,7 @@ func F() int {
 	let f = Id[int]
 	return f(3) + Id[int](4)
 }`},
-	{"M10", "function-value-discarded-tail", "", `func Id[T](x T) T { return x }
+	{"M10", "function-value-discarded-tail", "S110", `func Id[T](x T) T { return x }
 func F() { Id[int] }`},
 	{"M10", "function-value-before-tail", "S110", `func Id[T](x T) T { return x }
 func F() { Id[int]; _ = 0 }`},

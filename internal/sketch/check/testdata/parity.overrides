@@ -31,3 +31,4 @@ probes/wire-method-cycle.ergo S108
 probes/wire-predeclared-name.ergo clean
 probes/with-nonlocal-return.ergo S108
 probes/with-return.ergo S108
+probes/compound-discard.ergo S110
